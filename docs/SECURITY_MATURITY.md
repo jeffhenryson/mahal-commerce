@@ -10,13 +10,13 @@ Objetivo: tornar este projeto um template sólido para novas aplicações, com a
 - [ ] Estrutura de pacotes clara (adapter in/out, core, infra/security, infra/config, infra/handler, docs, scripts).
 - [ ] Perfis: `dev` (H2, console H2, logs verbosos), `hml` (Postgres + Flyway), `prod` (Postgres + Flyway, observabilidade e segurança reforçadas).
 - [ ] Migrações Flyway: `ddl-auto=none` em hml/prod; evolução de schema via `db/migration`.
-- [ ] Seeds condicionados a perfis (ex.: admin/admin apenas em `dev`).
+- [x] Seeds condicionados a perfis (ex.: admin/admin apenas em `dev`).
 
 ## 2) Autenticação JWT (Stateless)
 - [ ] Endpoints de Autenticação
-  - `POST /auth/login`: recebe credenciais, emite Access Token (curta duração) + Refresh Token (longa duração).
-  - `POST /auth/refresh`: troca Refresh Token por novo par de tokens (rotação).
-  - `POST /auth/logout`: invalida/rotaciona refresh (quando aplicável).
+  - [x] `POST /auth/login`: recebe credenciais, emite Access Token (curta duração).
+  - [ ] `POST /auth/refresh`: troca Refresh Token por novo par de tokens (rotação).
+  - [ ] `POST /auth/logout`: invalida/rotaciona refresh (quando aplicável).
 - [ ] Modelo de Tokens
   - Access Token: expiração curta (ex.: 5m–15m), assinado (HS256/RS256). Sem dados sensíveis.
   - Refresh Token: expiração maior (ex.: 7–30d), rotacionado a cada uso; persistido/checado no servidor.
@@ -24,10 +24,11 @@ Objetivo: tornar este projeto um template sólido para novas aplicações, com a
     - Cookies HttpOnly/SameSite=strict (recomendado para SPAs) OU 
     - Header `Authorization: Bearer <token>` (APIs públicas/serviço-a-serviço).
 - [ ] Componentes de Segurança
-  - `JwtTokenProvider`/`JwtService`: gerar/validar tokens, extrair claims, clock skew.
-  - `JwtAuthenticationFilter` (OncePerRequestFilter): extrai Bearer, valida token, popula `SecurityContext`.
-  - `AuthenticationEntryPoint`/`AccessDeniedHandler` customizados: respostas 401/403 padronizadas (JSON).
-  - `SecurityFilterChain`: `sessionManagement().sessionCreationPolicy(STATELESS)`, `csrf().disable()` para APIs stateless, CORS configurado.
+  - [x] `JwtTokenProvider`/`JwtService`: gerar/validar tokens, extrair claims, clock skew.
+  - [x] `JwtAuthenticationFilter` (OncePerRequestFilter): extrai Bearer, valida token, popula `SecurityContext`.
+  - [ ] `AuthenticationEntryPoint`/`AccessDeniedHandler` customizados: respostas 401/403 padronizadas (JSON).
+  - [x] `SecurityFilterChain`: `sessionManagement().sessionCreationPolicy(STATELESS)`, `csrf().disable()`.
+  - [ ] CORS configurado por perfil.
 - [ ] Gestão de Refresh Tokens
   - Persistência: tabela `refresh_tokens` (user_id, token_hash, expiração, status/rotated_at, user-agent/ip opcionais).
   - Rotação obrigatória: cada uso invalida o anterior e emite um novo.
@@ -70,15 +71,3 @@ Objetivo: tornar este projeto um template sólido para novas aplicações, com a
 - [ ] Perfis em CI/CD: `dev` (build/test), `hml` (deploy em staging) e `prod`.
 - [ ] OpenAPI com `securitySchemes` (Bearer JWT) e exemplos; bloquear Swagger em `hml/prod` ou exigir auth.
 
----
-
-## Roadmap de Implementação (Sugerido)
-1. Padronizar POM e starters + ajustar versão do Boot.
-2. Isolar seed em `dev` e garantir Flyway (`ddl-auto=none`) em `hml`.
-3. Implementar JWT: `JwtService`, `JwtAuthenticationFilter`, `SecurityFilterChain` stateless, entry/denied handlers.
-4. Expor `/auth/login`, `/auth/refresh`, `/auth/logout` com rotação segura de refresh.
-5. Endurecer: rate limiting de login, CORS por perfil, headers de segurança, logs/auditoria.
-6. Ativar Actuator protegido e testes (unit + integração com Testcontainers).
-7. Dockerfile/compose e pipeline CI (build, test, imagens, deploy hml).
-
-Quando concluirmos esses itens, o template estará pronto para sustentar features com boa base de segurança e engenharia.
