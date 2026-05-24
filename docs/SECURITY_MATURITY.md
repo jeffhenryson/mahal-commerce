@@ -15,8 +15,8 @@ Objetivo: tornar este projeto um template sólido para novas aplicações, com a
 ## 2) Autenticação JWT (Stateless)
 - [ ] Endpoints de Autenticação
   - [x] `POST /auth/login`: recebe credenciais, emite Access Token (curta duração).
-  - [ ] `POST /auth/refresh`: troca Refresh Token por novo par de tokens (rotação).
-  - [ ] `POST /auth/logout`: invalida/rotaciona refresh (quando aplicável).
+  - [x] `POST /auth/refresh`: troca Refresh Token por novo par de tokens (rotação) e emite novo Access Token.
+  - [x] `POST /auth/logout`: invalida/rotaciona refresh (quando aplicável).
 - [ ] Modelo de Tokens
   - Access Token: expiração curta (ex.: 5m–15m), assinado (HS256/RS256). Sem dados sensíveis.
   - Refresh Token: expiração maior (ex.: 7–30d), rotacionado a cada uso; persistido/checado no servidor.
@@ -26,9 +26,9 @@ Objetivo: tornar este projeto um template sólido para novas aplicações, com a
 - [ ] Componentes de Segurança
   - [x] `JwtTokenProvider`/`JwtService`: gerar/validar tokens, extrair claims, clock skew.
   - [x] `JwtAuthenticationFilter` (OncePerRequestFilter): extrai Bearer, valida token, popula `SecurityContext`.
-  - [ ] `AuthenticationEntryPoint`/`AccessDeniedHandler` customizados: respostas 401/403 padronizadas (JSON).
+  - [x] `AuthenticationEntryPoint`/`AccessDeniedHandler` customizados: respostas 401/403 padronizadas (JSON).
   - [x] `SecurityFilterChain`: `sessionManagement().sessionCreationPolicy(STATELESS)`, `csrf().disable()`.
-  - [ ] CORS configurado por perfil.
+  - [x] CORS configurado por perfil.
 - [ ] Gestão de Refresh Tokens
   - Persistência: tabela `refresh_tokens` (user_id, token_hash, expiração, status/rotated_at, user-agent/ip opcionais).
   - Rotação obrigatória: cada uso invalida o anterior e emite um novo.
