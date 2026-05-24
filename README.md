@@ -1,119 +1,94 @@
 ## Visão Geral
-- Spring Boot 4.0.6 (Java 21)
-- Arquitetura Hexagonal (Ports & Adapters)
-- Spring Security (BCrypt) — endpoints atualmente liberados (`permitAll`) para facilitar testes
-- Persistência com JPA + H2 (em memória)
-- Seed automático: cria `admin/admin` com `ROLE_ADMIN`
-- OpenAPI (Springdoc) com Swagger UI
-
-## Stack
 - Java 21, Maven
-- Spring Boot: Web MVC, Data JPA, Security, Validation
-- Banco: H2 (console habilitado em `/h2-console`)
-- OpenAPI: `springdoc-openapi-starter-webmvc-ui`
+- Spring Boot (Web, Data JPA, Security, Validation, Actuator)
+- Arquitetura Hexagonal (Ports & Adapters)
+- Segurança: JWT (Bearer), RBAC por roles com `@PreAuthorize`, rate limiting em `/auth/login`
+- Persistência: H2 (dev) e Postgres (hml) via perfis + Flyway (V1 schema, V2 refresh tokens)
+- OpenAPI (Springdoc) com esquema Bearer JWT (Swagger habilitado apenas em dev)
 
-## Arquitetura (Hexagonal)
-
-Pastas principais:
+## Arquitetura
 - `adapter/in`: controladores REST, DTOs e conversões
 - `core`: regras de domínio, ports e serviço de aplicação
-- `adapter/out`: entidades JPA e repositórios (implementações das ports)
-- `infra/config`: `SecurityConfig`, `BeanConfig` e `SeedConfig`
-- `infra/handler`: tratamento global de exceções
+- `adapter/out`: entidades JPA e repositórios (implementam as ports)
+- `infra/config`: configs de beans, segurança, openapi, seed
+- `infra/security`: filtros (JWT e rate limiting) e serviços de token
+- `infra/audit`: auditoria de eventos de autenticação
+- `infra/handler`: tratamento global de exceções (JSON)
 
-## Endpoints
-Base path: `http://localhost:8080`
-
-Endpoints de Usuários (`/users`):
-- `POST /users` — cria usuário
-  - Body: `{ "username": "string(3..80)", "password": "string(3..120)" }`
-  - 201 Created com corpo `UserResponseDTO`
-  - 409 Conflict se `username` já existir
-- `POST /users/{username}/roles/{roleName}` — atribui role a um usuário (cria a role se não existir)
-  - 204 No Content
-  - 404 Not Found se usuário não existir
-- `GET /users/{id}` — busca usuário por id
-  - 200 OK com `UserResponseDTO`
-  - 404 Not Found se não existir
-- `GET /users` — lista todos os usuários
-  - 200 OK com `List<UserResponseDTO>`
-- `DELETE /users/{id}` — remove usuário por id
-  - 204 No Content
-
-Formato de `UserResponseDTO`:
-```json
-{
-  "id": 1,
-  "username": "john",
-  "roles": ["ROLE_USER", "ROLE_ADMIN"]
-}
-```
-
-Erros (handler global):
-- 404 Not Found: usuário/role não encontrado
-- 409 Conflict: username já existe
+## Perfis e Execução
+- Dev (padrão): H2 em memória, Swagger habilitado, seed `admin/admin`
+  ```bash
+  ./mvnw spring-boot:run
+  # H2 console: http://localhost:8080/h2-console (JDBC jdbc:h2:mem:demo)
+  # Swagger UI: http://localhost:8080/swagger-ui/index.html
+  ```
+- Hml (staging): Postgres + Flyway; Swagger e docs desabilitados por padrão
+  ```bash
+  docker compose up -d  # sobe Postgres local
+  SPRING_PROFILES_ACTIVE=hml \
+  DB_URL=jdbc:postgresql://localhost:5432/security \
+  DB_USERNAME=postgres DB_PASSWORD=postgres \
+  JWT_SECRET=<base64-256bit> \
+  ./mvnw spring-boot:run
+  ```
 
 ## Segurança
-- `BCryptPasswordEncoder` configurado para armazenar senhas com hash
-- `httpBasic` está habilitado, porém, a política atual é `permitAll()` para todos os endpoints (útil para desenvolvimento). Ajuste em `infra/config/SecurityConfig.java` para proteger rotas quando desejar.
-- CSRF desabilitado e H2 Console liberado
+- Autenticação: JWT (access de curta duração, refresh opaco no banco)
+  - Endpoints `/auth/login`, `/auth/refresh`, `/auth/logout`
+- Autorização: `@PreAuthorize`
+  - ADMIN: `POST /users`, `POST /users/{username}/roles/{role}`, `DELETE /users/{id}`
+  - ADMIN ou USER: `GET /users`, `GET /users/{id}`
+- Rate limiting: `/auth/login` limitado por IP (configurável)
+- CORS por perfil, CSRF desabilitado (API stateless)
+- Actuator: `health`/`info` públicos; demais `/actuator/**` exigem ADMIN
 
-## Banco de Dados
-- H2 em memória (config padrão):
-  - URL: `jdbc:h2:mem:demo;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE`
-  - Usuário: `sa` | Senha: em branco
-- Console H2: `http://localhost:8080/h2-console` (JDBC URL: `jdbc:h2:mem:demo`)
+## Variáveis/Propriedades úteis
+- JWT: `jwt.secret` (defina um segredo base64 forte em hml), `jwt.access-ttl-minutes`, `jwt.refresh-ttl-days`
+- Rate limit login: `rate.limit.login.window-seconds`, `rate.limit.login.max-requests`
+- Actuator (dev/hml): `management.endpoints.web.exposure.include=health,info,metrics`
 
-Seed automático (em `SeedConfig`):
-- Cria o usuário `admin` com senha `admin` e atribui `ROLE_ADMIN` na inicialização, caso ainda não exista
+## Documentação (OpenAPI)
+- Dev:
+  - UI: http://localhost:8080/swagger-ui/index.html
+  - JSON: http://localhost:8080/v3/api-docs
+- Hml: desabilitado por padrão (habilite via `springdoc.*` se necessário)
+- Esquema de segurança: Bearer JWT (`Authorization: Bearer <token>`) aplicado aos controladores protegidos
 
-## Documentação (Swagger)
-- UI: `http://localhost:8080/swagger-ui/index.html`
-- OpenAPI JSON: `http://localhost:8080/v3/api-docs`
+## Exemplos cURL (Auth)
+- Login (tokens):
+  ```bash
+  curl -s -X POST http://localhost:8080/auth/login \
+    -H "Content-Type: application/json" \
+    -d '{"username":"admin","password":"admin"}'
+  ```
+- Refresh:
+  ```bash
+  curl -s -X POST http://localhost:8080/auth/refresh \
+    -H "Content-Type: application/json" \
+    -d '{"refreshToken":"<OPAQUE>"}'
+  ```
+- Acesso com Bearer:
+  ```bash
+  curl -H "Authorization: Bearer <ACCESS>" http://localhost:8080/users
+  ```
 
-## Como Executar
-Pré-requisitos: JDK 21 e Maven Wrapper 
+## Endpoints de Usuários (resumo)
+- `POST /users` (ADMIN) — cria usuário `{ username: 3..80, password: 3..120 }`
+- `POST /users/{username}/roles/{role}` (ADMIN) — atribui role
+- `GET /users/{id}` (ADMIN/USER) — busca por id
+- `GET /users` (ADMIN/USER) — lista todos
+- `DELETE /users/{id}` (ADMIN) — remove
 
-Execução direta:
-```bash
-./mvnw spring-boot:run
-```
-
-Build do JAR e execução:
-```bash
-./mvnw clean package -DskipTests
-java -jar target/security-spring-0.0.1-SNAPSHOT.jar
-```
-
-Testes:
+## Testes
 ```bash
 ./mvnw test
+# Testcontainers opcional
+ENABLE_TC=true ./mvnw -Dtest=RefreshTokenServiceTest test
 ```
 
-## Exemplos com cURL
-Criar usuário:
-```bash
-curl -X POST http://localhost:8080/users \
-  -H "Content-Type: application/json" \
-  -d '{"username":"john","password":"secret"}'
-```
-
-Atribuir role:
-```bash
-curl -X POST http://localhost:8080/users/john/roles/ROLE_USER
-```
-
-Buscar por id:
-```bash
-curl http://localhost:8080/users/1
-```
-
-Listar:
-```bash
-curl http://localhost:8080/users
-```
-
-Remover:
-```bash
-curl -X DELETE http://localhost:8080/users/1
-```
+## Roadmap de Produção (opcional)
+- Segredos: gerenciar `JWT_SECRET` (Key Vault/Secrets Manager) e rotacionar; considerar RS256
+- Observabilidade: logs estruturados + correlação; métricas customizadas; tracing
+- CI/CD: pipeline com build/test/scan; criação de imagem (Dockerfile multi-stage)
+- Hardening: headers de segurança; políticas de senha/lockout; rate limit adicional por usuário
+- OpenAPI: exemplos completos de request/response para todos os endpoints
