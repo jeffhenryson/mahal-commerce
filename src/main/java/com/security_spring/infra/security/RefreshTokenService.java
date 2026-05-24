@@ -23,6 +23,8 @@ public class RefreshTokenService {
     private final long refreshTtlDays;
     private final SecureRandom secureRandom = new SecureRandom();
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(RefreshTokenService.class);
+
     public RefreshTokenService(RefreshTokenJpaRepository refreshRepo,
                                UserJpaRepository userRepo,
                                @Value("${jwt.refresh-ttl-days}") long refreshTtlDays) {
@@ -44,6 +46,7 @@ public class RefreshTokenService {
         rt.setTokenHash(tokenHash);
         rt.setExpiresAt(Instant.now().plus(refreshTtlDays, ChronoUnit.DAYS));
         refreshRepo.save(rt);
+        log.info("audit.refresh.issued user={}", username);
         return token;
     }
 
@@ -64,6 +67,7 @@ public class RefreshTokenService {
         rt.setTokenHash(sha256(newToken));
         rt.setExpiresAt(Instant.now().plus(refreshTtlDays, ChronoUnit.DAYS));
         refreshRepo.save(rt);
+        log.info("audit.refresh.rotated user={}", found.getUser().getUsername());
         return newToken;
     }
 
@@ -96,6 +100,7 @@ public class RefreshTokenService {
             rt.setRevoked(true);
             rt.setRotatedAt(Instant.now());
             refreshRepo.save(rt);
+            log.info("audit.refresh.revoked user={} tokenHash={}", rt.getUser().getUsername(), sha256(token));
         });
     }
 

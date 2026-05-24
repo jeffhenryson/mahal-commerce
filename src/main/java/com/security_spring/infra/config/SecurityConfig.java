@@ -14,6 +14,7 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 import com.security_spring.infra.security.JwtAuthenticationFilter;
+import com.security_spring.infra.security.LoginRateLimitingFilter;
 import com.security_spring.infra.security.RestAccessDeniedHandler;
 import com.security_spring.infra.security.RestAuthenticationEntryPoint;
 import org.springframework.web.cors.CorsConfiguration;
@@ -32,7 +33,8 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http, JwtAuthenticationFilter jwtAuthenticationFilter,
-                                          RestAuthenticationEntryPoint entryPoint, RestAccessDeniedHandler deniedHandler) throws Exception {
+                                          RestAuthenticationEntryPoint entryPoint, RestAccessDeniedHandler deniedHandler,
+                                          LoginRateLimitingFilter loginRateLimitingFilter) throws Exception {
     http
                 .csrf(csrf -> csrf
                         .ignoringRequestMatchers("/h2-console/**")
@@ -53,6 +55,7 @@ public class SecurityConfig {
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .httpBasic(b -> b.disable())
                 .exceptionHandling(e -> e.authenticationEntryPoint(entryPoint).accessDeniedHandler(deniedHandler))
+                .addFilterBefore(loginRateLimitingFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 .cors(Customizer.withDefaults());
     return http.build();
