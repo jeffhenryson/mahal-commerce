@@ -1,0 +1,23 @@
+version: "3.9"
+
+services:
+  postgres-hml:
+    image: postgres:16-alpine
+    container_name: postgres-hml
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: security
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata_hml:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d security"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata_hml:

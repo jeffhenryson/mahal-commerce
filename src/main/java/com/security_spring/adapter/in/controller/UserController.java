@@ -2,6 +2,7 @@ package com.security_spring.adapter.in.controller;
 
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import com.security_spring.adapter.in.converter.UserDTOConverter;
@@ -26,6 +27,7 @@ public class UserController {
     }
 
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<UserResponseDTO> create(@Valid @RequestBody UserRequestDTO request) {
         User created = useCase.createUser(request.getUsername(), request.getPassword());
         UserResponseDTO body = converter.toResponse(created);
@@ -33,17 +35,20 @@ public class UserController {
     }
 
     @PostMapping("/{username}/roles/{roleName}")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Void> assignRole(@PathVariable String username, @PathVariable String roleName) {
         useCase.assignRole(username, roleName);
         return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasAnyRole('ADMIN','USER')")
     public ResponseEntity<UserResponseDTO> get(@PathVariable Long id) {
         return ResponseEntity.ok(converter.toResponse(useCase.getUserById(id)));
     }
 
     @GetMapping
+    @PreAuthorize("hasAnyRole('ADMIN','USER')")
     public ResponseEntity<java.util.List<UserResponseDTO>> list() {
         return ResponseEntity.ok(
             useCase.listAll().stream()
@@ -53,6 +58,7 @@ public class UserController {
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Void> delete(@PathVariable Long id) {
         useCase.deleteUser(id);
         return ResponseEntity.noContent().build();
