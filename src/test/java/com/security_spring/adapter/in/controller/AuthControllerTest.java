@@ -39,7 +39,9 @@ public class AuthControllerTest {
         refreshService = mock(RefreshTokenService.class);
 
         AuthController controller = new AuthController(authenticationManager, jwtService, refreshService);
-        mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+        mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(new com.security_spring.infra.handler.GlobalExceptionHandler())
+                .build();
     }
 
     @Test
@@ -61,6 +63,34 @@ public class AuthControllerTest {
                 .andExpect(jsonPath("$.accessToken").value("access123"))
                 .andExpect(jsonPath("$.refreshToken").value("refresh123"))
                 .andExpect(jsonPath("$.tokenType").value("Bearer"));
+    }
+
+    @Test
+    void login_with_bad_credentials_returns_401() throws Exception {
+        var req = new LoginRequest();
+        req.setUsername("admin");
+        req.setPassword("wrong");
+
+        when(authenticationManager.authenticate(any())).thenThrow(new org.springframework.security.authentication.BadCredentialsException("Bad credentials"));
+
+        mockMvc.perform(post("/auth/login")
+                .contentType("application/json")
+                .content(objectMapper.writeValueAsString(req)))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").exists());
+    }
+
+    @Test
+    void refresh_with_invalid_token_returns_400() throws Exception {
+        var req = new RefreshRequest();
+        req.setRefreshToken("invalid");
+
+        when(refreshService.rotateAndGetUsername("invalid")).thenThrow(new IllegalArgumentException("Invalid refresh token"));
+
+        mockMvc.perform(post("/auth/refresh")
+                .contentType("application/json")
+                .content(objectMapper.writeValueAsString(req)))
+                .andExpect(status().isBadRequest());
     }
 
     @Test
