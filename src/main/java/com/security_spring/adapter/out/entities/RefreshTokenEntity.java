@@ -1,15 +1,22 @@
 package com.security_spring.adapter.out.entities;
 
 import jakarta.persistence.*;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 import java.time.Instant;
 
+@Getter
+@Setter
+@NoArgsConstructor
 @Entity
 @Table(name = "refresh_tokens", indexes = {
         @Index(name = "idx_refresh_user", columnList = "user_id"),
         @Index(name = "idx_refresh_expires", columnList = "expires_at")
 })
 public class RefreshTokenEntity {
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -32,18 +39,4 @@ public class RefreshTokenEntity {
 
     @Column(name = "rotated_at")
     private Instant rotatedAt;
-
-    public Long getId() { return id; }
-    public UserEntity getUser() { return user; }
-    public void setUser(UserEntity user) { this.user = user; }
-    public String getTokenHash() { return tokenHash; }
-    public void setTokenHash(String tokenHash) { this.tokenHash = tokenHash; }
-    public Instant getExpiresAt() { return expiresAt; }
-    public void setExpiresAt(Instant expiresAt) { this.expiresAt = expiresAt; }
-    public boolean isRevoked() { return revoked; }
-    public void setRevoked(boolean revoked) { this.revoked = revoked; }
-    public Instant getCreatedAt() { return createdAt; }
-    public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
-    public Instant getRotatedAt() { return rotatedAt; }
-    public void setRotatedAt(Instant rotatedAt) { this.rotatedAt = rotatedAt; }
 }

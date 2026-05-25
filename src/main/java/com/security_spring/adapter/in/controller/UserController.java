@@ -3,6 +3,7 @@ package com.security_spring.adapter.in.controller;
 import com.security_spring.adapter.in.converter.UserDTOConverter;
 import com.security_spring.adapter.in.dtos.request.ChangePasswordRequest;
 import com.security_spring.adapter.in.dtos.request.UserRequestDTO;
+import com.security_spring.adapter.in.dtos.request.UserUpdateRequest;
 import com.security_spring.adapter.in.dtos.response.UserResponseDTO;
 import com.security_spring.core.domain.model.PageResult;
 import com.security_spring.core.domain.model.User;
@@ -143,7 +144,7 @@ public class UserController {
         @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
     })
     @PutMapping("/{id}/disable")
-    @PreAuthorize("hasAuthority('USER_DELETE')")
+    @PreAuthorize("hasAuthority('USER_STATUS')")
     public ResponseEntity<Void> disable(@PathVariable Long id) {
         useCase.setUserEnabled(id, false);
         return ResponseEntity.noContent().build();
@@ -156,10 +157,25 @@ public class UserController {
         @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
     })
     @PutMapping("/{id}/enable")
-    @PreAuthorize("hasAuthority('USER_DELETE')")
+    @PreAuthorize("hasAuthority('USER_STATUS')")
     public ResponseEntity<Void> enable(@PathVariable Long id) {
         useCase.setUserEnabled(id, true);
         return ResponseEntity.noContent().build();
+    }
+
+    @Operation(summary = "Atualiza dados básicos do usuário")
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Atualizado",
+            content = @Content(schema = @Schema(implementation = UserResponseDTO.class))),
+        @ApiResponse(responseCode = "404", description = "Não encontrado", content = @Content),
+        @ApiResponse(responseCode = "409", description = "Username já existe", content = @Content),
+        @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PatchMapping("/{id}")
+    @PreAuthorize("hasAuthority('USER_CREATE')")
+    public ResponseEntity<UserResponseDTO> update(@PathVariable Long id,
+                                                   @Valid @RequestBody UserUpdateRequest request) {
+        return ResponseEntity.ok(converter.toResponse(useCase.updateUser(id, request.getUsername())));
     }
 }
 

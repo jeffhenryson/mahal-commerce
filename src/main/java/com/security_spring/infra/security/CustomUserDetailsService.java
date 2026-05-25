@@ -1,8 +1,6 @@
 package com.security_spring.infra.security;
 
-import java.util.HashSet;
-import java.util.Set;
-import com.security_spring.core.ports.out.UserAuthoritiesPort;
+import com.security_spring.core.ports.out.UserRepository;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -11,21 +9,22 @@ import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.security_spring.adapter.out.repository.UserJpaRepository;
+import java.util.HashSet;
+import java.util.Set;
 
 @Service
-public class CustomUserDetailsService implements UserDetailsService, UserAuthoritiesPort {
+public class CustomUserDetailsService implements UserDetailsService {
 
-    private final UserJpaRepository userRepo;
+    private final UserRepository userRepository;
 
-    public CustomUserDetailsService(UserJpaRepository userRepo) {
-        this.userRepo = userRepo;
+    public CustomUserDetailsService(UserRepository userRepository) {
+        this.userRepository = userRepository;
     }
 
     @Transactional(readOnly = true)
     @Override
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
-        var user = userRepo.findByUsernameWithRoles(username)
+        var user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new UsernameNotFoundException("User not found: " + username));
 
         Set<SimpleGrantedAuthority> authorities = new HashSet<>();
@@ -40,19 +39,5 @@ public class CustomUserDetailsService implements UserDetailsService, UserAuthori
                 .disabled(!user.isEnabled())
                 .authorities(authorities)
                 .build();
-    }
-
-    @Transactional(readOnly = true)
-    @Override
-    public Set<String> loadAuthoritiesByUsername(String username) {
-        var user = userRepo.findByUsernameWithRoles(username)
-                .orElseThrow(() -> new UsernameNotFoundException("User not found: " + username));
-
-        Set<String> authorities = new HashSet<>();
-        user.getRoles().forEach(role -> {
-            authorities.add(role.getName());
-            role.getPermissions().forEach(perm -> authorities.add(perm.getName()));
-        });
-        return authorities;
     }
 }

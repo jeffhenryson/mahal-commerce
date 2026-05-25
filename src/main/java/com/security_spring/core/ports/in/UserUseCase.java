@@ -22,4 +22,6 @@ public interface UserUseCase {
     void changeOwnPassword(String username, String currentPassword, String newPassword);
 
     void setUserEnabled(Long id, boolean enabled);
+
+    User updateUser(Long id, String newUsername);
 }

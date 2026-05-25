@@ -15,12 +15,9 @@ public class UserEntityConverter {
 
     public User toDomain(UserEntity entity) {
         if (entity == null) return null;
-        User user = new User();
+        User user = User.of(entity.getUsername(), entity.getPassword(), toDomainRoles(entity.getRoles()));
         user.setId(entity.getId());
-        user.setUsername(entity.getUsername());
-        user.setPassword(entity.getPassword());
         user.setEnabled(entity.isEnabled());
-        user.setRoles(toDomainRoles(entity.getRoles()));
         return user;
     }
 

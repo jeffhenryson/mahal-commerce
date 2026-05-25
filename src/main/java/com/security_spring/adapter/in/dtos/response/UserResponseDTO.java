@@ -10,4 +10,5 @@ public class UserResponseDTO {
     private String username;
     private boolean enabled;
     private List<String> roles;
+    private List<String> permissions;
 }

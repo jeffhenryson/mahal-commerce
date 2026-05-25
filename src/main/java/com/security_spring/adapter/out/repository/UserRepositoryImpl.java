@@ -17,6 +17,7 @@ import com.security_spring.core.domain.exception.RoleNotFoundException;
 import com.security_spring.core.domain.model.PageResult;
 import com.security_spring.core.domain.model.Role;
 import com.security_spring.core.domain.model.User;
+import com.security_spring.core.ports.out.RoleRepository;
 import com.security_spring.core.ports.out.UserRepository;
 
 @Repository
@@ -24,14 +25,17 @@ import com.security_spring.core.ports.out.UserRepository;
 public class UserRepositoryImpl implements UserRepository {
 
     private final UserJpaRepository userRepo;
-    private final RoleJpaRepository roleRepo;
+    private final RoleJpaRepository roleJpaRepo;
+    private final RoleRepository roleRepository;
     private final UserEntityConverter converter;
 
     public UserRepositoryImpl(UserJpaRepository userRepo,
-                              RoleJpaRepository roleRepo,
+                              RoleJpaRepository roleJpaRepo,
+                              RoleRepository roleRepository,
                               UserEntityConverter converter) {
         this.userRepo = userRepo;
-        this.roleRepo = roleRepo;
+        this.roleJpaRepo = roleJpaRepo;
+        this.roleRepository = roleRepository;
         this.converter = converter;
     }
 
@@ -44,8 +48,12 @@ public class UserRepositoryImpl implements UserRepository {
                     .map(Role::getName)
                     .filter(n -> n != null && !n.isBlank())
                     .distinct()
-                    .map(name -> roleRepo.findByName(name)
-                            .orElseThrow(() -> new RoleNotFoundException(name)))
+                    .map(name -> {
+                        // Validate role exists via port, then get a JPA proxy by ID.
+                        Role domainRole = roleRepository.findByName(name)
+                                .orElseThrow(() -> new RoleNotFoundException(name));
+                        return roleJpaRepo.getReferenceById(domainRole.getId());
+                    })
                     .collect(Collectors.toSet());
             entity.setRoles(roleEntities);
         }
@@ -61,7 +69,7 @@ public class UserRepositoryImpl implements UserRepository {
 
     @Override
     public Optional<User> findByUsername(String username) {
-        return userRepo.findByUsername(username).map(converter::toDomain);
+        return userRepo.findByUsernameWithRoles(username).map(converter::toDomain);
     }
 
     @Override

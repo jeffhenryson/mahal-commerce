@@ -34,33 +34,31 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http, JwtAuthenticationFilter jwtAuthenticationFilter,
-                                          RestAuthenticationEntryPoint entryPoint, RestAccessDeniedHandler deniedHandler,
-                                          LoginRateLimitingFilter loginRateLimitingFilter) throws Exception {
-    http
-                .csrf(csrf -> csrf
-                        .ignoringRequestMatchers("/h2-console/**")
-                        .disable())
-        .headers(h -> h.frameOptions(f -> f.sameOrigin()))
-        .authorizeHttpRequests(auth -> auth
-            .requestMatchers(
-                "/h2-console/**",
-                "/v3/api-docs/**",
-                "/swagger-ui/**",
-                "/swagger-ui.html",
-                "/actuator/health/**",
-                "/actuator/info"
-            ).permitAll()
-            .requestMatchers(org.springframework.http.HttpMethod.DELETE, "/auth/sessions").authenticated()
-            .requestMatchers("/auth/**").permitAll()
-            .requestMatchers("/actuator/**").hasAuthority("ROLE_ADMIN")
-            .anyRequest().authenticated())
-                .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .httpBasic(b -> b.disable())
-                .exceptionHandling(e -> e.authenticationEntryPoint(entryPoint).accessDeniedHandler(deniedHandler))
-                .addFilterBefore(loginRateLimitingFilter, UsernamePasswordAuthenticationFilter.class)
-                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
-                .cors(Customizer.withDefaults());
-    return http.build();
+                                           RestAuthenticationEntryPoint entryPoint, RestAccessDeniedHandler deniedHandler,
+                                           LoginRateLimitingFilter loginRateLimitingFilter) throws Exception {
+        http
+            .csrf(csrf -> csrf.ignoringRequestMatchers("/h2-console/**").disable())
+            .headers(h -> h.frameOptions(f -> f.sameOrigin()))
+            .authorizeHttpRequests(auth -> auth
+                .requestMatchers(
+                    "/h2-console/**",
+                    "/v3/api-docs/**",
+                    "/swagger-ui/**",
+                    "/swagger-ui.html",
+                    "/actuator/health/**",
+                    "/actuator/info"
+                ).permitAll()
+                .requestMatchers(org.springframework.http.HttpMethod.DELETE, "/auth/sessions").authenticated()
+                .requestMatchers("/auth/**").permitAll()
+                .requestMatchers("/actuator/**").hasAuthority("ROLE_ADMIN")
+                .anyRequest().authenticated())
+            .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .httpBasic(b -> b.disable())
+            .exceptionHandling(e -> e.authenticationEntryPoint(entryPoint).accessDeniedHandler(deniedHandler))
+            .addFilterBefore(loginRateLimitingFilter, UsernamePasswordAuthenticationFilter.class)
+            .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+            .cors(Customizer.withDefaults());
+        return http.build();
     }
 
     @Bean

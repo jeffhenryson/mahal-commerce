@@ -1,6 +1,9 @@
 package com.security_spring.infra.handler;
 
 import com.security_spring.core.domain.exception.InvalidPasswordException;
+import com.security_spring.core.domain.exception.InvalidRefreshTokenException;
+import com.security_spring.core.domain.exception.RefreshTokenAlreadyUsedException;
+import com.security_spring.core.domain.exception.RefreshTokenExpiredException;
 import com.security_spring.core.domain.exception.RoleNotFoundException;
 import com.security_spring.core.domain.exception.UserNotFoundException;
 import com.security_spring.core.domain.exception.UsernameAlreadyExistsException;
@@ -43,9 +46,24 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ApiError(ex.getMessage()));
     }
 
+    @ExceptionHandler(InvalidRefreshTokenException.class)
+    public ResponseEntity<ApiError> handleInvalidRefreshToken(InvalidRefreshTokenException ex) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(new ApiError("Token de atualização inválido"));
+    }
+
+    @ExceptionHandler(RefreshTokenExpiredException.class)
+    public ResponseEntity<ApiError> handleRefreshTokenExpired(RefreshTokenExpiredException ex) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(new ApiError("Token de atualização expirado"));
+    }
+
+    @ExceptionHandler(RefreshTokenAlreadyUsedException.class)
+    public ResponseEntity<ApiError> handleRefreshTokenReuse(RefreshTokenAlreadyUsedException ex) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(new ApiError("Sessão inválida — faça login novamente"));
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ApiError> handleIllegalArgument(IllegalArgumentException ex) {
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ApiError(ex.getMessage()));
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ApiError("Requisição inválida"));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

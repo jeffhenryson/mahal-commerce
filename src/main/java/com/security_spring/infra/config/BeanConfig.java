@@ -29,8 +29,10 @@ public class BeanConfig {
     @Bean
     public UserUseCase userUseCase(UserRepository userRepository,
             RoleRepository roleRepository,
-            PasswordHashPort passwordHashPort) {
-        return new UserService(userRepository, roleRepository, passwordHashPort);
+            PasswordHashPort passwordHashPort,
+            RefreshTokenPort refreshTokenPort,
+            TokenBlocklistPort tokenBlocklistPort) {
+        return new UserService(userRepository, roleRepository, passwordHashPort, refreshTokenPort, tokenBlocklistPort);
     }
 
     @Bean

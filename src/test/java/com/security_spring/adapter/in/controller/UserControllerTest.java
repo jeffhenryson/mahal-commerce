@@ -42,10 +42,8 @@ public class UserControllerTest {
     }
 
     private User user(Long id, String username) {
-        User u = new User();
+        User u = User.of(username, "hashed", new HashSet<>());
         u.setId(id);
-        u.setUsername(username);
-        u.setRoles(new HashSet<>());
         return u;
     }
 

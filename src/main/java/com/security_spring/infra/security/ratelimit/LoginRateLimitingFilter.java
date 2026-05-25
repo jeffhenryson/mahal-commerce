@@ -26,7 +26,11 @@ public class LoginRateLimitingFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) throws ServletException {
-        return !("/auth/login".equals(request.getRequestURI()) && "POST".equalsIgnoreCase(request.getMethod()));
+        String uri = request.getRequestURI();
+        String method = request.getMethod();
+        boolean isLogin = "/auth/login".equals(uri) && "POST".equalsIgnoreCase(method);
+        boolean isRefresh = "/auth/refresh".equals(uri) && "POST".equalsIgnoreCase(method);
+        return !isLogin && !isRefresh;
     }
 
     @Override
@@ -43,10 +47,8 @@ public class LoginRateLimitingFilter extends OncePerRequestFilter {
     }
 
     private String clientIp(HttpServletRequest request) {
-        String xff = request.getHeader("X-Forwarded-For");
-        if (xff != null && !xff.isBlank()) {
-            return xff.split(",")[0].trim();
-        }
+        // Rely on server.forward-headers-strategy (native in hml/prod, none in dev).
+        // Spring/Tomcat already resolves the real client IP before this filter runs.
         return request.getRemoteAddr();
     }
 }

@@ -1,5 +1,6 @@
 package com.security_spring.core.service;
 
+import com.security_spring.core.domain.exception.RefreshTokenAlreadyUsedException;
 import com.security_spring.core.domain.model.TokenPair;
 import com.security_spring.core.ports.in.AuthUseCase;
 import com.security_spring.core.ports.out.AccessTokenPort;
@@ -41,10 +42,17 @@ public class AuthService implements AuthUseCase {
 
     @Override
     public TokenPair refresh(String oldRefreshToken) {
-        RefreshTokenPort.RotationResult result = refreshToken.rotate(oldRefreshToken);
-        Set<String> authorities = userAuthorities.loadAuthoritiesByUsername(result.username());
-        String access = accessToken.generateFor(result.username(), authorities);
-        return new TokenPair(access, result.newToken());
+        try {
+            RefreshTokenPort.RotationResult result = refreshToken.rotate(oldRefreshToken);
+            Set<String> authorities = userAuthorities.loadAuthoritiesByUsername(result.username());
+            String access = accessToken.generateFor(result.username(), authorities);
+            return new TokenPair(access, result.newToken());
+        } catch (RefreshTokenAlreadyUsedException ex) {
+            // Token reuse detected: revoke all sessions for this user before re-throwing.
+            refreshToken.revokeAll(ex.getUsername());
+            tokenBlocklist.blockAllBefore(ex.getUsername(), Instant.now());
+            throw ex;
+        }
     }
 
     @Override

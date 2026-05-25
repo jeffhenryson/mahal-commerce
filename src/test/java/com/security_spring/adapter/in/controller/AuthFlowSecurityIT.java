@@ -19,10 +19,9 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
+import com.security_spring.infra.security.support.TestHashUtils;
+
 import java.time.Instant;
-import java.util.Base64;
 
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 
@@ -103,12 +102,6 @@ public class AuthFlowSecurityIT {
     }
 
     private static String sha256(String value) {
-        try {
-            var md = MessageDigest.getInstance("SHA-256");
-            byte[] digest = md.digest(value.getBytes(StandardCharsets.UTF_8));
-            return Base64.getUrlEncoder().withoutPadding().encodeToString(digest);
-        } catch (Exception e) {
-            throw new IllegalStateException(e);
-        }
+        return TestHashUtils.sha256(value);
     }
 }

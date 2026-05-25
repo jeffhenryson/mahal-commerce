@@ -44,4 +44,8 @@ public class InMemoryLoginRateLimiterAdapter implements LoginRateLimiterPort {
         }
         return true;
     }
+
+    public void reset() {
+        hits.clear();
+    }
 }

@@ -14,6 +14,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.security_spring.adapter.out.entities.RefreshTokenEntity;
 import com.security_spring.adapter.out.entities.UserEntity;
+import com.security_spring.core.domain.exception.InvalidRefreshTokenException;
+import com.security_spring.core.domain.exception.RefreshTokenAlreadyUsedException;
+import com.security_spring.core.domain.exception.RefreshTokenExpiredException;
 import com.security_spring.core.ports.out.RefreshTokenPort;
 
 @Repository
@@ -38,7 +41,7 @@ public class RefreshTokenRepositoryImpl implements RefreshTokenPort {
     @Transactional
     public String issue(String username) {
         UserEntity user = userRepo.findByUsername(username)
-                .orElseThrow(() -> new IllegalArgumentException("User not found: " + username));
+                .orElseThrow(InvalidRefreshTokenException::new);
 
         String token = generateOpaqueToken();
         RefreshTokenEntity rt = new RefreshTokenEntity();
@@ -55,19 +58,17 @@ public class RefreshTokenRepositoryImpl implements RefreshTokenPort {
     public RotationResult rotate(String oldToken) {
         String hash = sha256(oldToken);
         var found = refreshRepo.findByTokenHash(hash)
-                .orElseThrow(() -> new IllegalArgumentException("Invalid refresh token"));
+                .orElseThrow(InvalidRefreshTokenException::new);
 
         String username = found.getUser().getUsername();
 
-        // Token already revoked → possible theft; invalidate entire session family.
+        // Signal theft to the service layer — it will revoke all sessions.
         if (found.isRevoked()) {
-            int revoked = refreshRepo.revokeAllByUsername(username, Instant.now());
-            log.warn("audit.refresh.reuse-detected user={} revokedAll={}", username, revoked);
-            throw new IllegalArgumentException("Refresh token already used — all sessions revoked");
+            throw new RefreshTokenAlreadyUsedException(username);
         }
 
         if (found.getExpiresAt().isBefore(Instant.now())) {
-            throw new IllegalArgumentException("Refresh token expired");
+            throw new RefreshTokenExpiredException();
         }
 
         found.setRevoked(true);

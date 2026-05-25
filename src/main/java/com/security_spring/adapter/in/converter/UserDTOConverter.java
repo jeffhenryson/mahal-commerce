@@ -2,6 +2,7 @@ package com.security_spring.adapter.in.converter;
 
 import com.security_spring.adapter.in.dtos.request.UserRequestDTO;
 import com.security_spring.adapter.in.dtos.response.UserResponseDTO;
+import com.security_spring.core.domain.model.Permission;
 import com.security_spring.core.domain.model.Role;
 import com.security_spring.core.domain.model.User;
 
@@ -10,9 +11,7 @@ import java.util.stream.Collectors;
 public class UserDTOConverter {
 
     public User toDomain(UserRequestDTO dto) {
-        User u = new User();
-        u.setUsername(dto.getUsername());
-        u.setPassword(dto.getPassword());
+        User u = User.of(dto.getUsername(), dto.getPassword(), null);
         return u;
     }
 
@@ -22,9 +21,16 @@ public class UserDTOConverter {
         dto.setUsername(user.getUsername());
         dto.setEnabled(user.isEnabled());
         dto.setRoles(
-            user.getRoles()
-                .stream()
+            user.getRoles().stream()
                 .map(Role::getName)
+                .sorted()
+                .collect(Collectors.toList())
+        );
+        dto.setPermissions(
+            user.getRoles().stream()
+                .flatMap(role -> role.getPermissions().stream())
+                .map(Permission::getName)
+                .distinct()
                 .sorted()
                 .collect(Collectors.toList())
         );
