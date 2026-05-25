@@ -1,5 +1,8 @@
 package com.security_spring.adapter.in.dtos.response;
 
+import lombok.Getter;
+
+@Getter
 public class TokenPairResponse {
     private final String accessToken;
     private final String refreshToken;
@@ -9,8 +12,4 @@ public class TokenPairResponse {
         this.accessToken = accessToken;
         this.refreshToken = refreshToken;
     }
-
-    public String getAccessToken() { return accessToken; }
-    public String getRefreshToken() { return refreshToken; }
-    public String getTokenType() { return tokenType; }
 }

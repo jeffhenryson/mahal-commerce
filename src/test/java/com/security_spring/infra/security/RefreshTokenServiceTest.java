@@ -22,6 +22,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.security_spring.adapter.out.entities.UserEntity;
 import com.security_spring.adapter.out.repository.RefreshTokenJpaRepository;
+import com.security_spring.adapter.out.repository.RefreshTokenRepositoryImpl;
 import com.security_spring.adapter.out.repository.UserJpaRepository;
 
 @SpringBootTest
@@ -47,7 +48,7 @@ public class RefreshTokenServiceTest {
     }
 
     @Autowired
-    RefreshTokenService refreshTokenService;
+    RefreshTokenRepositoryImpl refreshTokenRepository;
     @Autowired
     UserJpaRepository userRepo;
     @Autowired
@@ -65,7 +66,7 @@ public class RefreshTokenServiceTest {
 
     @Test
     void issue_rotate_and_revoke_refresh_token() {
-        String token = refreshTokenService.issue("bob");
+        String token = refreshTokenRepository.issue("bob");
         assertNotNull(token);
 
         String hash = sha256(token);
@@ -73,14 +74,14 @@ public class RefreshTokenServiceTest {
         assertFalse(row.isRevoked());
         assertTrue(row.getExpiresAt().isAfter(Instant.now()));
 
-        var rotated = refreshTokenService.rotate(token);
+        var rotated = refreshTokenRepository.rotate(token);
         assertEquals("bob", rotated.username());
         assertNotEquals(token, rotated.newToken());
 
         var oldRow = refreshRepo.findByTokenHash(hash).orElseThrow();
         assertTrue(oldRow.isRevoked());
 
-        refreshTokenService.revoke(rotated.newToken());
+        refreshTokenRepository.revoke(rotated.newToken());
         var newHash = sha256(rotated.newToken());
         var newRow = refreshRepo.findByTokenHash(newHash).orElseThrow();
         assertTrue(newRow.isRevoked());

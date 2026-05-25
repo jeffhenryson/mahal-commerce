@@ -5,6 +5,7 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -15,9 +16,12 @@ import java.io.IOException;
 public class LoginRateLimitingFilter extends OncePerRequestFilter {
 
     private final LoginRateLimiterPort rateLimiter;
+    private final long windowSeconds;
 
-    public LoginRateLimitingFilter(LoginRateLimiterPort rateLimiter) {
+    public LoginRateLimitingFilter(LoginRateLimiterPort rateLimiter,
+                                   @Value("${rate.limit.login.window-seconds:60}") long windowSeconds) {
         this.rateLimiter = rateLimiter;
+        this.windowSeconds = windowSeconds;
     }
 
     @Override
@@ -30,6 +34,7 @@ public class LoginRateLimitingFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         if (!rateLimiter.tryConsume(clientIp(request))) {
             response.setStatus(429);
+            response.setHeader("Retry-After", String.valueOf(windowSeconds));
             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
             response.getWriter().write("{\"error\":\"too_many_requests\",\"message\":\"Too many login attempts\"}");
             return;

@@ -20,6 +20,7 @@ public class UserDTOConverter {
         UserResponseDTO dto = new UserResponseDTO();
         dto.setId(user.getId());
         dto.setUsername(user.getUsername());
+        dto.setEnabled(user.isEnabled());
         dto.setRoles(
             user.getRoles()
                 .stream()

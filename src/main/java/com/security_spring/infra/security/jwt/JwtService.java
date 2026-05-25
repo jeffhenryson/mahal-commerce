@@ -1,11 +1,14 @@
 package com.security_spring.infra.security.jwt;
 
-import java.security.Key;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Collection;
 import java.util.Date;
 import java.util.Set;
 import java.util.stream.Collectors;
+
+import javax.crypto.SecretKey;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.GrantedAuthority;
@@ -14,22 +17,29 @@ import org.springframework.stereotype.Service;
 
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.SignatureAlgorithm;
-import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
 
 @Service
 public class JwtService {
 
-    private final Key key;
+    private final SecretKey key;
     private final long accessTtlMinutes;
 
     public JwtService(
             @Value("${jwt.secret}") String secret,
             @Value("${jwt.access-ttl-minutes}") long accessTtlMinutes) {
-        byte[] keyBytes = Decoders.BASE64.decode(base64IfNot(secret));
-        this.key = Keys.hmacShaKeyFor(keyBytes);
+        this.key = Keys.hmacShaKeyFor(decodeSecret(secret));
         this.accessTtlMinutes = accessTtlMinutes;
+    }
+
+    // Tries to decode as base64 first (production secrets); falls back to raw UTF-8 bytes.
+    private static byte[] decodeSecret(String secret) {
+        try {
+            byte[] decoded = java.util.Base64.getDecoder().decode(secret);
+            if (decoded.length >= 32) return decoded;
+        } catch (IllegalArgumentException ignored) {
+        }
+        return secret.getBytes(StandardCharsets.UTF_8);
     }
 
     public String generateAccessToken(UserDetails user) {
@@ -39,11 +49,11 @@ public class JwtService {
                 .collect(Collectors.toSet());
 
         return Jwts.builder()
-                .setSubject(user.getUsername())
+                .subject(user.getUsername())
                 .claim("roles", roles)
-                .setIssuedAt(Date.from(now))
-                .setExpiration(Date.from(now.plus(accessTtlMinutes, ChronoUnit.MINUTES)))
-                .signWith(key, SignatureAlgorithm.HS256)
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(now.plus(accessTtlMinutes, ChronoUnit.MINUTES)))
+                .signWith(key)
                 .compact();
     }
 
@@ -64,36 +74,19 @@ public class JwtService {
         return parseClaims(token).getIssuedAt().toInstant();
     }
 
-    @SuppressWarnings("unchecked")
     public Set<String> extractRoles(String token) {
         Object roles = parseClaims(token).get("roles");
-        if (roles instanceof Set<?>) {
-            return (Set<String>) roles;
-        }
-        if (roles instanceof java.util.Collection<?>) {
-            return ((java.util.Collection<?>) roles).stream().map(Object::toString).collect(Collectors.toSet());
+        if (roles instanceof Collection<?> coll) {
+            return coll.stream().map(Object::toString).collect(Collectors.toSet());
         }
         return Set.of();
     }
 
     private Claims parseClaims(String token) {
-        return Jwts.parserBuilder().setSigningKey(key).build().parseClaimsJws(token).getBody();
-    }
-
-    private static String base64IfNot(String s) {
-        // If the provided secret looks like plain text, base64-encode expectation
-        // For simplicity here we assume user provides base64 or a random ascii string.
-        // JJWT requires a strong enough key; users should provide a proper base64 secret.
-        if (isBase64(s)) return s;
-        return java.util.Base64.getEncoder().encodeToString(s.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-    }
-
-    private static boolean isBase64(String s) {
-        try {
-            Decoders.BASE64.decode(s);
-            return true;
-        } catch (Exception e) {
-            return false;
-        }
+        return Jwts.parser()
+                .verifyWith(key)
+                .build()
+                .parseSignedClaims(token)
+                .getPayload();
     }
 }

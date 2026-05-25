@@ -19,6 +19,7 @@ public class UserEntityConverter {
         user.setId(entity.getId());
         user.setUsername(entity.getUsername());
         user.setPassword(entity.getPassword());
+        user.setEnabled(entity.isEnabled());
         user.setRoles(toDomainRoles(entity.getRoles()));
         return user;
     }
@@ -29,6 +30,7 @@ public class UserEntityConverter {
         entity.setId(domain.getId());
         entity.setUsername(domain.getUsername());
         entity.setPassword(domain.getPassword());
+        entity.setEnabled(domain.isEnabled());
         return entity;
     }
 

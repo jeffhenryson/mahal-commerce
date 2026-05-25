@@ -15,8 +15,6 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import java.util.stream.Collectors;
 
-record ApiError(String message) {}
-
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 

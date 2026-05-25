@@ -12,6 +12,8 @@ import com.security_spring.core.ports.out.PasswordHashPort;
 import com.security_spring.core.ports.out.RoleRepository;
 import com.security_spring.core.ports.out.UserRepository;
 
+import jakarta.transaction.Transactional;
+
 import java.util.List;
 import java.util.Optional;
 
@@ -30,6 +32,7 @@ public class UserService implements UserUseCase {
     }
 
     @Override
+    @Transactional
     public User createUser(String username, String rawPassword, List<String> roles) {
         userRepository.findByUsername(username).ifPresent(u -> {
             throw new UsernameAlreadyExistsException(username);
@@ -60,6 +63,7 @@ public class UserService implements UserUseCase {
     }
 
     @Override
+    @Transactional
     public void assignRole(String username, String roleName) {
         User user = userRepository
                 .findByUsername(username)
@@ -79,12 +83,14 @@ public class UserService implements UserUseCase {
     }
 
     @Override
+    @Transactional
     public void deleteUser(Long id) {
         userRepository.findById(id).orElseThrow(() -> new UserNotFoundException(id));
         userRepository.deleteById(id);
     }
 
     @Override
+    @Transactional
     public void changeOwnPassword(String username, String currentPassword, String newPassword) {
         User user = userRepository
                 .findByUsername(username)
@@ -95,6 +101,16 @@ public class UserService implements UserUseCase {
         }
 
         user.setPassword(passwordHash.hash(newPassword));
+        userRepository.save(user);
+    }
+
+    @Override
+    @Transactional
+    public void setUserEnabled(Long id, boolean enabled) {
+        User user = userRepository
+                .findById(id)
+                .orElseThrow(() -> new UserNotFoundException(id));
+        user.setEnabled(enabled);
         userRepository.save(user);
     }
 }

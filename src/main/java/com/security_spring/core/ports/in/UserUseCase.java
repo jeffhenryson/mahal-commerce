@@ -20,4 +20,6 @@ public interface UserUseCase {
     void deleteUser(Long id);
 
     void changeOwnPassword(String username, String currentPassword, String newPassword);
+
+    void setUserEnabled(Long id, boolean enabled);
 }

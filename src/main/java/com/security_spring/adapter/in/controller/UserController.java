@@ -135,5 +135,31 @@ public class UserController {
         useCase.deleteUser(id);
         return ResponseEntity.noContent().build();
     }
+
+    @Operation(summary = "Desativa conta de usuário")
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "204", description = "Desativado"),
+        @ApiResponse(responseCode = "404", description = "Não encontrado", content = @Content),
+        @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PutMapping("/{id}/disable")
+    @PreAuthorize("hasAuthority('USER_DELETE')")
+    public ResponseEntity<Void> disable(@PathVariable Long id) {
+        useCase.setUserEnabled(id, false);
+        return ResponseEntity.noContent().build();
+    }
+
+    @Operation(summary = "Reativa conta de usuário")
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "204", description = "Reativado"),
+        @ApiResponse(responseCode = "404", description = "Não encontrado", content = @Content),
+        @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PutMapping("/{id}/enable")
+    @PreAuthorize("hasAuthority('USER_DELETE')")
+    public ResponseEntity<Void> enable(@PathVariable Long id) {
+        useCase.setUserEnabled(id, true);
+        return ResponseEntity.noContent().build();
+    }
 }
 

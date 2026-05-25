@@ -1,11 +1,10 @@
 package com.security_spring.adapter.in.dtos.request;
 
 import jakarta.validation.constraints.NotBlank;
+import lombok.Data;
 
+@Data
 public class RefreshRequest {
     @NotBlank
     private String refreshToken;
-
-    public String getRefreshToken() { return refreshToken; }
-    public void setRefreshToken(String refreshToken) { this.refreshToken = refreshToken; }
 }
