@@ -11,6 +11,7 @@ import com.securityspring.adapter.in.dtos.request.LogoutRequest;
 import com.securityspring.adapter.in.dtos.request.RefreshRequest;
 import com.securityspring.core.domain.model.TokenPair;
 import com.securityspring.core.ports.in.AuthUseCase;
+import com.securityspring.core.ports.in.UserUseCase;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -27,7 +28,8 @@ public class AuthControllerTest {
     @BeforeEach
     void setup() {
         authUseCase = mock(AuthUseCase.class);
-        AuthController controller = new AuthController(authUseCase);
+        UserUseCase userUseCase = mock(UserUseCase.class);
+        AuthController controller = new AuthController(authUseCase, userUseCase);
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new com.securityspring.infra.handler.GlobalExceptionHandler())
                 .build();

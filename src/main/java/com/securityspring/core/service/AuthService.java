@@ -1,10 +1,12 @@
 package com.securityspring.core.service;
 
+import com.securityspring.core.domain.exception.AccountLockedException;
 import com.securityspring.core.domain.exception.RefreshTokenAlreadyUsedException;
 import com.securityspring.core.domain.model.TokenPair;
 import com.securityspring.core.ports.in.AuthUseCase;
 import com.securityspring.core.ports.out.AccessTokenPort;
 import com.securityspring.core.ports.out.CredentialVerifierPort;
+import com.securityspring.core.ports.out.LoginAttemptPort;
 import com.securityspring.core.ports.out.RefreshTokenPort;
 import com.securityspring.core.ports.out.TokenBlocklistPort;
 import com.securityspring.core.ports.out.UserAuthoritiesPort;
@@ -19,25 +21,37 @@ public class AuthService implements AuthUseCase {
     private final RefreshTokenPort refreshToken;
     private final UserAuthoritiesPort userAuthorities;
     private final TokenBlocklistPort tokenBlocklist;
+    private final LoginAttemptPort loginAttempt;
 
     public AuthService(CredentialVerifierPort credentialVerifier,
                        AccessTokenPort accessToken,
                        RefreshTokenPort refreshToken,
                        UserAuthoritiesPort userAuthorities,
-                       TokenBlocklistPort tokenBlocklist) {
+                       TokenBlocklistPort tokenBlocklist,
+                       LoginAttemptPort loginAttempt) {
         this.credentialVerifier = credentialVerifier;
         this.accessToken = accessToken;
         this.refreshToken = refreshToken;
         this.userAuthorities = userAuthorities;
         this.tokenBlocklist = tokenBlocklist;
+        this.loginAttempt = loginAttempt;
     }
 
     @Override
     public TokenPair login(String username, String password) {
-        CredentialVerifierPort.VerifiedUser verified = credentialVerifier.verify(username, password);
-        String access = accessToken.generateFor(verified.username(), verified.authorities());
-        String refresh = refreshToken.issue(verified.username());
-        return new TokenPair(access, refresh);
+        if (loginAttempt.isLocked(username)) {
+            throw new AccountLockedException(username);
+        }
+        try {
+            CredentialVerifierPort.VerifiedUser verified = credentialVerifier.verify(username, password);
+            loginAttempt.recordSuccess(username);
+            String access = accessToken.generateFor(verified.username(), verified.authorities());
+            String refresh = refreshToken.issue(verified.username());
+            return new TokenPair(access, refresh);
+        } catch (RuntimeException ex) {
+            loginAttempt.recordFailure(username);
+            throw ex;
+        }
     }
 
     @Override

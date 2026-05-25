@@ -15,4 +15,6 @@ public interface UserRepository {
     PageResult<User> findAll(int page, int size);
 
     void deleteById(Long id);
+
+    Optional<User> findByEmail(String email);
 }

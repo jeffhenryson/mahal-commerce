@@ -3,9 +3,13 @@ package com.securityspring.adapter.in.controller;
 import com.securityspring.adapter.in.dtos.request.LoginRequest;
 import com.securityspring.adapter.in.dtos.request.LogoutRequest;
 import com.securityspring.adapter.in.dtos.request.RefreshRequest;
+import com.securityspring.adapter.in.dtos.request.RegisterRequest;
+import com.securityspring.adapter.in.dtos.request.ResendVerificationRequest;
+import com.securityspring.adapter.in.dtos.request.VerifyEmailRequest;
 import com.securityspring.adapter.in.dtos.response.TokenPairResponse;
 import com.securityspring.core.domain.model.TokenPair;
 import com.securityspring.core.ports.in.AuthUseCase;
+import com.securityspring.core.ports.in.UserUseCase;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -29,9 +33,11 @@ public class AuthController {
     private static final Logger log = LoggerFactory.getLogger(AuthController.class);
 
     private final AuthUseCase authUseCase;
+    private final UserUseCase userUseCase;
 
-    public AuthController(AuthUseCase authUseCase) {
+    public AuthController(AuthUseCase authUseCase, UserUseCase userUseCase) {
         this.authUseCase = authUseCase;
+        this.userUseCase = userUseCase;
     }
 
     @Operation(summary = "Login e emissão de tokens (access + refresh)")
@@ -78,6 +84,41 @@ public class AuthController {
     public ResponseEntity<Void> logoutAll(Authentication authentication) {
         authUseCase.logoutAll(authentication.getName());
         log.info("audit.logoutAll user={}", authentication.getName());
+        return ResponseEntity.noContent().build();
+    }
+
+    @Operation(summary = "Autoregistro de usuário — cria conta desabilitada e envia código de verificação")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "201", description = "Conta criada — verifique o email"),
+            @ApiResponse(responseCode = "409", description = "Username ou email já existe", content = @Content)
+    })
+    @PostMapping("/register")
+    public ResponseEntity<Void> register(@Valid @RequestBody RegisterRequest request) {
+        userUseCase.registerUser(request.getUsername(), request.getPassword(), request.getEmail(),
+                java.util.List.of());
+        return ResponseEntity.status(201).build();
+    }
+
+    @Operation(summary = "Confirma email com código de 6 dígitos recebido por email")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "204", description = "Email confirmado — conta ativada"),
+            @ApiResponse(responseCode = "400", description = "Código inválido ou expirado", content = @Content)
+    })
+    @PostMapping("/verify-email")
+    public ResponseEntity<Void> verifyEmail(@Valid @RequestBody VerifyEmailRequest request) {
+        userUseCase.verifyEmail(request.getCode());
+        return ResponseEntity.noContent().build();
+    }
+
+    @Operation(summary = "Reenvia código de verificação para o email informado")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "204", description = "Código reenviado"),
+            @ApiResponse(responseCode = "404", description = "Email não encontrado", content = @Content),
+            @ApiResponse(responseCode = "409", description = "Email já verificado", content = @Content)
+    })
+    @PostMapping("/resend-verification")
+    public ResponseEntity<Void> resendVerification(@Valid @RequestBody ResendVerificationRequest request) {
+        userUseCase.resendVerification(request.getEmail());
         return ResponseEntity.noContent().build();
     }
 }

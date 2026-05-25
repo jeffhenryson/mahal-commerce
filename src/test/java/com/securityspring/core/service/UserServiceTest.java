@@ -1,11 +1,15 @@
 package com.securityspring.core.service;
 
+import com.securityspring.core.domain.exception.EmailAlreadyExistsException;
 import com.securityspring.core.domain.exception.InvalidPasswordException;
 import com.securityspring.core.domain.exception.RoleNotFoundException;
 import com.securityspring.core.domain.exception.UserNotFoundException;
 import com.securityspring.core.domain.exception.UsernameAlreadyExistsException;
+import com.securityspring.core.domain.model.EmailVerificationCode;
 import com.securityspring.core.domain.model.Role;
 import com.securityspring.core.domain.model.User;
+import com.securityspring.core.ports.out.EmailPort;
+import com.securityspring.core.ports.out.EmailVerificationCodeRepository;
 import com.securityspring.core.ports.out.PasswordHashPort;
 import com.securityspring.core.ports.out.RefreshTokenPort;
 import com.securityspring.core.ports.out.RoleRepository;
@@ -17,12 +21,14 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -33,13 +39,15 @@ class UserServiceTest {
     @Mock PasswordHashPort passwordHash;
     @Mock RefreshTokenPort refreshTokenPort;
     @Mock TokenBlocklistPort tokenBlocklistPort;
+    @Mock EmailPort emailPort;
+    @Mock EmailVerificationCodeRepository verificationCodeRepository;
 
     UserService userService;
 
     @BeforeEach
     void setUp() {
         userService = new UserService(userRepository, roleRepository, passwordHash,
-                refreshTokenPort, tokenBlocklistPort);
+                refreshTokenPort, tokenBlocklistPort, emailPort, verificationCodeRepository, 15L);
     }
 
     @Test
@@ -78,6 +86,32 @@ class UserServiceTest {
         userService.createUser("alice", "Password@123", List.of("ROLE_USER"));
 
         verify(userRepository).save(any(User.class));
+        verifyNoInteractions(emailPort);
+    }
+
+    @Test
+    void registerUser_rejectsDuplicateEmail() {
+        when(userRepository.findByUsername(anyString())).thenReturn(Optional.empty());
+        when(userRepository.findByEmail("alice@test.com"))
+                .thenReturn(Optional.of(User.of("other", "hashed", null)));
+
+        assertThatThrownBy(() -> userService.registerUser("alice", "Password@123", "alice@test.com", List.of()))
+                .isInstanceOf(EmailAlreadyExistsException.class);
+    }
+
+    @Test
+    void registerUser_createsDisabledUserAndSendsEmail() {
+        when(userRepository.findByUsername(anyString())).thenReturn(Optional.empty());
+        when(userRepository.findByEmail(anyString())).thenReturn(Optional.empty());
+        when(passwordHash.hash(anyString())).thenReturn("hashed");
+        when(userRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(verificationCodeRepository.save(anyString(), anyString(), any()))
+                .thenReturn(new EmailVerificationCode(1L, "alice", "123456", Instant.now().plusSeconds(900), false));
+
+        User created = userService.registerUser("alice", "Password@123", "alice@test.com", List.of());
+
+        verify(emailPort).sendVerificationCode(eq("alice@test.com"), eq("alice"), anyString());
+        assert !created.isEnabled();
     }
 
     @Test

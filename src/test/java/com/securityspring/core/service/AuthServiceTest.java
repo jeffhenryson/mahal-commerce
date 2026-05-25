@@ -1,9 +1,11 @@
 package com.securityspring.core.service;
 
+import com.securityspring.core.domain.exception.AccountLockedException;
 import com.securityspring.core.domain.exception.RefreshTokenAlreadyUsedException;
 import com.securityspring.core.domain.model.TokenPair;
 import com.securityspring.core.ports.out.AccessTokenPort;
 import com.securityspring.core.ports.out.CredentialVerifierPort;
+import com.securityspring.core.ports.out.LoginAttemptPort;
 import com.securityspring.core.ports.out.RefreshTokenPort;
 import com.securityspring.core.ports.out.TokenBlocklistPort;
 import com.securityspring.core.ports.out.UserAuthoritiesPort;
@@ -19,7 +21,7 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -30,17 +32,19 @@ class AuthServiceTest {
     @Mock RefreshTokenPort refreshToken;
     @Mock UserAuthoritiesPort userAuthorities;
     @Mock TokenBlocklistPort tokenBlocklist;
+    @Mock LoginAttemptPort loginAttempt;
 
     AuthService authService;
 
     @BeforeEach
     void setUp() {
         authService = new AuthService(credentialVerifier, accessToken, refreshToken,
-                userAuthorities, tokenBlocklist);
+                userAuthorities, tokenBlocklist, loginAttempt);
     }
 
     @Test
     void login_returnsTokenPair() {
+        when(loginAttempt.isLocked("alice")).thenReturn(false);
         when(credentialVerifier.verify("alice", "pass"))
                 .thenReturn(new CredentialVerifierPort.VerifiedUser("alice", Set.of("ROLE_USER")));
         when(accessToken.generateFor("alice", Set.of("ROLE_USER"))).thenReturn("access-token");
@@ -50,6 +54,29 @@ class AuthServiceTest {
 
         assertThat(pair.getAccessToken()).isEqualTo("access-token");
         assertThat(pair.getRefreshToken()).isEqualTo("refresh-token");
+        verify(loginAttempt).recordSuccess("alice");
+    }
+
+    @Test
+    void login_whenAccountLocked_throwsAccountLockedException() {
+        when(loginAttempt.isLocked("alice")).thenReturn(true);
+
+        assertThatThrownBy(() -> authService.login("alice", "pass"))
+                .isInstanceOf(AccountLockedException.class);
+
+        verifyNoInteractions(credentialVerifier);
+    }
+
+    @Test
+    void login_onBadCredentials_recordsFailure() {
+        when(loginAttempt.isLocked("alice")).thenReturn(false);
+        when(credentialVerifier.verify("alice", "wrong"))
+                .thenThrow(new RuntimeException("bad credentials"));
+
+        assertThatThrownBy(() -> authService.login("alice", "wrong"))
+                .isInstanceOf(RuntimeException.class);
+
+        verify(loginAttempt).recordFailure("alice");
     }
 
     @Test

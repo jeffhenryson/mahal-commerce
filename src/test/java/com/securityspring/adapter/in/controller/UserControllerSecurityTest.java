@@ -7,6 +7,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.securityspring.infra.security.InMemoryTokenBlocklistAdapter;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -24,12 +25,15 @@ public class UserControllerSecurityTest {
 
     @Autowired
     private WebApplicationContext context;
+    @Autowired
+    private InMemoryTokenBlocklistAdapter blocklistAdapter;
     private MockMvc mockMvc;
     private final ObjectMapper om = new ObjectMapper();
 
     @BeforeEach
     void setup() {
         mockMvc = MockMvcBuilders.webAppContextSetup(context).apply(springSecurity()).build();
+        blocklistAdapter.clearAll();
     }
 
     @Test
@@ -42,7 +46,7 @@ public class UserControllerSecurityTest {
 
     @Test
     void admin_can_create_user_and_assign_role() throws Exception {
-        String body = "{\"username\":\"john\",\"password\":\"Secret@123\"}";
+        String body = "{\"username\":\"john\",\"password\":\"Secret@123\",\"email\":\"john@test.com\"}";
         mockMvc.perform(post("/users")
             .contentType(MediaType.APPLICATION_JSON)
             .content(body)
@@ -62,7 +66,7 @@ public class UserControllerSecurityTest {
 
     @Test
     void post_users_requires_create_permission_returns_403_for_USER() throws Exception {
-        String body = "{\"username\":\"userxyz\",\"password\":\"Secret@123\"}";
+        String body = "{\"username\":\"userxyz\",\"password\":\"Secret@123\",\"email\":\"userxyz@test.com\"}";
         mockMvc.perform(post("/users")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body)
@@ -77,7 +81,7 @@ public class UserControllerSecurityTest {
         String username = "disabled_" + System.currentTimeMillis();
         MvcResult createResult = mockMvc.perform(post("/users")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(String.format("{\"username\":\"%s\",\"password\":\"Secret@123\"}", username))
+                .content(String.format("{\"username\":\"%s\",\"password\":\"Secret@123\",\"email\":\"%s@test.com\"}", username, username))
                 .with(user("admin").authorities(
                         new SimpleGrantedAuthority("ROLE_ADMIN"),
                         new SimpleGrantedAuthority("USER_CREATE"),
@@ -90,7 +94,7 @@ public class UserControllerSecurityTest {
         // Login to get an access token
         MvcResult loginResult = mockMvc.perform(post("/auth/login")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(String.format("{\"username\":\"%s\",\"password\":\"Secret@123\"}", username)))
+                .content(String.format("{\"username\":\"%s\",\"password\":\"Secret@123\",\"email\":\"%s@test.com\"}", username, username)))
                 .andExpect(status().isOk())
                 .andReturn();
         String accessToken = om.readTree(loginResult.getResponse().getContentAsString())

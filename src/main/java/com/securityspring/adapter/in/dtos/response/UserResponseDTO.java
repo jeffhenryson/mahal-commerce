@@ -9,6 +9,8 @@ public class UserResponseDTO {
     private Long id;
     private String username;
     private boolean enabled;
+    private String email;
+    private boolean emailVerified;
     private List<String> roles;
     private List<String> permissions;
 }

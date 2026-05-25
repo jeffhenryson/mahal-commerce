@@ -42,7 +42,7 @@ public class UserControllerTest {
     }
 
     private User user(Long id, String username) {
-        return User.fromPersisted(id, username, "hashed", true, new HashSet<>());
+        return User.fromPersisted(id, username, "hashed", true, null, false, new HashSet<>());
     }
 
     @Test
@@ -90,6 +90,7 @@ public class UserControllerTest {
         UserRequestDTO dto = new UserRequestDTO();
         dto.setUsername("admin");
         dto.setPassword("Secret@123");
+        dto.setEmail("admin@test.com");
 
         mockMvc.perform(post("/users")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -102,7 +103,7 @@ public class UserControllerTest {
     void create_user_blank_username_returns_400() throws Exception {
         mockMvc.perform(post("/users")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"username\":\"\",\"password\":\"Secret@123\"}"))
+                .content("{\"username\":\"\",\"password\":\"Secret@123\",\"email\":\"a@b.com\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").exists());
     }

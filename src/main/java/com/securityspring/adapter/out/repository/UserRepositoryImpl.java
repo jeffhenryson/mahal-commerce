@@ -88,4 +88,9 @@ public class UserRepositoryImpl implements UserRepository {
     public void deleteById(Long id) {
         userRepo.deleteById(id);
     }
+
+    @Override
+    public Optional<User> findByEmail(String email) {
+        return userRepo.findByEmailWithRoles(email).map(converter::toDomain);
+    }
 }

@@ -5,6 +5,7 @@ import static org.springframework.security.test.web.servlet.setup.SecurityMockMv
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
+import com.securityspring.infra.security.InMemoryTokenBlocklistAdapter;
 import com.securityspring.infra.security.support.RefreshTokenTestHelper;
 import com.securityspring.infra.security.support.TestHashUtils;
 
@@ -31,6 +32,8 @@ public class UserProfileAndSessionsTest {
     private WebApplicationContext context;
     @Autowired
     private RefreshTokenTestHelper refreshTokenTestHelper;
+    @Autowired
+    private InMemoryTokenBlocklistAdapter blocklistAdapter;
 
     private MockMvc mockMvc;
     private final ObjectMapper om = new ObjectMapper();
@@ -38,6 +41,7 @@ public class UserProfileAndSessionsTest {
     @BeforeEach
     void setup() {
         mockMvc = MockMvcBuilders.webAppContextSetup(context).apply(springSecurity()).build();
+        blocklistAdapter.clearAll();
     }
 
     @Test

@@ -42,7 +42,7 @@ public class AuthFlowSecurityIT {
     @Test
     void user_role_can_read_with_bearer() throws Exception {
         // Create user as ADMIN (using permission-based mock)
-        String body = "{\"username\":\"john2\",\"password\":\"Secret@123\"}";
+        String body = "{\"username\":\"john2\",\"password\":\"Secret@123\",\"email\":\"john2@test.com\"}";
         mockMvc.perform(post("/users")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body)

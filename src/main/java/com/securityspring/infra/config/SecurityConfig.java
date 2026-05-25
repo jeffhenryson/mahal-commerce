@@ -13,6 +13,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
+import com.securityspring.infra.security.CorrelationIdFilter;
 import com.securityspring.infra.security.RestAccessDeniedHandler;
 import com.securityspring.infra.security.RestAuthenticationEntryPoint;
 import com.securityspring.infra.security.jwt.JwtAuthenticationFilter;
@@ -35,7 +36,8 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http, JwtAuthenticationFilter jwtAuthenticationFilter,
                                            RestAuthenticationEntryPoint entryPoint, RestAccessDeniedHandler deniedHandler,
-                                           LoginRateLimitingFilter loginRateLimitingFilter) throws Exception {
+                                           LoginRateLimitingFilter loginRateLimitingFilter,
+                                           CorrelationIdFilter correlationIdFilter) throws Exception {
         // Convenção de autorização: sempre hasAuthority(), nunca hasRole().
         // Roles têm prefixo ROLE_ (ex: ROLE_ADMIN); permissões não (ex: USER_CREATE).
         // hasRole("ADMIN") adiciona o prefixo automaticamente e seria equivalente a
@@ -55,12 +57,14 @@ public class SecurityConfig {
                 // DELETE /auth/sessions exige autenticação; a regra de /auth/** é mais ampla
                 // e cobriria este endpoint se declarada primeiro. Não reordene sem revisar.
                 .requestMatchers(org.springframework.http.HttpMethod.DELETE, "/auth/sessions").authenticated()
+                .requestMatchers("/auth/verify-email", "/auth/resend-verification").permitAll()
                 .requestMatchers("/auth/**").permitAll()
                 .requestMatchers("/actuator/**").hasAuthority("ROLE_ADMIN")
                 .anyRequest().authenticated())
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .httpBasic(b -> b.disable())
             .exceptionHandling(e -> e.authenticationEntryPoint(entryPoint).accessDeniedHandler(deniedHandler))
+            .addFilterBefore(correlationIdFilter, UsernamePasswordAuthenticationFilter.class)
             .addFilterBefore(loginRateLimitingFilter, UsernamePasswordAuthenticationFilter.class)
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
             .cors(Customizer.withDefaults());

@@ -7,7 +7,11 @@ import java.util.List;
 import java.util.Optional;
 
 public interface UserUseCase {
+    /** Criação administrativa sem verificação de email (ex: SeedConfig, admin API). */
     User createUser(String username, String rawPassword, List<String> roles);
+
+    /** Registro externo: cria conta desabilitada e envia código de verificação por email. */
+    User registerUser(String username, String rawPassword, String email, List<String> roles);
 
     User getUserById(Long id);
 
@@ -24,4 +28,8 @@ public interface UserUseCase {
     void setUserEnabled(Long id, boolean enabled);
 
     User updateUser(Long id, String newUsername);
+
+    void verifyEmail(String code);
+
+    void resendVerification(String email);
 }

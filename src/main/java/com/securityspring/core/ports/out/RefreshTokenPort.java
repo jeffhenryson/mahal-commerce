@@ -11,4 +11,6 @@ public interface RefreshTokenPort {
     java.util.Optional<String> revoke(String token);
 
     void revokeAll(String username);
+
+    void deleteExpiredAndRevoked();
 }

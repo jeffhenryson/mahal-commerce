@@ -105,6 +105,13 @@ public class RefreshTokenRepositoryImpl implements RefreshTokenPort {
         log.info("audit.refresh.revokedAll user={} count={}", username, count);
     }
 
+    @Override
+    @Transactional
+    public void deleteExpiredAndRevoked() {
+        int deleted = refreshRepo.deleteExpiredAndRevoked(Instant.now());
+        if (deleted > 0) log.info("audit.refresh.cleanup deleted={}", deleted);
+    }
+
     private String generateOpaqueToken() {
         byte[] bytes = new byte[64];
         secureRandom.nextBytes(bytes);

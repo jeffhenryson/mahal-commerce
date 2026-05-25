@@ -6,11 +6,8 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
-import java.util.ArrayList;
-import java.util.List;
-
 @Data
-public class UserRequestDTO {
+public class RegisterRequest {
     @NotBlank
     @Size(min = 3, max = 80)
     private String username;
@@ -23,9 +20,8 @@ public class UserRequestDTO {
     )
     private String password;
 
+    @NotBlank
     @Email(message = "Email inválido")
     @Size(max = 254)
     private String email;
-
-    private List<String> roles = new ArrayList<>();
 }

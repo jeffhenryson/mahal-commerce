@@ -32,7 +32,14 @@ public class InMemoryTokenBlocklistAdapter implements TokenBlocklistPort {
     @Override
     public boolean isBlockedAt(String username, Instant tokenIssuedAt) {
         Instant threshold = blockedBefore.get(username);
-        return threshold != null && !tokenIssuedAt.isAfter(threshold);
+        if (threshold == null) return false;
+        // JWT iat has second precision; a token issued at or before the threshold second is blocked.
+        // !isAfter covers the equal case (same second) safely.
+        return !tokenIssuedAt.isAfter(threshold);
+    }
+
+    public void clearAll() {
+        blockedBefore.clear();
     }
 
     // A blocklist entry for user U set at time T can only affect tokens issued at or before T.

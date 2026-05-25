@@ -46,6 +46,41 @@
       "type": "java.lang.Long",
       "description": "Número máximo de requisições permitidas por IP na janela do rate limiting.",
       "defaultValue": 10
+    },
+    {
+      "name": "auth.lockout.max-attempts",
+      "type": "java.lang.Integer",
+      "description": "Número de falhas de login consecutivas antes de bloquear a conta do usuário.",
+      "defaultValue": 5
+    },
+    {
+      "name": "auth.lockout.duration-minutes",
+      "type": "java.lang.Long",
+      "description": "Tempo em minutos que a conta permanece bloqueada após exceder as tentativas.",
+      "defaultValue": 15
+    },
+    {
+      "name": "email.verification.ttl-minutes",
+      "type": "java.lang.Long",
+      "description": "Tempo de vida do código de verificação de email em minutos.",
+      "defaultValue": 15
+    },
+    {
+      "name": "resend.api-key",
+      "type": "java.lang.String",
+      "description": "API key do serviço Resend para envio de emails transacionais."
+    },
+    {
+      "name": "resend.from",
+      "type": "java.lang.String",
+      "description": "Endereço remetente dos emails enviados via Resend (ex: 'Sistema <noreply@example.com>').",
+      "defaultValue": "noreply@example.com"
+    },
+    {
+      "name": "refresh-token.cleanup.cron",
+      "type": "java.lang.String",
+      "description": "Expressão cron para limpeza de refresh tokens expirados e revogados.",
+      "defaultValue": "0 0 3 * * *"
     }
   ]
 }

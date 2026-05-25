@@ -16,7 +16,8 @@ public class UserEntityConverter {
     public User toDomain(UserEntity entity) {
         if (entity == null) return null;
         return User.fromPersisted(entity.getId(), entity.getUsername(), entity.getPassword(),
-                entity.isEnabled(), toDomainRoles(entity.getRoles()));
+                entity.isEnabled(), entity.getEmail(), entity.isEmailVerified(),
+                toDomainRoles(entity.getRoles()));
     }
 
     public UserEntity toEntityBase(User domain) {
@@ -26,6 +27,8 @@ public class UserEntityConverter {
         entity.setUsername(domain.getUsername());
         entity.setPassword(domain.getPassword());
         entity.setEnabled(domain.isEnabled());
+        entity.setEmail(domain.getEmail());
+        entity.setEmailVerified(domain.isEmailVerified());
         return entity;
     }
 

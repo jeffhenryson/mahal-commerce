@@ -47,7 +47,8 @@ public class UserController {
     @PostMapping
     @PreAuthorize("hasAuthority('USER_CREATE')")
     public ResponseEntity<UserResponseDTO> create(@Valid @RequestBody UserRequestDTO request) {
-        User created = useCase.createUser(request.getUsername(), request.getPassword(), request.getRoles());
+        User created = useCase.createUser(
+                request.getUsername(), request.getPassword(), request.getRoles());
         UserResponseDTO body = converter.toResponse(created);
         return ResponseEntity.created(URI.create("/users/" + body.getId())).body(body);
     }
