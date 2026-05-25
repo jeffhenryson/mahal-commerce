@@ -1,21 +1,22 @@
 package com.security_spring.adapter.out.repository;
 
-
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.security_spring.adapter.out.converter.UserEntityConverter;
 import com.security_spring.adapter.out.entities.RoleEntity;
 import com.security_spring.adapter.out.entities.UserEntity;
+import com.security_spring.core.domain.model.PageResult;
 import com.security_spring.core.domain.model.Role;
 import com.security_spring.core.domain.model.User;
 import com.security_spring.core.ports.out.UserRepository;
-
-import jakarta.transaction.Transactional;
 
 @Repository
 @Transactional
@@ -24,26 +25,18 @@ public class UserRepositoryImpl implements UserRepository {
     private final UserJpaRepository userRepo;
     private final RoleJpaRepository roleRepo;
     private final UserEntityConverter converter;
-    private final PasswordEncoder passwordEncoder;
 
     public UserRepositoryImpl(UserJpaRepository userRepo,
                               RoleJpaRepository roleRepo,
-                              UserEntityConverter converter,
-                              PasswordEncoder passwordEncoder) {
+                              UserEntityConverter converter) {
         this.userRepo = userRepo;
         this.roleRepo = roleRepo;
         this.converter = converter;
-        this.passwordEncoder = passwordEncoder;
     }
 
     @Override
     public User save(User user) {
         UserEntity entity = converter.toEntity(user);
-
-        if (entity.getPassword() != null) {
-            // Sempre encode aqui (o core não conhece infra)
-            entity.setPassword(passwordEncoder.encode(user.getPassword()));
-        }
 
         if (user.getRoles() != null && !user.getRoles().isEmpty()) {
             Set<RoleEntity> roleEntities = user.getRoles().stream()
@@ -65,19 +58,24 @@ public class UserRepositoryImpl implements UserRepository {
 
     @Override
     public Optional<User> findById(Long id) {
-        return userRepo.findById(id).map(e -> converter.toDomain(e));
+        return userRepo.findByIdWithRoles(id).map(converter::toDomain);
     }
 
     @Override
     public Optional<User> findByUsername(String username) {
-        return userRepo.findByUsername(username).map(e -> converter.toDomain(e));
+        return userRepo.findByUsername(username).map(converter::toDomain);
     }
 
     @Override
-    public java.util.List<User> findAll() {
-        return userRepo.findAll().stream()
-                .map(e -> converter.toDomain(e))
-                .collect(Collectors.toList());
+    public PageResult<User> findAll(int page, int size) {
+        Page<Long> idPage = userRepo.findAllIds(PageRequest.of(page, size));
+        List<User> users = idPage.isEmpty()
+                ? List.of()
+                : userRepo.findAllWithRolesByIdIn(idPage.getContent())
+                          .stream()
+                          .map(converter::toDomain)
+                          .collect(Collectors.toList());
+        return new PageResult<>(users, page, size, idPage.getTotalElements(), idPage.getTotalPages());
     }
 
     @Override

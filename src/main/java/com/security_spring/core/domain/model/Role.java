@@ -1,9 +1,13 @@
 package com.security_spring.core.domain.model;
 
+import java.util.HashSet;
+import java.util.Set;
+
 public class Role {
 
     private Long id;
     private String name;
+    private Set<Permission> permissions = new HashSet<>();
 
     public Role() {
     }
@@ -26,5 +30,17 @@ public class Role {
 
     public void setName(String name) {
         this.name = name;
+    }
+
+    public Set<Permission> getPermissions() {
+        return permissions;
+    }
+
+    public void setPermissions(Set<Permission> permissions) {
+        this.permissions = permissions;
+    }
+
+    public void addPermission(Permission permission) {
+        this.permissions.add(permission);
     }
 }

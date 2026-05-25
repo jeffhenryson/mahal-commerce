@@ -13,6 +13,9 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetailsService;
 
+import com.security_spring.infra.security.jwt.JwtAuthenticationFilter;
+import com.security_spring.infra.security.jwt.JwtService;
+
 import java.util.Collections;
 
 public class JwtAuthenticationFilterTest {
@@ -37,7 +40,7 @@ public class JwtAuthenticationFilterTest {
         when(jwt.extractUsername("abc.xyz")).thenReturn("john");
         when(uds.loadUserByUsername("john")).thenReturn(new User("john", "pwd", Collections.emptyList()));
 
-        filter.doFilterInternal(req, res, chain);
+        filter.doFilter(req, res, chain);
 
         assertNotNull(SecurityContextHolder.getContext().getAuthentication());
         assertEquals("john", SecurityContextHolder.getContext().getAuthentication().getName());
@@ -56,7 +59,7 @@ public class JwtAuthenticationFilterTest {
 
         when(req.getHeader("Authorization")).thenReturn(null);
 
-        filter.doFilterInternal(req, res, chain);
+        filter.doFilter(req, res, chain);
 
         assertNull(SecurityContextHolder.getContext().getAuthentication());
         verify(chain, times(1)).doFilter(req, res);

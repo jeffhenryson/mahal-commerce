@@ -1,0 +1,651 @@
+{
+  "info": {
+    "name": "security-spring",
+    "description": "API de autenticação e usuários — JWT + RBAC com Permissões + Refresh Token\n\nFluxo recomendado:\n1. Execute **[Auth] Login (admin)** — accessToken e refreshToken são salvos automaticamente\n2. Todos os requests protegidos já usam {{access_token}}\n3. Ao expirar o access token, execute **[Auth] Refresh**\n4. Para testar como usuário comum, execute **[Auth] Login (user)**\n\nCredenciais dev:\n- admin / Admin@dev1  (permissões: todas)\n- user  / User@dev1   (permissões: USER_READ)\n\nCredenciais hml:\n- admin / Admin@hml1  (troque após primeiro login)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "refresh_token",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "[Health] Status da aplicação",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/actuator/health",
+              "host": ["{{base_url}}"],
+              "path": ["actuator", "health"]
+            },
+            "description": "Verifica se a aplicação está no ar. Resposta esperada: {\"status\": \"UP\"}.\nEndpoint público — não exige autenticação."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "[Auth] Login (admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('access_token', body.accessToken);",
+                  "    pm.collectionVariables.set('refresh_token', body.refreshToken);",
+                  "    console.log('✅ Tokens salvos nas variáveis da coleção');",
+                  "}",
+                  "",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Retorna accessToken', () => pm.expect(pm.response.json().accessToken).to.be.a('string'));",
+                  "pm.test('Retorna refreshToken', () => pm.expect(pm.response.json().refreshToken).to.be.a('string'));",
+                  "pm.test('tokenType é Bearer', () => pm.expect(pm.response.json().tokenType).to.eql('Bearer'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"Admin@dev1\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Autentica o admin e salva automaticamente accessToken + refreshToken.\n\nPermissões do admin: USER_CREATE, USER_READ, USER_UPDATE, USER_DELETE, USER_ROLE_ASSIGN\n\nDev:  admin / Admin@dev1\nHml:  admin / Admin@hml1"
+          }
+        },
+        {
+          "name": "[Auth] Login (user comum)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('access_token', body.accessToken);",
+                  "    pm.collectionVariables.set('refresh_token', body.refreshToken);",
+                  "    console.log('✅ Tokens do usuário comum salvos');",
+                  "}",
+                  "",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"user\",\n  \"password\": \"User@dev1\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Autentica o usuário comum (somente USER_READ).\nÚtil para testar cenários de acesso negado (403)."
+          }
+        },
+        {
+          "name": "[Auth] Refresh",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('access_token', body.accessToken);",
+                  "    pm.collectionVariables.set('refresh_token', body.refreshToken);",
+                  "    console.log('✅ Tokens renovados e salvos');",
+                  "}",
+                  "",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Novo accessToken gerado', () => pm.expect(pm.response.json().accessToken).to.be.a('string'));",
+                  "pm.test('Novo refreshToken gerado', () => pm.expect(pm.response.json().refreshToken).to.be.a('string'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refresh_token}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/refresh",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "refresh"]
+            },
+            "description": "Rotaciona o par de tokens. O refreshToken antigo é invalidado imediatamente.\nO novo accessToken contém as roles/permissões atuais do usuário (carregadas do banco)."
+          }
+        },
+        {
+          "name": "[Auth] Logout (revoga refresh token)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 204', () => pm.response.to.have.status(204));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refresh_token}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/logout",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "logout"]
+            },
+            "description": "Revoga o refreshToken informado no body.\nApós isso, qualquer tentativa de usar esse refresh retorna 400.\nO accessToken ainda é válido até expirar (stateless)."
+          }
+        },
+        {
+          "name": "[Auth] Logout Total (revoga todos os tokens)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 204', () => pm.response.to.have.status(204));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/sessions",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "sessions"]
+            },
+            "description": "Revoga TODOS os refresh tokens do usuário autenticado (logout de todos os dispositivos).\nRequer Bearer token válido. O username é extraído do JWT.\nEndpoint: DELETE /auth/sessions"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Usuários",
+      "item": [
+        {
+          "name": "[Usuários] Meu perfil (GET /users/me)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Tem username', () => pm.expect(pm.response.json().username).to.be.a('string'));",
+                  "pm.test('Tem roles', () => pm.expect(pm.response.json().roles).to.be.an('array'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users/me",
+              "host": ["{{base_url}}"],
+              "path": ["users", "me"]
+            },
+            "description": "Retorna o perfil do usuário autenticado.\nQualquer usuário autenticado pode acessar — não exige permissão específica."
+          }
+        },
+        {
+          "name": "[Usuários] Listar paginado (GET /users)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Retorna content como array', () => pm.expect(pm.response.json().content).to.be.an('array'));",
+                  "pm.test('Tem totalElements', () => pm.expect(pm.response.json().totalElements).to.be.a('number'));",
+                  "pm.test('Tem totalPages', () => pm.expect(pm.response.json().totalPages).to.be.a('number'));",
+                  "pm.test('Tem page', () => pm.expect(pm.response.json().page).to.eql(0));",
+                  "pm.test('Tem size', () => pm.expect(pm.response.json().size).to.eql(20));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users?page=0&size=20",
+              "host": ["{{base_url}}"],
+              "path": ["users"],
+              "query": [
+                { "key": "page", "value": "0", "description": "Página (base 0)" },
+                { "key": "size", "value": "20", "description": "Itens por página (padrão: 20)" }
+              ]
+            },
+            "description": "Lista usuários com paginação. Requer permissão USER_READ.\nResposta: { content: [...], page, size, totalElements, totalPages }"
+          }
+        },
+        {
+          "name": "[Usuários] Buscar por ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Tem username', () => pm.expect(pm.response.json().username).to.be.a('string'));",
+                  "pm.test('Tem roles', () => pm.expect(pm.response.json().roles).to.be.an('array'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users/1",
+              "host": ["{{base_url}}"],
+              "path": ["users", "1"]
+            },
+            "description": "Busca usuário pelo ID. Requer permissão USER_READ.\nAlterece o ID na URL conforme necessário."
+          }
+        },
+        {
+          "name": "[Usuários] Criar novo usuário",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Username correto', () => pm.expect(pm.response.json().username).to.eql('joao'));",
+                  "pm.test('Roles atribuídas', () => pm.expect(pm.response.json().roles).to.include('ROLE_USER'));",
+                  "",
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set('created_user_id', pm.response.json().id);",
+                  "    console.log('✅ Usuário criado. ID salvo: ' + pm.response.json().id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"joao\",\n  \"password\": \"Senha@123\",\n  \"roles\": [\"ROLE_USER\"]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/users",
+              "host": ["{{base_url}}"],
+              "path": ["users"]
+            },
+            "description": "Cria um novo usuário com roles. Requer permissão USER_CREATE (apenas ADMIN).\nUsername: 3-80 chars | Password: 8-120 chars\nroles: opcional — ex: [\"ROLE_USER\"] ou [\"ROLE_ADMIN\"]"
+          }
+        },
+        {
+          "name": "[Usuários] Atribuir role a usuário",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 204', () => pm.response.to.have.status(204));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users/joao/roles/ROLE_ADMIN",
+              "host": ["{{base_url}}"],
+              "path": ["users", "joao", "roles", "ROLE_ADMIN"]
+            },
+            "description": "Adiciona uma role a um usuário existente. Requer permissão USER_ROLE_ASSIGN (apenas ADMIN).\nURL: POST /users/{username}/roles/{roleName}"
+          }
+        },
+        {
+          "name": "[Usuários] Trocar minha senha",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 204', () => pm.response.to.have.status(204));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"Admin@dev1\",\n  \"newPassword\": \"NovasSenha@456\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/users/me/password",
+              "host": ["{{base_url}}"],
+              "path": ["users", "me", "password"]
+            },
+            "description": "Troca a senha do usuário autenticado.\nRequer a senha atual correta (campo currentPassword).\nNewPassword: mínimo 8 caracteres.\nQualquer usuário autenticado pode usar — não exige permissão especial.\nURL: PUT /users/me/password"
+          }
+        },
+        {
+          "name": "[Usuários] Deletar por ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 204', () => pm.response.to.have.status(204));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users/2",
+              "host": ["{{base_url}}"],
+              "path": ["users", "2"]
+            },
+            "description": "Remove o usuário com o ID especificado. Requer permissão USER_DELETE (apenas ADMIN).\nAjuste o ID na URL conforme necessário."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cenários de Erro",
+      "item": [
+        {
+          "name": "[Erro] Login com senha errada → 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));",
+                  "pm.test('Tem message', () => pm.expect(pm.response.json().message).to.be.a('string'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"senha_errada\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Tentativa de login com credenciais inválidas. Espera 401."
+          }
+        },
+        {
+          "name": "[Erro] Acesso sem token → 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/users",
+              "host": ["{{base_url}}"],
+              "path": ["users"]
+            },
+            "description": "Acesso a endpoint protegido sem Authorization header. Espera 401."
+          }
+        },
+        {
+          "name": "[Erro] Token JWT inválido → 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer token.invalido.aqui" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users",
+              "host": ["{{base_url}}"],
+              "path": ["users"]
+            },
+            "description": "Acesso com JWT malformado ou assinatura inválida. Espera 401."
+          }
+        },
+        {
+          "name": "[Erro] Sem permissão USER_CREATE → 403",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "// Execute '[Auth] Login (user comum)' antes deste request",
+                  "// O usuário comum tem apenas USER_READ — não pode criar usuários",
+                  "pm.test('Status 403', () => pm.response.to.have.status(403));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"tentativa\",\n  \"password\": \"Senha@123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/users",
+              "host": ["{{base_url}}"],
+              "path": ["users"]
+            },
+            "description": "POST /users requer permissão USER_CREATE.\nFaça login como 'user' (ROLE_USER) primeiro — ele só tem USER_READ. Espera 403."
+          }
+        },
+        {
+          "name": "[Erro] Refresh token inválido → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"token_invalido_ou_revogado\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/refresh",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "refresh"]
+            },
+            "description": "Tentativa de refresh com token inválido, expirado ou revogado. Espera 400."
+          }
+        },
+        {
+          "name": "[Erro] Senha atual incorreta → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Tem message', () => pm.expect(pm.response.json().message).to.include('incorrect'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"senha_errada\",\n  \"newPassword\": \"NovaSenha@789\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/users/me/password",
+              "host": ["{{base_url}}"],
+              "path": ["users", "me", "password"]
+            },
+            "description": "Troca de senha com currentPassword incorreta. Espera 400 com mensagem de erro."
+          }
+        },
+        {
+          "name": "[Erro] Rate limit login → 429",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "// Execute este request 11x seguidas para acionar o rate limit",
+                  "// Após 10 tentativas na janela de 60s, a 11ª retorna 429",
+                  "console.log('Resposta:', pm.response.code);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"tentativa\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Execute 11x em sequência para acionar o rate limiting.\nLimite padrão: 10 tentativas por 60 segundos por IP. Espera 429 na 11ª tentativa."
+          }
+        }
+      ]
+    }
+  ]
+}

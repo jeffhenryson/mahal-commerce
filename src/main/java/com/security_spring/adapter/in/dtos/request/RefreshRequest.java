@@ -1,8 +1,8 @@
-package com.security_spring.adapter.in.dtos;
+package com.security_spring.adapter.in.dtos.request;
 
 import jakarta.validation.constraints.NotBlank;
 
-public class LogoutRequest {
+public class RefreshRequest {
     @NotBlank
     private String refreshToken;
 

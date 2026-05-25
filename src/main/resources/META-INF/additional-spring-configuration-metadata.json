@@ -1,0 +1,51 @@
+{
+  "properties": [
+    {
+      "name": "jwt.secret",
+      "type": "java.lang.String",
+      "description": "Chave secreta para assinar tokens JWT (HS256). Deve ser base64 de no mínimo 256 bits."
+    },
+    {
+      "name": "jwt.access-ttl-minutes",
+      "type": "java.lang.Long",
+      "description": "Tempo de vida do access token em minutos.",
+      "defaultValue": 15
+    },
+    {
+      "name": "jwt.refresh-ttl-days",
+      "type": "java.lang.Long",
+      "description": "Tempo de vida do refresh token em dias.",
+      "defaultValue": 7
+    },
+    {
+      "name": "cors.allowed-origins",
+      "type": "java.lang.String",
+      "description": "Origens permitidas no CORS, separadas por vírgula. Use * para permitir todas (apenas dev).",
+      "defaultValue": "*"
+    },
+    {
+      "name": "cors.allowed-methods",
+      "type": "java.lang.String",
+      "description": "Métodos HTTP permitidos no CORS, separados por vírgula.",
+      "defaultValue": "GET,POST,PUT,DELETE,OPTIONS"
+    },
+    {
+      "name": "cors.allowed-headers",
+      "type": "java.lang.String",
+      "description": "Headers permitidos no CORS, separados por vírgula. Use * para permitir todos.",
+      "defaultValue": "*"
+    },
+    {
+      "name": "rate.limit.login.window-seconds",
+      "type": "java.lang.Long",
+      "description": "Janela de tempo em segundos para o rate limiting do endpoint /auth/login.",
+      "defaultValue": 60
+    },
+    {
+      "name": "rate.limit.login.max-requests",
+      "type": "java.lang.Long",
+      "description": "Número máximo de requisições permitidas por IP na janela do rate limiting.",
+      "defaultValue": 10
+    }
+  ]
+}

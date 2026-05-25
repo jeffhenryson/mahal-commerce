@@ -65,7 +65,7 @@ public class RefreshTokenServiceTest {
 
     @Test
     void issue_rotate_and_revoke_refresh_token() {
-        String token = refreshTokenService.issueNewRefreshToken("bob");
+        String token = refreshTokenService.issue("bob");
         assertNotNull(token);
 
         String hash = sha256(token);
@@ -73,7 +73,7 @@ public class RefreshTokenServiceTest {
         assertFalse(row.isRevoked());
         assertTrue(row.getExpiresAt().isAfter(Instant.now()));
 
-        var rotated = refreshTokenService.rotateAndGetUsername(token);
+        var rotated = refreshTokenService.rotate(token);
         assertEquals("bob", rotated.username());
         assertNotEquals(token, rotated.newToken());
 

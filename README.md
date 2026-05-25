@@ -1,94 +1,132 @@
-## Visão Geral
-- Java 21, Maven
-- Spring Boot (Web, Data JPA, Security, Validation, Actuator)
-- Arquitetura Hexagonal (Ports & Adapters)
-- Segurança: JWT (Bearer), RBAC por roles com `@PreAuthorize`, rate limiting em `/auth/login`
-- Persistência: H2 (dev) e Postgres (hml) via perfis + Flyway (V1 schema, V2 refresh tokens)
-- OpenAPI (Springdoc) com esquema Bearer JWT (Swagger habilitado apenas em dev)
+# security-spring
+
+Estudo de arquitetura hexagonal (Ports & Adapters) aplicada a uma API REST com camada de segurança completa usando Spring Boot e Spring Security.
+
+O objetivo do projeto é servir de base reutilizável para novas aplicações, com autenticação JWT, controle de acesso por papéis (RBAC), rotação de refresh tokens e migração de schema via Flyway — tudo pronto para trocar a lógica de negócio sem mexer na infraestrutura.
+
+---
+
+## Tecnologias
+
+| Camada | Escolha |
+|---|---|
+| Linguagem | Java 21 |
+| Framework | Spring Boot 4 (Web, Security, Data JPA, Validation, Actuator) |
+| Autenticação | JWT (JJWT 0.11) + Refresh Token opaco |
+| Banco (dev) | H2 em memória |
+| Banco (hml/prod) | PostgreSQL + Flyway |
+| Documentação | SpringDoc OpenAPI (Swagger) |
+| Build | Maven |
+| Container | Docker + Docker Compose |
+
+---
 
 ## Arquitetura
-- `adapter/in`: controladores REST, DTOs e conversões
-- `core`: regras de domínio, ports e serviço de aplicação
-- `adapter/out`: entidades JPA e repositórios (implementam as ports)
-- `infra/config`: configs de beans, segurança, openapi, seed
-- `infra/security`: filtros (JWT e rate limiting) e serviços de token
-- `infra/audit`: auditoria de eventos de autenticação
-- `infra/handler`: tratamento global de exceções (JSON)
 
-## Perfis e Execução
-- Dev (padrão): H2 em memória, Swagger habilitado, seed `admin/admin`
-  ```bash
-  ./mvnw spring-boot:run
-  # H2 console: http://localhost:8080/h2-console (JDBC jdbc:h2:mem:demo)
-  # Swagger UI: http://localhost:8080/swagger-ui/index.html
-  ```
-- Hml (staging): Postgres + Flyway; Swagger e docs desabilitados por padrão
-  ```bash
-  docker compose up -d  # sobe Postgres local
-  SPRING_PROFILES_ACTIVE=hml \
-  DB_URL=jdbc:postgresql://localhost:5432/security \
-  DB_USERNAME=postgres DB_PASSWORD=postgres \
-  JWT_SECRET=<base64-256bit> \
-  ./mvnw spring-boot:run
-  ```
+O projeto segue a arquitetura hexagonal: o núcleo de negócio não conhece frameworks, banco de dados ou HTTP — ele expõe portas que os adaptadores implementam.
 
-## Segurança
-- Autenticação: JWT (access de curta duração, refresh opaco no banco)
-  - Endpoints `/auth/login`, `/auth/refresh`, `/auth/logout`
-- Autorização: `@PreAuthorize`
-  - ADMIN: `POST /users`, `POST /users/{username}/roles/{role}`, `DELETE /users/{id}`
-  - ADMIN ou USER: `GET /users`, `GET /users/{id}`
-- Rate limiting: `/auth/login` limitado por IP (configurável)
-- CORS por perfil, CSRF desabilitado (API stateless)
-- Actuator: `health`/`info` públicos; demais `/actuator/**` exigem ADMIN
+```
+┌─────────────────────────────────────────────────────────┐
+│                        adapter/in                       │
+│          Controllers  ·  DTOs  ·  Converters            │
+└────────────────────────────┬────────────────────────────┘
+                             │ porta de entrada (UseCase)
+┌────────────────────────────▼────────────────────────────┐
+│                          core                           │
+│        domain/model  ·  ports  ·  service               │
+└────────────────────────────┬────────────────────────────┘
+                             │ porta de saída (Repository)
+┌────────────────────────────▼────────────────────────────┐
+│                       adapter/out                       │
+│         Entities JPA  ·  Repository impls               │
+└─────────────────────────────────────────────────────────┘
 
-## Variáveis/Propriedades úteis
-- JWT: `jwt.secret` (defina um segredo base64 forte em hml), `jwt.access-ttl-minutes`, `jwt.refresh-ttl-days`
-- Rate limit login: `rate.limit.login.window-seconds`, `rate.limit.login.max-requests`
-- Actuator (dev/hml): `management.endpoints.web.exposure.include=health,info,metrics`
-
-## Documentação (OpenAPI)
-- Dev:
-  - UI: http://localhost:8080/swagger-ui/index.html
-  - JSON: http://localhost:8080/v3/api-docs
-- Hml: desabilitado por padrão (habilite via `springdoc.*` se necessário)
-- Esquema de segurança: Bearer JWT (`Authorization: Bearer <token>`) aplicado aos controladores protegidos
-
-## Exemplos cURL (Auth)
-- Login (tokens):
-  ```bash
-  curl -s -X POST http://localhost:8080/auth/login \
-    -H "Content-Type: application/json" \
-    -d '{"username":"admin","password":"admin"}'
-  ```
-- Refresh:
-  ```bash
-  curl -s -X POST http://localhost:8080/auth/refresh \
-    -H "Content-Type: application/json" \
-    -d '{"refreshToken":"<OPAQUE>"}'
-  ```
-- Acesso com Bearer:
-  ```bash
-  curl -H "Authorization: Bearer <ACCESS>" http://localhost:8080/users
-  ```
-
-## Endpoints de Usuários (resumo)
-- `POST /users` (ADMIN) — cria usuário `{ username: 3..80, password: 3..120 }`
-- `POST /users/{username}/roles/{role}` (ADMIN) — atribui role
-- `GET /users/{id}` (ADMIN/USER) — busca por id
-- `GET /users` (ADMIN/USER) — lista todos
-- `DELETE /users/{id}` (ADMIN) — remove
-
-## Testes
-```bash
-./mvnw test
-# Testcontainers opcional
-ENABLE_TC=true ./mvnw -Dtest=RefreshTokenServiceTest test
+infra/
+  config/    → SecurityConfig, BeanConfig, OpenApiConfig, SeedConfig
+  security/  → JWT, filtros, rate limiting, refresh token
+  handler/   → GlobalExceptionHandler (respostas JSON padronizadas)
+  audit/     → Listener de eventos de autenticação
 ```
 
-## Roadmap de Produção (opcional)
-- Segredos: gerenciar `JWT_SECRET` (Key Vault/Secrets Manager) e rotacionar; considerar RS256
-- Observabilidade: logs estruturados + correlação; métricas customizadas; tracing
-- CI/CD: pipeline com build/test/scan; criação de imagem (Dockerfile multi-stage)
-- Hardening: headers de segurança; políticas de senha/lockout; rate limit adicional por usuário
-- OpenAPI: exemplos completos de request/response para todos os endpoints
+---
+
+## Segurança
+
+### Autenticação
+- **Access token** JWT (HS256) de curta duração — configurável via `JWT_ACCESS_TTL_MINUTES`
+- **Refresh token** opaco armazenado como hash SHA-256 no banco — nunca o token em claro
+- Rotação de refresh token a cada uso (revogação automática do anterior)
+- Logout revoga o refresh token imediatamente
+
+### Autorização
+- RBAC com `@PreAuthorize` por papel (`ADMIN`, `USER`)
+- Sessão stateless — sem cookies, sem estado no servidor
+
+### Proteções adicionais
+- Rate limiting em `POST /auth/login` por IP (janela e limite configuráveis)
+- CORS por perfil (permissivo em dev, restrito em hml via env)
+- CSRF desabilitado (API stateless — sem sessão de formulário)
+- Actuator: `health` e `info` públicos; demais endpoints exigem papel `ADMIN`
+
+---
+
+## Setup local
+
+### Pré-requisitos
+- Java 21+
+- Maven 3.9+ (ou use o wrapper `./mvnw`)
+- Docker (apenas para perfil `hml`)
+
+### 1. Clonar e configurar variáveis
+
+```bash
+git clone https://github.com/seu-usuario/security-spring.git
+cd security-spring
+cp .env.example .env
+```
+
+O arquivo `.env` já vem com os defaults de dev. Ajuste `JWT_SECRET` se quiser.
+
+### 2. Rodar em dev (H2 em memória)
+
+```bash
+./mvnw spring-boot:run
+```
+
+| Recurso | URL |
+|---|---|
+| API | http://localhost:8080 |
+| Swagger UI | http://localhost:8080/swagger-ui/index.html |
+| H2 Console | http://localhost:8080/h2-console |
+
+> JDBC URL do H2: `jdbc:h2:mem:demo` · Usuário: `sa` · Sem senha
+
+O perfil dev cria automaticamente os usuários de seed:
+
+| Usuário | Senha | Papel |
+|---|---|---|
+| `admin` | `admin` | `ADMIN` |
+| `user` | `user` | `USER` |
+
+### 3. Rodar em hml (PostgreSQL)
+
+```bash
+docker compose up -d          # sobe o Postgres
+SPRING_PROFILES_ACTIVE=hml \
+JWT_SECRET=<chave-256-bits> \
+./mvnw spring-boot:run
+```
+
+O Flyway aplica as migrations automaticamente (`V1__init.sql`, `V2__refresh_tokens.sql`).
+
+---
+
+## Testes
+
+```bash
+./mvnw test
+```
+
+Os testes de integração com PostgreSQL usam Testcontainers e são ativados por padrão quando o Docker está disponível.
+
+---

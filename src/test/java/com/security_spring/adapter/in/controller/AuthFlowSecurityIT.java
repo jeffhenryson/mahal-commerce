@@ -2,6 +2,7 @@ package com.security_spring.adapter.in.controller;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -44,23 +45,29 @@ public class AuthFlowSecurityIT {
 
     @Test
     void user_role_can_read_with_bearer() throws Exception {
-        // Create user as ADMIN
-        String body = "{\"username\":\"john2\",\"password\":\"secret123\"}";
+        // Create user as ADMIN (using permission-based mock)
+        String body = "{\"username\":\"john2\",\"password\":\"Secret@123\"}";
         mockMvc.perform(post("/users")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body)
-                .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user("admin").roles("ADMIN")))
+                .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user("admin")
+                        .authorities(new SimpleGrantedAuthority("ROLE_ADMIN"),
+                                     new SimpleGrantedAuthority("USER_CREATE"),
+                                     new SimpleGrantedAuthority("USER_READ"),
+                                     new SimpleGrantedAuthority("USER_ROLE_ASSIGN"))))
                 .andExpect(status().isCreated());
 
         // Assign ROLE_USER as ADMIN
         mockMvc.perform(post("/users/john2/roles/ROLE_USER")
-                .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user("admin").roles("ADMIN")))
+                .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user("admin")
+                        .authorities(new SimpleGrantedAuthority("ROLE_ADMIN"),
+                                     new SimpleGrantedAuthority("USER_ROLE_ASSIGN"))))
                 .andExpect(status().isNoContent());
 
-        // Login as john2
+        // Login as john2 (john2 has ROLE_USER which has USER_READ permission)
         MvcResult r = mockMvc.perform(post("/auth/login")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"username\":\"john2\",\"password\":\"secret123\"}"))
+                .content("{\"username\":\"john2\",\"password\":\"Secret@123\"}"))
                 .andExpect(status().isOk())
                 .andReturn();
         JsonNode json = om.readTree(r.getResponse().getContentAsString());
@@ -76,7 +83,7 @@ public class AuthFlowSecurityIT {
         // Login as admin (seeded in dev) to get a refresh token
         MvcResult r = mockMvc.perform(post("/auth/login")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"username\":\"admin\",\"password\":\"admin\"}"))
+                .content("{\"username\":\"admin\",\"password\":\"Admin@dev1\"}"))
                 .andExpect(status().isOk())
                 .andReturn();
         JsonNode json = om.readTree(r.getResponse().getContentAsString());

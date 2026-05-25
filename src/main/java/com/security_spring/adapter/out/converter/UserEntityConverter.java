@@ -1,7 +1,9 @@
 package com.security_spring.adapter.out.converter;
 
+import com.security_spring.adapter.out.entities.PermissionEntity;
 import com.security_spring.adapter.out.entities.RoleEntity;
 import com.security_spring.adapter.out.entities.UserEntity;
+import com.security_spring.core.domain.model.Permission;
 import com.security_spring.core.domain.model.Role;
 import com.security_spring.core.domain.model.User;
 
@@ -16,7 +18,6 @@ public class UserEntityConverter {
         User user = new User();
         user.setId(entity.getId());
         user.setUsername(entity.getUsername());
-        // Importante: password não deve ser exposto além do necessário
         user.setPassword(entity.getPassword());
         user.setRoles(toDomainRoles(entity.getRoles()));
         return user;
@@ -28,7 +29,6 @@ public class UserEntityConverter {
         entity.setId(domain.getId());
         entity.setUsername(domain.getUsername());
         entity.setPassword(domain.getPassword());
-        // Roles serão associadas no repository impl (carregando RoleEntity por nome)
         return entity;
     }
 
@@ -39,7 +39,20 @@ public class UserEntityConverter {
                     Role r = new Role();
                     r.setId(re.getId());
                     r.setName(re.getName());
+                    r.setPermissions(toDomainPermissions(re.getPermissions()));
                     return r;
+                })
+                .collect(Collectors.toSet());
+    }
+
+    private Set<Permission> toDomainPermissions(Set<PermissionEntity> permEntities) {
+        if (permEntities == null) return new HashSet<>();
+        return permEntities.stream()
+                .map(pe -> {
+                    Permission p = new Permission();
+                    p.setId(pe.getId());
+                    p.setName(pe.getName());
+                    return p;
                 })
                 .collect(Collectors.toSet());
     }

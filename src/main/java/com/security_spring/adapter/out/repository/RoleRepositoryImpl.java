@@ -27,6 +27,14 @@ public class RoleRepositoryImpl implements RoleRepository {
         Role r = new Role();
         r.setId(e.getId());
         r.setName(e.getName());
+        if (e.getPermissions() != null) {
+            e.getPermissions().forEach(pe -> {
+                com.security_spring.core.domain.model.Permission p = new com.security_spring.core.domain.model.Permission();
+                p.setId(pe.getId());
+                p.setName(pe.getName());
+                r.addPermission(p);
+            });
+        }
         return r;
     }
 

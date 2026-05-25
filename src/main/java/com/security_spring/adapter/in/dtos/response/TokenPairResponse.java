@@ -1,4 +1,4 @@
-package com.security_spring.adapter.in.dtos;
+package com.security_spring.adapter.in.dtos.response;
 
 public class TokenPairResponse {
     private final String accessToken;

@@ -8,6 +8,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.User;
 
+import com.security_spring.infra.security.jwt.JwtService;
+
 public class JwtServiceTest {
 
     @Test

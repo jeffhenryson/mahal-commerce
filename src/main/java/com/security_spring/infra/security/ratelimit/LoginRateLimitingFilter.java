@@ -1,4 +1,4 @@
-package com.security_spring.infra.security;
+package com.security_spring.infra.security.ratelimit;
 
 import java.io.IOException;
 import java.time.Instant;

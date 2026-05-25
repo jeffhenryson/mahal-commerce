@@ -1,4 +1,4 @@
-package com.security_spring.infra.security;
+package com.security_spring.infra.security.jwt;
 
 import java.security.Key;
 import java.time.Instant;

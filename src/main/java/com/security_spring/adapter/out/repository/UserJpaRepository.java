@@ -1,11 +1,31 @@
 package com.security_spring.adapter.out.repository;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import com.security_spring.adapter.out.entities.UserEntity;
 
+import java.util.List;
 import java.util.Optional;
 
 public interface UserJpaRepository extends JpaRepository<UserEntity, Long> {
     Optional<UserEntity> findByUsername(String username);
+
+    @Query("select u from UserEntity u left join fetch u.roles r left join fetch r.permissions where u.username = :username")
+    Optional<UserEntity> findByUsernameWithRoles(@Param("username") String username);
+
+    @Query("select distinct u from UserEntity u left join fetch u.roles r left join fetch r.permissions")
+    List<UserEntity> findAllWithRoles();
+
+    @Query("select u from UserEntity u left join fetch u.roles r left join fetch r.permissions where u.id = :id")
+    Optional<UserEntity> findByIdWithRoles(@Param("id") Long id);
+
+    @Query("select u.id from UserEntity u")
+    Page<Long> findAllIds(Pageable pageable);
+
+    @Query("select distinct u from UserEntity u left join fetch u.roles r left join fetch r.permissions where u.id in :ids")
+    List<UserEntity> findAllWithRolesByIdIn(@Param("ids") List<Long> ids);
 }

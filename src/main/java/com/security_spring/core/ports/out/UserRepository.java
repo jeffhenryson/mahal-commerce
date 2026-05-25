@@ -1,8 +1,8 @@
 package com.security_spring.core.ports.out;
 
+import com.security_spring.core.domain.model.PageResult;
 import com.security_spring.core.domain.model.User;
 
-import java.util.List;
 import java.util.Optional;
 
 public interface UserRepository {
@@ -12,7 +12,7 @@ public interface UserRepository {
 
     Optional<User> findByUsername(String username);
 
-    List<User> findAll();
+    PageResult<User> findAll(int page, int size);
 
     void deleteById(Long id);
 }

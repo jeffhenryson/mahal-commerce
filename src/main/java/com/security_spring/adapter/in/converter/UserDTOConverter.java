@@ -1,7 +1,7 @@
 package com.security_spring.adapter.in.converter;
 
-import com.security_spring.adapter.in.dtos.UserRequestDTO;
-import com.security_spring.adapter.in.dtos.UserResponseDTO;
+import com.security_spring.adapter.in.dtos.request.UserRequestDTO;
+import com.security_spring.adapter.in.dtos.response.UserResponseDTO;
 import com.security_spring.core.domain.model.Role;
 import com.security_spring.core.domain.model.User;
 

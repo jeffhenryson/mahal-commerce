@@ -13,10 +13,11 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
-import com.security_spring.infra.security.JwtAuthenticationFilter;
-import com.security_spring.infra.security.LoginRateLimitingFilter;
 import com.security_spring.infra.security.RestAccessDeniedHandler;
 import com.security_spring.infra.security.RestAuthenticationEntryPoint;
+import com.security_spring.infra.security.jwt.JwtAuthenticationFilter;
+import com.security_spring.infra.security.ratelimit.LoginRateLimitingFilter;
+
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -45,11 +46,12 @@ public class SecurityConfig {
                 "/h2-console/**",
                 "/v3/api-docs/**",
                 "/swagger-ui/**",
-                        "/swagger-ui.html",
-                "/auth/**",
+                "/swagger-ui.html",
                 "/actuator/health/**",
                 "/actuator/info"
             ).permitAll()
+            .requestMatchers(org.springframework.http.HttpMethod.DELETE, "/auth/sessions").authenticated()
+            .requestMatchers("/auth/**").permitAll()
             .requestMatchers("/actuator/**").hasRole("ADMIN")
             .anyRequest().authenticated())
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))

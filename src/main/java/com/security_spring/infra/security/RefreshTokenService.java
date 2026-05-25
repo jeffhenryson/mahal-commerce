@@ -14,9 +14,10 @@ import com.security_spring.adapter.out.entities.RefreshTokenEntity;
 import com.security_spring.adapter.out.entities.UserEntity;
 import com.security_spring.adapter.out.repository.RefreshTokenJpaRepository;
 import com.security_spring.adapter.out.repository.UserJpaRepository;
+import com.security_spring.core.ports.out.RefreshTokenPort;
 
 @Service
-public class RefreshTokenService {
+public class RefreshTokenService implements RefreshTokenPort {
 
     private final RefreshTokenJpaRepository refreshRepo;
     private final UserJpaRepository userRepo;
@@ -33,8 +34,9 @@ public class RefreshTokenService {
         this.refreshTtlDays = refreshTtlDays;
     }
 
+    @Override
     @Transactional
-    public String issueNewRefreshToken(String username) {
+    public String issue(String username) {
         UserEntity user = userRepo.findByUsername(username)
                 .orElseThrow(() -> new IllegalArgumentException("User not found: " + username));
 
@@ -50,31 +52,9 @@ public class RefreshTokenService {
         return token;
     }
 
+    @Override
     @Transactional
-    public String rotate(String oldToken) {
-        var found = refreshRepo.findByTokenHash(sha256(oldToken))
-                .orElseThrow(() -> new IllegalArgumentException("Invalid refresh token"));
-        if (found.isRevoked() || found.getExpiresAt().isBefore(Instant.now())) {
-            throw new IllegalArgumentException("Refresh token expired or revoked");
-        }
-        found.setRevoked(true);
-        found.setRotatedAt(Instant.now());
-        refreshRepo.save(found);
-
-        String newToken = generateOpaqueToken();
-        RefreshTokenEntity rt = new RefreshTokenEntity();
-        rt.setUser(found.getUser());
-        rt.setTokenHash(sha256(newToken));
-        rt.setExpiresAt(Instant.now().plus(refreshTtlDays, ChronoUnit.DAYS));
-        refreshRepo.save(rt);
-        log.info("audit.refresh.rotated user={}", found.getUser().getUsername());
-        return newToken;
-    }
-
-    public static record RotationResult(String username, String newToken) {}
-
-    @Transactional
-    public RotationResult rotateAndGetUsername(String oldToken) {
+    public RotationResult rotate(String oldToken) {
         var found = refreshRepo.findByTokenHash(sha256(oldToken))
                 .orElseThrow(() -> new IllegalArgumentException("Invalid refresh token"));
         if (found.isRevoked() || found.getExpiresAt().isBefore(Instant.now())) {
@@ -91,17 +71,26 @@ public class RefreshTokenService {
         rt.setTokenHash(sha256(newToken));
         rt.setExpiresAt(Instant.now().plus(refreshTtlDays, ChronoUnit.DAYS));
         refreshRepo.save(rt);
+        log.info("audit.refresh.rotated user={}", username);
         return new RotationResult(username, newToken);
     }
 
+    @Override
     @Transactional
     public void revoke(String token) {
         refreshRepo.findByTokenHash(sha256(token)).ifPresent(rt -> {
             rt.setRevoked(true);
             rt.setRotatedAt(Instant.now());
             refreshRepo.save(rt);
-            log.info("audit.refresh.revoked user={} tokenHash={}", rt.getUser().getUsername(), sha256(token));
+            log.info("audit.refresh.revoked user={}", rt.getUser().getUsername());
         });
+    }
+
+    @Override
+    @Transactional
+    public void revokeAll(String username) {
+        int count = refreshRepo.revokeAllByUsername(username, Instant.now());
+        log.info("audit.refresh.revokedAll user={} count={}", username, count);
     }
 
     private String generateOpaqueToken() {
