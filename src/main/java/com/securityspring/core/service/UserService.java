@@ -1,23 +1,24 @@
-package com.security_spring.core.service;
+package com.securityspring.core.service;
 
-import com.security_spring.core.domain.exception.InvalidPasswordException;
-import com.security_spring.core.domain.exception.RoleNotFoundException;
-import com.security_spring.core.domain.exception.UserNotFoundException;
-import com.security_spring.core.domain.exception.UsernameAlreadyExistsException;
-import com.security_spring.core.domain.model.PageResult;
-import com.security_spring.core.domain.model.Role;
-import com.security_spring.core.domain.model.User;
-import com.security_spring.core.ports.in.UserUseCase;
-import com.security_spring.core.ports.out.PasswordHashPort;
-import com.security_spring.core.ports.out.RefreshTokenPort;
-import com.security_spring.core.ports.out.RoleRepository;
-import com.security_spring.core.ports.out.TokenBlocklistPort;
-import com.security_spring.core.ports.out.UserRepository;
+import com.securityspring.core.domain.exception.InvalidPasswordException;
+import com.securityspring.core.domain.exception.RoleNotFoundException;
+import com.securityspring.core.domain.exception.UserNotFoundException;
+import com.securityspring.core.domain.exception.UsernameAlreadyExistsException;
+import com.securityspring.core.domain.model.PageResult;
+import com.securityspring.core.domain.model.Role;
+import com.securityspring.core.domain.model.User;
+import com.securityspring.core.ports.in.UserUseCase;
+import com.securityspring.core.ports.out.PasswordHashPort;
+import com.securityspring.core.ports.out.RefreshTokenPort;
+import com.securityspring.core.ports.out.RoleRepository;
+import com.securityspring.core.ports.out.TokenBlocklistPort;
+import com.securityspring.core.ports.out.UserRepository;
 
-import org.springframework.transaction.annotation.Transactional;
-
+import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 public class UserService implements UserUseCase {
 
@@ -40,7 +41,6 @@ public class UserService implements UserUseCase {
     }
 
     @Override
-    @Transactional
     public User createUser(String username, String rawPassword, List<String> roles) {
         if (rawPassword == null || rawPassword.length() < 8) {
             throw new InvalidPasswordException();
@@ -48,7 +48,7 @@ public class UserService implements UserUseCase {
         userRepository.findByUsername(username).ifPresent(u -> {
             throw new UsernameAlreadyExistsException(username);
         });
-        java.util.Set<Role> roleSet = new java.util.HashSet<>();
+        Set<Role> roleSet = new HashSet<>();
         if (roles != null) {
             roles.forEach(roleName -> {
                 Role role = roleRepository.findByName(roleName)
@@ -73,7 +73,6 @@ public class UserService implements UserUseCase {
     }
 
     @Override
-    @Transactional
     public void assignRole(String username, String roleName) {
         User user = userRepository
                 .findByUsername(username)
@@ -93,15 +92,16 @@ public class UserService implements UserUseCase {
     }
 
     @Override
-    @Transactional
     public void deleteUser(Long id) {
         userRepository.findById(id).orElseThrow(() -> new UserNotFoundException(id));
         userRepository.deleteById(id);
     }
 
     @Override
-    @Transactional
     public void changeOwnPassword(String username, String currentPassword, String newPassword) {
+        if (newPassword == null || newPassword.length() < 8) {
+            throw new InvalidPasswordException();
+        }
         User user = userRepository
                 .findByUsername(username)
                 .orElseThrow(() -> new UserNotFoundException(username));
@@ -110,26 +110,29 @@ public class UserService implements UserUseCase {
             throw new InvalidPasswordException();
         }
 
-        user.setPassword(passwordHash.hash(newPassword));
+        user.changePassword(passwordHash.hash(newPassword));
         userRepository.save(user);
 
         // Invalidate all active sessions so stolen credentials cannot be reused.
         refreshTokenPort.revokeAll(username);
-        tokenBlocklistPort.blockAllBefore(username, java.time.Instant.now());
+        tokenBlocklistPort.blockAllBefore(username, Instant.now());
     }
 
     @Override
-    @Transactional
     public void setUserEnabled(Long id, boolean enabled) {
         User user = userRepository
                 .findById(id)
                 .orElseThrow(() -> new UserNotFoundException(id));
-        user.setEnabled(enabled);
+        if (enabled) user.enable(); else user.disable();
         userRepository.save(user);
+
+        if (!enabled) {
+            refreshTokenPort.revokeAll(user.getUsername());
+            tokenBlocklistPort.blockAllBefore(user.getUsername(), Instant.now());
+        }
     }
 
     @Override
-    @Transactional
     public User updateUser(Long id, String newUsername) {
         User user = userRepository
                 .findById(id)
@@ -139,7 +142,7 @@ public class UserService implements UserUseCase {
                 throw new UsernameAlreadyExistsException(newUsername);
             }
         });
-        user.setUsername(newUsername);
+        user.rename(newUsername);
         return userRepository.save(user);
     }
 }

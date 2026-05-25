@@ -1,4 +1,4 @@
-package com.security_spring.adapter.in.dtos.request;
+package com.securityspring.adapter.in.dtos.request;
 
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;

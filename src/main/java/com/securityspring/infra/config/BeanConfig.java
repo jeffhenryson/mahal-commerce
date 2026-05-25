@@ -1,22 +1,27 @@
-package com.security_spring.infra.config;
+package com.securityspring.infra.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import com.security_spring.adapter.in.converter.UserDTOConverter;
-import com.security_spring.adapter.out.converter.UserEntityConverter;
-import com.security_spring.core.ports.in.AuthUseCase;
-import com.security_spring.core.ports.in.UserUseCase;
-import com.security_spring.core.ports.out.AccessTokenPort;
-import com.security_spring.core.ports.out.CredentialVerifierPort;
-import com.security_spring.core.ports.out.PasswordHashPort;
-import com.security_spring.core.ports.out.RefreshTokenPort;
-import com.security_spring.core.ports.out.RoleRepository;
-import com.security_spring.core.ports.out.TokenBlocklistPort;
-import com.security_spring.core.ports.out.UserAuthoritiesPort;
-import com.security_spring.core.ports.out.UserRepository;
-import com.security_spring.core.service.AuthService;
-import com.security_spring.core.service.UserService;
+import com.securityspring.adapter.in.converter.UserDTOConverter;
+import com.securityspring.adapter.out.converter.UserEntityConverter;
+import com.securityspring.core.ports.in.AuthUseCase;
+import com.securityspring.core.ports.in.PermissionUseCase;
+import com.securityspring.core.ports.in.RoleUseCase;
+import com.securityspring.core.ports.in.UserUseCase;
+import com.securityspring.core.ports.out.AccessTokenPort;
+import com.securityspring.core.ports.out.CredentialVerifierPort;
+import com.securityspring.core.ports.out.PasswordHashPort;
+import com.securityspring.core.ports.out.PermissionRepository;
+import com.securityspring.core.ports.out.RefreshTokenPort;
+import com.securityspring.core.ports.out.RoleRepository;
+import com.securityspring.core.ports.out.TokenBlocklistPort;
+import com.securityspring.core.ports.out.UserAuthoritiesPort;
+import com.securityspring.core.ports.out.UserRepository;
+import com.securityspring.core.service.AuthService;
+import com.securityspring.core.service.PermissionService;
+import com.securityspring.core.service.RoleService;
+import com.securityspring.core.service.UserService;
 
 @Configuration
 public class BeanConfig {
@@ -42,6 +47,16 @@ public class BeanConfig {
             UserAuthoritiesPort userAuthorities,
             TokenBlocklistPort tokenBlocklist) {
         return new AuthService(credentialVerifier, accessToken, refreshToken, userAuthorities, tokenBlocklist);
+    }
+
+    @Bean
+    public RoleUseCase roleUseCase(RoleRepository roleRepository, PermissionRepository permissionRepository) {
+        return new RoleService(roleRepository, permissionRepository);
+    }
+
+    @Bean
+    public PermissionUseCase permissionUseCase(PermissionRepository permissionRepository) {
+        return new PermissionService(permissionRepository);
     }
 
     @Bean

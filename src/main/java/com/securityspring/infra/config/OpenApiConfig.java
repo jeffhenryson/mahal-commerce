@@ -1,4 +1,4 @@
-package com.security_spring.infra.config;
+package com.securityspring.infra.config;
 
 import org.springframework.context.annotation.Configuration;
 

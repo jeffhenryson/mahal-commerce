@@ -1,4 +1,4 @@
-package com.security_spring.infra.security.jwt;
+package com.securityspring.infra.security.jwt;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -8,7 +8,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
-import com.security_spring.core.ports.out.TokenBlocklistPort;
+import com.securityspring.core.ports.out.TokenBlocklistPort;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;

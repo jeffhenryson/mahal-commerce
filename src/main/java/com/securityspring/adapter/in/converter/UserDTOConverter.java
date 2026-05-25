@@ -1,10 +1,10 @@
-package com.security_spring.adapter.in.converter;
+package com.securityspring.adapter.in.converter;
 
-import com.security_spring.adapter.in.dtos.request.UserRequestDTO;
-import com.security_spring.adapter.in.dtos.response.UserResponseDTO;
-import com.security_spring.core.domain.model.Permission;
-import com.security_spring.core.domain.model.Role;
-import com.security_spring.core.domain.model.User;
+import com.securityspring.adapter.in.dtos.request.UserRequestDTO;
+import com.securityspring.adapter.in.dtos.response.UserResponseDTO;
+import com.securityspring.core.domain.model.Permission;
+import com.securityspring.core.domain.model.Role;
+import com.securityspring.core.domain.model.User;
 
 import java.util.stream.Collectors;
 

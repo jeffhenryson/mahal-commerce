@@ -1,4 +1,4 @@
-package com.security_spring.infra.audit;
+package com.securityspring.infra.audit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,9 +19,10 @@ public class AuthenticationEventsListener implements ApplicationListener<Abstrac
         String username = auth != null ? auth.getName() : "<unknown>";
 
         if (event instanceof AuthenticationSuccessEvent) {
-            log.info("auth.success user={} details={}", username, auth.getDetails());
+            log.info("auth.success user={}", username);
         } else if (event instanceof AbstractAuthenticationFailureEvent failure) {
-            log.warn("auth.failure user={} reason={} details={}", username, failure.getException().getMessage(), auth.getDetails());
+            // IP vem do details para auditoria de segurança, mas nunca logamos credenciais
+            log.warn("auth.failure user={} reason={}", username, failure.getException().getClass().getSimpleName());
         } else {
             log.debug("auth.event type={} user={}", event.getClass().getSimpleName(), username);
         }

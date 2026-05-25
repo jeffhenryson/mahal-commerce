@@ -1,4 +1,4 @@
-package com.security_spring.infra.config;
+package com.securityspring.infra.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -13,10 +13,10 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
-import com.security_spring.infra.security.RestAccessDeniedHandler;
-import com.security_spring.infra.security.RestAuthenticationEntryPoint;
-import com.security_spring.infra.security.jwt.JwtAuthenticationFilter;
-import com.security_spring.infra.security.ratelimit.LoginRateLimitingFilter;
+import com.securityspring.infra.security.RestAccessDeniedHandler;
+import com.securityspring.infra.security.RestAuthenticationEntryPoint;
+import com.securityspring.infra.security.jwt.JwtAuthenticationFilter;
+import com.securityspring.infra.security.ratelimit.LoginRateLimitingFilter;
 
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -37,17 +37,18 @@ public class SecurityConfig {
                                            RestAuthenticationEntryPoint entryPoint, RestAccessDeniedHandler deniedHandler,
                                            LoginRateLimitingFilter loginRateLimitingFilter) throws Exception {
         http
-            .csrf(csrf -> csrf.ignoringRequestMatchers("/h2-console/**").disable())
-            .headers(h -> h.frameOptions(f -> f.sameOrigin()))
+            .csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(
-                    "/h2-console/**",
                     "/v3/api-docs/**",
                     "/swagger-ui/**",
                     "/swagger-ui.html",
                     "/actuator/health/**",
                     "/actuator/info"
                 ).permitAll()
+                // ATENÇÃO: esta regra DEVE vir antes de /auth/** permitAll abaixo.
+                // DELETE /auth/sessions exige autenticação; a regra de /auth/** é mais ampla
+                // e cobriria este endpoint se declarada primeiro. Não reordene sem revisar.
                 .requestMatchers(org.springframework.http.HttpMethod.DELETE, "/auth/sessions").authenticated()
                 .requestMatchers("/auth/**").permitAll()
                 .requestMatchers("/actuator/**").hasAuthority("ROLE_ADMIN")

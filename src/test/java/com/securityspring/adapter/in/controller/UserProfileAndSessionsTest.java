@@ -1,4 +1,4 @@
-package com.security_spring.adapter.in.controller;
+package com.securityspring.adapter.in.controller;
 
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;

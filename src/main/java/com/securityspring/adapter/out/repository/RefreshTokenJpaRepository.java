@@ -1,4 +1,4 @@
-package com.security_spring.adapter.out.repository;
+package com.securityspring.adapter.out.repository;
 
 import java.time.Instant;
 import java.util.Optional;
@@ -8,7 +8,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-import com.security_spring.adapter.out.entities.RefreshTokenEntity;
+import com.securityspring.adapter.out.entities.RefreshTokenEntity;
 
 public interface RefreshTokenJpaRepository extends JpaRepository<RefreshTokenEntity, Long> {
     Optional<RefreshTokenEntity> findByTokenHash(String tokenHash);

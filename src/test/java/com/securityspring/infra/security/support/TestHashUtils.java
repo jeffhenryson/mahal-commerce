@@ -1,4 +1,4 @@
-package com.security_spring.infra.security.support;
+package com.securityspring.infra.security.support;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;

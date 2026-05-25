@@ -1,13 +1,13 @@
-package com.security_spring.core.service;
+package com.securityspring.core.service;
 
-import com.security_spring.core.domain.exception.RefreshTokenAlreadyUsedException;
-import com.security_spring.core.domain.model.TokenPair;
-import com.security_spring.core.ports.in.AuthUseCase;
-import com.security_spring.core.ports.out.AccessTokenPort;
-import com.security_spring.core.ports.out.CredentialVerifierPort;
-import com.security_spring.core.ports.out.RefreshTokenPort;
-import com.security_spring.core.ports.out.TokenBlocklistPort;
-import com.security_spring.core.ports.out.UserAuthoritiesPort;
+import com.securityspring.core.domain.exception.RefreshTokenAlreadyUsedException;
+import com.securityspring.core.domain.model.TokenPair;
+import com.securityspring.core.ports.in.AuthUseCase;
+import com.securityspring.core.ports.out.AccessTokenPort;
+import com.securityspring.core.ports.out.CredentialVerifierPort;
+import com.securityspring.core.ports.out.RefreshTokenPort;
+import com.securityspring.core.ports.out.TokenBlocklistPort;
+import com.securityspring.core.ports.out.UserAuthoritiesPort;
 
 import java.time.Instant;
 import java.util.Set;

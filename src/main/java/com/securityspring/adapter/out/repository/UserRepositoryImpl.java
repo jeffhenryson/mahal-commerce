@@ -1,4 +1,4 @@
-package com.security_spring.adapter.out.repository;
+package com.securityspring.adapter.out.repository;
 
 import java.util.List;
 import java.util.Optional;
@@ -10,15 +10,15 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.security_spring.adapter.out.converter.UserEntityConverter;
-import com.security_spring.adapter.out.entities.RoleEntity;
-import com.security_spring.adapter.out.entities.UserEntity;
-import com.security_spring.core.domain.exception.RoleNotFoundException;
-import com.security_spring.core.domain.model.PageResult;
-import com.security_spring.core.domain.model.Role;
-import com.security_spring.core.domain.model.User;
-import com.security_spring.core.ports.out.RoleRepository;
-import com.security_spring.core.ports.out.UserRepository;
+import com.securityspring.adapter.out.converter.UserEntityConverter;
+import com.securityspring.adapter.out.entities.RoleEntity;
+import com.securityspring.adapter.out.entities.UserEntity;
+import com.securityspring.core.domain.exception.RoleNotFoundException;
+import com.securityspring.core.domain.model.PageResult;
+import com.securityspring.core.domain.model.Role;
+import com.securityspring.core.domain.model.User;
+import com.securityspring.core.ports.out.RoleRepository;
+import com.securityspring.core.ports.out.UserRepository;
 
 @Repository
 @Transactional

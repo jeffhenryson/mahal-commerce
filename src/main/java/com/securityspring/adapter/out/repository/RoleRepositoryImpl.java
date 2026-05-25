@@ -1,4 +1,4 @@
-package com.security_spring.adapter.out.repository;
+package com.securityspring.adapter.out.repository;
 
 
 import java.util.List;
@@ -7,10 +7,10 @@ import java.util.Set;
 
 import org.springframework.stereotype.Repository;
 
-import com.security_spring.adapter.out.entities.PermissionEntity;
-import com.security_spring.adapter.out.entities.RoleEntity;
-import com.security_spring.core.domain.model.Role;
-import com.security_spring.core.ports.out.RoleRepository;
+import com.securityspring.adapter.out.entities.PermissionEntity;
+import com.securityspring.adapter.out.entities.RoleEntity;
+import com.securityspring.core.domain.model.Role;
+import com.securityspring.core.ports.out.RoleRepository;
 
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,7 +33,7 @@ public class RoleRepositoryImpl implements RoleRepository {
         r.setName(e.getName());
         if (e.getPermissions() != null) {
             e.getPermissions().forEach(pe -> {
-                com.security_spring.core.domain.model.Permission p = new com.security_spring.core.domain.model.Permission();
+                com.securityspring.core.domain.model.Permission p = new com.securityspring.core.domain.model.Permission();
                 p.setId(pe.getId());
                 p.setName(pe.getName());
                 r.addPermission(p);
@@ -76,6 +76,19 @@ public class RoleRepositoryImpl implements RoleRepository {
                     .orElseThrow(() -> new IllegalArgumentException("Permission not found: " + name));
             role.getPermissions().add(perm);
         }
+        roleRepo.save(role);
+    }
+
+    @Override
+    public void deleteByName(String name) {
+        roleRepo.findByName(name).ifPresent(roleRepo::delete);
+    }
+
+    @Override
+    public void removePermission(String roleName, String permissionName) {
+        RoleEntity role = roleRepo.findByName(roleName)
+                .orElseThrow(() -> new IllegalArgumentException("Role not found: " + roleName));
+        role.getPermissions().removeIf(p -> p.getName().equals(permissionName));
         roleRepo.save(role);
     }
 }

@@ -1,4 +1,4 @@
-package com.security_spring.adapter.out.entities;
+package com.securityspring.adapter.out.entities;
 
 import jakarta.persistence.*;
 import lombok.*;

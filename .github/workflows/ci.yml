@@ -20,9 +20,9 @@ jobs:
           java-version: '21'
           cache: 'maven'
 
-      - name: Build and test
+      - name: Build and test (inclui testes de integração com Testcontainers/PostgreSQL)
         run: |
-          ./mvnw -B -ntp verify
+          ENABLE_TC=true ./mvnw -B -ntp verify
 
       # Optional: Build Docker image (no push)
       # - name: Build Docker image

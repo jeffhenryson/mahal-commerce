@@ -1,6 +1,6 @@
-package com.security_spring.infra.security;
+package com.securityspring.infra.security;
 
-import com.security_spring.core.ports.out.TokenBlocklistPort;
+import com.securityspring.core.ports.out.TokenBlocklistPort;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;

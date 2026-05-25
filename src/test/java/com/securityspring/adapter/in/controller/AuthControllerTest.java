@@ -1,4 +1,4 @@
-package com.security_spring.adapter.in.controller;
+package com.securityspring.adapter.in.controller;
 
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -6,11 +6,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.security_spring.adapter.in.dtos.request.LoginRequest;
-import com.security_spring.adapter.in.dtos.request.LogoutRequest;
-import com.security_spring.adapter.in.dtos.request.RefreshRequest;
-import com.security_spring.core.domain.model.TokenPair;
-import com.security_spring.core.ports.in.AuthUseCase;
+import com.securityspring.adapter.in.dtos.request.LoginRequest;
+import com.securityspring.adapter.in.dtos.request.LogoutRequest;
+import com.securityspring.adapter.in.dtos.request.RefreshRequest;
+import com.securityspring.core.domain.model.TokenPair;
+import com.securityspring.core.ports.in.AuthUseCase;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -29,7 +29,7 @@ public class AuthControllerTest {
         authUseCase = mock(AuthUseCase.class);
         AuthController controller = new AuthController(authUseCase);
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
-                .setControllerAdvice(new com.security_spring.infra.handler.GlobalExceptionHandler())
+                .setControllerAdvice(new com.securityspring.infra.handler.GlobalExceptionHandler())
                 .build();
     }
 

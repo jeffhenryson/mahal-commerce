@@ -1,4 +1,4 @@
-package com.security_spring.adapter.out.repository;
+package com.securityspring.adapter.out.repository;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -6,7 +6,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-import com.security_spring.adapter.out.entities.UserEntity;
+import com.securityspring.adapter.out.entities.UserEntity;
 
 import java.util.List;
 import java.util.Optional;

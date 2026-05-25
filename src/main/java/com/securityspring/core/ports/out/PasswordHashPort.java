@@ -1,4 +1,4 @@
-package com.security_spring.core.ports.out;
+package com.securityspring.core.ports.out;
 
 public interface PasswordHashPort {
     String hash(String rawPassword);

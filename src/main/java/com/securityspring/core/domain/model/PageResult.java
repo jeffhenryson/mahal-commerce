@@ -1,4 +1,4 @@
-package com.security_spring.core.domain.model;
+package com.securityspring.core.domain.model;
 
 import java.util.List;
 

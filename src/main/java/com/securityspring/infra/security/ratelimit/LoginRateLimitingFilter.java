@@ -1,6 +1,6 @@
-package com.security_spring.infra.security.ratelimit;
+package com.securityspring.infra.security.ratelimit;
 
-import com.security_spring.core.ports.out.LoginRateLimiterPort;
+import com.securityspring.core.ports.out.LoginRateLimiterPort;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;

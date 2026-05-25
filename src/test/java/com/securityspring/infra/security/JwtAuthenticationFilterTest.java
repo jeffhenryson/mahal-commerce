@@ -1,4 +1,4 @@
-package com.security_spring.infra.security;
+package com.securityspring.infra.security;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -14,9 +14,9 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetailsService;
 
-import com.security_spring.core.ports.out.TokenBlocklistPort;
-import com.security_spring.infra.security.jwt.JwtAuthenticationFilter;
-import com.security_spring.infra.security.jwt.JwtService;
+import com.securityspring.core.ports.out.TokenBlocklistPort;
+import com.securityspring.infra.security.jwt.JwtAuthenticationFilter;
+import com.securityspring.infra.security.jwt.JwtService;
 
 import java.time.Instant;
 import java.util.Collections;

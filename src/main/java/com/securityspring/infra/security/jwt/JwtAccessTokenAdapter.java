@@ -1,6 +1,6 @@
-package com.security_spring.infra.security.jwt;
+package com.securityspring.infra.security.jwt;
 
-import com.security_spring.core.ports.out.AccessTokenPort;
+import com.securityspring.core.ports.out.AccessTokenPort;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.stereotype.Component;

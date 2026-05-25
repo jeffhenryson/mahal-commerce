@@ -1,6 +1,6 @@
-package com.security_spring.infra.security;
+package com.securityspring.infra.security;
 
-import com.security_spring.core.ports.out.PasswordHashPort;
+import com.securityspring.core.ports.out.PasswordHashPort;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 

@@ -1,4 +1,4 @@
-package com.security_spring.infra.security;
+package com.securityspring.infra.security;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;

@@ -1,6 +1,6 @@
-package com.security_spring.core.ports.out;
+package com.securityspring.core.ports.out;
 
-import com.security_spring.core.domain.model.Role;
+import com.securityspring.core.domain.model.Role;
 
 import java.util.List;
 import java.util.Optional;
@@ -16,4 +16,8 @@ public interface RoleRepository {
     List<Role> findAll();
 
     void addPermissions(String roleName, Set<String> permissionNames);
+
+    void deleteByName(String name);
+
+    void removePermission(String roleName, String permissionName);
 }

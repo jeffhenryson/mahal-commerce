@@ -1,4 +1,4 @@
-package com.security_spring.core.domain.exception;
+package com.securityspring.core.domain.exception;
 
 public class UsernameAlreadyExistsException extends RuntimeException {
     public UsernameAlreadyExistsException(String username) {

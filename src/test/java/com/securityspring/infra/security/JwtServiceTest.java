@@ -1,4 +1,4 @@
-package com.security_spring.infra.security;
+package com.securityspring.infra.security;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.User;
 
-import com.security_spring.infra.security.jwt.JwtService;
+import com.securityspring.infra.security.jwt.JwtService;
 
 public class JwtServiceTest {
 

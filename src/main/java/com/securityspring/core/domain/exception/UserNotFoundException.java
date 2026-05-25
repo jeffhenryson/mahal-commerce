@@ -1,4 +1,4 @@
-package com.security_spring.core.domain.exception;
+package com.securityspring.core.domain.exception;
 
 public class UserNotFoundException extends RuntimeException {
     public UserNotFoundException(Long id) {

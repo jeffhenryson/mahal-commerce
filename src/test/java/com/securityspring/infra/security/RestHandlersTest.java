@@ -1,4 +1,4 @@
-package com.security_spring.infra.security;
+package com.securityspring.infra.security;
 
 import static org.mockito.Mockito.*;
 

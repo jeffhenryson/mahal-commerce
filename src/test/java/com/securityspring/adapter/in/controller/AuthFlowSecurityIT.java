@@ -1,4 +1,4 @@
-package com.security_spring.adapter.in.controller;
+package com.securityspring.adapter.in.controller;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -6,7 +6,8 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.security_spring.adapter.out.repository.RefreshTokenJpaRepository;
+import com.securityspring.infra.security.support.RefreshTokenTestHelper;
+import com.securityspring.infra.security.support.TestHashUtils;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -19,10 +20,6 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
-import com.security_spring.infra.security.support.TestHashUtils;
-
-import java.time.Instant;
-
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 
 @SpringBootTest
@@ -32,7 +29,7 @@ public class AuthFlowSecurityIT {
     @Autowired
     private WebApplicationContext context;
     @Autowired
-    private RefreshTokenJpaRepository refreshRepo;
+    private RefreshTokenTestHelper refreshTokenTestHelper;
 
     private MockMvc mockMvc;
     private final ObjectMapper om = new ObjectMapper();
@@ -88,11 +85,8 @@ public class AuthFlowSecurityIT {
         JsonNode json = om.readTree(r.getResponse().getContentAsString());
         String refresh = json.get("refreshToken").asText();
 
-        // Expire the refresh token in DB
-        String hash = sha256(refresh);
-        var row = refreshRepo.findByTokenHash(hash).orElseThrow();
-        row.setExpiresAt(Instant.now().minusSeconds(5));
-        refreshRepo.save(row);
+        // Expire the refresh token via test helper (uses JDBC — sem acoplar ao JPA repo de produção)
+        refreshTokenTestHelper.expireTokenByHash(sha256(refresh));
 
         // Attempt refresh -> should be 400 (expired)
         mockMvc.perform(post("/auth/refresh")

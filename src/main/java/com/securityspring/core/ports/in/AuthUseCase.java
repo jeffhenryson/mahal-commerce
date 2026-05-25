@@ -1,6 +1,6 @@
-package com.security_spring.core.ports.in;
+package com.securityspring.core.ports.in;
 
-import com.security_spring.core.domain.model.TokenPair;
+import com.securityspring.core.domain.model.TokenPair;
 
 public interface AuthUseCase {
     TokenPair login(String username, String password);

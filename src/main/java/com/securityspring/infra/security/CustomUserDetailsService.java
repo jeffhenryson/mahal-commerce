@@ -1,6 +1,6 @@
-package com.security_spring.infra.security;
+package com.securityspring.infra.security;
 
-import com.security_spring.core.ports.out.UserRepository;
+import com.securityspring.core.ports.out.UserRepository;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;

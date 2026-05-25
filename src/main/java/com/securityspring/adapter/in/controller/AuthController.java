@@ -1,11 +1,11 @@
-package com.security_spring.adapter.in.controller;
+package com.securityspring.adapter.in.controller;
 
-import com.security_spring.adapter.in.dtos.request.LoginRequest;
-import com.security_spring.adapter.in.dtos.request.LogoutRequest;
-import com.security_spring.adapter.in.dtos.request.RefreshRequest;
-import com.security_spring.adapter.in.dtos.response.TokenPairResponse;
-import com.security_spring.core.domain.model.TokenPair;
-import com.security_spring.core.ports.in.AuthUseCase;
+import com.securityspring.adapter.in.dtos.request.LoginRequest;
+import com.securityspring.adapter.in.dtos.request.LogoutRequest;
+import com.securityspring.adapter.in.dtos.request.RefreshRequest;
+import com.securityspring.adapter.in.dtos.response.TokenPairResponse;
+import com.securityspring.core.domain.model.TokenPair;
+import com.securityspring.core.ports.in.AuthUseCase;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -16,6 +16,8 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -24,7 +26,7 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/auth")
 public class AuthController {
 
-    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(AuthController.class);
+    private static final Logger log = LoggerFactory.getLogger(AuthController.class);
 
     private final AuthUseCase authUseCase;
 
@@ -34,11 +36,8 @@ public class AuthController {
 
     @Operation(summary = "Login e emissão de tokens (access + refresh)")
     @ApiResponses(value = {
-        @ApiResponse(responseCode = "200", description = "Login bem-sucedido",
-            content = @Content(mediaType = "application/json",
-                schema = @Schema(implementation = TokenPairResponse.class),
-                examples = @ExampleObject(value = "{\n  \"accessToken\": \"<JWT>\",\n  \"refreshToken\": \"<OPAQUE>\",\n  \"tokenType\": \"Bearer\"\n}"))),
-        @ApiResponse(responseCode = "401", description = "Credenciais inválidas", content = @Content)
+            @ApiResponse(responseCode = "200", description = "Login bem-sucedido", content = @Content(mediaType = "application/json", schema = @Schema(implementation = TokenPairResponse.class), examples = @ExampleObject(value = "{\n  \"accessToken\": \"<JWT>\",\n  \"refreshToken\": \"<OPAQUE>\",\n  \"tokenType\": \"Bearer\"\n}"))),
+            @ApiResponse(responseCode = "401", description = "Credenciais inválidas", content = @Content)
     })
     @PostMapping("/login")
     public ResponseEntity<TokenPairResponse> login(@Valid @RequestBody LoginRequest request) {
@@ -49,10 +48,8 @@ public class AuthController {
 
     @Operation(summary = "Rotaciona refresh e emite novo access + refresh")
     @ApiResponses(value = {
-        @ApiResponse(responseCode = "200", description = "Tokens emitidos",
-            content = @Content(mediaType = "application/json",
-                schema = @Schema(implementation = TokenPairResponse.class))),
-        @ApiResponse(responseCode = "400", description = "Refresh inválido/expirado", content = @Content)
+            @ApiResponse(responseCode = "200", description = "Tokens emitidos", content = @Content(mediaType = "application/json", schema = @Schema(implementation = TokenPairResponse.class))),
+            @ApiResponse(responseCode = "400", description = "Refresh inválido/expirado", content = @Content)
     })
     @PostMapping("/refresh")
     public ResponseEntity<TokenPairResponse> refresh(@Valid @RequestBody RefreshRequest request) {
@@ -62,8 +59,8 @@ public class AuthController {
 
     @Operation(summary = "Revoga o refresh token (logout)")
     @ApiResponses(value = {
-        @ApiResponse(responseCode = "204", description = "Revogado"),
-        @ApiResponse(responseCode = "400", description = "Refresh inválido", content = @Content)
+            @ApiResponse(responseCode = "204", description = "Revogado"),
+            @ApiResponse(responseCode = "400", description = "Refresh inválido", content = @Content)
     })
     @PostMapping("/logout")
     public ResponseEntity<Void> logout(@Valid @RequestBody LogoutRequest request) {
@@ -74,8 +71,8 @@ public class AuthController {
     @Operation(summary = "Revoga todos os refresh tokens do usuário autenticado (logout total)")
     @SecurityRequirement(name = "bearerAuth")
     @ApiResponses(value = {
-        @ApiResponse(responseCode = "204", description = "Todos os tokens revogados"),
-        @ApiResponse(responseCode = "401", description = "Não autenticado", content = @Content)
+            @ApiResponse(responseCode = "204", description = "Todos os tokens revogados"),
+            @ApiResponse(responseCode = "401", description = "Não autenticado", content = @Content)
     })
     @DeleteMapping("/sessions")
     public ResponseEntity<Void> logoutAll(Authentication authentication) {

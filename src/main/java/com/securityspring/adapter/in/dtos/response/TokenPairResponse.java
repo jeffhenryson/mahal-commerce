@@ -1,4 +1,4 @@
-package com.security_spring.adapter.in.dtos.response;
+package com.securityspring.adapter.in.dtos.response;
 
 import lombok.Getter;
 

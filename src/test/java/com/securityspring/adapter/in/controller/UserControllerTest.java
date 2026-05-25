@@ -1,4 +1,4 @@
-package com.security_spring.adapter.in.controller;
+package com.securityspring.adapter.in.controller;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -7,15 +7,15 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.security_spring.adapter.in.converter.UserDTOConverter;
-import com.security_spring.adapter.in.dtos.request.UserRequestDTO;
-import com.security_spring.core.domain.exception.RoleNotFoundException;
-import com.security_spring.core.domain.exception.UserNotFoundException;
-import com.security_spring.core.domain.exception.UsernameAlreadyExistsException;
-import com.security_spring.core.domain.model.PageResult;
-import com.security_spring.core.domain.model.User;
-import com.security_spring.core.ports.in.UserUseCase;
-import com.security_spring.infra.handler.GlobalExceptionHandler;
+import com.securityspring.adapter.in.converter.UserDTOConverter;
+import com.securityspring.adapter.in.dtos.request.UserRequestDTO;
+import com.securityspring.core.domain.exception.RoleNotFoundException;
+import com.securityspring.core.domain.exception.UserNotFoundException;
+import com.securityspring.core.domain.exception.UsernameAlreadyExistsException;
+import com.securityspring.core.domain.model.PageResult;
+import com.securityspring.core.domain.model.User;
+import com.securityspring.core.ports.in.UserUseCase;
+import com.securityspring.infra.handler.GlobalExceptionHandler;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -42,9 +42,7 @@ public class UserControllerTest {
     }
 
     private User user(Long id, String username) {
-        User u = User.of(username, "hashed", new HashSet<>());
-        u.setId(id);
-        return u;
+        return User.fromPersisted(id, username, "hashed", true, new HashSet<>());
     }
 
     @Test

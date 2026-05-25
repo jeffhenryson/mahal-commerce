@@ -1,7 +1,7 @@
-package com.security_spring.infra.security;
+package com.securityspring.infra.security;
 
-import com.security_spring.core.ports.out.UserAuthoritiesPort;
-import com.security_spring.core.ports.out.UserRepository;
+import com.securityspring.core.ports.out.UserAuthoritiesPort;
+import com.securityspring.core.ports.out.UserRepository;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;

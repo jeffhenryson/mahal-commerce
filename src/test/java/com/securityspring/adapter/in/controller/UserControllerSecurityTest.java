@@ -1,4 +1,4 @@
-package com.security_spring.adapter.in.controller;
+package com.securityspring.adapter.in.controller;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;

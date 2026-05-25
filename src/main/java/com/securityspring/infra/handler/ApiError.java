@@ -1,3 +1,3 @@
-package com.security_spring.infra.handler;
+package com.securityspring.infra.handler;
 
 public record ApiError(String message) {}

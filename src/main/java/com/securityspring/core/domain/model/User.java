@@ -1,4 +1,4 @@
-package com.security_spring.core.domain.model;
+package com.securityspring.core.domain.model;
 
 import java.util.HashSet;
 import java.util.Objects;
@@ -15,10 +15,7 @@ public class User {
     User() {
     }
 
-    /**
-     * Factory for creating a valid User with all required fields set.
-     * Use this instead of the no-arg constructor in business logic.
-     */
+    /** Factory para criação de novo usuário (id gerado pelo banco, enabled=true por padrão). */
     public static User of(String username, String hashedPassword, Set<Role> roles) {
         Objects.requireNonNull(username, "username is required");
         Objects.requireNonNull(hashedPassword, "password is required");
@@ -29,47 +26,59 @@ public class User {
         return u;
     }
 
-    public Long getId() {
-        return id;
+    /** Factory para reconstituição a partir de persistência — preserva id e enabled. */
+    public static User fromPersisted(Long id, String username, String hashedPassword,
+                                     boolean enabled, Set<Role> roles) {
+        Objects.requireNonNull(id, "id is required for persisted user");
+        User u = of(username, hashedPassword, roles);
+        u.id = id;
+        u.enabled = enabled;
+        return u;
     }
 
-    public void setId(Long id) {
-        this.id = id;
+    // --- Domain operations ---
+
+    public void changePassword(String hashedPassword) {
+        Objects.requireNonNull(hashedPassword, "hashedPassword is required");
+        this.password = hashedPassword;
+    }
+
+    public void rename(String newUsername) {
+        Objects.requireNonNull(newUsername, "newUsername is required");
+        this.username = newUsername;
+    }
+
+    public void enable() {
+        this.enabled = true;
+    }
+
+    public void disable() {
+        this.enabled = false;
+    }
+
+    public void addRole(Role role) {
+        this.roles.add(role);
+    }
+
+    // --- Accessors ---
+
+    public Long getId() {
+        return id;
     }
 
     public String getUsername() {
         return username;
     }
 
-    public void setUsername(String username) {
-        this.username = username;
-    }
-
     public String getPassword() {
         return password;
-    }
-
-    public void setPassword(String password) {
-        this.password = password;
     }
 
     public boolean isEnabled() {
         return enabled;
     }
 
-    public void setEnabled(boolean enabled) {
-        this.enabled = enabled;
-    }
-
     public Set<Role> getRoles() {
         return roles;
-    }
-
-    public void setRoles(Set<Role> roles) {
-        this.roles = roles;
-    }
-
-    public void addRole(Role role) {
-        this.roles.add(role);
     }
 }

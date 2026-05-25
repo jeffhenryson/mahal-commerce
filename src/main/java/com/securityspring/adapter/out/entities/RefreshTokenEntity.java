@@ -1,4 +1,4 @@
-package com.security_spring.adapter.out.entities;
+package com.securityspring.adapter.out.entities;
 
 import jakarta.persistence.*;
 import lombok.Getter;
@@ -34,8 +34,13 @@ public class RefreshTokenEntity {
     @Column(name = "revoked", nullable = false)
     private boolean revoked = false;
 
-    @Column(name = "created_at", nullable = false)
-    private Instant createdAt = Instant.now();
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private Instant createdAt;
+
+    @PrePersist
+    void prePersist() {
+        if (createdAt == null) createdAt = Instant.now();
+    }
 
     @Column(name = "rotated_at")
     private Instant rotatedAt;

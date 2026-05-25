@@ -48,6 +48,14 @@ infra/
   audit/     → Listener de eventos de autenticação
 ```
 
+### Convenção Lombok
+
+| Camada | Abordagem | Motivo |
+|---|---|---|
+| `core/domain/model` | Manual (sem Lombok) | O core não deve depender de frameworks; modelos de domínio têm métodos semânticos (`changePassword`, `rename`, etc.) |
+| `adapter/out/entities` | Lombok (`@Getter @Setter @NoArgsConstructor`) | Entidades JPA são artefatos de infraestrutura — Lombok reduz boilerplate sem impacto no domínio |
+| `adapter/in/dtos` | Lombok (`@Data`) | DTOs são simples POJOs de transporte; `@Data` é adequado |
+
 ---
 
 ## Segurança
@@ -105,8 +113,8 @@ O perfil dev cria automaticamente os usuários de seed:
 
 | Usuário | Senha | Papel |
 |---|---|---|
-| `admin` | `admin` | `ADMIN` |
-| `user` | `user` | `USER` |
+| `admin` | `Admin@dev1` | `ADMIN` |
+| `user` | `User@dev1` | `USER` |
 
 ### 3. Rodar em hml (PostgreSQL)
 

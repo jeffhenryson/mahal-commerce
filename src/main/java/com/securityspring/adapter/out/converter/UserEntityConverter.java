@@ -1,11 +1,11 @@
-package com.security_spring.adapter.out.converter;
+package com.securityspring.adapter.out.converter;
 
-import com.security_spring.adapter.out.entities.PermissionEntity;
-import com.security_spring.adapter.out.entities.RoleEntity;
-import com.security_spring.adapter.out.entities.UserEntity;
-import com.security_spring.core.domain.model.Permission;
-import com.security_spring.core.domain.model.Role;
-import com.security_spring.core.domain.model.User;
+import com.securityspring.adapter.out.entities.PermissionEntity;
+import com.securityspring.adapter.out.entities.RoleEntity;
+import com.securityspring.adapter.out.entities.UserEntity;
+import com.securityspring.core.domain.model.Permission;
+import com.securityspring.core.domain.model.Role;
+import com.securityspring.core.domain.model.User;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -15,10 +15,8 @@ public class UserEntityConverter {
 
     public User toDomain(UserEntity entity) {
         if (entity == null) return null;
-        User user = User.of(entity.getUsername(), entity.getPassword(), toDomainRoles(entity.getRoles()));
-        user.setId(entity.getId());
-        user.setEnabled(entity.isEnabled());
-        return user;
+        return User.fromPersisted(entity.getId(), entity.getUsername(), entity.getPassword(),
+                entity.isEnabled(), toDomainRoles(entity.getRoles()));
     }
 
     public UserEntity toEntityBase(User domain) {

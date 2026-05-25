@@ -9,23 +9,30 @@
 		<version>4.0.6</version>
 		<relativePath /> <!-- lookup parent from repository -->
 	</parent>
-	<groupId>com.security-spring</groupId>
+	<groupId>com.securityspring</groupId>
 	<artifactId>security-spring</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<name />
-	<description />
-	<url />
+	<name>security-spring</name>
+	<description>Template reutilizável: Spring Boot 4 + arquitetura hexagonal + Spring Security (JWT, RBAC, refresh token, rate limiting, Redis)</description>
+	<url>https://github.com/JeffHenryson/security-spring</url>
 	<licenses>
-		<license />
+		<license>
+			<name>MIT License</name>
+			<url>https://opensource.org/licenses/MIT</url>
+		</license>
 	</licenses>
 	<developers>
-		<developer />
+		<developer>
+			<id>JeffHenryson</id>
+			<name>Jeff Henryson</name>
+			<email>jeffhunbruey@gmail.com</email>
+		</developer>
 	</developers>
 	<scm>
-		<connection />
-		<developerConnection />
-		<tag />
-		<url />
+		<connection>scm:git:git://github.com/JeffHenryson/security-spring.git</connection>
+		<developerConnection>scm:git:ssh://github.com/JeffHenryson/security-spring.git</developerConnection>
+		<tag>HEAD</tag>
+		<url>https://github.com/JeffHenryson/security-spring</url>
 	</scm>
 	<properties>
 		<java.version>21</java.version>

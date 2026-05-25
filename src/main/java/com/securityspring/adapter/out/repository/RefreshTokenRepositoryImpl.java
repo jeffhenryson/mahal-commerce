@@ -1,4 +1,4 @@
-package com.security_spring.adapter.out.repository;
+package com.securityspring.adapter.out.repository;
 
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
@@ -12,12 +12,12 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.security_spring.adapter.out.entities.RefreshTokenEntity;
-import com.security_spring.adapter.out.entities.UserEntity;
-import com.security_spring.core.domain.exception.InvalidRefreshTokenException;
-import com.security_spring.core.domain.exception.RefreshTokenAlreadyUsedException;
-import com.security_spring.core.domain.exception.RefreshTokenExpiredException;
-import com.security_spring.core.ports.out.RefreshTokenPort;
+import com.securityspring.adapter.out.entities.RefreshTokenEntity;
+import com.securityspring.adapter.out.entities.UserEntity;
+import com.securityspring.core.domain.exception.InvalidRefreshTokenException;
+import com.securityspring.core.domain.exception.RefreshTokenAlreadyUsedException;
+import com.securityspring.core.domain.exception.RefreshTokenExpiredException;
+import com.securityspring.core.ports.out.RefreshTokenPort;
 
 @Repository
 public class RefreshTokenRepositoryImpl implements RefreshTokenPort {

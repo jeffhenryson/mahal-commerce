@@ -1,14 +1,14 @@
-package com.security_spring.adapter.in.controller;
+package com.securityspring.adapter.in.controller;
 
-import com.security_spring.adapter.in.converter.UserDTOConverter;
-import com.security_spring.adapter.in.dtos.request.ChangePasswordRequest;
-import com.security_spring.adapter.in.dtos.request.UserRequestDTO;
-import com.security_spring.adapter.in.dtos.request.UserUpdateRequest;
-import com.security_spring.adapter.in.dtos.response.UserResponseDTO;
-import com.security_spring.core.domain.model.PageResult;
-import com.security_spring.core.domain.model.User;
-import com.security_spring.core.domain.exception.UserNotFoundException;
-import com.security_spring.core.ports.in.UserUseCase;
+import com.securityspring.adapter.in.converter.UserDTOConverter;
+import com.securityspring.adapter.in.dtos.request.ChangePasswordRequest;
+import com.securityspring.adapter.in.dtos.request.UserRequestDTO;
+import com.securityspring.adapter.in.dtos.request.UserUpdateRequest;
+import com.securityspring.adapter.in.dtos.response.UserResponseDTO;
+import com.securityspring.core.domain.model.PageResult;
+import com.securityspring.core.domain.model.User;
+import com.securityspring.core.domain.exception.UserNotFoundException;
+import com.securityspring.core.ports.in.UserUseCase;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -117,7 +117,7 @@ public class UserController {
     public ResponseEntity<PageResult<UserResponseDTO>> list(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        PageResult<User> result = useCase.listAll(page, size);
+        PageResult<User> result = useCase.listAll(page, Math.min(size, 100));
         PageResult<UserResponseDTO> response = new PageResult<>(
                 result.content().stream().map(converter::toResponse).collect(Collectors.toList()),
                 result.page(), result.size(), result.totalElements(), result.totalPages());
@@ -172,7 +172,7 @@ public class UserController {
         @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
     })
     @PatchMapping("/{id}")
-    @PreAuthorize("hasAuthority('USER_CREATE')")
+    @PreAuthorize("hasAuthority('USER_UPDATE')")
     public ResponseEntity<UserResponseDTO> update(@PathVariable Long id,
                                                    @Valid @RequestBody UserUpdateRequest request) {
         return ResponseEntity.ok(converter.toResponse(useCase.updateUser(id, request.getUsername())));

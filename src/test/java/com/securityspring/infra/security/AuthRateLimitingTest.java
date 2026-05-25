@@ -1,9 +1,9 @@
-package com.security_spring.infra.security;
+package com.securityspring.infra.security;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.security_spring.infra.security.ratelimit.InMemoryLoginRateLimiterAdapter;
+import com.securityspring.core.ports.out.LoginRateLimiterPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,7 +28,7 @@ public class AuthRateLimitingTest {
     private WebApplicationContext context;
 
     @Autowired
-    private InMemoryLoginRateLimiterAdapter rateLimiter;
+    private LoginRateLimiterPort rateLimiter;
 
     private MockMvc mockMvc;
 

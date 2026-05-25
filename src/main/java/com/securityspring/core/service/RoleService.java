@@ -1,0 +1,65 @@
+package com.securityspring.core.service;
+
+import com.securityspring.core.domain.exception.PermissionNotFoundException;
+import com.securityspring.core.domain.exception.RoleAlreadyExistsException;
+import com.securityspring.core.domain.exception.RoleNotFoundException;
+import com.securityspring.core.domain.model.Role;
+import com.securityspring.core.ports.in.RoleUseCase;
+import com.securityspring.core.ports.out.PermissionRepository;
+import com.securityspring.core.ports.out.RoleRepository;
+
+import java.util.List;
+
+public class RoleService implements RoleUseCase {
+
+    private final RoleRepository roleRepository;
+    private final PermissionRepository permissionRepository;
+
+    public RoleService(RoleRepository roleRepository, PermissionRepository permissionRepository) {
+        this.roleRepository = roleRepository;
+        this.permissionRepository = permissionRepository;
+    }
+
+    @Override
+    public Role createRole(String name) {
+        roleRepository.findByName(name).ifPresent(r -> {
+            throw new RoleAlreadyExistsException(name);
+        });
+        Role role = new Role(name);
+        return roleRepository.save(role);
+    }
+
+    @Override
+    public List<Role> listAll() {
+        return roleRepository.findAll();
+    }
+
+    @Override
+    public Role findByName(String name) {
+        return roleRepository.findByName(name)
+                .orElseThrow(() -> new RoleNotFoundException(name));
+    }
+
+    @Override
+    public void deleteRole(String name) {
+        roleRepository.findByName(name)
+                .orElseThrow(() -> new RoleNotFoundException(name));
+        roleRepository.deleteByName(name);
+    }
+
+    @Override
+    public void assignPermission(String roleName, String permissionName) {
+        roleRepository.findByName(roleName)
+                .orElseThrow(() -> new RoleNotFoundException(roleName));
+        permissionRepository.findByName(permissionName)
+                .orElseThrow(() -> new PermissionNotFoundException(permissionName));
+        roleRepository.addPermissions(roleName, java.util.Set.of(permissionName));
+    }
+
+    @Override
+    public void removePermission(String roleName, String permissionName) {
+        roleRepository.findByName(roleName)
+                .orElseThrow(() -> new RoleNotFoundException(roleName));
+        roleRepository.removePermission(roleName, permissionName);
+    }
+}

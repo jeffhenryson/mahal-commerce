@@ -1,4 +1,4 @@
-package com.security_spring.core.domain.exception;
+package com.securityspring.core.domain.exception;
 
 public class RoleNotFoundException extends RuntimeException {
     public RoleNotFoundException(Long id) {

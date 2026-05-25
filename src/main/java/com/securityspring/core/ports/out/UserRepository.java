@@ -1,7 +1,7 @@
-package com.security_spring.core.ports.out;
+package com.securityspring.core.ports.out;
 
-import com.security_spring.core.domain.model.PageResult;
-import com.security_spring.core.domain.model.User;
+import com.securityspring.core.domain.model.PageResult;
+import com.securityspring.core.domain.model.User;
 
 import java.util.Optional;
 

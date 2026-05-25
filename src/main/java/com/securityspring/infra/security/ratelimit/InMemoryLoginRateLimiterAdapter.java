@@ -1,6 +1,6 @@
-package com.security_spring.infra.security.ratelimit;
+package com.securityspring.infra.security.ratelimit;
 
-import com.security_spring.core.ports.out.LoginRateLimiterPort;
+import com.securityspring.core.ports.out.LoginRateLimiterPort;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;

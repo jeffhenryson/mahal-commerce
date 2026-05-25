@@ -1,6 +1,6 @@
-package com.security_spring.infra.security.redis;
+package com.securityspring.infra.security.redis;
 
-import com.security_spring.core.ports.out.TokenBlocklistPort;
+import com.securityspring.core.ports.out.TokenBlocklistPort;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -12,7 +12,7 @@ import java.time.Instant;
 import java.util.List;
 
 @Component
-@Profile("!dev")
+@Profile({"hml", "prod"})
 public class RedisTokenBlocklistAdapter implements TokenBlocklistPort {
 
     private static final String KEY_PREFIX = "blocklist:";

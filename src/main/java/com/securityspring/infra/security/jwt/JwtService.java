@@ -1,4 +1,4 @@
-package com.security_spring.infra.security.jwt;
+package com.securityspring.infra.security.jwt;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;

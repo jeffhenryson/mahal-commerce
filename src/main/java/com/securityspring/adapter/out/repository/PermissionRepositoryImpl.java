@@ -1,11 +1,12 @@
-package com.security_spring.adapter.out.repository;
+package com.securityspring.adapter.out.repository;
 
-import com.security_spring.adapter.out.entities.PermissionEntity;
-import com.security_spring.core.domain.model.Permission;
-import com.security_spring.core.ports.out.PermissionRepository;
+import com.securityspring.adapter.out.entities.PermissionEntity;
+import com.securityspring.core.domain.model.Permission;
+import com.securityspring.core.ports.out.PermissionRepository;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.Optional;
 
 @Repository
@@ -31,6 +32,17 @@ public class PermissionRepositoryImpl implements PermissionRepository {
     @Transactional(readOnly = true)
     public Optional<Permission> findByName(String name) {
         return permRepo.findByName(name).map(this::toDomain);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<Permission> findAll() {
+        return permRepo.findAll().stream().map(this::toDomain).toList();
+    }
+
+    @Override
+    public void deleteByName(String name) {
+        permRepo.findByName(name).ifPresent(permRepo::delete);
     }
 
     private Permission toDomain(PermissionEntity e) {

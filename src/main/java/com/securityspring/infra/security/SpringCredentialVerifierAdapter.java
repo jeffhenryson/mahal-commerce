@@ -1,6 +1,6 @@
-package com.security_spring.infra.security;
+package com.securityspring.infra.security;
 
-import com.security_spring.core.ports.out.CredentialVerifierPort;
+import com.securityspring.core.ports.out.CredentialVerifierPort;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
