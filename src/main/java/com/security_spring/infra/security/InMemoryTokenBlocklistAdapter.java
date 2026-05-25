@@ -1,12 +1,14 @@
 package com.security_spring.infra.security;
 
 import com.security_spring.core.ports.out.TokenBlocklistPort;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Component
+@Profile("dev")
 public class InMemoryTokenBlocklistAdapter implements TokenBlocklistPort {
 
     private final ConcurrentHashMap<String, Instant> blockedBefore = new ConcurrentHashMap<>();

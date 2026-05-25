@@ -19,5 +19,17 @@ services:
       timeout: 5s
       retries: 10
 
+  redis-hml:
+    image: redis:7-alpine
+    container_name: redis-hml
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
 volumes:
   pgdata_hml:
