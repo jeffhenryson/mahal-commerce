@@ -43,7 +43,7 @@ class UserServiceTest {
     }
 
     @Test
-    void createUser_rejectsPasswordShorterThan8Chars() {
+    void createUser_rejectsWeakPassword() {
         assertThatThrownBy(() -> userService.createUser("alice", "short", List.of()))
                 .isInstanceOf(InvalidPasswordException.class);
         verifyNoInteractions(userRepository);
@@ -53,7 +53,7 @@ class UserServiceTest {
     void createUser_rejectsDuplicateUsername() {
         when(userRepository.findByUsername("alice")).thenReturn(Optional.of(User.of("alice", "hashed", null)));
 
-        assertThatThrownBy(() -> userService.createUser("alice", "password123", List.of()))
+        assertThatThrownBy(() -> userService.createUser("alice", "Password@123", List.of()))
                 .isInstanceOf(UsernameAlreadyExistsException.class);
     }
 
@@ -62,7 +62,7 @@ class UserServiceTest {
         when(userRepository.findByUsername(anyString())).thenReturn(Optional.empty());
         when(roleRepository.findByName("ROLE_UNKNOWN")).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> userService.createUser("alice", "password123", List.of("ROLE_UNKNOWN")))
+        assertThatThrownBy(() -> userService.createUser("alice", "Password@123", List.of("ROLE_UNKNOWN")))
                 .isInstanceOf(RoleNotFoundException.class);
     }
 
@@ -75,7 +75,7 @@ class UserServiceTest {
         when(roleRepository.findByName("ROLE_USER")).thenReturn(Optional.of(role));
         when(userRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        userService.createUser("alice", "password123", List.of("ROLE_USER"));
+        userService.createUser("alice", "Password@123", List.of("ROLE_USER"));
 
         verify(userRepository).save(any(User.class));
     }
@@ -86,7 +86,7 @@ class UserServiceTest {
         when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user));
         when(passwordHash.matches("wrong", "hashed")).thenReturn(false);
 
-        assertThatThrownBy(() -> userService.changeOwnPassword("alice", "wrong", "newPassword1"))
+        assertThatThrownBy(() -> userService.changeOwnPassword("alice", "wrong", "NewPass@123"))
                 .isInstanceOf(InvalidPasswordException.class);
         verifyNoInteractions(refreshTokenPort, tokenBlocklistPort);
     }
@@ -96,10 +96,10 @@ class UserServiceTest {
         User user = User.of("alice", "hashed", null);
         when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user));
         when(passwordHash.matches("current", "hashed")).thenReturn(true);
-        when(passwordHash.hash("newPassword1")).thenReturn("newHashed");
+        when(passwordHash.hash("NewPass@123")).thenReturn("newHashed");
         when(userRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        userService.changeOwnPassword("alice", "current", "newPassword1");
+        userService.changeOwnPassword("alice", "current", "NewPass@123");
 
         verify(refreshTokenPort).revokeAll("alice");
         verify(tokenBlocklistPort).blockAllBefore(eq("alice"), any());

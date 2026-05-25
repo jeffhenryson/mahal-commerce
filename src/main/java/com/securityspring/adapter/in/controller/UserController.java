@@ -22,7 +22,6 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
-import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/users")
@@ -119,7 +118,7 @@ public class UserController {
             @RequestParam(defaultValue = "20") int size) {
         PageResult<User> result = useCase.listAll(page, Math.min(size, 100));
         PageResult<UserResponseDTO> response = new PageResult<>(
-                result.content().stream().map(converter::toResponse).collect(Collectors.toList()),
+                result.content().stream().map(converter::toResponse).toList(),
                 result.page(), result.size(), result.totalElements(), result.totalPages());
         return ResponseEntity.ok(response);
     }

@@ -26,10 +26,11 @@ public class LoginRateLimitingFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) throws ServletException {
-        String uri = request.getRequestURI();
+        // Subtract context-path so the check works with or without server.servlet.context-path.
+        String path = request.getRequestURI().substring(request.getContextPath().length());
         String method = request.getMethod();
-        boolean isLogin = "/auth/login".equals(uri) && "POST".equalsIgnoreCase(method);
-        boolean isRefresh = "/auth/refresh".equals(uri) && "POST".equalsIgnoreCase(method);
+        boolean isLogin = "/auth/login".equals(path) && "POST".equalsIgnoreCase(method);
+        boolean isRefresh = "/auth/refresh".equals(path) && "POST".equalsIgnoreCase(method);
         return !isLogin && !isRefresh;
     }
 

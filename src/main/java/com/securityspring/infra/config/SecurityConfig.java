@@ -36,6 +36,11 @@ public class SecurityConfig {
     public SecurityFilterChain filterChain(HttpSecurity http, JwtAuthenticationFilter jwtAuthenticationFilter,
                                            RestAuthenticationEntryPoint entryPoint, RestAccessDeniedHandler deniedHandler,
                                            LoginRateLimitingFilter loginRateLimitingFilter) throws Exception {
+        // Convenção de autorização: sempre hasAuthority(), nunca hasRole().
+        // Roles têm prefixo ROLE_ (ex: ROLE_ADMIN); permissões não (ex: USER_CREATE).
+        // hasRole("ADMIN") adiciona o prefixo automaticamente e seria equivalente a
+        // hasAuthority("ROLE_ADMIN"), mas misturar os dois métodos gera inconsistência.
+        // Usar hasAuthority() para tudo é mais explícito e funciona para roles e permissões.
         http
             .csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(auth -> auth

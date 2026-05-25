@@ -87,12 +87,14 @@ public class RefreshTokenRepositoryImpl implements RefreshTokenPort {
 
     @Override
     @Transactional
-    public void revoke(String token) {
-        refreshRepo.findByTokenHash(sha256(token)).ifPresent(rt -> {
+    public java.util.Optional<String> revoke(String token) {
+        return refreshRepo.findByTokenHash(sha256(token)).map(rt -> {
             rt.setRevoked(true);
             rt.setRotatedAt(Instant.now());
             refreshRepo.save(rt);
-            log.info("audit.refresh.revoked user={}", rt.getUser().getUsername());
+            String username = rt.getUser().getUsername();
+            log.info("audit.refresh.revoked user={}", username);
+            return username;
         });
     }
 

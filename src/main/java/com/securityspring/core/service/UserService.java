@@ -19,8 +19,12 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 public class UserService implements UserUseCase {
+
+    private static final Pattern PASSWORD_COMPLEXITY =
+            Pattern.compile("^(?=.*[A-Z])(?=.*[a-z])(?=.*\\d)(?=.*[^A-Za-z\\d]).+$");
 
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
@@ -42,7 +46,7 @@ public class UserService implements UserUseCase {
 
     @Override
     public User createUser(String username, String rawPassword, List<String> roles) {
-        if (rawPassword == null || rawPassword.length() < 8) {
+        if (!isValidPassword(rawPassword)) {
             throw new InvalidPasswordException();
         }
         userRepository.findByUsername(username).ifPresent(u -> {
@@ -99,7 +103,7 @@ public class UserService implements UserUseCase {
 
     @Override
     public void changeOwnPassword(String username, String currentPassword, String newPassword) {
-        if (newPassword == null || newPassword.length() < 8) {
+        if (!isValidPassword(newPassword)) {
             throw new InvalidPasswordException();
         }
         User user = userRepository
@@ -130,6 +134,10 @@ public class UserService implements UserUseCase {
             refreshTokenPort.revokeAll(user.getUsername());
             tokenBlocklistPort.blockAllBefore(user.getUsername(), Instant.now());
         }
+    }
+
+    private static boolean isValidPassword(String password) {
+        return password != null && password.length() >= 8 && PASSWORD_COMPLEXITY.matcher(password).matches();
     }
 
     @Override

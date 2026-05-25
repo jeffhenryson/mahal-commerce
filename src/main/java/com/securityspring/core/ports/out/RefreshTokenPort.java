@@ -8,7 +8,7 @@ public interface RefreshTokenPort {
 
     RotationResult rotate(String oldToken);
 
-    void revoke(String token);
+    java.util.Optional<String> revoke(String token);
 
     void revokeAll(String username);
 }

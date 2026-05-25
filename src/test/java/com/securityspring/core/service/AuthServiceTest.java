@@ -13,6 +13,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.Optional;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -77,9 +78,23 @@ class AuthServiceTest {
     }
 
     @Test
-    void logout_revokesRefreshToken() {
+    void logout_revokesRefreshTokenAndBlocksAccessToken() {
+        when(refreshToken.revoke("some-refresh-token")).thenReturn(Optional.of("alice"));
+
         authService.logout("some-refresh-token");
+
         verify(refreshToken).revoke("some-refresh-token");
+        verify(tokenBlocklist).blockAllBefore(eq("alice"), any());
+    }
+
+    @Test
+    void logout_withUnknownToken_doesNotCallBlocklist() {
+        when(refreshToken.revoke("unknown-token")).thenReturn(Optional.empty());
+
+        authService.logout("unknown-token");
+
+        verify(refreshToken).revoke("unknown-token");
+        verifyNoInteractions(tokenBlocklist);
     }
 
     @Test

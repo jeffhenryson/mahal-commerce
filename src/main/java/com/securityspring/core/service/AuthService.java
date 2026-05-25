@@ -57,7 +57,8 @@ public class AuthService implements AuthUseCase {
 
     @Override
     public void logout(String refreshTokenValue) {
-        refreshToken.revoke(refreshTokenValue);
+        refreshToken.revoke(refreshTokenValue)
+                .ifPresent(username -> tokenBlocklist.blockAllBefore(username, Instant.now()));
     }
 
     @Override

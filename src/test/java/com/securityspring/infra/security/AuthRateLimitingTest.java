@@ -4,6 +4,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.securityspring.core.ports.out.LoginRateLimiterPort;
+import com.securityspring.infra.security.ratelimit.InMemoryLoginRateLimiterAdapter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -40,7 +41,7 @@ public class AuthRateLimitingTest {
 
     @BeforeEach
     void setup() {
-        rateLimiter.reset();
+        if (rateLimiter instanceof InMemoryLoginRateLimiterAdapter rl) rl.reset();
         mockMvc = MockMvcBuilders.webAppContextSetup(context).apply(springSecurity()).build();
     }
 
@@ -56,6 +57,21 @@ public class AuthRateLimitingTest {
                 .andExpect(status().isUnauthorized());
         // Fourth within window -> 429
         mockMvc.perform(post("/auth/login").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isTooManyRequests());
+    }
+
+    @Test
+    void returns_429_after_exceeding_refresh_attempts_in_window() throws Exception {
+        String body = "{\"refreshToken\":\"invalid-token\"}";
+        // First three attempts -> 401 (invalid token)
+        mockMvc.perform(post("/auth/refresh").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/auth/refresh").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/auth/refresh").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isUnauthorized());
+        // Fourth within window -> 429
+        mockMvc.perform(post("/auth/refresh").contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isTooManyRequests());
     }
 }

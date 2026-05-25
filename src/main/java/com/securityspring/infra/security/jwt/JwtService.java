@@ -28,7 +28,14 @@ public class JwtService {
     public JwtService(
             @Value("${jwt.secret}") String secret,
             @Value("${jwt.access-ttl-minutes}") long accessTtlMinutes) {
-        this.key = Keys.hmacShaKeyFor(decodeSecret(secret));
+        byte[] keyBytes = decodeSecret(secret);
+        if (keyBytes.length < 32) {
+            throw new IllegalStateException(
+                "jwt.secret must produce at least 256 bits (32 bytes) of key material — " +
+                "got " + keyBytes.length + " bytes. " +
+                "Use a base64-encoded 256-bit random key or a raw string of at least 32 characters.");
+        }
+        this.key = Keys.hmacShaKeyFor(keyBytes);
         this.accessTtlMinutes = accessTtlMinutes;
     }
 
