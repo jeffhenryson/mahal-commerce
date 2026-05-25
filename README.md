@@ -117,7 +117,19 @@ JWT_SECRET=<chave-256-bits> \
 ./mvnw spring-boot:run
 ```
 
-O Flyway aplica as migrations automaticamente (`V1__init.sql`, `V2__refresh_tokens.sql`).
+O Flyway aplica as migrations automaticamente (`V1__init.sql` a `V5__…`). As migrations criam apenas roles e permissões — **nenhum usuário é criado automaticamente em hml/prod**.
+
+### Criando o primeiro admin (hml/prod)
+
+Após o primeiro deploy, execute o script `scripts/create-first-admin.sql` substituindo o hash bcrypt pelo da senha escolhida:
+
+```bash
+# Gerar hash bcrypt
+python3 -c "import bcrypt; print(bcrypt.hashpw(b'SUA_SENHA', bcrypt.gensalt(10)).decode())"
+
+# Aplicar no banco
+psql $DB_URL -f scripts/create-first-admin.sql
+```
 
 ---
 
@@ -127,6 +139,10 @@ O Flyway aplica as migrations automaticamente (`V1__init.sql`, `V2__refresh_toke
 ./mvnw test
 ```
 
-Os testes de integração com PostgreSQL usam Testcontainers e são ativados por padrão quando o Docker está disponível.
+Os testes de integração com PostgreSQL usam Testcontainers e requerem a variável de ambiente `ENABLE_TC=true` para serem executados:
+
+```bash
+ENABLE_TC=true ./mvnw test
+```
 
 ---

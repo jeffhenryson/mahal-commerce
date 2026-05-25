@@ -80,6 +80,7 @@ public class UserService implements UserUseCase {
 
     @Override
     public void deleteUser(Long id) {
+        userRepository.findById(id).orElseThrow(() -> new UserNotFoundException(id));
         userRepository.deleteById(id);
     }
 

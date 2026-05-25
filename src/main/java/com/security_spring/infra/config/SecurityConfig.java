@@ -77,7 +77,8 @@ public class SecurityConfig {
         config.setAllowedOrigins(List.of(allowedOrigins.split(",")));
         config.setAllowedMethods(List.of(allowedMethods.split(",")));
         config.setAllowedHeaders(List.of(allowedHeaders.split(",")));
-        config.setAllowCredentials(true);
+        // JWT via Authorization header não usa cookies — credentials mode desnecessário e
+        // incompatível com allowedOrigins("*") pela spec CORS (causaria IllegalArgumentException)
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);

@@ -4,16 +4,29 @@ import com.security_spring.core.ports.out.TokenBlocklistPort;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
-import java.util.concurrent.TimeUnit;
+import java.util.List;
 
 @Component
 @Profile("!dev")
 public class RedisTokenBlocklistAdapter implements TokenBlocklistPort {
 
     private static final String KEY_PREFIX = "blocklist:";
+
+    // Lua script atômico: só sobrescreve se o novo threshold for posterior ao existente,
+    // evitando race condition entre GET + SET separados em múltiplas instâncias.
+    private static final RedisScript<Long> SET_IF_LATER_SCRIPT = new DefaultRedisScript<>("""
+            local existing = redis.call('GET', KEYS[1])
+            if existing == false or tonumber(ARGV[1]) > tonumber(existing) then
+                redis.call('SET', KEYS[1], ARGV[1], 'EX', tonumber(ARGV[2]))
+                return 1
+            end
+            return 0
+            """, Long.class);
 
     private final StringRedisTemplate redis;
     private final long accessTtlSeconds;
@@ -27,21 +40,16 @@ public class RedisTokenBlocklistAdapter implements TokenBlocklistPort {
 
     @Override
     public void blockAllBefore(String username, Instant instant) {
-        String key = KEY_PREFIX + username;
-        String newValue = String.valueOf(instant.getEpochSecond());
-
-        // Only update if new threshold is later than the stored one
-        String existing = redis.opsForValue().get(key);
-        if (existing == null || instant.getEpochSecond() > Long.parseLong(existing)) {
-            redis.opsForValue().set(key, newValue, accessTtlSeconds, TimeUnit.SECONDS);
-        }
+        redis.execute(SET_IF_LATER_SCRIPT,
+                List.of(KEY_PREFIX + username),
+                String.valueOf(instant.getEpochSecond()),
+                String.valueOf(accessTtlSeconds));
     }
 
     @Override
     public boolean isBlockedAt(String username, Instant tokenIssuedAt) {
         String value = redis.opsForValue().get(KEY_PREFIX + username);
         if (value == null) return false;
-        long threshold = Long.parseLong(value);
-        return !tokenIssuedAt.isAfter(Instant.ofEpochSecond(threshold));
+        return !tokenIssuedAt.isAfter(Instant.ofEpochSecond(Long.parseLong(value)));
     }
 }
