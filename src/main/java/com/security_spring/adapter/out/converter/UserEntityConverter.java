@@ -23,7 +23,7 @@ public class UserEntityConverter {
         return user;
     }
 
-    public UserEntity toEntity(User domain) {
+    public UserEntity toEntityBase(User domain) {
         if (domain == null) return null;
         UserEntity entity = new UserEntity();
         entity.setId(domain.getId());

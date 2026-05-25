@@ -1,6 +1,7 @@
 package com.security_spring.infra.config;
 
 import com.security_spring.adapter.out.entities.PermissionEntity;
+import com.security_spring.adapter.out.entities.RoleEntity;
 import com.security_spring.adapter.out.repository.PermissionJpaRepository;
 import com.security_spring.adapter.out.repository.RoleJpaRepository;
 import com.security_spring.core.ports.in.UserUseCase;
@@ -18,7 +19,7 @@ import java.util.List;
 public class SeedConfig {
 
     private static final String[] ADMIN_PERMISSIONS =
-            {"USER_CREATE", "USER_READ", "USER_UPDATE", "USER_DELETE", "USER_ROLE_ASSIGN"};
+            {"USER_CREATE", "USER_READ", "USER_DELETE", "USER_ROLE_ASSIGN"};
 
     @Bean
     CommandLineRunner seedAll(UserUseCase useCase,
@@ -26,12 +27,17 @@ public class SeedConfig {
                                PermissionJpaRepository permRepo,
                                PlatformTransactionManager txManager) {
         return args -> {
-            if (useCase.findByUsername("admin").isEmpty())
-                useCase.createUser("admin", "Admin@dev1", List.of("ROLE_ADMIN"));
-            if (useCase.findByUsername("user").isEmpty())
-                useCase.createUser("user", "User@dev1", List.of("ROLE_USER"));
-
             new TransactionTemplate(txManager).execute(status -> {
+                // Seed base roles first — required before any createUser call
+                for (String roleName : new String[]{"ROLE_ADMIN", "ROLE_USER"}) {
+                    roleRepo.findByName(roleName).orElseGet(() -> {
+                        RoleEntity re = new RoleEntity();
+                        re.setName(roleName);
+                        return roleRepo.save(re);
+                    });
+                }
+
+                // Seed permissions
                 for (String name : ADMIN_PERMISSIONS) {
                     permRepo.findByName(name).orElseGet(() -> {
                         PermissionEntity p = new PermissionEntity();
@@ -39,17 +45,29 @@ public class SeedConfig {
                         return permRepo.save(p);
                     });
                 }
+
+                // Assign permissions to roles — fail fast if any permission is missing
                 roleRepo.findByName("ROLE_ADMIN").ifPresent(role -> {
-                    for (String name : ADMIN_PERMISSIONS)
-                        permRepo.findByName(name).ifPresent(p -> role.getPermissions().add(p));
+                    for (String name : ADMIN_PERMISSIONS) {
+                        PermissionEntity p = permRepo.findByName(name)
+                                .orElseThrow(() -> new IllegalStateException("Permission not seeded: " + name));
+                        role.getPermissions().add(p);
+                    }
                     roleRepo.save(role);
                 });
                 roleRepo.findByName("ROLE_USER").ifPresent(role -> {
-                    permRepo.findByName("USER_READ").ifPresent(p -> role.getPermissions().add(p));
+                    PermissionEntity p = permRepo.findByName("USER_READ")
+                            .orElseThrow(() -> new IllegalStateException("Permission not seeded: USER_READ"));
+                    role.getPermissions().add(p);
                     roleRepo.save(role);
                 });
                 return null;
             });
+
+            if (useCase.findByUsername("admin").isEmpty())
+                useCase.createUser("admin", "Admin@dev1", List.of("ROLE_ADMIN"));
+            if (useCase.findByUsername("user").isEmpty())
+                useCase.createUser("user", "User@dev1", List.of("ROLE_USER"));
         };
     }
 }

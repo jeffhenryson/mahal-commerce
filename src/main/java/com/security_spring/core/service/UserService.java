@@ -1,6 +1,7 @@
 package com.security_spring.core.service;
 
 import com.security_spring.core.domain.exception.InvalidPasswordException;
+import com.security_spring.core.domain.exception.RoleNotFoundException;
 import com.security_spring.core.domain.exception.UserNotFoundException;
 import com.security_spring.core.domain.exception.UsernameAlreadyExistsException;
 import com.security_spring.core.domain.model.PageResult;
@@ -39,7 +40,7 @@ public class UserService implements UserUseCase {
         if (roles != null) {
             roles.forEach(roleName -> {
                 Role role = roleRepository.findByName(roleName)
-                        .orElseGet(() -> roleRepository.save(new Role(roleName)));
+                        .orElseThrow(() -> new RoleNotFoundException(roleName));
                 user.addRole(role);
             });
         }
@@ -66,7 +67,7 @@ public class UserService implements UserUseCase {
 
         Role role = roleRepository
                 .findByName(roleName)
-                .orElseGet(() -> roleRepository.save(new Role(roleName)));
+                .orElseThrow(() -> new RoleNotFoundException(roleName));
 
         user.addRole(role);
         userRepository.save(user);

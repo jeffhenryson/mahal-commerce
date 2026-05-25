@@ -52,7 +52,7 @@ public class SecurityConfig {
             ).permitAll()
             .requestMatchers(org.springframework.http.HttpMethod.DELETE, "/auth/sessions").authenticated()
             .requestMatchers("/auth/**").permitAll()
-            .requestMatchers("/actuator/**").hasRole("ADMIN")
+            .requestMatchers("/actuator/**").hasAuthority("ROLE_ADMIN")
             .anyRequest().authenticated())
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .httpBasic(b -> b.disable())

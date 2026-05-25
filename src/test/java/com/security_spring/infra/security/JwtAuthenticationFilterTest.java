@@ -1,6 +1,7 @@
 package com.security_spring.infra.security;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import jakarta.servlet.FilterChain;
@@ -13,9 +14,11 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetailsService;
 
+import com.security_spring.core.ports.out.TokenBlocklistPort;
 import com.security_spring.infra.security.jwt.JwtAuthenticationFilter;
 import com.security_spring.infra.security.jwt.JwtService;
 
+import java.time.Instant;
 import java.util.Collections;
 
 public class JwtAuthenticationFilterTest {
@@ -29,7 +32,8 @@ public class JwtAuthenticationFilterTest {
     void sets_authentication_when_token_valid() throws Exception {
         JwtService jwt = mock(JwtService.class);
         UserDetailsService uds = mock(UserDetailsService.class);
-        JwtAuthenticationFilter filter = new JwtAuthenticationFilter(jwt, uds);
+        TokenBlocklistPort blocklist = mock(TokenBlocklistPort.class);
+        JwtAuthenticationFilter filter = new JwtAuthenticationFilter(jwt, uds, blocklist);
 
         HttpServletRequest req = mock(HttpServletRequest.class);
         HttpServletResponse res = mock(HttpServletResponse.class);
@@ -38,6 +42,8 @@ public class JwtAuthenticationFilterTest {
         when(req.getHeader("Authorization")).thenReturn("Bearer abc.xyz");
         when(jwt.isValid("abc.xyz")).thenReturn(true);
         when(jwt.extractUsername("abc.xyz")).thenReturn("john");
+        when(jwt.extractIssuedAt("abc.xyz")).thenReturn(Instant.now());
+        when(blocklist.isBlockedAt(eq("john"), any())).thenReturn(false);
         when(uds.loadUserByUsername("john")).thenReturn(new User("john", "pwd", Collections.emptyList()));
 
         filter.doFilter(req, res, chain);
@@ -51,7 +57,8 @@ public class JwtAuthenticationFilterTest {
     void skips_when_no_bearer_header() throws Exception {
         JwtService jwt = mock(JwtService.class);
         UserDetailsService uds = mock(UserDetailsService.class);
-        JwtAuthenticationFilter filter = new JwtAuthenticationFilter(jwt, uds);
+        TokenBlocklistPort blocklist = mock(TokenBlocklistPort.class);
+        JwtAuthenticationFilter filter = new JwtAuthenticationFilter(jwt, uds, blocklist);
 
         HttpServletRequest req = mock(HttpServletRequest.class);
         HttpServletResponse res = mock(HttpServletResponse.class);

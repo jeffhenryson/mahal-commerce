@@ -23,9 +23,9 @@ public interface UserJpaRepository extends JpaRepository<UserEntity, Long> {
     @Query("select u from UserEntity u left join fetch u.roles r left join fetch r.permissions where u.id = :id")
     Optional<UserEntity> findByIdWithRoles(@Param("id") Long id);
 
-    @Query("select u.id from UserEntity u")
+    @Query("select u.id from UserEntity u order by u.id")
     Page<Long> findAllIds(Pageable pageable);
 
-    @Query("select distinct u from UserEntity u left join fetch u.roles r left join fetch r.permissions where u.id in :ids")
+    @Query("select distinct u from UserEntity u left join fetch u.roles r left join fetch r.permissions where u.id in :ids order by u.id")
     List<UserEntity> findAllWithRolesByIdIn(@Param("ids") List<Long> ids);
 }

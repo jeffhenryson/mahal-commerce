@@ -60,6 +60,10 @@ public class JwtService {
         return parseClaims(token).getSubject();
     }
 
+    public Instant extractIssuedAt(String token) {
+        return parseClaims(token).getIssuedAt().toInstant();
+    }
+
     @SuppressWarnings("unchecked")
     public Set<String> extractRoles(String token) {
         Object roles = parseClaims(token).get("roles");

@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.security_spring.adapter.out.converter.UserEntityConverter;
 import com.security_spring.adapter.out.entities.RoleEntity;
 import com.security_spring.adapter.out.entities.UserEntity;
+import com.security_spring.core.domain.exception.RoleNotFoundException;
 import com.security_spring.core.domain.model.PageResult;
 import com.security_spring.core.domain.model.Role;
 import com.security_spring.core.domain.model.User;
@@ -36,18 +37,15 @@ public class UserRepositoryImpl implements UserRepository {
 
     @Override
     public User save(User user) {
-        UserEntity entity = converter.toEntity(user);
+        UserEntity entity = converter.toEntityBase(user);
 
         if (user.getRoles() != null && !user.getRoles().isEmpty()) {
             Set<RoleEntity> roleEntities = user.getRoles().stream()
                     .map(Role::getName)
                     .filter(n -> n != null && !n.isBlank())
                     .distinct()
-                    .map(name -> roleRepo.findByName(name).orElseGet(() -> {
-                        RoleEntity re = new RoleEntity();
-                        re.setName(name);
-                        return roleRepo.save(re);
-                    }))
+                    .map(name -> roleRepo.findByName(name)
+                            .orElseThrow(() -> new RoleNotFoundException(name)))
                     .collect(Collectors.toSet());
             entity.setRoles(roleEntities);
         }

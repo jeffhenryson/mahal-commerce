@@ -5,8 +5,10 @@ import com.security_spring.core.ports.in.AuthUseCase;
 import com.security_spring.core.ports.out.AccessTokenPort;
 import com.security_spring.core.ports.out.CredentialVerifierPort;
 import com.security_spring.core.ports.out.RefreshTokenPort;
+import com.security_spring.core.ports.out.TokenBlocklistPort;
 import com.security_spring.core.ports.out.UserAuthoritiesPort;
 
+import java.time.Instant;
 import java.util.Set;
 
 public class AuthService implements AuthUseCase {
@@ -15,15 +17,18 @@ public class AuthService implements AuthUseCase {
     private final AccessTokenPort accessToken;
     private final RefreshTokenPort refreshToken;
     private final UserAuthoritiesPort userAuthorities;
+    private final TokenBlocklistPort tokenBlocklist;
 
     public AuthService(CredentialVerifierPort credentialVerifier,
                        AccessTokenPort accessToken,
                        RefreshTokenPort refreshToken,
-                       UserAuthoritiesPort userAuthorities) {
+                       UserAuthoritiesPort userAuthorities,
+                       TokenBlocklistPort tokenBlocklist) {
         this.credentialVerifier = credentialVerifier;
         this.accessToken = accessToken;
         this.refreshToken = refreshToken;
         this.userAuthorities = userAuthorities;
+        this.tokenBlocklist = tokenBlocklist;
     }
 
     @Override
@@ -50,5 +55,6 @@ public class AuthService implements AuthUseCase {
     @Override
     public void logoutAll(String username) {
         refreshToken.revokeAll(username);
+        tokenBlocklist.blockAllBefore(username, Instant.now());
     }
 }

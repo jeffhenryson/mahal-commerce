@@ -12,6 +12,7 @@ import com.security_spring.core.ports.out.CredentialVerifierPort;
 import com.security_spring.core.ports.out.PasswordHashPort;
 import com.security_spring.core.ports.out.RefreshTokenPort;
 import com.security_spring.core.ports.out.RoleRepository;
+import com.security_spring.core.ports.out.TokenBlocklistPort;
 import com.security_spring.core.ports.out.UserAuthoritiesPort;
 import com.security_spring.core.ports.out.UserRepository;
 import com.security_spring.core.service.AuthService;
@@ -36,8 +37,9 @@ public class BeanConfig {
     public AuthUseCase authUseCase(CredentialVerifierPort credentialVerifier,
             AccessTokenPort accessToken,
             RefreshTokenPort refreshToken,
-            UserAuthoritiesPort userAuthorities) {
-        return new AuthService(credentialVerifier, accessToken, refreshToken, userAuthorities);
+            UserAuthoritiesPort userAuthorities,
+            TokenBlocklistPort tokenBlocklist) {
+        return new AuthService(credentialVerifier, accessToken, refreshToken, userAuthorities, tokenBlocklist);
     }
 
     @Bean
