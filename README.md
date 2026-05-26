@@ -12,7 +12,7 @@ O objetivo do projeto é servir de base reutilizável para novas aplicações, c
 |---|---|
 | Linguagem | Java 21 |
 | Framework | Spring Boot 4 (Web, Security, Data JPA, Validation, Actuator) |
-| Autenticação | JWT (JJWT 0.11) + Refresh Token opaco |
+| Autenticação | JWT (JJWT 0.12.6) + Refresh Token opaco |
 | Banco (dev) | H2 em memória |
 | Banco (hml/prod) | PostgreSQL + Flyway |
 | Documentação | SpringDoc OpenAPI (Swagger) |

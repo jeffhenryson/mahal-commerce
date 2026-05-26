@@ -8,7 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.securityspring.adapter.in.converter.UserDTOConverter;
-import com.securityspring.adapter.in.dtos.request.UserRequestDTO;
+import com.securityspring.adapter.in.dtos.request.CreateUserRequest;
 import com.securityspring.core.domain.exception.RoleNotFoundException;
 import com.securityspring.core.domain.exception.UserNotFoundException;
 import com.securityspring.core.domain.exception.UsernameAlreadyExistsException;
@@ -87,7 +87,7 @@ public class UserControllerTest {
         when(useCase.createUser(eq("admin"), any(), any(), any()))
                 .thenThrow(new UsernameAlreadyExistsException("admin"));
 
-        UserRequestDTO dto = new UserRequestDTO();
+        CreateUserRequest dto = new CreateUserRequest();
         dto.setUsername("admin");
         dto.setPassword("Secret@123");
         dto.setEmail("admin@test.com");

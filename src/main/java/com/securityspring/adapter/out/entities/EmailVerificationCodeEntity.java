@@ -7,6 +7,8 @@ import lombok.Setter;
 
 import java.time.Instant;
 
+// sentAt é preenchido via @PrePersist — não usar @Data aqui (evitar override de equals/hashCode com id nulo)
+
 @Getter
 @Setter
 @NoArgsConstructor
@@ -23,7 +25,7 @@ public class EmailVerificationCodeEntity {
     @Column(nullable = false, length = 80)
     private String username;
 
-    @Column(nullable = false, length = 6)
+    @Column(nullable = false, length = 64)
     private String code;
 
     @Column(nullable = false)
@@ -31,4 +33,12 @@ public class EmailVerificationCodeEntity {
 
     @Column(nullable = false)
     private boolean used = false;
+
+    @Column(nullable = false, updatable = false)
+    private Instant sentAt;
+
+    @PrePersist
+    void prePersist() {
+        if (sentAt == null) sentAt = Instant.now();
+    }
 }

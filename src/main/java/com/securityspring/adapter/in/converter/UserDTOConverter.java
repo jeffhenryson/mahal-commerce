@@ -1,6 +1,5 @@
 package com.securityspring.adapter.in.converter;
 
-import com.securityspring.adapter.in.dtos.request.UserRequestDTO;
 import com.securityspring.adapter.in.dtos.response.UserResponseDTO;
 import com.securityspring.core.domain.model.Permission;
 import com.securityspring.core.domain.model.Role;
@@ -9,11 +8,6 @@ import com.securityspring.core.domain.model.User;
 import java.util.stream.Collectors;
 
 public class UserDTOConverter {
-
-    public User toDomain(UserRequestDTO dto) {
-        User u = User.of(dto.getUsername(), dto.getPassword(), null);
-        return u;
-    }
 
     public UserResponseDTO toResponse(User user) {
         UserResponseDTO dto = new UserResponseDTO();

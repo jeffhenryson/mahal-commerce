@@ -5,6 +5,7 @@ import com.securityspring.core.ports.in.RoleUseCase;
 import com.securityspring.core.ports.in.UserUseCase;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -27,11 +28,13 @@ public class SeedConfig {
     @Bean
     CommandLineRunner seedAll(UserUseCase userUseCase,
                               RoleUseCase roleUseCase,
-                              PermissionUseCase permissionUseCase) {
+                              PermissionUseCase permissionUseCase,
+                              @Value("${seed.admin.password:Admin@dev1}") String adminPassword,
+                              @Value("${seed.user.password:User@dev1}") String userPassword) {
         return args -> {
             seedPermissions(permissionUseCase);
             seedRoles(roleUseCase);
-            seedUsers(userUseCase);
+            seedUsers(userUseCase, adminPassword, userPassword);
         };
     }
 
@@ -67,10 +70,10 @@ public class SeedConfig {
         }
     }
 
-    private void seedUsers(UserUseCase userUseCase) {
+    private void seedUsers(UserUseCase userUseCase, String adminPassword, String userPassword) {
         if (userUseCase.findByUsername("admin").isEmpty())
-            userUseCase.createUser("admin", "Admin@dev1", List.of("ROLE_ADMIN"));
+            userUseCase.createUser("admin", adminPassword, List.of("ROLE_ADMIN"));
         if (userUseCase.findByUsername("user").isEmpty())
-            userUseCase.createUser("user", "User@dev1", List.of("ROLE_USER"));
+            userUseCase.createUser("user", userPassword, List.of("ROLE_USER"));
     }
 }

@@ -2,7 +2,7 @@ package com.securityspring.adapter.in.controller;
 
 import com.securityspring.adapter.in.converter.UserDTOConverter;
 import com.securityspring.adapter.in.dtos.request.ChangePasswordRequest;
-import com.securityspring.adapter.in.dtos.request.UserRequestDTO;
+import com.securityspring.adapter.in.dtos.request.CreateUserRequest;
 import com.securityspring.adapter.in.dtos.request.UserUpdateRequest;
 import com.securityspring.adapter.in.dtos.response.UserResponseDTO;
 import com.securityspring.core.domain.model.PageResult;
@@ -16,6 +16,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -49,7 +50,7 @@ public class UserController {
     })
     @PostMapping
     @PreAuthorize("hasAuthority('USER_CREATE')")
-    public ResponseEntity<UserResponseDTO> create(@Valid @RequestBody UserRequestDTO request) {
+    public ResponseEntity<UserResponseDTO> create(@Valid @RequestBody CreateUserRequest request) {
         User created = useCase.createUser(
                 request.getUsername(), request.getPassword(), request.getEmail(), request.getRoles());
         UserResponseDTO body = converter.toResponse(created);
@@ -119,7 +120,7 @@ public class UserController {
     @PreAuthorize("hasAuthority('USER_READ')")
     public ResponseEntity<PageResult<UserResponseDTO>> list(
             @RequestParam(defaultValue = "0") @Min(0) int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
         PageResult<User> result = useCase.listAll(page, Math.min(size, 100));
         PageResult<UserResponseDTO> response = new PageResult<>(
                 result.content().stream().map(converter::toResponse).toList(),
@@ -178,7 +179,7 @@ public class UserController {
     @PreAuthorize("hasAuthority('USER_UPDATE')")
     public ResponseEntity<UserResponseDTO> update(@PathVariable Long id,
                                                    @Valid @RequestBody UserUpdateRequest request) {
-        return ResponseEntity.ok(converter.toResponse(useCase.updateUser(id, request.getUsername())));
+        return ResponseEntity.ok(converter.toResponse(useCase.updateUser(id, request.getUsername(), request.getEmail())));
     }
 }
 

@@ -1,10 +1,13 @@
 package com.securityspring.infra.security.ratelimit;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.securityspring.core.ports.out.LoginRateLimiterPort;
+import com.securityspring.infra.handler.ApiError;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -17,11 +20,14 @@ public class LoginRateLimitingFilter extends OncePerRequestFilter {
 
     private final LoginRateLimiterPort rateLimiter;
     private final long windowSeconds;
+    private final ObjectMapper objectMapper;
 
     public LoginRateLimitingFilter(LoginRateLimiterPort rateLimiter,
-                                   @Value("${rate.limit.login.window-seconds:60}") long windowSeconds) {
+                                   @Value("${rate.limit.login.window-seconds:60}") long windowSeconds,
+                                   ObjectMapper objectMapper) {
         this.rateLimiter = rateLimiter;
         this.windowSeconds = windowSeconds;
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -42,10 +48,15 @@ public class LoginRateLimitingFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
         if (!rateLimiter.tryConsume(clientIp(request))) {
+            ApiError error = ApiError.of(
+                    "Muitas tentativas — aguarde antes de tentar novamente",
+                    "TOO_MANY_REQUESTS",
+                    request.getRequestURI(),
+                    MDC.get("traceId"));
             response.setStatus(429);
             response.setHeader("Retry-After", String.valueOf(windowSeconds));
             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-            response.getWriter().write("{\"error\":\"too_many_requests\",\"message\":\"Too many login attempts\"}");
+            objectMapper.writeValue(response.getWriter(), error);
             return;
         }
         filterChain.doFilter(request, response);

@@ -1,6 +1,7 @@
 package com.securityspring.infra.handler;
 
 import com.securityspring.core.domain.exception.AccountLockedException;
+import com.securityspring.core.domain.exception.EmailDeliveryException;
 import com.securityspring.core.domain.exception.EmailAlreadyExistsException;
 import com.securityspring.core.domain.exception.EmailAlreadyVerifiedException;
 import com.securityspring.core.domain.exception.EmailVerificationCodeExpiredException;
@@ -23,6 +24,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -91,6 +93,11 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.TOO_MANY_REQUESTS, ex.getMessage(), "ACCOUNT_LOCKED", req);
     }
 
+    @ExceptionHandler(DisabledException.class)
+    public ResponseEntity<ApiError> handleDisabled(DisabledException ex, HttpServletRequest req) {
+        return error(HttpStatus.FORBIDDEN, "Conta desabilitada — verifique seu email para ativar a conta", "ACCOUNT_DISABLED", req);
+    }
+
     @ExceptionHandler(AuthenticationException.class)
     public ResponseEntity<ApiError> handleAuth(AuthenticationException ex, HttpServletRequest req) {
         return error(HttpStatus.UNAUTHORIZED, "Credenciais inválidas", "INVALID_CREDENTIALS", req);
@@ -119,6 +126,12 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(RefreshTokenAlreadyUsedException.class)
     public ResponseEntity<ApiError> handleRefreshTokenReuse(RefreshTokenAlreadyUsedException ex, HttpServletRequest req) {
         return error(HttpStatus.UNAUTHORIZED, "Sessão inválida — faça login novamente", "REFRESH_TOKEN_REUSED", req);
+    }
+
+    @ExceptionHandler(EmailDeliveryException.class)
+    public ResponseEntity<ApiError> handleEmailDelivery(EmailDeliveryException ex, HttpServletRequest req) {
+        // Conta criada, mas email não entregue. Cliente deve orientar o usuário a usar resend-verification.
+        return error(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), "EMAIL_DELIVERY_FAILED", req);
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

@@ -9,5 +9,14 @@ public interface EmailVerificationCodeRepository {
 
     Optional<EmailVerificationCode> findByCode(String code);
 
+    Optional<EmailVerificationCode> findByUsername(String username);
+
+    /**
+     * Marca atomicamente o código como usado (CAS: used=false → used=true).
+     * Retorna true se o código foi reclamado por esta chamada; false se já estava usado
+     * (outra requisição concorrente venceu a corrida).
+     */
+    boolean markAsUsed(String code);
+
     void deleteByUsername(String username);
 }

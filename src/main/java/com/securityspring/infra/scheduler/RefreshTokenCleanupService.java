@@ -1,6 +1,7 @@
 package com.securityspring.infra.scheduler;
 
 import com.securityspring.core.ports.out.RefreshTokenPort;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -17,7 +18,10 @@ public class RefreshTokenCleanupService {
         this.refreshTokenPort = refreshTokenPort;
     }
 
+    // lockAtMostFor deve ser maior que o tempo máximo de execução e menor que o intervalo do cron.
+    // lockAtLeastFor evita re-execução imediata em caso de falha rápida.
     @Scheduled(cron = "${refresh-token.cleanup.cron:0 0 3 * * *}")
+    @SchedulerLock(name = "refreshTokenCleanup", lockAtMostFor = "PT55M", lockAtLeastFor = "PT5M")
     public void cleanup() {
         log.info("scheduler.refresh.cleanup.start");
         refreshTokenPort.deleteExpiredAndRevoked();

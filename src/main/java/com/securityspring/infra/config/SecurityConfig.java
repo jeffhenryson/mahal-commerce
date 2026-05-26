@@ -13,9 +13,9 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
-import com.securityspring.infra.security.CorrelationIdFilter;
 import com.securityspring.infra.security.RestAccessDeniedHandler;
 import com.securityspring.infra.security.RestAuthenticationEntryPoint;
+import com.securityspring.infra.security.TraceIdFilter;
 import com.securityspring.infra.security.jwt.JwtAuthenticationFilter;
 import com.securityspring.infra.security.ratelimit.LoginRateLimitingFilter;
 
@@ -37,7 +37,7 @@ public class SecurityConfig {
     public SecurityFilterChain filterChain(HttpSecurity http, JwtAuthenticationFilter jwtAuthenticationFilter,
                                            RestAuthenticationEntryPoint entryPoint, RestAccessDeniedHandler deniedHandler,
                                            LoginRateLimitingFilter loginRateLimitingFilter,
-                                           CorrelationIdFilter correlationIdFilter) throws Exception {
+                                           TraceIdFilter traceIdFilter) throws Exception {
         // Convenção de autorização: sempre hasAuthority(), nunca hasRole().
         // Roles têm prefixo ROLE_ (ex: ROLE_ADMIN); permissões não (ex: USER_CREATE).
         // hasRole("ADMIN") adiciona o prefixo automaticamente e seria equivalente a
@@ -45,6 +45,11 @@ public class SecurityConfig {
         // Usar hasAuthority() para tudo é mais explícito e funciona para roles e permissões.
         http
             .csrf(csrf -> csrf.disable())
+            // Headers de segurança: frameOptions e contentTypeOptions vêm dos defaults do Spring Security.
+            // Adicionamos Referrer-Policy explicitamente (não incluso nos defaults).
+            .headers(headers -> headers
+                    .referrerPolicy(r -> r.policy(
+                            org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter.ReferrerPolicy.NO_REFERRER)))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(
                     "/v3/api-docs/**",
@@ -64,7 +69,7 @@ public class SecurityConfig {
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .httpBasic(b -> b.disable())
             .exceptionHandling(e -> e.authenticationEntryPoint(entryPoint).accessDeniedHandler(deniedHandler))
-            .addFilterBefore(correlationIdFilter, UsernamePasswordAuthenticationFilter.class)
+            .addFilterBefore(traceIdFilter, UsernamePasswordAuthenticationFilter.class)
             .addFilterBefore(loginRateLimitingFilter, UsernamePasswordAuthenticationFilter.class)
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
             .cors(Customizer.withDefaults());

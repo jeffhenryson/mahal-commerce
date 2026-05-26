@@ -66,6 +66,12 @@
       "defaultValue": 15
     },
     {
+      "name": "email.verification.resend-cooldown-seconds",
+      "type": "java.lang.Long",
+      "description": "Cooldown mínimo em segundos entre reenvios de código de verificação para o mesmo destinatário.",
+      "defaultValue": 60
+    },
+    {
       "name": "resend.api-key",
       "type": "java.lang.String",
       "description": "API key do serviço Resend para envio de emails transacionais."
@@ -81,6 +87,24 @@
       "type": "java.lang.String",
       "description": "Expressão cron para limpeza de refresh tokens expirados e revogados.",
       "defaultValue": "0 0 3 * * *"
+    },
+    {
+      "name": "resend.api-url",
+      "type": "java.lang.String",
+      "description": "URL base da API de envio de emails (Resend). Útil para testes de integração com mock server.",
+      "defaultValue": "https://api.resend.com/emails"
+    },
+    {
+      "name": "seed.admin.password",
+      "type": "java.lang.String",
+      "description": "Senha do usuário admin criado pelo SeedConfig em dev. Override via SEED_ADMIN_PASSWORD.",
+      "defaultValue": "Admin@dev1"
+    },
+    {
+      "name": "seed.user.password",
+      "type": "java.lang.String",
+      "description": "Senha do usuário user criado pelo SeedConfig em dev. Override via SEED_USER_PASSWORD.",
+      "defaultValue": "User@dev1"
     }
   ]
 }

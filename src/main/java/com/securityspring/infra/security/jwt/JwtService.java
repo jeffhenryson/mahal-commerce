@@ -10,6 +10,8 @@ import java.util.stream.Collectors;
 
 import javax.crypto.SecretKey;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -19,6 +21,8 @@ import io.jsonwebtoken.security.Keys;
 
 @Service
 public class JwtService {
+
+    private static final Logger log = LoggerFactory.getLogger(JwtService.class);
 
     private final SecretKey key;
     private final long accessTtlMinutes;
@@ -42,7 +46,11 @@ public class JwtService {
         try {
             byte[] decoded = java.util.Base64.getDecoder().decode(secret);
             if (decoded.length >= 32) return decoded;
+            log.warn("jwt.secret: base64 decode produziu {} bytes (< 32) — usando UTF-8 raw como fallback. "
+                    + "Configure uma chave base64 de 256 bits para eliminar este aviso.", decoded.length);
         } catch (IllegalArgumentException ignored) {
+            log.warn("jwt.secret não é base64 válido — usando UTF-8 raw como fallback. "
+                    + "Em produção use uma chave base64-encoded de 256 bits (32 bytes).");
         }
         return secret.getBytes(StandardCharsets.UTF_8);
     }

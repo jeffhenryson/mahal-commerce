@@ -10,7 +10,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Data
-public class UserRequestDTO {
+public class CreateUserRequest {
     @NotBlank
     @Size(min = 3, max = 80)
     private String username;

@@ -1,5 +1,6 @@
 package com.securityspring.infra.email;
 
+import com.securityspring.core.domain.exception.EmailDeliveryException;
 import com.securityspring.core.ports.out.EmailPort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,8 +17,6 @@ import java.util.Map;
 public class ResendEmailAdapter implements EmailPort {
 
     private static final Logger log = LoggerFactory.getLogger(ResendEmailAdapter.class);
-    private static final String RESEND_API_URL = "https://api.resend.com/emails";
-
     private final RestClient restClient;
     private final String fromAddress;
     private final long ttlMinutes;
@@ -25,11 +24,12 @@ public class ResendEmailAdapter implements EmailPort {
     public ResendEmailAdapter(
             @Value("${resend.api-key}") String apiKey,
             @Value("${resend.from:noreply@example.com}") String fromAddress,
+            @Value("${resend.api-url:https://api.resend.com/emails}") String apiUrl,
             @Value("${email.verification.ttl-minutes:15}") long ttlMinutes) {
         this.fromAddress = fromAddress;
         this.ttlMinutes = ttlMinutes;
         this.restClient = RestClient.builder()
-                .baseUrl(RESEND_API_URL)
+                .baseUrl(apiUrl)
                 .defaultHeader("Authorization", "Bearer " + apiKey)
                 .build();
     }
@@ -52,7 +52,7 @@ public class ResendEmailAdapter implements EmailPort {
             log.info("email.verification.sent to={}", to);
         } catch (Exception ex) {
             log.error("email.verification.failed to={} error={}", to, ex.getMessage());
-            throw new RuntimeException("Falha ao enviar email de verificação", ex);
+            throw new EmailDeliveryException(ex.getMessage());
         }
     }
 
