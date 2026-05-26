@@ -1,0 +1,116 @@
+package com.securityspring.adapter.out.persistence.repository;
+
+import java.security.SecureRandom;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.Base64;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
+
+import com.securityspring.adapter.out.persistence.entity.RefreshTokenEntity;
+import com.securityspring.adapter.out.persistence.entity.UserEntity;
+import com.securityspring.core.domain.exception.InvalidRefreshTokenException;
+import com.securityspring.core.domain.exception.RefreshTokenAlreadyUsedException;
+import com.securityspring.core.domain.exception.RefreshTokenExpiredException;
+import com.securityspring.core.ports.out.token.RefreshTokenPort;
+import com.securityspring.infra.security.TokenHashUtils;
+
+@Repository
+@Transactional
+public class RefreshTokenRepositoryImpl implements RefreshTokenPort {
+
+    private static final Logger log = LoggerFactory.getLogger(RefreshTokenRepositoryImpl.class);
+
+    private final RefreshTokenJpaRepository refreshRepo;
+    private final UserJpaRepository userRepo;
+    private final long refreshTtlDays;
+    private final SecureRandom secureRandom = new SecureRandom();
+
+    public RefreshTokenRepositoryImpl(RefreshTokenJpaRepository refreshRepo,
+                                      UserJpaRepository userRepo,
+                                      @Value("${jwt.refresh-ttl-days}") long refreshTtlDays) {
+        this.refreshRepo = refreshRepo;
+        this.userRepo = userRepo;
+        this.refreshTtlDays = refreshTtlDays;
+    }
+
+    @Override
+    public String issue(String username) {
+        UserEntity user = userRepo.findByUsername(username)
+                .orElseThrow(InvalidRefreshTokenException::new);
+
+        String token = generateOpaqueToken();
+        RefreshTokenEntity rt = new RefreshTokenEntity();
+        rt.setUser(user);
+        rt.setTokenHash(TokenHashUtils.sha256(token));
+        rt.setExpiresAt(Instant.now().plus(refreshTtlDays, ChronoUnit.DAYS));
+        refreshRepo.save(rt);
+        log.info("audit.refresh.issued user={}", username);
+        return token;
+    }
+
+    @Override
+    public RotationResult rotate(String oldToken) {
+        String hash = TokenHashUtils.sha256(oldToken);
+        var found = refreshRepo.findByTokenHash(hash)
+                .orElseThrow(InvalidRefreshTokenException::new);
+
+        String username = found.getUser().getUsername();
+
+        // Signal theft to the service layer — it will revoke all sessions.
+        if (found.isRevoked()) {
+            throw new RefreshTokenAlreadyUsedException(username);
+        }
+
+        if (found.getExpiresAt().isBefore(Instant.now())) {
+            throw new RefreshTokenExpiredException();
+        }
+
+        found.setRevoked(true);
+        found.setRotatedAt(Instant.now());
+        refreshRepo.save(found);
+
+        String newToken = generateOpaqueToken();
+        RefreshTokenEntity rt = new RefreshTokenEntity();
+        rt.setUser(found.getUser());
+        rt.setTokenHash(TokenHashUtils.sha256(newToken));
+        rt.setExpiresAt(Instant.now().plus(refreshTtlDays, ChronoUnit.DAYS));
+        refreshRepo.save(rt);
+        log.info("audit.refresh.rotated user={}", username);
+        return new RotationResult(username, newToken);
+    }
+
+    @Override
+    public java.util.Optional<String> revoke(String token) {
+        return refreshRepo.findByTokenHash(TokenHashUtils.sha256(token)).map(rt -> {
+            rt.setRevoked(true);
+            rt.setRotatedAt(Instant.now());
+            refreshRepo.save(rt);
+            String username = rt.getUser().getUsername();
+            log.info("audit.refresh.revoked user={}", username);
+            return username;
+        });
+    }
+
+    @Override
+    public void revokeAll(String username) {
+        int count = refreshRepo.revokeAllByUsername(username, Instant.now());
+        log.info("audit.refresh.revokedAll user={} count={}", username, count);
+    }
+
+    @Override
+    public void deleteExpiredAndRevoked() {
+        int deleted = refreshRepo.deleteExpiredAndRevoked(Instant.now());
+        if (deleted > 0) log.info("audit.refresh.cleanup deleted={}", deleted);
+    }
+
+    private String generateOpaqueToken() {
+        byte[] bytes = new byte[64];
+        secureRandom.nextBytes(bytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+}

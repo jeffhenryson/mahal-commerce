@@ -2,8 +2,8 @@ package com.securityspring.adapter.in.controller;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.securityspring.core.ports.out.LoginRateLimiterPort;
-import com.securityspring.infra.security.ratelimit.InMemoryLoginRateLimiterAdapter;
+import com.securityspring.core.ports.out.ratelimit.LoginRateLimiterPort;
+import com.securityspring.adapter.out.security.ratelimit.InMemoryLoginRateLimiterAdapter;
 import com.securityspring.infra.security.support.EmailVerificationTestHelper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

@@ -2,10 +2,10 @@ package com.securityspring.infra.security;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-import com.securityspring.adapter.out.repository.RefreshTokenJpaRepository;
-import com.securityspring.adapter.out.repository.RefreshTokenRepositoryImpl;
-import com.securityspring.adapter.out.repository.UserJpaRepository;
-import com.securityspring.adapter.out.entities.UserEntity;
+import com.securityspring.adapter.out.persistence.repository.RefreshTokenJpaRepository;
+import com.securityspring.adapter.out.persistence.repository.RefreshTokenRepositoryImpl;
+import com.securityspring.adapter.out.persistence.repository.UserJpaRepository;
+import com.securityspring.adapter.out.persistence.entity.UserEntity;
 import com.securityspring.infra.security.support.TestHashUtils;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

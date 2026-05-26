@@ -5,7 +5,7 @@ import com.securityspring.core.domain.exception.PermissionNotFoundException;
 import com.securityspring.core.domain.model.PageResult;
 import com.securityspring.core.domain.model.Permission;
 import com.securityspring.core.ports.in.PermissionUseCase;
-import com.securityspring.core.ports.out.PermissionRepository;
+import com.securityspring.core.ports.out.role.PermissionRepository;
 
 public class PermissionService implements PermissionUseCase {
 

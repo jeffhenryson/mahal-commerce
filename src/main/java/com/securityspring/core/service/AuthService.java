@@ -4,12 +4,12 @@ import com.securityspring.core.domain.exception.AccountLockedException;
 import com.securityspring.core.domain.exception.RefreshTokenAlreadyUsedException;
 import com.securityspring.core.domain.model.TokenPair;
 import com.securityspring.core.ports.in.AuthUseCase;
-import com.securityspring.core.ports.out.AccessTokenPort;
-import com.securityspring.core.ports.out.CredentialVerifierPort;
-import com.securityspring.core.ports.out.LoginAttemptPort;
-import com.securityspring.core.ports.out.RefreshTokenPort;
-import com.securityspring.core.ports.out.TokenBlocklistPort;
-import com.securityspring.core.ports.out.UserAuthoritiesPort;
+import com.securityspring.core.ports.out.token.AccessTokenPort;
+import com.securityspring.core.ports.out.credential.CredentialVerifierPort;
+import com.securityspring.core.ports.out.ratelimit.LoginAttemptPort;
+import com.securityspring.core.ports.out.token.RefreshTokenPort;
+import com.securityspring.core.ports.out.token.TokenBlocklistPort;
+import com.securityspring.core.ports.out.user.UserAuthoritiesPort;
 
 import java.time.Instant;
 import java.util.Set;

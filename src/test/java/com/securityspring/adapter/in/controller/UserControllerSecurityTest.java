@@ -7,7 +7,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.securityspring.infra.security.InMemoryTokenBlocklistAdapter;
+import com.securityspring.adapter.out.security.blocklist.InMemoryTokenBlocklistAdapter;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;

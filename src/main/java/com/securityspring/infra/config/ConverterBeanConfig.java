@@ -6,7 +6,7 @@ import org.springframework.context.annotation.Configuration;
 import com.securityspring.adapter.in.converter.PermissionDTOConverter;
 import com.securityspring.adapter.in.converter.RoleDTOConverter;
 import com.securityspring.adapter.in.converter.UserDTOConverter;
-import com.securityspring.adapter.out.converter.UserEntityConverter;
+import com.securityspring.adapter.out.persistence.converter.UserEntityConverter;
 
 @Configuration
 class ConverterBeanConfig {

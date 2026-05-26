@@ -5,7 +5,7 @@ import static org.springframework.security.test.web.servlet.setup.SecurityMockMv
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-import com.securityspring.infra.security.InMemoryTokenBlocklistAdapter;
+import com.securityspring.adapter.out.security.blocklist.InMemoryTokenBlocklistAdapter;
 import com.securityspring.infra.security.support.RefreshTokenTestHelper;
 import com.securityspring.infra.security.support.TestHashUtils;
 

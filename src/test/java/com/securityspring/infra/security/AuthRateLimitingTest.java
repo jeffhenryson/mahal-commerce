@@ -3,8 +3,8 @@ package com.securityspring.infra.security;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.securityspring.core.ports.out.LoginRateLimiterPort;
-import com.securityspring.infra.security.ratelimit.InMemoryLoginRateLimiterAdapter;
+import com.securityspring.core.ports.out.ratelimit.LoginRateLimiterPort;
+import com.securityspring.adapter.out.security.ratelimit.InMemoryLoginRateLimiterAdapter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
