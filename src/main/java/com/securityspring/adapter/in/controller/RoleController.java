@@ -1,8 +1,9 @@
 package com.securityspring.adapter.in.controller;
 
+import com.securityspring.adapter.in.converter.RoleDTOConverter;
 import com.securityspring.adapter.in.dtos.request.RoleRequest;
 import com.securityspring.adapter.in.dtos.response.RoleResponseDTO;
-import com.securityspring.core.domain.model.Permission;
+import com.securityspring.core.domain.model.PageResult;
 import com.securityspring.core.domain.model.Role;
 import com.securityspring.core.ports.in.RoleUseCase;
 import io.swagger.v3.oas.annotations.Operation;
@@ -17,8 +18,6 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
-import java.util.List;
-import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/roles")
@@ -26,20 +25,28 @@ import java.util.stream.Collectors;
 public class RoleController {
 
     private final RoleUseCase roleUseCase;
+    private final RoleDTOConverter converter;
 
-    public RoleController(RoleUseCase roleUseCase) {
+    public RoleController(RoleUseCase roleUseCase, RoleDTOConverter converter) {
         this.roleUseCase = roleUseCase;
+        this.converter = converter;
     }
 
-    @Operation(summary = "Lista todas as roles")
+    @Operation(summary = "Lista roles paginadas")
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "OK"),
         @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
     })
     @GetMapping
     @PreAuthorize("hasAuthority('ROLE_READ')")
-    public ResponseEntity<List<RoleResponseDTO>> list() {
-        return ResponseEntity.ok(roleUseCase.listAll().stream().map(this::toResponse).toList());
+    public ResponseEntity<PageResult<RoleResponseDTO>> list(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        PageResult<Role> result = roleUseCase.listAll(page, Math.min(size, 100));
+        PageResult<RoleResponseDTO> response = new PageResult<>(
+                result.content().stream().map(converter::toResponse).toList(),
+                result.page(), result.size(), result.totalElements(), result.totalPages());
+        return ResponseEntity.ok(response);
     }
 
     @Operation(summary = "Cria uma nova role")
@@ -54,7 +61,7 @@ public class RoleController {
     public ResponseEntity<RoleResponseDTO> create(@Valid @RequestBody RoleRequest request) {
         Role created = roleUseCase.createRole(request.getName());
         return ResponseEntity.created(URI.create("/roles/" + created.getName()))
-                .body(toResponse(created));
+                .body(converter.toResponse(created));
     }
 
     @Operation(summary = "Remove uma role pelo nome")
@@ -98,14 +105,4 @@ public class RoleController {
         return ResponseEntity.noContent().build();
     }
 
-    private RoleResponseDTO toResponse(Role role) {
-        RoleResponseDTO dto = new RoleResponseDTO();
-        dto.setId(role.getId());
-        dto.setName(role.getName());
-        dto.setPermissions(role.getPermissions().stream()
-                .map(Permission::getName)
-                .sorted()
-                .collect(Collectors.toList()));
-        return dto;
-    }
 }

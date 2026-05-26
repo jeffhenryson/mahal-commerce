@@ -19,6 +19,7 @@ import com.securityspring.core.ports.out.PasswordHashPort;
 import com.securityspring.core.ports.out.RefreshTokenPort;
 import com.securityspring.core.ports.out.RoleRepository;
 import com.securityspring.core.ports.out.TokenBlocklistPort;
+import com.securityspring.core.ports.out.UserCachePort;
 import com.securityspring.core.ports.out.UserRepository;
 
 import java.security.SecureRandom;
@@ -42,7 +43,9 @@ public class UserService implements UserUseCase {
     private final TokenBlocklistPort tokenBlocklistPort;
     private final EmailPort emailPort;
     private final EmailVerificationCodeRepository verificationCodeRepository;
+    private final UserCachePort userCachePort;
     private final long verificationCodeTtlMinutes;
+    private final long resendCooldownSeconds;
     private final SecureRandom secureRandom = new SecureRandom();
 
     public UserService(UserRepository userRepository,
@@ -52,7 +55,9 @@ public class UserService implements UserUseCase {
             TokenBlocklistPort tokenBlocklistPort,
             EmailPort emailPort,
             EmailVerificationCodeRepository verificationCodeRepository,
-            long verificationCodeTtlMinutes) {
+            UserCachePort userCachePort,
+            long verificationCodeTtlMinutes,
+            long resendCooldownSeconds) {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.passwordHash = passwordHash;
@@ -60,7 +65,9 @@ public class UserService implements UserUseCase {
         this.tokenBlocklistPort = tokenBlocklistPort;
         this.emailPort = emailPort;
         this.verificationCodeRepository = verificationCodeRepository;
+        this.userCachePort = userCachePort;
         this.verificationCodeTtlMinutes = verificationCodeTtlMinutes;
+        this.resendCooldownSeconds = resendCooldownSeconds;
     }
 
     @Override
@@ -106,7 +113,13 @@ public class UserService implements UserUseCase {
         EmailVerificationCode record = verificationCodeRepository.findByCode(code)
                 .orElseThrow(EmailVerificationCodeNotFoundException::new);
 
-        if (record.isExpired() || record.used()) {
+        if (record.isExpired()) {
+            throw new EmailVerificationCodeExpiredException();
+        }
+
+        // CAS atômico: previne que duas requisições concorrentes ativem a mesma conta.
+        // Se markAsUsed retornar false, outra requisição já reclamou o código.
+        if (!verificationCodeRepository.markAsUsed(code)) {
             throw new EmailVerificationCodeExpiredException();
         }
 
@@ -118,6 +131,7 @@ public class UserService implements UserUseCase {
         user.confirmEmail();
         userRepository.save(user);
         verificationCodeRepository.deleteByUsername(record.username());
+        userCachePort.evict(record.username());
     }
 
     @Override
@@ -126,6 +140,11 @@ public class UserService implements UserUseCase {
         // Callers always receive 204 regardless of whether the email exists.
         userRepository.findByEmail(email).ifPresent(user -> {
             if (user.isEmailVerified()) return;
+            // Cooldown por destinatário: evita spam e custo excessivo no provedor de email.
+            boolean onCooldown = verificationCodeRepository.findByUsername(user.getUsername())
+                    .map(c -> c.isOnCooldown(resendCooldownSeconds))
+                    .orElse(false);
+            if (onCooldown) return;
             verificationCodeRepository.deleteByUsername(user.getUsername());
             issueAndSendCode(user.getUsername(), email);
         });
@@ -149,6 +168,7 @@ public class UserService implements UserUseCase {
                 .orElseThrow(() -> new RoleNotFoundException(roleName));
         user.addRole(role);
         userRepository.save(user);
+        userCachePort.evict(username);
     }
 
     @Override
@@ -161,6 +181,7 @@ public class UserService implements UserUseCase {
         User user = userRepository.findById(id).orElseThrow(() -> new UserNotFoundException(id));
         refreshTokenPort.revokeAll(user.getUsername());
         tokenBlocklistPort.blockAllBefore(user.getUsername(), Instant.now());
+        verificationCodeRepository.deleteByUsername(user.getUsername());
         userRepository.deleteById(id);
     }
 
@@ -172,6 +193,7 @@ public class UserService implements UserUseCase {
         if (!passwordHash.matches(currentPassword, user.getPassword())) throw new InvalidPasswordException();
         user.changePassword(passwordHash.hash(newPassword));
         userRepository.save(user);
+        userCachePort.evict(username);
         refreshTokenPort.revokeAll(username);
         tokenBlocklistPort.blockAllBefore(username, Instant.now());
     }
@@ -181,6 +203,7 @@ public class UserService implements UserUseCase {
         User user = userRepository.findById(id).orElseThrow(() -> new UserNotFoundException(id));
         if (enabled) user.enable(); else user.disable();
         userRepository.save(user);
+        userCachePort.evict(user.getUsername());
         if (!enabled) {
             refreshTokenPort.revokeAll(user.getUsername());
             tokenBlocklistPort.blockAllBefore(user.getUsername(), Instant.now());
@@ -188,13 +211,23 @@ public class UserService implements UserUseCase {
     }
 
     @Override
-    public User updateUser(Long id, String newUsername) {
+    public User updateUser(Long id, String newUsername, String newEmail) {
         User user = userRepository.findById(id).orElseThrow(() -> new UserNotFoundException(id));
         userRepository.findByUsername(newUsername).ifPresent(existing -> {
             if (!existing.getId().equals(id)) throw new UsernameAlreadyExistsException(newUsername);
         });
+        String oldUsername = user.getUsername();
         user.rename(newUsername);
-        return userRepository.save(user);
+        if (newEmail != null && !newEmail.equalsIgnoreCase(user.getEmail())) {
+            userRepository.findByEmail(newEmail).ifPresent(existing -> {
+                if (!existing.getId().equals(id)) throw new EmailAlreadyExistsException(newEmail);
+            });
+            user.changeEmail(newEmail);
+        }
+        User saved = userRepository.save(user);
+        userCachePort.evict(oldUsername);
+        if (!oldUsername.equals(newUsername)) userCachePort.evict(newUsername);
+        return saved;
     }
 
     private void issueAndSendCode(String username, String email) {
@@ -204,8 +237,15 @@ public class UserService implements UserUseCase {
         emailPort.sendVerificationCode(email, username, code);
     }
 
+    private static final String CODE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
     private String generateCode() {
-        return String.format("%06d", secureRandom.nextInt(1_000_000));
+        // 8 chars alfanuméricos maiúsculos = 36^8 ≈ 2.8 trilhões de combinações (41 bits)
+        StringBuilder sb = new StringBuilder(8);
+        for (int i = 0; i < 8; i++) {
+            sb.append(CODE_ALPHABET.charAt(secureRandom.nextInt(CODE_ALPHABET.length())));
+        }
+        return sb.toString();
     }
 
     private Set<Role> resolveRoles(List<String> roles) {

@@ -1,12 +1,11 @@
 package com.securityspring.core.ports.in;
 
+import com.securityspring.core.domain.model.PageResult;
 import com.securityspring.core.domain.model.Role;
-
-import java.util.List;
 
 public interface RoleUseCase {
     Role createRole(String name);
-    List<Role> listAll();
+    PageResult<Role> listAll(int page, int size);
     Role findByName(String name);
     void deleteRole(String name);
     void assignPermission(String roleName, String permissionName);

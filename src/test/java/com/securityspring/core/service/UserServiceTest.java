@@ -14,6 +14,7 @@ import com.securityspring.core.ports.out.PasswordHashPort;
 import com.securityspring.core.ports.out.RefreshTokenPort;
 import com.securityspring.core.ports.out.RoleRepository;
 import com.securityspring.core.ports.out.TokenBlocklistPort;
+import com.securityspring.core.ports.out.UserCachePort;
 import com.securityspring.core.ports.out.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -41,13 +42,15 @@ class UserServiceTest {
     @Mock TokenBlocklistPort tokenBlocklistPort;
     @Mock EmailPort emailPort;
     @Mock EmailVerificationCodeRepository verificationCodeRepository;
+    @Mock UserCachePort userCachePort;
 
     UserService userService;
 
     @BeforeEach
     void setUp() {
         userService = new UserService(userRepository, roleRepository, passwordHash,
-                refreshTokenPort, tokenBlocklistPort, emailPort, verificationCodeRepository, 15L);
+                refreshTokenPort, tokenBlocklistPort, emailPort, verificationCodeRepository,
+                userCachePort, 15L, 60L);
     }
 
     @Test
@@ -105,7 +108,7 @@ class UserServiceTest {
         when(passwordHash.hash(anyString())).thenReturn("hashed");
         when(userRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(verificationCodeRepository.save(anyString(), anyString(), any()))
-                .thenReturn(new EmailVerificationCode(1L, "alice", "123456", Instant.now().plusSeconds(900), false));
+                .thenReturn(new EmailVerificationCode(1L, "alice", "HASHED", Instant.now().plusSeconds(900), Instant.now(), false));
 
         User created = userService.registerUser("alice", "Password@123", "alice@test.com", List.of());
 

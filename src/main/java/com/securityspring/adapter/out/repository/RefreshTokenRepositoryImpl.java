@@ -1,6 +1,5 @@
 package com.securityspring.adapter.out.repository;
 
-import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -18,8 +17,10 @@ import com.securityspring.core.domain.exception.InvalidRefreshTokenException;
 import com.securityspring.core.domain.exception.RefreshTokenAlreadyUsedException;
 import com.securityspring.core.domain.exception.RefreshTokenExpiredException;
 import com.securityspring.core.ports.out.RefreshTokenPort;
+import com.securityspring.infra.security.TokenHashUtils;
 
 @Repository
+@Transactional
 public class RefreshTokenRepositoryImpl implements RefreshTokenPort {
 
     private static final Logger log = LoggerFactory.getLogger(RefreshTokenRepositoryImpl.class);
@@ -38,7 +39,6 @@ public class RefreshTokenRepositoryImpl implements RefreshTokenPort {
     }
 
     @Override
-    @Transactional
     public String issue(String username) {
         UserEntity user = userRepo.findByUsername(username)
                 .orElseThrow(InvalidRefreshTokenException::new);
@@ -46,7 +46,7 @@ public class RefreshTokenRepositoryImpl implements RefreshTokenPort {
         String token = generateOpaqueToken();
         RefreshTokenEntity rt = new RefreshTokenEntity();
         rt.setUser(user);
-        rt.setTokenHash(sha256(token));
+        rt.setTokenHash(TokenHashUtils.sha256(token));
         rt.setExpiresAt(Instant.now().plus(refreshTtlDays, ChronoUnit.DAYS));
         refreshRepo.save(rt);
         log.info("audit.refresh.issued user={}", username);
@@ -54,9 +54,8 @@ public class RefreshTokenRepositoryImpl implements RefreshTokenPort {
     }
 
     @Override
-    @Transactional
     public RotationResult rotate(String oldToken) {
-        String hash = sha256(oldToken);
+        String hash = TokenHashUtils.sha256(oldToken);
         var found = refreshRepo.findByTokenHash(hash)
                 .orElseThrow(InvalidRefreshTokenException::new);
 
@@ -78,7 +77,7 @@ public class RefreshTokenRepositoryImpl implements RefreshTokenPort {
         String newToken = generateOpaqueToken();
         RefreshTokenEntity rt = new RefreshTokenEntity();
         rt.setUser(found.getUser());
-        rt.setTokenHash(sha256(newToken));
+        rt.setTokenHash(TokenHashUtils.sha256(newToken));
         rt.setExpiresAt(Instant.now().plus(refreshTtlDays, ChronoUnit.DAYS));
         refreshRepo.save(rt);
         log.info("audit.refresh.rotated user={}", username);
@@ -86,9 +85,8 @@ public class RefreshTokenRepositoryImpl implements RefreshTokenPort {
     }
 
     @Override
-    @Transactional
     public java.util.Optional<String> revoke(String token) {
-        return refreshRepo.findByTokenHash(sha256(token)).map(rt -> {
+        return refreshRepo.findByTokenHash(TokenHashUtils.sha256(token)).map(rt -> {
             rt.setRevoked(true);
             rt.setRotatedAt(Instant.now());
             refreshRepo.save(rt);
@@ -99,14 +97,12 @@ public class RefreshTokenRepositoryImpl implements RefreshTokenPort {
     }
 
     @Override
-    @Transactional
     public void revokeAll(String username) {
         int count = refreshRepo.revokeAllByUsername(username, Instant.now());
         log.info("audit.refresh.revokedAll user={} count={}", username, count);
     }
 
     @Override
-    @Transactional
     public void deleteExpiredAndRevoked() {
         int deleted = refreshRepo.deleteExpiredAndRevoked(Instant.now());
         if (deleted > 0) log.info("audit.refresh.cleanup deleted={}", deleted);
@@ -116,15 +112,5 @@ public class RefreshTokenRepositoryImpl implements RefreshTokenPort {
         byte[] bytes = new byte[64];
         secureRandom.nextBytes(bytes);
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
-    }
-
-    private String sha256(String value) {
-        try {
-            var md = java.security.MessageDigest.getInstance("SHA-256");
-            byte[] digest = md.digest(value.getBytes(StandardCharsets.UTF_8));
-            return Base64.getUrlEncoder().withoutPadding().encodeToString(digest);
-        } catch (Exception e) {
-            throw new IllegalStateException("SHA-256 not available", e);
-        }
     }
 }

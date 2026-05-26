@@ -1,8 +1,11 @@
 package com.securityspring.adapter.out.repository;
 
 import com.securityspring.adapter.out.entities.PermissionEntity;
+import com.securityspring.core.domain.model.PageResult;
 import com.securityspring.core.domain.model.Permission;
 import com.securityspring.core.ports.out.PermissionRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,8 +39,10 @@ public class PermissionRepositoryImpl implements PermissionRepository {
 
     @Override
     @Transactional(readOnly = true)
-    public List<Permission> findAll() {
-        return permRepo.findAll().stream().map(this::toDomain).toList();
+    public PageResult<Permission> findAll(int page, int size) {
+        Page<PermissionEntity> p = permRepo.findAll(PageRequest.of(page, size));
+        List<Permission> content = p.getContent().stream().map(this::toDomain).toList();
+        return new PageResult<>(content, page, size, p.getTotalElements(), p.getTotalPages());
     }
 
     @Override

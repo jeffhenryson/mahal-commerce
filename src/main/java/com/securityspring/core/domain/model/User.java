@@ -57,6 +57,12 @@ public class User {
         this.email = email;
     }
 
+    public void changeEmail(String newEmail) {
+        Objects.requireNonNull(newEmail, "newEmail is required");
+        this.email = newEmail;
+        this.emailVerified = false;
+    }
+
     public void changePassword(String hashedPassword) {
         Objects.requireNonNull(hashedPassword, "hashedPassword is required");
         this.password = hashedPassword;

@@ -53,16 +53,19 @@ public class UserRepositoryImpl implements UserRepository {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public Optional<User> findById(Long id) {
         return userRepo.findByIdWithRoles(id).map(converter::toDomain);
     }
 
     @Override
+    @Transactional(readOnly = true)
     public Optional<User> findByUsername(String username) {
         return userRepo.findByUsernameWithRoles(username).map(converter::toDomain);
     }
 
     @Override
+    @Transactional(readOnly = true)
     public PageResult<User> findAll(int page, int size) {
         // Ordering is deterministic: both JPQL queries use ORDER BY u.id.
         Page<Long> idPage = userRepo.findAllIds(PageRequest.of(page, size));
@@ -81,6 +84,7 @@ public class UserRepositoryImpl implements UserRepository {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public Optional<User> findByEmail(String email) {
         return userRepo.findByEmailWithRoles(email).map(converter::toDomain);
     }

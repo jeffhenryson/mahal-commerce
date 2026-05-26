@@ -30,7 +30,7 @@ public interface UserUseCase {
 
     void setUserEnabled(Long id, boolean enabled);
 
-    User updateUser(Long id, String newUsername);
+    User updateUser(Long id, String newUsername, String newEmail);
 
     void verifyEmail(String code);
 

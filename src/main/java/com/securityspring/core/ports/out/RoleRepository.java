@@ -1,8 +1,8 @@
 package com.securityspring.core.ports.out;
 
+import com.securityspring.core.domain.model.PageResult;
 import com.securityspring.core.domain.model.Role;
 
-import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
@@ -13,7 +13,7 @@ public interface RoleRepository {
 
     Optional<Role> findById(Long id);
 
-    List<Role> findAll();
+    PageResult<Role> findAll(int page, int size);
 
     void addPermissions(String roleName, Set<String> permissionNames);
 

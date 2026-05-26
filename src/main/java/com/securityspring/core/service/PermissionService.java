@@ -2,11 +2,10 @@ package com.securityspring.core.service;
 
 import com.securityspring.core.domain.exception.PermissionAlreadyExistsException;
 import com.securityspring.core.domain.exception.PermissionNotFoundException;
+import com.securityspring.core.domain.model.PageResult;
 import com.securityspring.core.domain.model.Permission;
 import com.securityspring.core.ports.in.PermissionUseCase;
 import com.securityspring.core.ports.out.PermissionRepository;
-
-import java.util.List;
 
 public class PermissionService implements PermissionUseCase {
 
@@ -26,8 +25,8 @@ public class PermissionService implements PermissionUseCase {
     }
 
     @Override
-    public List<Permission> listAll() {
-        return permissionRepository.findAll();
+    public PageResult<Permission> listAll(int page, int size) {
+        return permissionRepository.findAll(page, size);
     }
 
     @Override

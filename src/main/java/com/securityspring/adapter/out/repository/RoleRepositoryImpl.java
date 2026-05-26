@@ -5,10 +5,13 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Repository;
 
 import com.securityspring.adapter.out.entities.PermissionEntity;
 import com.securityspring.adapter.out.entities.RoleEntity;
+import com.securityspring.core.domain.model.PageResult;
 import com.securityspring.core.domain.model.Permission;
 import com.securityspring.core.domain.model.Role;
 import com.securityspring.core.ports.out.RoleRepository;
@@ -47,18 +50,23 @@ public class RoleRepositoryImpl implements RoleRepository {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public Optional<Role> findByName(String name) {
         return roleRepo.findByName(name).map(this::toDomain);
     }
 
     @Override
+    @Transactional(readOnly = true)
     public Optional<Role> findById(Long id) {
         return roleRepo.findById(id).map(this::toDomain);
     }
 
     @Override
-    public List<Role> findAll() {
-        return roleRepo.findAll().stream().map(this::toDomain).toList();
+    @Transactional(readOnly = true)
+    public PageResult<Role> findAll(int page, int size) {
+        Page<RoleEntity> p = roleRepo.findAll(PageRequest.of(page, size));
+        List<Role> content = p.getContent().stream().map(this::toDomain).toList();
+        return new PageResult<>(content, page, size, p.getTotalElements(), p.getTotalPages());
     }
 
     @Override

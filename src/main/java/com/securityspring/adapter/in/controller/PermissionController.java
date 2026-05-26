@@ -1,7 +1,9 @@
 package com.securityspring.adapter.in.controller;
 
+import com.securityspring.adapter.in.converter.PermissionDTOConverter;
 import com.securityspring.adapter.in.dtos.request.PermissionRequest;
 import com.securityspring.adapter.in.dtos.response.PermissionResponseDTO;
+import com.securityspring.core.domain.model.PageResult;
 import com.securityspring.core.domain.model.Permission;
 import com.securityspring.core.ports.in.PermissionUseCase;
 import io.swagger.v3.oas.annotations.Operation;
@@ -16,7 +18,6 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
-import java.util.List;
 
 @RestController
 @RequestMapping("/permissions")
@@ -24,20 +25,28 @@ import java.util.List;
 public class PermissionController {
 
     private final PermissionUseCase permissionUseCase;
+    private final PermissionDTOConverter converter;
 
-    public PermissionController(PermissionUseCase permissionUseCase) {
+    public PermissionController(PermissionUseCase permissionUseCase, PermissionDTOConverter converter) {
         this.permissionUseCase = permissionUseCase;
+        this.converter = converter;
     }
 
-    @Operation(summary = "Lista todas as permissions")
+    @Operation(summary = "Lista permissions paginadas")
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "OK"),
         @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
     })
     @GetMapping
     @PreAuthorize("hasAuthority('PERMISSION_READ')")
-    public ResponseEntity<List<PermissionResponseDTO>> list() {
-        return ResponseEntity.ok(permissionUseCase.listAll().stream().map(this::toResponse).toList());
+    public ResponseEntity<PageResult<PermissionResponseDTO>> list(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        PageResult<Permission> result = permissionUseCase.listAll(page, Math.min(size, 100));
+        PageResult<PermissionResponseDTO> response = new PageResult<>(
+                result.content().stream().map(converter::toResponse).toList(),
+                result.page(), result.size(), result.totalElements(), result.totalPages());
+        return ResponseEntity.ok(response);
     }
 
     @Operation(summary = "Cria uma nova permission")
@@ -52,7 +61,7 @@ public class PermissionController {
     public ResponseEntity<PermissionResponseDTO> create(@Valid @RequestBody PermissionRequest request) {
         Permission created = permissionUseCase.createPermission(request.getName());
         return ResponseEntity.created(URI.create("/permissions/" + created.getName()))
-                .body(toResponse(created));
+                .body(converter.toResponse(created));
     }
 
     @Operation(summary = "Remove uma permission pelo nome")
@@ -68,10 +77,4 @@ public class PermissionController {
         return ResponseEntity.noContent().build();
     }
 
-    private PermissionResponseDTO toResponse(Permission permission) {
-        PermissionResponseDTO dto = new PermissionResponseDTO();
-        dto.setId(permission.getId());
-        dto.setName(permission.getName());
-        return dto;
-    }
 }

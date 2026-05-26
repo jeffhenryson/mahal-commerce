@@ -5,6 +5,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.securityspring.adapter.in.converter.RoleDTOConverter;
 import com.securityspring.core.domain.exception.RoleAlreadyExistsException;
 import com.securityspring.core.domain.exception.RoleNotFoundException;
 import com.securityspring.core.domain.model.Role;
@@ -16,6 +17,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+
+import com.securityspring.core.domain.model.PageResult;
 
 import java.util.List;
 
@@ -29,7 +32,7 @@ public class RoleControllerTest {
     void setup() {
         roleUseCase = mock(RoleUseCase.class);
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new RoleController(roleUseCase))
+                .standaloneSetup(new RoleController(roleUseCase, new RoleDTOConverter()))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }
@@ -37,11 +40,13 @@ public class RoleControllerTest {
     @Test
     void list_returns_200_with_roles() throws Exception {
         Role r = new Role("ROLE_ADMIN");
-        when(roleUseCase.listAll()).thenReturn(List.of(r));
+        when(roleUseCase.listAll(0, 20))
+                .thenReturn(new PageResult<>(List.of(r), 0, 20, 1L, 1));
 
         mockMvc.perform(get("/roles"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].name").value("ROLE_ADMIN"));
+                .andExpect(jsonPath("$.content[0].name").value("ROLE_ADMIN"))
+                .andExpect(jsonPath("$.totalElements").value(1));
     }
 
     @Test

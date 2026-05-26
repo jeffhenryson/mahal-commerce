@@ -3,12 +3,11 @@ package com.securityspring.core.service;
 import com.securityspring.core.domain.exception.PermissionNotFoundException;
 import com.securityspring.core.domain.exception.RoleAlreadyExistsException;
 import com.securityspring.core.domain.exception.RoleNotFoundException;
+import com.securityspring.core.domain.model.PageResult;
 import com.securityspring.core.domain.model.Role;
 import com.securityspring.core.ports.in.RoleUseCase;
 import com.securityspring.core.ports.out.PermissionRepository;
 import com.securityspring.core.ports.out.RoleRepository;
-
-import java.util.List;
 
 public class RoleService implements RoleUseCase {
 
@@ -30,8 +29,8 @@ public class RoleService implements RoleUseCase {
     }
 
     @Override
-    public List<Role> listAll() {
-        return roleRepository.findAll();
+    public PageResult<Role> listAll(int page, int size) {
+        return roleRepository.findAll(page, size);
     }
 
     @Override
