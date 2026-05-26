@@ -16,28 +16,25 @@ public class Role {
         this.name = name;
     }
 
-    public Long getId() {
-        return id;
+    /** Factory para reconstituição a partir de persistência. */
+    public static Role of(Long id, String name, Set<Permission> permissions) {
+        Role r = new Role();
+        r.id = id;
+        r.name = name;
+        r.permissions = permissions != null ? new HashSet<>(permissions) : new HashSet<>();
+        return r;
     }
 
-    public void setId(Long id) {
-        this.id = id;
+    public Long getId() {
+        return id;
     }
 
     public String getName() {
         return name;
     }
 
-    public void setName(String name) {
-        this.name = name;
-    }
-
     public Set<Permission> getPermissions() {
         return permissions;
-    }
-
-    public void setPermissions(Set<Permission> permissions) {
-        this.permissions = permissions;
     }
 
     public void addPermission(Permission permission) {

@@ -1,12 +1,9 @@
 package com.securityspring.infra.security.jwt;
 
 import com.securityspring.core.ports.out.AccessTokenPort;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.security.core.userdetails.User;
 import org.springframework.stereotype.Component;
 
 import java.util.Set;
-import java.util.stream.Collectors;
 
 @Component
 public class JwtAccessTokenAdapter implements AccessTokenPort {
@@ -19,12 +16,6 @@ public class JwtAccessTokenAdapter implements AccessTokenPort {
 
     @Override
     public String generateFor(String username, Set<String> authorities) {
-        var userDetails = User.withUsername(username)
-                .password("")
-                .authorities(authorities.stream()
-                        .map(SimpleGrantedAuthority::new)
-                        .collect(Collectors.toSet()))
-                .build();
-        return jwtService.generateAccessToken(userDetails);
+        return jwtService.generateAccessToken(username, authorities);
     }
 }

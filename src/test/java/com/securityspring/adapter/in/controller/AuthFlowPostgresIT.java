@@ -20,6 +20,8 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import com.securityspring.infra.security.support.SeedCredentials;
+
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -69,7 +71,7 @@ public class AuthFlowPostgresIT {
         // Login with seeded admin user
         MvcResult loginResult = mockMvc.perform(post("/auth/login")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"username\":\"admin\",\"password\":\"Admin@dev1\"}"))
+                .content("{\"username\":\"" + SeedCredentials.SEED_ADMIN_USERNAME + "\",\"password\":\"" + SeedCredentials.SEED_ADMIN_PASSWORD + "\"}"))
                 .andExpect(status().isOk())
                 .andReturn();
 

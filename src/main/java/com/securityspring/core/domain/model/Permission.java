@@ -12,19 +12,19 @@ public class Permission {
         this.name = name;
     }
 
+    /** Factory para reconstituição a partir de persistência. */
+    public static Permission of(Long id, String name) {
+        Permission p = new Permission();
+        p.id = id;
+        p.name = name;
+        return p;
+    }
+
     public Long getId() {
         return id;
     }
 
-    public void setId(Long id) {
-        this.id = id;
-    }
-
     public String getName() {
         return name;
-    }
-
-    public void setName(String name) {
-        this.name = name;
     }
 }

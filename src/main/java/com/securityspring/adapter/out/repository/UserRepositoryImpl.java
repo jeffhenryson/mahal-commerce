@@ -13,11 +13,9 @@ import org.springframework.transaction.annotation.Transactional;
 import com.securityspring.adapter.out.converter.UserEntityConverter;
 import com.securityspring.adapter.out.entities.RoleEntity;
 import com.securityspring.adapter.out.entities.UserEntity;
-import com.securityspring.core.domain.exception.RoleNotFoundException;
 import com.securityspring.core.domain.model.PageResult;
 import com.securityspring.core.domain.model.Role;
 import com.securityspring.core.domain.model.User;
-import com.securityspring.core.ports.out.RoleRepository;
 import com.securityspring.core.ports.out.UserRepository;
 
 @Repository
@@ -26,16 +24,13 @@ public class UserRepositoryImpl implements UserRepository {
 
     private final UserJpaRepository userRepo;
     private final RoleJpaRepository roleJpaRepo;
-    private final RoleRepository roleRepository;
     private final UserEntityConverter converter;
 
     public UserRepositoryImpl(UserJpaRepository userRepo,
                               RoleJpaRepository roleJpaRepo,
-                              RoleRepository roleRepository,
                               UserEntityConverter converter) {
         this.userRepo = userRepo;
         this.roleJpaRepo = roleJpaRepo;
-        this.roleRepository = roleRepository;
         this.converter = converter;
     }
 
@@ -44,16 +39,11 @@ public class UserRepositoryImpl implements UserRepository {
         UserEntity entity = converter.toEntityBase(user);
 
         if (user.getRoles() != null && !user.getRoles().isEmpty()) {
+            // Roles carry their IDs from the service layer — use JPA references directly
+            // without going back to the port, decoupling this adapter from RoleRepository.
             Set<RoleEntity> roleEntities = user.getRoles().stream()
-                    .map(Role::getName)
-                    .filter(n -> n != null && !n.isBlank())
-                    .distinct()
-                    .map(name -> {
-                        // Validate role exists via port, then get a JPA proxy by ID.
-                        Role domainRole = roleRepository.findByName(name)
-                                .orElseThrow(() -> new RoleNotFoundException(name));
-                        return roleJpaRepo.getReferenceById(domainRole.getId());
-                    })
+                    .filter(r -> r.getId() != null)
+                    .map(r -> roleJpaRepo.getReferenceById(r.getId()))
                     .collect(Collectors.toSet());
             entity.setRoles(roleEntities);
         }
@@ -74,6 +64,7 @@ public class UserRepositoryImpl implements UserRepository {
 
     @Override
     public PageResult<User> findAll(int page, int size) {
+        // Ordering is deterministic: both JPQL queries use ORDER BY u.id.
         Page<Long> idPage = userRepo.findAllIds(PageRequest.of(page, size));
         List<User> users = idPage.isEmpty()
                 ? List.of()

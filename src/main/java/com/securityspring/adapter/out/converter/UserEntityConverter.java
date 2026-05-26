@@ -35,25 +35,14 @@ public class UserEntityConverter {
     public Set<Role> toDomainRoles(Set<RoleEntity> roleEntities) {
         if (roleEntities == null) return new HashSet<>();
         return roleEntities.stream()
-                .map(re -> {
-                    Role r = new Role();
-                    r.setId(re.getId());
-                    r.setName(re.getName());
-                    r.setPermissions(toDomainPermissions(re.getPermissions()));
-                    return r;
-                })
+                .map(re -> Role.of(re.getId(), re.getName(), toDomainPermissions(re.getPermissions())))
                 .collect(Collectors.toSet());
     }
 
     private Set<Permission> toDomainPermissions(Set<PermissionEntity> permEntities) {
         if (permEntities == null) return new HashSet<>();
         return permEntities.stream()
-                .map(pe -> {
-                    Permission p = new Permission();
-                    p.setId(pe.getId());
-                    p.setName(pe.getName());
-                    return p;
-                })
+                .map(pe -> Permission.of(pe.getId(), pe.getName()))
                 .collect(Collectors.toSet());
     }
 }

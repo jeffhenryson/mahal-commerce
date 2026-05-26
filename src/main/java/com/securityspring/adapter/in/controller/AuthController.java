@@ -20,6 +20,8 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
 
+import java.util.List;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -95,7 +97,7 @@ public class AuthController {
     @PostMapping("/register")
     public ResponseEntity<Void> register(@Valid @RequestBody RegisterRequest request) {
         userUseCase.registerUser(request.getUsername(), request.getPassword(), request.getEmail(),
-                java.util.List.of());
+                List.of());
         return ResponseEntity.status(201).build();
     }
 
@@ -110,11 +112,10 @@ public class AuthController {
         return ResponseEntity.noContent().build();
     }
 
-    @Operation(summary = "Reenvia código de verificação para o email informado")
+    @Operation(summary = "Reenvia código de verificação para o email informado",
+               description = "Sempre retorna 204 — não revela se o email está cadastrado.")
     @ApiResponses(value = {
-            @ApiResponse(responseCode = "204", description = "Código reenviado"),
-            @ApiResponse(responseCode = "404", description = "Email não encontrado", content = @Content),
-            @ApiResponse(responseCode = "409", description = "Email já verificado", content = @Content)
+            @ApiResponse(responseCode = "204", description = "Código reenviado (ou email não encontrado — resposta idêntica por segurança)")
     })
     @PostMapping("/resend-verification")
     public ResponseEntity<Void> resendVerification(@Valid @RequestBody ResendVerificationRequest request) {

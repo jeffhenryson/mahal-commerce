@@ -9,6 +9,10 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+// Diferença comportamental vs RedisLoginAttemptAdapter: após expiração do lock, o estado
+// é removido explicitamente em isLocked() e a contagem de falhas recomeça do zero.
+// No Redis, o contador tem TTL automático de lockDurationMinutes*2 e pode ter contagem
+// residual após o lock expirar. Em dev isso é irrelevante; não promova este adaptador a prod.
 @Component
 @Profile("dev")
 public class InMemoryLoginAttemptAdapter implements LoginAttemptPort {

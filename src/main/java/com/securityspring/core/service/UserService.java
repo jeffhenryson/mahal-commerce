@@ -65,12 +65,23 @@ public class UserService implements UserUseCase {
 
     @Override
     public User createUser(String username, String rawPassword, List<String> roles) {
+        return createUser(username, rawPassword, null, roles);
+    }
+
+    @Override
+    public User createUser(String username, String rawPassword, String email, List<String> roles) {
         if (!isValidPassword(rawPassword)) throw new InvalidPasswordException();
         userRepository.findByUsername(username).ifPresent(u -> {
             throw new UsernameAlreadyExistsException(username);
         });
+        if (email != null) {
+            userRepository.findByEmail(email).ifPresent(u -> {
+                throw new EmailAlreadyExistsException(email);
+            });
+        }
         Set<Role> roleSet = resolveRoles(roles);
         User user = User.of(username, passwordHash.hash(rawPassword), roleSet);
+        if (email != null) user.assignEmail(email);
         return userRepository.save(user);
     }
 
@@ -111,13 +122,13 @@ public class UserService implements UserUseCase {
 
     @Override
     public void resendVerification(String email) {
-        User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new UserNotFoundException(email));
-
-        if (user.isEmailVerified()) throw new EmailAlreadyVerifiedException();
-
-        verificationCodeRepository.deleteByUsername(user.getUsername());
-        issueAndSendCode(user.getUsername(), email);
+        // Return silently when email is not found to prevent user enumeration.
+        // Callers always receive 204 regardless of whether the email exists.
+        userRepository.findByEmail(email).ifPresent(user -> {
+            if (user.isEmailVerified()) return;
+            verificationCodeRepository.deleteByUsername(user.getUsername());
+            issueAndSendCode(user.getUsername(), email);
+        });
     }
 
     @Override
@@ -147,7 +158,9 @@ public class UserService implements UserUseCase {
 
     @Override
     public void deleteUser(Long id) {
-        userRepository.findById(id).orElseThrow(() -> new UserNotFoundException(id));
+        User user = userRepository.findById(id).orElseThrow(() -> new UserNotFoundException(id));
+        refreshTokenPort.revokeAll(user.getUsername());
+        tokenBlocklistPort.blockAllBefore(user.getUsername(), Instant.now());
         userRepository.deleteById(id);
     }
 

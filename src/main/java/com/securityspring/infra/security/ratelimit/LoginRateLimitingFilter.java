@@ -29,9 +29,13 @@ public class LoginRateLimitingFilter extends OncePerRequestFilter {
         // Subtract context-path so the check works with or without server.servlet.context-path.
         String path = request.getRequestURI().substring(request.getContextPath().length());
         String method = request.getMethod();
-        boolean isLogin = "/auth/login".equals(path) && "POST".equalsIgnoreCase(method);
-        boolean isRefresh = "/auth/refresh".equals(path) && "POST".equalsIgnoreCase(method);
-        return !isLogin && !isRefresh;
+        if (!"POST".equalsIgnoreCase(method)) return true;
+        // /auth/refresh is intentionally excluded: refresh tokens are opaque and rotation already
+        // detects reuse (full session revocation). Per-IP rate limiting adds NAT false positives
+        // without meaningful security benefit over the existing token-reuse detection.
+        return !"/auth/login".equals(path)
+                && !"/auth/verify-email".equals(path)
+                && !"/auth/resend-verification".equals(path);
     }
 
     @Override

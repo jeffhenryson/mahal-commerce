@@ -5,8 +5,6 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.security.core.userdetails.User;
 
 import com.securityspring.infra.security.jwt.JwtService;
 
@@ -17,9 +15,7 @@ public class JwtServiceTest {
         String secret = "dev-secret-please-change-to-256-bit-random-key"; // non-base64 ok
         JwtService jwt = new JwtService(secret, 15);
 
-        User user = new User("alice", "pass", Set.of(new SimpleGrantedAuthority("ROLE_ADMIN")));
-
-        String token = jwt.generateAccessToken(user);
+        String token = jwt.generateAccessToken("alice", Set.of("ROLE_ADMIN"));
         assertNotNull(token);
         assertTrue(jwt.isValid(token));
         assertEquals("alice", jwt.extractUsername(token));

@@ -9,6 +9,7 @@ import org.springframework.stereotype.Repository;
 
 import com.securityspring.adapter.out.entities.PermissionEntity;
 import com.securityspring.adapter.out.entities.RoleEntity;
+import com.securityspring.core.domain.model.Permission;
 import com.securityspring.core.domain.model.Role;
 import com.securityspring.core.ports.out.RoleRepository;
 
@@ -28,18 +29,11 @@ public class RoleRepositoryImpl implements RoleRepository {
 
     private Role toDomain(RoleEntity e) {
         if (e == null) return null;
-        Role r = new Role();
-        r.setId(e.getId());
-        r.setName(e.getName());
+        java.util.Set<Permission> permissions = new java.util.HashSet<>();
         if (e.getPermissions() != null) {
-            e.getPermissions().forEach(pe -> {
-                com.securityspring.core.domain.model.Permission p = new com.securityspring.core.domain.model.Permission();
-                p.setId(pe.getId());
-                p.setName(pe.getName());
-                r.addPermission(p);
-            });
+            e.getPermissions().forEach(pe -> permissions.add(Permission.of(pe.getId(), pe.getName())));
         }
-        return r;
+        return Role.of(e.getId(), e.getName(), permissions);
     }
 
     @Override

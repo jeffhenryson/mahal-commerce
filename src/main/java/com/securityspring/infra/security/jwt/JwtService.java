@@ -11,8 +11,6 @@ import java.util.stream.Collectors;
 import javax.crypto.SecretKey;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.security.core.GrantedAuthority;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Service;
 
 import io.jsonwebtoken.Claims;
@@ -49,15 +47,11 @@ public class JwtService {
         return secret.getBytes(StandardCharsets.UTF_8);
     }
 
-    public String generateAccessToken(UserDetails user) {
+    public String generateAccessToken(String username, Set<String> authorities) {
         Instant now = Instant.now();
-        Set<String> roles = user.getAuthorities().stream()
-                .map(GrantedAuthority::getAuthority)
-                .collect(Collectors.toSet());
-
         return Jwts.builder()
-                .subject(user.getUsername())
-                .claim("roles", roles)
+                .subject(username)
+                .claim("roles", authorities)
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(now.plus(accessTtlMinutes, ChronoUnit.MINUTES)))
                 .signWith(key)

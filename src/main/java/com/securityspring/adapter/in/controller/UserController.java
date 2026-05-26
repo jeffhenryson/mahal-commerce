@@ -16,9 +16,11 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Min;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
@@ -26,6 +28,7 @@ import java.net.URI;
 @RestController
 @RequestMapping("/users")
 @SecurityRequirement(name = "bearerAuth")
+@Validated
 public class UserController {
 
     private final UserUseCase useCase;
@@ -48,7 +51,7 @@ public class UserController {
     @PreAuthorize("hasAuthority('USER_CREATE')")
     public ResponseEntity<UserResponseDTO> create(@Valid @RequestBody UserRequestDTO request) {
         User created = useCase.createUser(
-                request.getUsername(), request.getPassword(), request.getRoles());
+                request.getUsername(), request.getPassword(), request.getEmail(), request.getRoles());
         UserResponseDTO body = converter.toResponse(created);
         return ResponseEntity.created(URI.create("/users/" + body.getId())).body(body);
     }
@@ -115,7 +118,7 @@ public class UserController {
     @GetMapping
     @PreAuthorize("hasAuthority('USER_READ')")
     public ResponseEntity<PageResult<UserResponseDTO>> list(
-            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") int size) {
         PageResult<User> result = useCase.listAll(page, Math.min(size, 100));
         PageResult<UserResponseDTO> response = new PageResult<>(

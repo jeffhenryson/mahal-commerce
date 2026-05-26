@@ -60,18 +60,7 @@ public class AuthRateLimitingTest {
                 .andExpect(status().isTooManyRequests());
     }
 
-    @Test
-    void returns_429_after_exceeding_refresh_attempts_in_window() throws Exception {
-        String body = "{\"refreshToken\":\"invalid-token\"}";
-        // First three attempts -> 401 (invalid token)
-        mockMvc.perform(post("/auth/refresh").contentType(MediaType.APPLICATION_JSON).content(body))
-                .andExpect(status().isUnauthorized());
-        mockMvc.perform(post("/auth/refresh").contentType(MediaType.APPLICATION_JSON).content(body))
-                .andExpect(status().isUnauthorized());
-        mockMvc.perform(post("/auth/refresh").contentType(MediaType.APPLICATION_JSON).content(body))
-                .andExpect(status().isUnauthorized());
-        // Fourth within window -> 429
-        mockMvc.perform(post("/auth/refresh").contentType(MediaType.APPLICATION_JSON).content(body))
-                .andExpect(status().isTooManyRequests());
-    }
+    // /auth/refresh is excluded from IP rate limiting: the opaque refresh token already has
+    // reuse detection (rotation invalidates all sessions on reuse). Adding shared-IP rate limits
+    // creates NAT false positives without meaningful security benefit.
 }

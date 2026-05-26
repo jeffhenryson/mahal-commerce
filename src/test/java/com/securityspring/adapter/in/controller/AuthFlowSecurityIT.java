@@ -7,6 +7,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.securityspring.infra.security.support.RefreshTokenTestHelper;
+import com.securityspring.infra.security.support.SeedCredentials;
 import com.securityspring.infra.security.support.TestHashUtils;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -79,7 +80,7 @@ public class AuthFlowSecurityIT {
         // Login as admin (seeded in dev) to get a refresh token
         MvcResult r = mockMvc.perform(post("/auth/login")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"username\":\"admin\",\"password\":\"Admin@dev1\"}"))
+                .content("{\"username\":\"" + SeedCredentials.SEED_ADMIN_USERNAME + "\",\"password\":\"" + SeedCredentials.SEED_ADMIN_PASSWORD + "\"}"))
                 .andExpect(status().isOk())
                 .andReturn();
         JsonNode json = om.readTree(r.getResponse().getContentAsString());

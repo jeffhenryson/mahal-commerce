@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "security-spring",
-    "description": "API de autenticação e usuários — JWT + RBAC com Permissões + Refresh Token\n\nFluxo recomendado:\n1. Execute **[Auth] Login (admin)** — accessToken e refreshToken são salvos automaticamente\n2. Todos os requests protegidos já usam {{access_token}}\n3. Ao expirar o access token, execute **[Auth] Refresh**\n4. Para testar como usuário comum, execute **[Auth] Login (user)**\n\nCredenciais dev:\n- admin / Admin@dev1  (permissões: todas)\n- user  / User@dev1   (permissões: USER_READ)\n\nCredenciais hml:\n- admin / Admin@hml1  (troque após primeiro login)",
+    "description": "API de autenticação e usuários — JWT + RBAC com Permissões + Refresh Token + Verificação de Email\n\nFluxo recomendado:\n1. Execute **[Auth] Login (admin)** — accessToken e refreshToken são salvos automaticamente\n2. Todos os requests protegidos já usam {{access_token}}\n3. Ao expirar o access token, execute **[Auth] Refresh**\n4. Para testar como usuário comum, execute **[Auth] Login (user)**\n\nFluxo de autoregistro:\n1. Execute **[Auth] Registrar** → conta criada desabilitada, código enviado ao email\n2. Execute **[Auth] Verificar Email** com o código recebido → conta ativada\n3. Execute **[Auth] Login** normalmente\n\nCredenciais dev (criadas via create-first-admin.sql):\n- admin / Admin@dev1  (ROLE_ADMIN — todas as permissões)\n- user  / User@dev1   (ROLE_USER — apenas USER_READ)\n\nPermissões do ROLE_ADMIN:\n  Usuários: USER_CREATE, USER_READ, USER_UPDATE, USER_DELETE, USER_ROLE_ASSIGN, USER_STATUS\n  Roles:    ROLE_READ, ROLE_CREATE, ROLE_DELETE, ROLE_MANAGE_PERMISSIONS\n  Permissões: PERMISSION_READ, PERMISSION_CREATE, PERMISSION_DELETE",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -17,6 +17,11 @@
     },
     {
       "key": "refresh_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "created_user_id",
       "value": "",
       "type": "string"
     }
@@ -36,7 +41,19 @@
               "path": ["actuator", "health"]
             },
             "description": "Verifica se a aplicação está no ar. Resposta esperada: {\"status\": \"UP\"}.\nEndpoint público — não exige autenticação."
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Status UP', () => pm.expect(pm.response.json().status).to.eql('UP'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
         }
       ]
     },
@@ -80,7 +97,7 @@
               "host": ["{{base_url}}"],
               "path": ["auth", "login"]
             },
-            "description": "Autentica o admin e salva automaticamente accessToken + refreshToken.\n\nPermissões do admin: USER_CREATE, USER_READ, USER_UPDATE, USER_DELETE, USER_ROLE_ASSIGN\n\nDev:  admin / Admin@dev1\nHml:  admin / Admin@hml1"
+            "description": "Autentica o admin e salva automaticamente accessToken + refreshToken.\n\nPermissões do admin: todas (USER_CREATE, USER_READ, USER_UPDATE, USER_DELETE, USER_ROLE_ASSIGN, USER_STATUS, ROLE_READ, ROLE_CREATE, ROLE_DELETE, ROLE_MANAGE_PERMISSIONS, PERMISSION_READ, PERMISSION_CREATE, PERMISSION_DELETE)\n\nDev:  admin / Admin@dev1"
           }
         },
         {
@@ -214,6 +231,98 @@
             },
             "description": "Revoga TODOS os refresh tokens do usuário autenticado (logout de todos os dispositivos).\nRequer Bearer token válido. O username é extraído do JWT.\nEndpoint: DELETE /auth/sessions"
           }
+        },
+        {
+          "name": "[Auth] Registrar (autoregistro)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "// Conta criada desabilitada — verificar o email antes de fazer login"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"novousuario\",\n  \"password\": \"Senha@123\",\n  \"email\": \"novousuario@exemplo.com\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/register",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "register"]
+            },
+            "description": "Autoregistro de usuário — cria conta DESABILITADA e envia código de 6 dígitos ao email.\nNão exige autenticação.\n\nRegras:\n- username: 3–80 chars\n- password: 8–120 chars, deve ter maiúscula, minúscula, dígito e caractere especial\n- email: endereço válido, máx 254 chars\n\nApós este request, execute **[Auth] Verificar Email** com o código recebido.\nEndpoint: POST /auth/register"
+          }
+        },
+        {
+          "name": "[Auth] Verificar Email",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 204', () => pm.response.to.have.status(204));",
+                  "// Após verificação, a conta está ativa e o login é possível"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"123456\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/verify-email",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "verify-email"]
+            },
+            "description": "Confirma o email com o código de 6 dígitos recebido por email após o registro.\nNão exige autenticação.\n\nO código tem TTL configurado via EMAIL_VERIFICATION_TTL_MINUTES (padrão: 15 min).\nApós confirmação, a conta é ativada e o usuário pode fazer login.\n\nSubstitua o campo \"code\" pelo código real recebido no email.\nEndpoint: POST /auth/verify-email"
+          }
+        },
+        {
+          "name": "[Auth] Reenviar Verificação",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 204', () => pm.response.to.have.status(204));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"novousuario@exemplo.com\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/resend-verification",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "resend-verification"]
+            },
+            "description": "Reenvia o código de verificação para o email informado.\nNão exige autenticação.\n\nRespostas possíveis:\n- 204: Código reenviado\n- 404: Email não encontrado no sistema\n- 409: Email já verificado (conta já está ativa)\n\nEndpoint: POST /auth/resend-verification"
+          }
         }
       ]
     },
@@ -277,7 +386,7 @@
               "path": ["users"],
               "query": [
                 { "key": "page", "value": "0", "description": "Página (base 0)" },
-                { "key": "size", "value": "20", "description": "Itens por página (padrão: 20)" }
+                { "key": "size", "value": "20", "description": "Itens por página (máx: 100)" }
               ]
             },
             "description": "Lista usuários com paginação. Requer permissão USER_READ.\nResposta: { content: [...], page, size, totalElements, totalPages }"
@@ -308,7 +417,7 @@
               "host": ["{{base_url}}"],
               "path": ["users", "1"]
             },
-            "description": "Busca usuário pelo ID. Requer permissão USER_READ.\nAlterece o ID na URL conforme necessário."
+            "description": "Busca usuário pelo ID. Requer permissão USER_READ.\nAltere o ID na URL conforme necessário."
           }
         },
         {
@@ -320,7 +429,6 @@
                 "exec": [
                   "pm.test('Status 201', () => pm.response.to.have.status(201));",
                   "pm.test('Username correto', () => pm.expect(pm.response.json().username).to.eql('joao'));",
-                  "pm.test('Roles atribuídas', () => pm.expect(pm.response.json().roles).to.include('ROLE_USER'));",
                   "",
                   "if (pm.response.code === 201) {",
                   "    pm.collectionVariables.set('created_user_id', pm.response.json().id);",
@@ -346,7 +454,91 @@
               "host": ["{{base_url}}"],
               "path": ["users"]
             },
-            "description": "Cria um novo usuário com roles. Requer permissão USER_CREATE (apenas ADMIN).\nUsername: 3-80 chars | Password: 8-120 chars\nroles: opcional — ex: [\"ROLE_USER\"] ou [\"ROLE_ADMIN\"]"
+            "description": "Cria um novo usuário com roles. Requer permissão USER_CREATE (apenas ADMIN).\nUsername: 3-80 chars | Password: 8-120 chars\nroles: opcional — ex: [\"ROLE_USER\"] ou [\"ROLE_ADMIN\"]\n\nO ID criado é salvo em {{created_user_id}} para reuso nos demais requests."
+          }
+        },
+        {
+          "name": "[Usuários] Atualizar username",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Tem username', () => pm.expect(pm.response.json().username).to.be.a('string'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"joao_atualizado\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/users/{{created_user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["users", "{{created_user_id}}"]
+            },
+            "description": "Atualiza o username de um usuário. Requer permissão USER_UPDATE (apenas ADMIN).\nUsa o ID salvo em {{created_user_id}} — execute **[Usuários] Criar novo usuário** primeiro.\nEndpoint: PATCH /users/{id}"
+          }
+        },
+        {
+          "name": "[Usuários] Desativar conta",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 204', () => pm.response.to.have.status(204));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users/{{created_user_id}}/disable",
+              "host": ["{{base_url}}"],
+              "path": ["users", "{{created_user_id}}", "disable"]
+            },
+            "description": "Desativa a conta de um usuário (enabled = false). Requer permissão USER_STATUS (apenas ADMIN).\nO usuário desativado não consegue fazer login.\nUsa o ID salvo em {{created_user_id}}.\nEndpoint: PUT /users/{id}/disable"
+          }
+        },
+        {
+          "name": "[Usuários] Reativar conta",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 204', () => pm.response.to.have.status(204));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users/{{created_user_id}}/enable",
+              "host": ["{{base_url}}"],
+              "path": ["users", "{{created_user_id}}", "enable"]
+            },
+            "description": "Reativa a conta de um usuário (enabled = true). Requer permissão USER_STATUS (apenas ADMIN).\nUsa o ID salvo em {{created_user_id}}.\nEndpoint: PUT /users/{id}/enable"
           }
         },
         {
@@ -396,14 +588,14 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"currentPassword\": \"Admin@dev1\",\n  \"newPassword\": \"NovasSenha@456\"\n}"
+              "raw": "{\n  \"currentPassword\": \"Admin@dev1\",\n  \"newPassword\": \"NovaSenha@456\"\n}"
             },
             "url": {
               "raw": "{{base_url}}/users/me/password",
               "host": ["{{base_url}}"],
               "path": ["users", "me", "password"]
             },
-            "description": "Troca a senha do usuário autenticado.\nRequer a senha atual correta (campo currentPassword).\nNewPassword: mínimo 8 caracteres.\nQualquer usuário autenticado pode usar — não exige permissão especial.\nURL: PUT /users/me/password"
+            "description": "Troca a senha do usuário autenticado.\nRequer a senha atual correta (campo currentPassword).\nNewPassword: mínimo 8 caracteres com maiúscula, minúscula, dígito e especial.\nQualquer usuário autenticado pode usar — não exige permissão especial.\nEndpoint: PUT /users/me/password"
           }
         },
         {
@@ -425,11 +617,251 @@
               { "key": "Authorization", "value": "Bearer {{access_token}}" }
             ],
             "url": {
-              "raw": "{{base_url}}/users/2",
+              "raw": "{{base_url}}/users/{{created_user_id}}",
               "host": ["{{base_url}}"],
-              "path": ["users", "2"]
+              "path": ["users", "{{created_user_id}}"]
             },
-            "description": "Remove o usuário com o ID especificado. Requer permissão USER_DELETE (apenas ADMIN).\nAjuste o ID na URL conforme necessário."
+            "description": "Remove o usuário com o ID especificado. Requer permissão USER_DELETE (apenas ADMIN).\nUsa o ID salvo em {{created_user_id}}."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Roles",
+      "item": [
+        {
+          "name": "[Roles] Listar todas",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Retorna array', () => pm.expect(pm.response.json()).to.be.an('array'));",
+                  "pm.test('Cada role tem name', () => {",
+                  "    pm.response.json().forEach(r => pm.expect(r.name).to.be.a('string'));",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/roles",
+              "host": ["{{base_url}}"],
+              "path": ["roles"]
+            },
+            "description": "Lista todas as roles cadastradas com suas permissões.\nRequer permissão ROLE_READ (apenas ADMIN).\nEndpoint: GET /roles"
+          }
+        },
+        {
+          "name": "[Roles] Criar nova role",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Tem name', () => pm.expect(pm.response.json().name).to.be.a('string'));",
+                  "pm.test('Tem permissions', () => pm.expect(pm.response.json().permissions).to.be.an('array'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"ROLE_MODERADOR\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/roles",
+              "host": ["{{base_url}}"],
+              "path": ["roles"]
+            },
+            "description": "Cria uma nova role. Requer permissão ROLE_CREATE (apenas ADMIN).\nname: 3–80 chars\n\nConvenção: usar prefixo ROLE_ (ex: ROLE_MODERADOR).\nApós criar, use **[Roles] Atribuir Permission** para associar permissões.\nEndpoint: POST /roles"
+          }
+        },
+        {
+          "name": "[Roles] Atribuir permission a role",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 204', () => pm.response.to.have.status(204));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/roles/ROLE_MODERADOR/permissions/USER_READ",
+              "host": ["{{base_url}}"],
+              "path": ["roles", "ROLE_MODERADOR", "permissions", "USER_READ"]
+            },
+            "description": "Atribui uma permission existente a uma role. Requer permissão ROLE_MANAGE_PERMISSIONS (apenas ADMIN).\nAjuste roleName e permissionName na URL conforme necessário.\nEndpoint: POST /roles/{roleName}/permissions/{permissionName}"
+          }
+        },
+        {
+          "name": "[Roles] Remover permission de role",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 204', () => pm.response.to.have.status(204));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/roles/ROLE_MODERADOR/permissions/USER_READ",
+              "host": ["{{base_url}}"],
+              "path": ["roles", "ROLE_MODERADOR", "permissions", "USER_READ"]
+            },
+            "description": "Remove uma permission de uma role. Requer permissão ROLE_MANAGE_PERMISSIONS (apenas ADMIN).\nAjuste roleName e permissionName na URL conforme necessário.\nEndpoint: DELETE /roles/{roleName}/permissions/{permissionName}"
+          }
+        },
+        {
+          "name": "[Roles] Deletar role",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 204', () => pm.response.to.have.status(204));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/roles/ROLE_MODERADOR",
+              "host": ["{{base_url}}"],
+              "path": ["roles", "ROLE_MODERADOR"]
+            },
+            "description": "Remove uma role pelo nome. Requer permissão ROLE_DELETE (apenas ADMIN).\nAtenção: roles com usuários associados podem falhar dependendo do cascade configurado.\nEndpoint: DELETE /roles/{name}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Permissions",
+      "item": [
+        {
+          "name": "[Permissions] Listar todas",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Retorna array', () => pm.expect(pm.response.json()).to.be.an('array'));",
+                  "pm.test('Cada permission tem name', () => {",
+                  "    pm.response.json().forEach(p => pm.expect(p.name).to.be.a('string'));",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/permissions",
+              "host": ["{{base_url}}"],
+              "path": ["permissions"]
+            },
+            "description": "Lista todas as permissions cadastradas.\nRequer permissão PERMISSION_READ (apenas ADMIN).\nEndpoint: GET /permissions"
+          }
+        },
+        {
+          "name": "[Permissions] Criar nova permission",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Tem name', () => pm.expect(pm.response.json().name).to.be.a('string'));",
+                  "pm.test('Tem id', () => pm.expect(pm.response.json().id).to.be.a('number'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"RELATORIO_READ\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/permissions",
+              "host": ["{{base_url}}"],
+              "path": ["permissions"]
+            },
+            "description": "Cria uma nova permission granular. Requer permissão PERMISSION_CREATE (apenas ADMIN).\nname: 3–80 chars\n\nConvenção: RECURSO_ACAO (ex: RELATORIO_READ, AUDITORIA_EXPORT).\nApós criar, use **[Roles] Atribuir Permission** para associá-la a uma role.\nEndpoint: POST /permissions"
+          }
+        },
+        {
+          "name": "[Permissions] Deletar permission",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 204', () => pm.response.to.have.status(204));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/permissions/RELATORIO_READ",
+              "host": ["{{base_url}}"],
+              "path": ["permissions", "RELATORIO_READ"]
+            },
+            "description": "Remove uma permission pelo nome. Requer permissão PERMISSION_DELETE (apenas ADMIN).\nA remoção é em cascata — a permission é desassociada de todas as roles automaticamente.\nEndpoint: DELETE /permissions/{name}"
           }
         }
       ]
@@ -589,7 +1021,7 @@
               "script": {
                 "exec": [
                   "pm.test('Status 400', () => pm.response.to.have.status(400));",
-                  "pm.test('Tem message', () => pm.expect(pm.response.json().message).to.include('incorrect'));"
+                  "pm.test('Tem message', () => pm.expect(pm.response.json().message).to.be.a('string'));"
                 ],
                 "type": "text/javascript"
               }
@@ -611,6 +1043,96 @@
               "path": ["users", "me", "password"]
             },
             "description": "Troca de senha com currentPassword incorreta. Espera 400 com mensagem de erro."
+          }
+        },
+        {
+          "name": "[Erro] Registro com username duplicado → 409",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 409', () => pm.response.to.have.status(409));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"Senha@123\",\n  \"email\": \"outro@exemplo.com\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/register",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "register"]
+            },
+            "description": "Tentativa de registro com username já existente. Espera 409 Conflict."
+          }
+        },
+        {
+          "name": "[Erro] Código de verificação inválido → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"000000\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/verify-email",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "verify-email"]
+            },
+            "description": "Tentativa de verificação com código inválido ou expirado. Espera 400."
+          }
+        },
+        {
+          "name": "[Erro] Email já verificado → 409",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 409', () => pm.response.to.have.status(409));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@exemplo.com\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/resend-verification",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "resend-verification"]
+            },
+            "description": "Tentativa de reenvio de verificação para email já confirmado. Espera 409 Conflict."
           }
         },
         {

@@ -76,8 +76,7 @@ class UserServiceTest {
 
     @Test
     void createUser_savesUserWithRole() {
-        Role role = new Role();
-        role.setName("ROLE_USER");
+        Role role = new Role("ROLE_USER");
         when(passwordHash.hash(anyString())).thenReturn("hashed");
         when(userRepository.findByUsername(anyString())).thenReturn(Optional.empty());
         when(roleRepository.findByName("ROLE_USER")).thenReturn(Optional.of(role));

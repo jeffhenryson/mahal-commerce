@@ -84,7 +84,7 @@ public class UserControllerTest {
 
     @Test
     void create_user_duplicate_username_returns_409() throws Exception {
-        when(useCase.createUser(eq("admin"), any(), any()))
+        when(useCase.createUser(eq("admin"), any(), any(), any()))
                 .thenThrow(new UsernameAlreadyExistsException("admin"));
 
         UserRequestDTO dto = new UserRequestDTO();

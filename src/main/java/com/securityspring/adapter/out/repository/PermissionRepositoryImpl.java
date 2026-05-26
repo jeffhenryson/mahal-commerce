@@ -46,9 +46,6 @@ public class PermissionRepositoryImpl implements PermissionRepository {
     }
 
     private Permission toDomain(PermissionEntity e) {
-        Permission p = new Permission();
-        p.setId(e.getId());
-        p.setName(e.getName());
-        return p;
+        return Permission.of(e.getId(), e.getName());
     }
 }

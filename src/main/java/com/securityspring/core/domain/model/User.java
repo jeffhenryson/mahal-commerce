@@ -53,6 +53,10 @@ public class User {
 
     // --- Domain operations ---
 
+    public void assignEmail(String email) {
+        this.email = email;
+    }
+
     public void changePassword(String hashedPassword) {
         Objects.requireNonNull(hashedPassword, "hashedPassword is required");
         this.password = hashedPassword;

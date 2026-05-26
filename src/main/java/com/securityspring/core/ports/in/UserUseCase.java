@@ -10,6 +10,9 @@ public interface UserUseCase {
     /** Criação administrativa sem verificação de email (ex: SeedConfig, admin API). */
     User createUser(String username, String rawPassword, List<String> roles);
 
+    /** Criação administrativa com email opcional — salvo sem trigger de verificação. */
+    User createUser(String username, String rawPassword, String email, List<String> roles);
+
     /** Registro externo: cria conta desabilitada e envia código de verificação por email. */
     User registerUser(String username, String rawPassword, String email, List<String> roles);
 

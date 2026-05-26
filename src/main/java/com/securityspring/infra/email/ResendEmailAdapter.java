@@ -20,11 +20,14 @@ public class ResendEmailAdapter implements EmailPort {
 
     private final RestClient restClient;
     private final String fromAddress;
+    private final long ttlMinutes;
 
     public ResendEmailAdapter(
             @Value("${resend.api-key}") String apiKey,
-            @Value("${resend.from:noreply@example.com}") String fromAddress) {
+            @Value("${resend.from:noreply@example.com}") String fromAddress,
+            @Value("${email.verification.ttl-minutes:15}") long ttlMinutes) {
         this.fromAddress = fromAddress;
+        this.ttlMinutes = ttlMinutes;
         this.restClient = RestClient.builder()
                 .baseUrl(RESEND_API_URL)
                 .defaultHeader("Authorization", "Bearer " + apiKey)
@@ -63,9 +66,9 @@ public class ResendEmailAdapter implements EmailPort {
                               background:#f4f4f4;padding:16px;text-align:center;border-radius:8px">
                     %s
                   </div>
-                  <p style="color:#666;font-size:.85rem">Este código expira em 15 minutos.<br>
+                  <p style="color:#666;font-size:.85rem">Este código expira em %d minutos.<br>
                   Se você não solicitou este cadastro, ignore este email.</p>
                 </div>
-                """.formatted(username, code);
+                """.formatted(username, code, ttlMinutes);
     }
 }
