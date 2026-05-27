@@ -1,5 +1,8 @@
 package com.securityspring.infra.config;
 
+import io.swagger.v3.oas.models.OpenAPI;
+import org.springdoc.core.utils.SpringDocUtils;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import io.swagger.v3.oas.annotations.OpenAPIDefinition;
@@ -18,4 +21,11 @@ import io.swagger.v3.oas.annotations.security.SecurityScheme;
     bearerFormat = "JWT"
 )
 public class OpenApiConfig {
+
+    @Bean
+    OpenAPI openAPI() {
+        // Exibe Instant como string ISO-8601 no Swagger UI em vez de objeto com epochSecond/nano.
+        SpringDocUtils.getConfig().replaceWithClass(java.time.Instant.class, String.class);
+        return new OpenAPI();
+    }
 }

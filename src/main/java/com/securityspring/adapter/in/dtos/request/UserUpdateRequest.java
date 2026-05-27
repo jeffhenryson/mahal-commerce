@@ -14,4 +14,7 @@ public class UserUpdateRequest {
     @Email(message = "Email inválido")
     @Size(max = 254)
     private String email;
+
+    /** Obrigatório apenas ao trocar o próprio email via PATCH /users/me. Ignorado em atualizações administrativas. */
+    private String currentPassword;
 }

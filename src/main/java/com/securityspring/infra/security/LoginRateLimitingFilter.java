@@ -18,16 +18,19 @@ import java.io.IOException;
 @Component
 public class LoginRateLimitingFilter extends OncePerRequestFilter {
 
+    // Static mapper avoids a Spring-managed ObjectMapper dependency that can be absent
+    // in lightweight test contexts (e.g. @SpringBootTest without full Jackson auto-config).
+    private static final ObjectMapper MAPPER = new ObjectMapper()
+            .registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule())
+            .disable(com.fasterxml.jackson.databind.SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+
     private final LoginRateLimiterPort rateLimiter;
     private final long windowSeconds;
-    private final ObjectMapper objectMapper;
 
     public LoginRateLimitingFilter(LoginRateLimiterPort rateLimiter,
-                                   @Value("${rate.limit.login.window-seconds:60}") long windowSeconds,
-                                   ObjectMapper objectMapper) {
+                                   @Value("${rate.limit.login.window-seconds:60}") long windowSeconds) {
         this.rateLimiter = rateLimiter;
         this.windowSeconds = windowSeconds;
-        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -36,12 +39,11 @@ public class LoginRateLimitingFilter extends OncePerRequestFilter {
         String path = request.getRequestURI().substring(request.getContextPath().length());
         String method = request.getMethod();
         if (!"POST".equalsIgnoreCase(method)) return true;
-        // /auth/refresh is intentionally excluded: refresh tokens are opaque and rotation already
-        // detects reuse (full session revocation). Per-IP rate limiting adds NAT false positives
-        // without meaningful security benefit over the existing token-reuse detection.
         return !"/auth/login".equals(path)
+                && !"/auth/register".equals(path)
                 && !"/auth/verify-email".equals(path)
-                && !"/auth/resend-verification".equals(path);
+                && !"/auth/resend-verification".equals(path)
+                && !"/auth/refresh".equals(path);
     }
 
     @Override
@@ -56,7 +58,7 @@ public class LoginRateLimitingFilter extends OncePerRequestFilter {
             response.setStatus(429);
             response.setHeader("Retry-After", String.valueOf(windowSeconds));
             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-            objectMapper.writeValue(response.getWriter(), error);
+            MAPPER.writeValue(response.getWriter(), error);
             return;
         }
         filterChain.doFilter(request, response);

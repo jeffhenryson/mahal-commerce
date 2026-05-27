@@ -16,6 +16,7 @@ import com.securityspring.core.domain.model.PageResult;
 import com.securityspring.core.domain.model.User;
 import com.securityspring.core.ports.in.UserUseCase;
 import com.securityspring.infra.handler.GlobalExceptionHandler;
+import org.springframework.context.ApplicationEventPublisher;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -35,8 +36,9 @@ public class UserControllerTest {
     @BeforeEach
     void setup() {
         useCase = mock(UserUseCase.class);
+        ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new UserController(useCase, new UserDTOConverter()))
+                .standaloneSetup(new UserController(useCase, new UserDTOConverter(), publisher))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }
@@ -67,6 +69,8 @@ public class UserControllerTest {
 
     @Test
     void delete_user_returns_204_and_calls_use_case() throws Exception {
+        when(useCase.deleteUser(42L)).thenReturn("alice");
+
         mockMvc.perform(delete("/users/42"))
                 .andExpect(status().isNoContent());
 

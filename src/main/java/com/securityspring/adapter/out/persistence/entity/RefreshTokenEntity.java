@@ -44,4 +44,12 @@ public class RefreshTokenEntity {
 
     @Column(name = "rotated_at")
     private Instant rotatedAt;
+
+    /** IP do cliente no momento do login. Nullable — pode estar ausente em contextos sem request. */
+    @Column(name = "ip_address", length = 45)
+    private String ipAddress;
+
+    /** User-Agent do cliente no momento do login, truncado a 512 chars. Nullable. */
+    @Column(name = "user_agent", length = 512)
+    private String userAgent;
 }

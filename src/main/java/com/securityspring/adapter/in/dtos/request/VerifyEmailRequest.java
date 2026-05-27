@@ -7,6 +7,6 @@ import lombok.Data;
 @Data
 public class VerifyEmailRequest {
     @NotBlank
-    @Pattern(regexp = "\\d{6}", message = "O código deve ter exatamente 6 dígitos")
+    @Pattern(regexp = "[A-Z0-9]{12}", message = "Code must be exactly 12 alphanumeric characters")
     private String code;
 }

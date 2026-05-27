@@ -28,6 +28,12 @@ public class HmlStartupValidator {
     @Value("${resend.api-key:}")
     private String resendApiKey;
 
+    @Value("${resend.from:}")
+    private String resendFrom;
+
+    @Value("${cors.allowed-origins:}")
+    private String corsAllowedOrigins;
+
     @PostConstruct
     public void validate() {
         List<String> errors = new ArrayList<>();
@@ -43,6 +49,12 @@ public class HmlStartupValidator {
         }
         if (isBlankOrPlaceholder(resendApiKey, "placeholder", "dev-")) {
             errors.add("resend.api-key está ausente ou contém valor de desenvolvimento");
+        }
+        if (isBlankOrPlaceholder(resendFrom, "example.com")) {
+            errors.add("resend.from (RESEND_FROM) está ausente ou usa domínio reservado — emails serão rejeitados");
+        }
+        if (isBlankOrPlaceholder(corsAllowedOrigins, "*")) {
+            errors.add("cors.allowed-origins não pode ser '*' em hml — defina CORS_ALLOWED_ORIGINS com a origem do ambiente de staging");
         }
 
         if (!errors.isEmpty()) {

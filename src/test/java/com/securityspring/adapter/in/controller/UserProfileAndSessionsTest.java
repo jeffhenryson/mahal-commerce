@@ -6,6 +6,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 import com.securityspring.adapter.out.security.blocklist.InMemoryTokenBlocklistAdapter;
+import com.securityspring.adapter.out.security.ratelimit.InMemoryLoginAttemptAdapter;
+import com.securityspring.adapter.out.security.ratelimit.InMemoryLoginRateLimiterAdapter;
 import com.securityspring.infra.security.support.RefreshTokenTestHelper;
 import com.securityspring.infra.security.support.TestHashUtils;
 
@@ -34,6 +36,10 @@ public class UserProfileAndSessionsTest {
     private RefreshTokenTestHelper refreshTokenTestHelper;
     @Autowired
     private InMemoryTokenBlocklistAdapter blocklistAdapter;
+    @Autowired
+    private InMemoryLoginAttemptAdapter loginAttemptAdapter;
+    @Autowired
+    private InMemoryLoginRateLimiterAdapter loginRateLimiterAdapter;
 
     private MockMvc mockMvc;
     private final ObjectMapper om = new ObjectMapper();
@@ -42,6 +48,8 @@ public class UserProfileAndSessionsTest {
     void setup() {
         mockMvc = MockMvcBuilders.webAppContextSetup(context).apply(springSecurity()).build();
         blocklistAdapter.clearAll();
+        loginAttemptAdapter.clearAll();
+        loginRateLimiterAdapter.reset();
     }
 
     @Test
@@ -160,6 +168,87 @@ public class UserProfileAndSessionsTest {
         mockMvc.perform(get("/users/me")
                 .header("Authorization", "Bearer " + accessToken))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void patch_me_updates_own_username() throws Exception {
+        String unique = "patchme_" + System.currentTimeMillis();
+        mockMvc.perform(post("/users")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(String.format("{\"username\":\"%s\",\"password\":\"Pass1@word\"}", unique))
+                .with(user("admin").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("USER_CREATE"))))
+                .andExpect(status().isCreated());
+
+        String newUsername = unique + "_v2";
+        mockMvc.perform(patch("/users/me")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(String.format("{\"username\":\"%s\"}", newUsername))
+                .with(user(unique).authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.username").value(newUsername));
+    }
+
+    @Test
+    void disable_user_returns_204_and_blocks_subsequent_authentication() throws Exception {
+        String unique = "disabletest_" + System.currentTimeMillis();
+        MvcResult created = mockMvc.perform(post("/users")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(String.format("{\"username\":\"%s\",\"password\":\"Pass1@word\"}", unique))
+                .with(user("admin").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("USER_CREATE"))))
+                .andExpect(status().isCreated())
+                .andReturn();
+        Long id = om.readTree(created.getResponse().getContentAsString()).get("id").asLong();
+
+        mockMvc.perform(put("/users/" + id + "/disable")
+                .with(user("admin").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("USER_STATUS"))))
+                .andExpect(status().isNoContent());
+
+        // Disabled accounts are rejected with generic 401 (no information disclosure)
+        mockMvc.perform(post("/auth/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(String.format("{\"username\":\"%s\",\"password\":\"Pass1@word\"}", unique)))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void enable_user_returns_204_and_allows_login() throws Exception {
+        String unique = "enabletest_" + System.currentTimeMillis();
+        MvcResult created = mockMvc.perform(post("/users")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(String.format("{\"username\":\"%s\",\"password\":\"Pass1@word\"}", unique))
+                .with(user("admin").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("USER_CREATE"))))
+                .andExpect(status().isCreated())
+                .andReturn();
+        Long id = om.readTree(created.getResponse().getContentAsString()).get("id").asLong();
+
+        // Disable first
+        mockMvc.perform(put("/users/" + id + "/disable")
+                .with(user("admin").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("USER_STATUS"))))
+                .andExpect(status().isNoContent());
+
+        // Re-enable
+        mockMvc.perform(put("/users/" + id + "/enable")
+                .with(user("admin").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("USER_STATUS"))))
+                .andExpect(status().isNoContent());
+
+        // After re-enable, account exists and login attempt returns auth failure (not 403)
+        // because the test user was created without email verification
+        mockMvc.perform(post("/auth/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(String.format("{\"username\":\"%s\",\"password\":\"Pass1@word\"}", unique)))
+                .andExpect(status().isOk());
     }
 
     @Test

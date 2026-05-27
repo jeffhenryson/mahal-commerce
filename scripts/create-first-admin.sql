@@ -10,8 +10,10 @@
 --   htpasswd -bnBC 10 "" SUA_SENHA_AQUI | tr -d ':\n'
 
 -- 1. Cria o usuário admin com o hash da senha escolhida
-INSERT INTO users (username, password)
-VALUES ('admin', '$2a$10$SUBSTITUA_ESTE_HASH_POR_UM_GERADO_COM_A_SENHA_REAL')
+--    enabled = TRUE  → conta ativa imediatamente
+--    email_verified = FALSE → sem email de verificação para conta admin criada manualmente
+INSERT INTO users (username, password, enabled, email_verified)
+VALUES ('admin', '$2a$10$SUBSTITUA_ESTE_HASH_POR_UM_GERADO_COM_A_SENHA_REAL', TRUE, FALSE)
 ON CONFLICT (username) DO NOTHING;
 
 -- 2. Garante que a role ROLE_ADMIN existe (já criada pela migration V3, mas idempotente)

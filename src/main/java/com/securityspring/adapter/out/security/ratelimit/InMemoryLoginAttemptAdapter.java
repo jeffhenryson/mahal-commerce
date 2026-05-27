@@ -58,4 +58,9 @@ public class InMemoryLoginAttemptAdapter implements LoginAttemptPort {
         }
         return true;
     }
+
+    /** Resets all lockout state. Intended for use in tests only. */
+    public void clearAll() {
+        state.clear();
+    }
 }

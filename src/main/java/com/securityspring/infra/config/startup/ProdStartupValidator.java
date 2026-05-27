@@ -17,8 +17,17 @@ import java.util.List;
 @Profile("prod")
 public class ProdStartupValidator {
 
+    @Value("${spring.application.name:}")
+    private String applicationName;
+
     @Value("${jwt.secret}")
     private String jwtSecret;
+
+    @Value("${jwt.issuer:security-spring}")
+    private String jwtIssuer;
+
+    @Value("${jwt.audience:api}")
+    private String jwtAudience;
 
     @Value("${cors.allowed-origins}")
     private String corsAllowedOrigins;
@@ -29,15 +38,21 @@ public class ProdStartupValidator {
     @Value("${resend.api-key}")
     private String resendApiKey;
 
+    @Value("${resend.from:}")
+    private String resendFrom;
+
     @PostConstruct
     public void validate() {
         List<String> errors = new ArrayList<>();
 
         if (isBlankOrPlaceholder(jwtSecret, "dev-secret", "troque-para")) {
             errors.add("jwt.secret está ausente ou contém valor de desenvolvimento");
-        }
-        if (jwtSecret != null && jwtSecret.getBytes().length < 32) {
-            errors.add("jwt.secret deve ter ao menos 32 bytes (256 bits) para HS256");
+        } else if (jwtSecret != null && jwtSecret.length() < 44) {
+            // Uma chave HS256 precisa de ao menos 256 bits (32 bytes).
+            // Representada em Base64 sem padding, 32 bytes → 43 chars (ceil(32*4/3)).
+            // Verificar o comprimento da string é proxy conservador: chaves mais curtas
+            // não têm entropia suficiente independentemente da codificação.
+            errors.add("jwt.secret parece curto demais para HS256 — use ao menos 44 caracteres (Base64 de 256 bits)");
         }
         if (isBlankOrPlaceholder(corsAllowedOrigins, "*")) {
             errors.add("cors.allowed-origins não pode ser '*' em produção — defina CORS_ALLOWED_ORIGINS");
@@ -47,6 +62,18 @@ public class ProdStartupValidator {
         }
         if (isBlankOrPlaceholder(resendApiKey, "placeholder", "dev-")) {
             errors.add("resend.api-key está ausente ou contém valor de desenvolvimento");
+        }
+        if (isBlankOrPlaceholder(resendFrom, "example.com")) {
+            errors.add("resend.from (RESEND_FROM) está ausente ou usa domínio reservado — emails serão rejeitados");
+        }
+        if ("security-spring".equalsIgnoreCase(jwtIssuer)) {
+            errors.add("jwt.issuer está com o valor padrão 'security-spring' — defina JWT_ISSUER com o nome do seu serviço");
+        }
+        if ("api".equalsIgnoreCase(jwtAudience)) {
+            errors.add("jwt.audience está com o valor padrão 'api' — defina JWT_AUDIENCE com um identificador único para este serviço");
+        }
+        if ("security-spring".equalsIgnoreCase(applicationName) || isBlankOrPlaceholder(applicationName)) {
+            errors.add("spring.application.name ainda é 'security-spring' (nome do template) — renomeie em application.properties e no artifactId do pom.xml");
         }
 
         if (!errors.isEmpty()) {

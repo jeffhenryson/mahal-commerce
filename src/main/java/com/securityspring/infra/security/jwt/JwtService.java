@@ -6,6 +6,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.Collection;
 import java.util.Date;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 import javax.crypto.SecretKey;
@@ -26,10 +27,14 @@ public class JwtService {
 
     private final SecretKey key;
     private final long accessTtlMinutes;
+    private final String issuer;
+    private final String audience;
 
     public JwtService(
             @Value("${jwt.secret}") String secret,
-            @Value("${jwt.access-ttl-minutes}") long accessTtlMinutes) {
+            @Value("${jwt.access-ttl-minutes}") long accessTtlMinutes,
+            @Value("${jwt.issuer:security-spring}") String issuer,
+            @Value("${jwt.audience:api}") String audience) {
         byte[] keyBytes = decodeSecret(secret);
         if (keyBytes.length < 32) {
             throw new IllegalStateException(
@@ -39,6 +44,8 @@ public class JwtService {
         }
         this.key = Keys.hmacShaKeyFor(keyBytes);
         this.accessTtlMinutes = accessTtlMinutes;
+        this.issuer = issuer;
+        this.audience = audience;
     }
 
     // Tries to decode as base64 first (production secrets); falls back to raw UTF-8 bytes.
@@ -58,7 +65,10 @@ public class JwtService {
     public String generateAccessToken(String username, Set<String> authorities) {
         Instant now = Instant.now();
         return Jwts.builder()
+                .id(UUID.randomUUID().toString())
                 .subject(username)
+                .issuer(issuer)
+                .audience().add(audience).and()
                 .claim("roles", authorities)
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(now.plus(accessTtlMinutes, ChronoUnit.MINUTES)))
@@ -94,6 +104,8 @@ public class JwtService {
     private Claims parseClaims(String token) {
         return Jwts.parser()
                 .verifyWith(key)
+                .requireIssuer(issuer)
+                .requireAudience(audience)
                 .build()
                 .parseSignedClaims(token)
                 .getPayload();

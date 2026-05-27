@@ -1,5 +1,6 @@
 package com.securityspring.adapter.in.dtos.request;
 
+import com.securityspring.core.domain.PasswordPolicy;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
@@ -13,11 +14,8 @@ public class RegisterRequest {
     private String username;
 
     @NotBlank
-    @Size(min = 8, max = 120)
-    @Pattern(
-        regexp = "^(?=.*[A-Z])(?=.*[a-z])(?=.*\\d)(?=.*[^A-Za-z\\d]).+$",
-        message = "A senha deve conter ao menos uma letra maiúscula, uma minúscula, um dígito e um caractere especial"
-    )
+    @Size(min = PasswordPolicy.MIN_LENGTH, max = PasswordPolicy.MAX_LENGTH)
+    @Pattern(regexp = PasswordPolicy.COMPLEXITY_REGEXP, message = PasswordPolicy.COMPLEXITY_MESSAGE)
     private String password;
 
     @NotBlank

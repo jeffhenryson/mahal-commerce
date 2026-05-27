@@ -38,6 +38,9 @@ public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
+    @org.springframework.beans.factory.annotation.Value("${auth.lockout.duration-minutes:15}")
+    private long lockoutDurationMinutes;
+
     @ExceptionHandler(UserNotFoundException.class)
     public ResponseEntity<ApiError> handleUserNotFound(UserNotFoundException ex, HttpServletRequest req) {
         return error(HttpStatus.NOT_FOUND, ex.getMessage(), "USER_NOT_FOUND", req);
@@ -90,12 +93,14 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(AccountLockedException.class)
     public ResponseEntity<ApiError> handleAccountLocked(AccountLockedException ex, HttpServletRequest req) {
-        return error(HttpStatus.TOO_MANY_REQUESTS, ex.getMessage(), "ACCOUNT_LOCKED", req);
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header("Retry-After", String.valueOf(lockoutDurationMinutes * 60))
+                .body(ApiError.of(ex.getMessage(), "ACCOUNT_LOCKED", req.getRequestURI(), MDC.get("traceId")));
     }
 
     @ExceptionHandler(DisabledException.class)
     public ResponseEntity<ApiError> handleDisabled(DisabledException ex, HttpServletRequest req) {
-        return error(HttpStatus.FORBIDDEN, "Conta desabilitada — verifique seu email para ativar a conta", "ACCOUNT_DISABLED", req);
+        return error(HttpStatus.UNAUTHORIZED, "Credenciais inválidas", "INVALID_CREDENTIALS", req);
     }
 
     @ExceptionHandler(AuthenticationException.class)
@@ -120,7 +125,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(RefreshTokenExpiredException.class)
     public ResponseEntity<ApiError> handleRefreshTokenExpired(RefreshTokenExpiredException ex, HttpServletRequest req) {
-        return error(HttpStatus.BAD_REQUEST, "Token de atualização expirado", "REFRESH_TOKEN_EXPIRED", req);
+        return error(HttpStatus.UNAUTHORIZED, "Sessão expirada — faça login novamente", "REFRESH_TOKEN_EXPIRED", req);
     }
 
     @ExceptionHandler(RefreshTokenAlreadyUsedException.class)

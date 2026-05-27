@@ -46,10 +46,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             if (!tokenBlocklist.isBlockedAt(username, issuedAt)) {
                 try {
                     UserDetails user = userDetailsService.loadUserByUsername(username);
-                    UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
-                            user, null, user.getAuthorities());
-                    auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-                    SecurityContextHolder.getContext().setAuthentication(auth);
+                    if (user.isEnabled()) {
+                        UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
+                                user, null, user.getAuthorities());
+                        auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                        SecurityContextHolder.getContext().setAuthentication(auth);
+                    }
+                    // isEnabled() == false: conta desabilitada — trata como não autenticado (401 downstream).
+                    // Defesa em profundidade: a blocklist já bloqueia os tokens ao desabilitar,
+                    // mas esta checagem protege se a blocklist estiver indisponível.
                 } catch (UsernameNotFoundException ignored) {
                     // User deleted after token was issued — treat as unauthenticated (401 downstream).
                 }

@@ -148,4 +148,122 @@ class UserServiceTest {
         assertThatThrownBy(() -> userService.getUserById(99L))
                 .isInstanceOf(UserNotFoundException.class);
     }
+
+    @Test
+    void deleteUser_revokesSessionsAndEvictsCache() {
+        User user = User.of("alice", "hashed", null);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+
+        userService.deleteUser(1L);
+
+        verify(refreshTokenPort).revokeAll("alice");
+        verify(tokenBlocklistPort).blockAllBefore(eq("alice"), any());
+        verify(userRepository).deleteById(1L);
+        verify(userCachePort).evict("alice");
+    }
+
+    @Test
+    void deleteUser_throwsWhenNotFound() {
+        when(userRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.deleteUser(99L))
+                .isInstanceOf(UserNotFoundException.class);
+        verifyNoInteractions(refreshTokenPort, tokenBlocklistPort, userCachePort);
+    }
+
+    @Test
+    void assignRole_addsRoleAndEvictsCache() {
+        User user = User.of("alice", "hashed", null);
+        Role role = new Role("ROLE_MANAGER");
+        when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user));
+        when(roleRepository.findByName("ROLE_MANAGER")).thenReturn(Optional.of(role));
+        when(userRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        userService.assignRole("alice", "ROLE_MANAGER");
+
+        verify(userRepository).save(any(User.class));
+        verify(userCachePort).evict("alice");
+    }
+
+    @Test
+    void assignRole_throwsWhenUserNotFound() {
+        when(userRepository.findByUsername("ghost")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.assignRole("ghost", "ROLE_USER"))
+                .isInstanceOf(UserNotFoundException.class);
+    }
+
+    @Test
+    void setUserEnabled_false_revokesSessionsAndEvictsCache() {
+        User user = User.of("alice", "hashed", null);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        userService.setUserEnabled(1L, false);
+
+        verify(refreshTokenPort).revokeAll("alice");
+        verify(tokenBlocklistPort).blockAllBefore(eq("alice"), any());
+        verify(userCachePort).evict("alice");
+    }
+
+    @Test
+    void setUserEnabled_true_doesNotRevokeSessions() {
+        User user = User.of("alice", "hashed", null);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        userService.setUserEnabled(1L, true);
+
+        verifyNoInteractions(refreshTokenPort, tokenBlocklistPort);
+        verify(userCachePort).evict("alice");
+    }
+
+    @Test
+    void verifyEmail_confirmsAccountAndEvictsCache() {
+        EmailVerificationCode code = new EmailVerificationCode(
+                1L, "alice", "HASH", Instant.now().plusSeconds(900), Instant.now(), false);
+        User user = User.ofPendingVerification("alice", "hashed", "alice@test.com", null);
+        when(verificationCodeRepository.findByCode("ABC123")).thenReturn(Optional.of(code));
+        when(verificationCodeRepository.markAsUsed("ABC123")).thenReturn(true);
+        when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user));
+        when(userRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        userService.verifyEmail("ABC123");
+
+        verify(userRepository).save(any(User.class));
+        verify(userCachePort).evict("alice");
+    }
+
+    @Test
+    void verifyEmail_throwsWhenCodeNotFound() {
+        when(verificationCodeRepository.findByCode("INVALID")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.verifyEmail("INVALID"))
+                .isInstanceOf(com.securityspring.core.domain.exception.EmailVerificationCodeNotFoundException.class);
+    }
+
+    @Test
+    void verifyEmail_throwsWhenCASFails() {
+        EmailVerificationCode code = new EmailVerificationCode(
+                1L, "alice", "HASH", Instant.now().plusSeconds(900), Instant.now(), false);
+        when(verificationCodeRepository.findByCode("ABC123")).thenReturn(Optional.of(code));
+        when(verificationCodeRepository.markAsUsed("ABC123")).thenReturn(false);
+
+        assertThatThrownBy(() -> userService.verifyEmail("ABC123"))
+                .isInstanceOf(com.securityspring.core.domain.exception.EmailVerificationCodeExpiredException.class);
+    }
+
+    @Test
+    void updateUser_usernameChange_revokesSessionsOfOldUsername() {
+        User user = User.fromPersisted(1L, "alice", "hashed", true, null, false, java.util.Set.of());
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.findByUsername("bob")).thenReturn(Optional.empty());
+        when(userRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        userService.updateUser(1L, "bob", null);
+
+        verify(refreshTokenPort).revokeAll("alice");
+        verify(tokenBlocklistPort).blockAllBefore(eq("alice"), any());
+        verify(userCachePort).evict("alice");
+    }
 }

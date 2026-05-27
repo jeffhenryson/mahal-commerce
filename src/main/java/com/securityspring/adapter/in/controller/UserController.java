@@ -9,6 +9,8 @@ import com.securityspring.core.domain.model.PageResult;
 import com.securityspring.core.domain.model.User;
 import com.securityspring.core.domain.exception.UserNotFoundException;
 import com.securityspring.core.ports.in.UserUseCase;
+import com.securityspring.core.domain.event.AuditEvent;
+import com.securityspring.core.domain.event.AuditEvent.EventType;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -18,6 +20,7 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -25,6 +28,7 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/users")
@@ -34,10 +38,12 @@ public class UserController {
 
     private final UserUseCase useCase;
     private final UserDTOConverter converter;
+    private final ApplicationEventPublisher publisher;
 
-    public UserController(UserUseCase useCase, UserDTOConverter converter) {
+    public UserController(UserUseCase useCase, UserDTOConverter converter, ApplicationEventPublisher publisher) {
         this.useCase = useCase;
         this.converter = converter;
+        this.publisher = publisher;
     }
 
     @Operation(summary = "Cria um novo usuário")
@@ -53,6 +59,7 @@ public class UserController {
     public ResponseEntity<UserResponseDTO> create(@Valid @RequestBody CreateUserRequest request) {
         User created = useCase.createUser(
                 request.getUsername(), request.getPassword(), request.getEmail(), request.getRoles());
+        publisher.publishEvent(AuditEvent.of(EventType.USER_CREATED, created.getUsername()));
         UserResponseDTO body = converter.toResponse(created);
         return ResponseEntity.created(URI.create("/users/" + body.getId())).body(body);
     }
@@ -68,6 +75,7 @@ public class UserController {
     @PreAuthorize("hasAuthority('USER_ROLE_ASSIGN')")
     public ResponseEntity<Void> assignRole(@PathVariable String username, @PathVariable String roleName) {
         useCase.assignRole(username, roleName);
+        publisher.publishEvent(AuditEvent.of(EventType.USER_ROLE_ASSIGNED, username, Map.of("role", roleName)));
         return ResponseEntity.noContent().build();
     }
 
@@ -95,7 +103,24 @@ public class UserController {
                                                    Authentication authentication) {
         useCase.changeOwnPassword(authentication.getName(),
                 request.getCurrentPassword(), request.getNewPassword());
+        publisher.publishEvent(AuditEvent.of(EventType.USER_PASSWORD_CHANGED, authentication.getName()));
         return ResponseEntity.noContent().build();
+    }
+
+    @Operation(summary = "Atualiza os dados do próprio perfil (username e/ou email)")
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Atualizado",
+            content = @Content(schema = @Schema(implementation = UserResponseDTO.class))),
+        @ApiResponse(responseCode = "409", description = "Username ou email já existe", content = @Content),
+        @ApiResponse(responseCode = "401", description = "Não autenticado", content = @Content)
+    })
+    @PatchMapping("/me")
+    public ResponseEntity<UserResponseDTO> updateOwnProfile(@Valid @RequestBody UserUpdateRequest request,
+                                                             Authentication authentication) {
+        User updated = useCase.updateOwnProfile(
+                authentication.getName(), request.getUsername(), request.getEmail(), request.getCurrentPassword());
+        publisher.publishEvent(AuditEvent.of(EventType.USER_UPDATED, updated.getUsername()));
+        return ResponseEntity.ok(converter.toResponse(updated));
     }
 
     @Operation(summary = "Busca usuário por id")
@@ -137,7 +162,8 @@ public class UserController {
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAuthority('USER_DELETE')")
     public ResponseEntity<Void> delete(@PathVariable Long id) {
-        useCase.deleteUser(id);
+        String username = useCase.deleteUser(id);
+        publisher.publishEvent(AuditEvent.of(EventType.USER_DELETED, username));
         return ResponseEntity.noContent().build();
     }
 
@@ -150,7 +176,8 @@ public class UserController {
     @PutMapping("/{id}/disable")
     @PreAuthorize("hasAuthority('USER_STATUS')")
     public ResponseEntity<Void> disable(@PathVariable Long id) {
-        useCase.setUserEnabled(id, false);
+        String username = useCase.setUserEnabled(id, false);
+        publisher.publishEvent(AuditEvent.of(EventType.USER_DISABLED, username));
         return ResponseEntity.noContent().build();
     }
 
@@ -163,7 +190,8 @@ public class UserController {
     @PutMapping("/{id}/enable")
     @PreAuthorize("hasAuthority('USER_STATUS')")
     public ResponseEntity<Void> enable(@PathVariable Long id) {
-        useCase.setUserEnabled(id, true);
+        String username = useCase.setUserEnabled(id, true);
+        publisher.publishEvent(AuditEvent.of(EventType.USER_ENABLED, username));
         return ResponseEntity.noContent().build();
     }
 

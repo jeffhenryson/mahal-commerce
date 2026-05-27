@@ -2,6 +2,7 @@ package com.securityspring.core.service;
 
 import com.securityspring.core.domain.exception.AccountLockedException;
 import com.securityspring.core.domain.exception.RefreshTokenAlreadyUsedException;
+import com.securityspring.core.domain.model.SessionInfo;
 import com.securityspring.core.domain.model.TokenPair;
 import com.securityspring.core.ports.in.AuthUseCase;
 import com.securityspring.core.ports.out.token.AccessTokenPort;
@@ -12,6 +13,7 @@ import com.securityspring.core.ports.out.token.TokenBlocklistPort;
 import com.securityspring.core.ports.out.user.UserAuthoritiesPort;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Set;
 
 public class AuthService implements AuthUseCase {
@@ -79,5 +81,10 @@ public class AuthService implements AuthUseCase {
     public void logoutAll(String username) {
         refreshToken.revokeAll(username);
         tokenBlocklist.blockAllBefore(username, Instant.now());
+    }
+
+    @Override
+    public List<SessionInfo> listActiveSessions(String username) {
+        return refreshToken.findActiveSessions(username);
     }
 }

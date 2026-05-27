@@ -24,13 +24,18 @@ public interface UserUseCase {
 
     PageResult<User> listAll(int page, int size);
 
-    void deleteUser(Long id);
+    /** Remove o usuário e revoga todas as suas sessões. Retorna o username para auditoria. */
+    String deleteUser(Long id);
 
     void changeOwnPassword(String username, String currentPassword, String newPassword);
 
-    void setUserEnabled(Long id, boolean enabled);
+    /** Ativa ou desativa a conta. Retorna o username para auditoria. */
+    String setUserEnabled(Long id, boolean enabled);
 
     User updateUser(Long id, String newUsername, String newEmail);
+
+    /** Auto-atualização: requer senha atual quando o email está sendo alterado. */
+    User updateOwnProfile(String username, String newUsername, String newEmail, String currentPassword);
 
     void verifyEmail(String code);
 

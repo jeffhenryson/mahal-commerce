@@ -1,14 +1,10 @@
-package com.securityspring.infra.security;
+package com.securityspring.core.domain;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
 
-/**
- * Utilitário compartilhado entre adaptadores que precisam de hashing SHA-256
- * para tokens opacos (refresh token, código de verificação de email).
- */
 public final class TokenHashUtils {
 
     private TokenHashUtils() {}

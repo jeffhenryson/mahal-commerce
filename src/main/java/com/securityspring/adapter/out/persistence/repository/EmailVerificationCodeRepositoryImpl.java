@@ -3,7 +3,7 @@ package com.securityspring.adapter.out.persistence.repository;
 import com.securityspring.adapter.out.persistence.entity.EmailVerificationCodeEntity;
 import com.securityspring.core.domain.model.EmailVerificationCode;
 import com.securityspring.core.ports.out.notification.EmailVerificationCodeRepository;
-import com.securityspring.infra.security.TokenHashUtils;
+import com.securityspring.core.domain.TokenHashUtils;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 

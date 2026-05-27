@@ -11,8 +11,11 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import jakarta.validation.Valid;
 
+import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Collectors;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -21,9 +24,19 @@ import org.springframework.web.bind.annotation.*;
 public class RegistrationController {
 
     private final UserUseCase userUseCase;
+    private final List<String> defaultRoles;
 
-    public RegistrationController(UserUseCase userUseCase) {
+    public RegistrationController(UserUseCase userUseCase,
+                                  @Value("${auth.registration.default-roles:}") String defaultRolesProperty) {
         this.userUseCase = userUseCase;
+        // Property: auth.registration.default-roles=ROLE_USER,ROLE_ANOTHER
+        // Vazio por padrão — sem role automática no auto-registro (princípio do mínimo privilégio).
+        this.defaultRoles = defaultRolesProperty.isBlank()
+                ? List.of()
+                : Arrays.stream(defaultRolesProperty.split(","))
+                        .map(String::trim)
+                        .filter(s -> !s.isBlank())
+                        .collect(Collectors.toList());
     }
 
     @Operation(summary = "Autoregistro de usuário — cria conta desabilitada e envia código de verificação")
@@ -34,7 +47,7 @@ public class RegistrationController {
     @PostMapping("/register")
     ResponseEntity<Void> register(@Valid @RequestBody RegisterRequest request) {
         userUseCase.registerUser(request.getUsername(), request.getPassword(), request.getEmail(),
-                List.of());
+                defaultRoles);
         return ResponseEntity.status(201).build();
     }
 

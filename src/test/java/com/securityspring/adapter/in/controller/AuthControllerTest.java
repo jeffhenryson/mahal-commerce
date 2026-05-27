@@ -14,6 +14,7 @@ import com.securityspring.core.ports.in.AuthUseCase;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -27,7 +28,8 @@ public class AuthControllerTest {
     @BeforeEach
     void setup() {
         authUseCase = mock(AuthUseCase.class);
-        AuthController controller = new AuthController(authUseCase);
+        ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
+        AuthController controller = new AuthController(authUseCase, publisher, 15);
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new com.securityspring.infra.handler.GlobalExceptionHandler())
                 .build();

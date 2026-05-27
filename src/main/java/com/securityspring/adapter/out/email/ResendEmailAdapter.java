@@ -21,13 +21,17 @@ public class ResendEmailAdapter implements EmailPort {
     private final String fromAddress;
     private final long ttlMinutes;
 
+    private final String emailSubject;
+
     public ResendEmailAdapter(
             @Value("${resend.api-key}") String apiKey,
             @Value("${resend.from:noreply@example.com}") String fromAddress,
             @Value("${resend.api-url:https://api.resend.com/emails}") String apiUrl,
-            @Value("${email.verification.ttl-minutes:15}") long ttlMinutes) {
+            @Value("${email.verification.ttl-minutes:15}") long ttlMinutes,
+            @Value("${email.verification.subject:Código de confirmação de cadastro}") String emailSubject) {
         this.fromAddress = fromAddress;
         this.ttlMinutes = ttlMinutes;
+        this.emailSubject = emailSubject;
         this.restClient = RestClient.builder()
                 .baseUrl(apiUrl)
                 .defaultHeader("Authorization", "Bearer " + apiKey)
@@ -40,7 +44,7 @@ public class ResendEmailAdapter implements EmailPort {
         Map<String, Object> body = Map.of(
                 "from", fromAddress,
                 "to", List.of(to),
-                "subject", "Código de confirmação de cadastro",
+                "subject", emailSubject,
                 "html", html
         );
         try {
@@ -69,6 +73,16 @@ public class ResendEmailAdapter implements EmailPort {
                   <p style="color:#666;font-size:.85rem">Este código expira em %d minutos.<br>
                   Se você não solicitou este cadastro, ignore este email.</p>
                 </div>
-                """.formatted(username, code, ttlMinutes);
+                """.formatted(escapeHtml(username), escapeHtml(code), ttlMinutes);
+    }
+
+    private static String escapeHtml(String value) {
+        if (value == null) return "";
+        return value
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&#x27;");
     }
 }

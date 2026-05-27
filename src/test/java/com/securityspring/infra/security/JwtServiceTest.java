@@ -13,7 +13,7 @@ public class JwtServiceTest {
     @Test
     void generate_and_validate_token_with_roles() {
         String secret = "dev-secret-please-change-to-256-bit-random-key"; // non-base64 ok
-        JwtService jwt = new JwtService(secret, 15);
+        JwtService jwt = new JwtService(secret, 15, "test-issuer", "test-aud");
 
         String token = jwt.generateAccessToken("alice", Set.of("ROLE_ADMIN"));
         assertNotNull(token);
@@ -25,7 +25,7 @@ public class JwtServiceTest {
     @Test
     void invalid_token_is_not_valid_and_extracts_nothing() {
         String secret = "dev-secret-please-change-to-256-bit-random-key";
-        JwtService jwt = new JwtService(secret, 15);
+        JwtService jwt = new JwtService(secret, 15, "test-issuer", "test-aud");
 
         String bogus = "abc.def.ghi";
         assertFalse(jwt.isValid(bogus));

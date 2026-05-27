@@ -69,11 +69,11 @@ public class AuthRegistrationFlowIT {
                 .content("{\"username\":\"" + username + "\",\"password\":\"" + password + "\",\"email\":\"" + email + "\"}"))
                 .andExpect(status().isCreated());
 
-        // 2. Login antes de verificar email — deve retornar 403 (conta desabilitada)
+        // 2. Login antes de verificar email — deve retornar 401 (sem enumeração: desabilitado = credenciais inválidas)
         mvc.perform(post("/auth/login")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"username\":\"" + username + "\",\"password\":\"" + password + "\"}"))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
 
         // 3. Buscar código de verificação diretamente no banco (sem envio de email real em dev)
         String code = verificationHelper.getCodeForUsername(username);

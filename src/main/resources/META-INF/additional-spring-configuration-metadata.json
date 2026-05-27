@@ -105,6 +105,48 @@
       "type": "java.lang.String",
       "description": "Senha do usuário user criado pelo SeedConfig em dev. Override via SEED_USER_PASSWORD.",
       "defaultValue": "User@dev1"
+    },
+    {
+      "name": "security.content-security-policy",
+      "type": "java.lang.String",
+      "description": "Diretiva Content-Security-Policy enviada em todas as respostas. Vazio desabilita o header (padrão em dev). Em hml/prod use 'default-src none; frame-ancestors none'.",
+      "defaultValue": ""
+    },
+    {
+      "name": "jwt.issuer",
+      "type": "java.lang.String",
+      "description": "Claim 'iss' inserido nos JWTs. Identifica o emissor; deve ser único por serviço para evitar tokens cruzados entre projetos.",
+      "defaultValue": "security-spring"
+    },
+    {
+      "name": "jwt.audience",
+      "type": "java.lang.String",
+      "description": "Claim 'aud' inserido nos JWTs. Identifica o público-alvo esperado; validado no parse.",
+      "defaultValue": "api"
+    },
+    {
+      "name": "cors.exposed-headers",
+      "type": "java.lang.String",
+      "description": "Headers de resposta expostos ao browser via CORS, separados por vírgula. Padrão: X-Trace-Id (permite clientes lerem o traceId).",
+      "defaultValue": "X-Trace-Id"
+    },
+    {
+      "name": "email.verification.subject",
+      "type": "java.lang.String",
+      "description": "Assunto do email de verificação de cadastro enviado via ResendEmailAdapter.",
+      "defaultValue": "Código de confirmação de cadastro"
+    },
+    {
+      "name": "auth.registration.default-roles",
+      "type": "java.lang.String",
+      "description": "Roles atribuídas automaticamente em auto-registros via POST /auth/register, separadas por vírgula. Vazio = sem role automática (princípio do mínimo privilégio). Exemplo: ROLE_USER",
+      "defaultValue": ""
+    },
+    {
+      "name": "auth.max-sessions-per-user",
+      "type": "java.lang.Integer",
+      "description": "Número máximo de refresh tokens (sessões) ativos simultâneos por usuário. Ao exceder, a sessão mais antiga é revogada automaticamente. 0 = sem limite.",
+      "defaultValue": 5
     }
   ]
 }

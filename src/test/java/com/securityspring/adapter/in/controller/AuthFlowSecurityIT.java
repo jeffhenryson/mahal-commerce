@@ -42,8 +42,10 @@ public class AuthFlowSecurityIT {
 
     @Test
     void user_role_can_read_with_bearer() throws Exception {
-        // Create user as ADMIN (using permission-based mock)
-        String body = "{\"username\":\"john2\",\"password\":\"Secret@123\",\"email\":\"john2@test.com\"}";
+        String uniqueSuffix = String.valueOf(System.currentTimeMillis());
+        String username = "john_" + uniqueSuffix;
+        String email = "john_" + uniqueSuffix + "@test.com";
+        String body = String.format("{\"username\":\"%s\",\"password\":\"Secret@123\",\"email\":\"%s\"}", username, email);
         mockMvc.perform(post("/users")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body)
@@ -55,16 +57,15 @@ public class AuthFlowSecurityIT {
                 .andExpect(status().isCreated());
 
         // Assign ROLE_USER as ADMIN
-        mockMvc.perform(post("/users/john2/roles/ROLE_USER")
+        mockMvc.perform(post("/users/" + username + "/roles/ROLE_USER")
                 .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user("admin")
                         .authorities(new SimpleGrantedAuthority("ROLE_ADMIN"),
                                      new SimpleGrantedAuthority("USER_ROLE_ASSIGN"))))
                 .andExpect(status().isNoContent());
 
-        // Login as john2 (john2 has ROLE_USER which has USER_READ permission)
         MvcResult r = mockMvc.perform(post("/auth/login")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"username\":\"john2\",\"password\":\"Secret@123\"}"))
+                .content(String.format("{\"username\":\"%s\",\"password\":\"Secret@123\"}", username)))
                 .andExpect(status().isOk())
                 .andReturn();
         JsonNode json = om.readTree(r.getResponse().getContentAsString());
@@ -89,11 +90,11 @@ public class AuthFlowSecurityIT {
         // Expire the refresh token via test helper (uses JDBC — sem acoplar ao JPA repo de produção)
         refreshTokenTestHelper.expireTokenByHash(sha256(refresh));
 
-        // Attempt refresh -> should be 400 (expired)
+        // Attempt refresh -> should be 401 (expired session — forces re-login)
         mockMvc.perform(post("/auth/refresh")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"refreshToken\":\"" + refresh + "\"}"))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isUnauthorized());
     }
 
     private static String sha256(String value) {
