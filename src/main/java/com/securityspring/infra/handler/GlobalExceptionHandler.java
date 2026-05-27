@@ -6,7 +6,13 @@ import com.securityspring.core.domain.exception.RoleAlreadyExistsException;
 import com.securityspring.core.domain.exception.auth.AccountLockedException;
 import com.securityspring.core.domain.exception.auth.InvalidPasswordException;
 import com.securityspring.core.domain.exception.auth.InvalidRefreshTokenException;
+import com.securityspring.core.domain.exception.auth.InvalidTotpCodeException;
+import com.securityspring.core.domain.exception.auth.PasswordResetTokenExpiredException;
+import com.securityspring.core.domain.exception.auth.PasswordResetTokenNotFoundException;
 import com.securityspring.core.domain.exception.auth.RefreshTokenAlreadyUsedException;
+import com.securityspring.core.domain.exception.auth.TotpAlreadyEnabledException;
+import com.securityspring.core.domain.exception.auth.TotpChallengeExpiredException;
+import com.securityspring.core.domain.exception.auth.TotpNotEnabledException;
 import com.securityspring.core.domain.exception.auth.RefreshTokenExpiredException;
 import com.securityspring.core.domain.exception.email.EmailAlreadyVerifiedException;
 import com.securityspring.core.domain.exception.email.EmailDeliveryException;
@@ -117,6 +123,36 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(InvalidPasswordException.class)
     public ResponseEntity<ApiError> handleInvalidPassword(InvalidPasswordException ex, HttpServletRequest req) {
         return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "INVALID_PASSWORD", req);
+    }
+
+    @ExceptionHandler(PasswordResetTokenNotFoundException.class)
+    public ResponseEntity<ApiError> handlePasswordResetTokenNotFound(PasswordResetTokenNotFoundException ex, HttpServletRequest req) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "PASSWORD_RESET_TOKEN_INVALID", req);
+    }
+
+    @ExceptionHandler(PasswordResetTokenExpiredException.class)
+    public ResponseEntity<ApiError> handlePasswordResetTokenExpired(PasswordResetTokenExpiredException ex, HttpServletRequest req) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "PASSWORD_RESET_TOKEN_EXPIRED", req);
+    }
+
+    @ExceptionHandler(InvalidTotpCodeException.class)
+    public ResponseEntity<ApiError> handleInvalidTotpCode(InvalidTotpCodeException ex, HttpServletRequest req) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "INVALID_TOTP_CODE", req);
+    }
+
+    @ExceptionHandler(TotpChallengeExpiredException.class)
+    public ResponseEntity<ApiError> handleTotpChallengeExpired(TotpChallengeExpiredException ex, HttpServletRequest req) {
+        return error(HttpStatus.UNAUTHORIZED, ex.getMessage(), "TOTP_CHALLENGE_EXPIRED", req);
+    }
+
+    @ExceptionHandler(TotpAlreadyEnabledException.class)
+    public ResponseEntity<ApiError> handleTotpAlreadyEnabled(TotpAlreadyEnabledException ex, HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "TOTP_ALREADY_ENABLED", req);
+    }
+
+    @ExceptionHandler(TotpNotEnabledException.class)
+    public ResponseEntity<ApiError> handleTotpNotEnabled(TotpNotEnabledException ex, HttpServletRequest req) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "TOTP_NOT_ENABLED", req);
     }
 
     @ExceptionHandler(InvalidRefreshTokenException.class)

@@ -14,19 +14,32 @@ import com.securityspring.core.ports.out.token.AccessTokenPort;
 import com.securityspring.core.ports.out.credential.CredentialVerifierPort;
 import com.securityspring.core.ports.out.notification.EmailPort;
 import com.securityspring.core.ports.out.notification.EmailVerificationCodeRepository;
+import com.securityspring.core.ports.out.notification.PasswordResetTokenRepository;
 import com.securityspring.core.ports.out.ratelimit.LoginAttemptPort;
 import com.securityspring.core.ports.out.credential.PasswordHashPort;
 import com.securityspring.core.ports.out.role.PermissionRepository;
 import com.securityspring.core.ports.out.token.RefreshTokenPort;
 import com.securityspring.core.ports.out.role.RoleRepository;
 import com.securityspring.core.ports.out.token.TokenBlocklistPort;
+import com.securityspring.core.ports.out.twofa.TotpBackupCodeRepository;
+import com.securityspring.core.ports.out.twofa.TotpChallengeTokenRepository;
+import com.securityspring.core.ports.out.twofa.TotpConfigRepository;
+import com.securityspring.core.ports.out.twofa.TotpEncryptionPort;
+import com.securityspring.core.ports.in.TotpUseCase;
 import com.securityspring.core.ports.out.user.UserAuthoritiesPort;
 import com.securityspring.core.ports.out.user.UserCachePort;
 import com.securityspring.core.ports.out.user.UserRepository;
 import com.securityspring.core.service.AuthService;
 import com.securityspring.core.service.PermissionService;
 import com.securityspring.core.service.RoleService;
+import com.securityspring.core.service.TotpService;
 import com.securityspring.core.service.UserService;
+import dev.samstevens.totp.code.CodeVerifier;
+import dev.samstevens.totp.code.DefaultCodeGenerator;
+import dev.samstevens.totp.code.DefaultCodeVerifier;
+import dev.samstevens.totp.secret.DefaultSecretGenerator;
+import dev.samstevens.totp.secret.SecretGenerator;
+import dev.samstevens.totp.time.SystemTimeProvider;
 
 @Configuration
 @EnableScheduling
@@ -41,12 +54,36 @@ class CoreBeanConfig {
             TokenBlocklistPort tokenBlocklistPort,
             EmailPort emailPort,
             EmailVerificationCodeRepository verificationCodeRepository,
+            PasswordResetTokenRepository passwordResetTokenRepository,
             UserCachePort userCachePort,
             @Value("${email.verification.ttl-minutes:15}") long verificationCodeTtlMinutes,
-            @Value("${email.verification.resend-cooldown-seconds:60}") long resendCooldownSeconds) {
+            @Value("${email.verification.resend-cooldown-seconds:60}") long resendCooldownSeconds,
+            @Value("${password-reset.ttl-minutes:15}") long passwordResetTtlMinutes,
+            @Value("${password-reset.frontend-url:http://localhost:3000/reset-password}") String passwordResetFrontendUrl) {
         return new UserService(userRepository, roleRepository, passwordHashPort,
                 refreshTokenPort, tokenBlocklistPort, emailPort,
-                verificationCodeRepository, userCachePort, verificationCodeTtlMinutes, resendCooldownSeconds);
+                verificationCodeRepository, passwordResetTokenRepository, userCachePort,
+                verificationCodeTtlMinutes, resendCooldownSeconds,
+                passwordResetTtlMinutes, passwordResetFrontendUrl);
+    }
+
+    @Bean
+    TotpService totpService(TotpConfigRepository totpConfigRepository,
+            TotpBackupCodeRepository totpBackupCodeRepository,
+            TotpChallengeTokenRepository totpChallengeTokenRepository,
+            TotpEncryptionPort totpEncryptionPort,
+            PasswordHashPort passwordHashPort,
+            UserRepository userRepository,
+            @Value("${totp.app-name:security-spring}") String appName) {
+        SecretGenerator secretGenerator = new DefaultSecretGenerator();
+        CodeVerifier codeVerifier = new DefaultCodeVerifier(new DefaultCodeGenerator(), new SystemTimeProvider());
+        return new TotpService(totpConfigRepository, totpBackupCodeRepository, totpChallengeTokenRepository,
+                totpEncryptionPort, passwordHashPort, userRepository, secretGenerator, codeVerifier, appName);
+    }
+
+    @Bean
+    TotpUseCase totpUseCase(TotpService totpService) {
+        return totpService;
     }
 
     @Bean
@@ -55,9 +92,10 @@ class CoreBeanConfig {
             RefreshTokenPort refreshToken,
             UserAuthoritiesPort userAuthorities,
             TokenBlocklistPort tokenBlocklist,
-            LoginAttemptPort loginAttempt) {
+            LoginAttemptPort loginAttempt,
+            TotpService totpService) {
         return new AuthService(credentialVerifier, accessToken, refreshToken,
-                userAuthorities, tokenBlocklist, loginAttempt);
+                userAuthorities, tokenBlocklist, loginAttempt, totpService, totpService);
     }
 
     @Bean

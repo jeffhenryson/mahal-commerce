@@ -40,4 +40,13 @@ public interface UserUseCase {
     void verifyEmail(String code);
 
     void resendVerification(String email);
+
+    /** Inicia o fluxo de recuperação de senha. Sempre silencioso para evitar enumeração de emails. */
+    void requestPasswordReset(String email);
+
+    /** Conclui o fluxo de recuperação de senha. Revoga todas as sessões ao final. */
+    void resetPassword(String token, String newPassword);
+
+    /** Confirma a troca de email via código enviado ao novo endereço. Retorna o username para auditoria. */
+    String confirmEmailChange(String code);
 }

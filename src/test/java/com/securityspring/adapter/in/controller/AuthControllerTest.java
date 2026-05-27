@@ -9,8 +9,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.securityspring.adapter.in.dtos.request.LoginRequest;
 import com.securityspring.adapter.in.dtos.request.LogoutRequest;
 import com.securityspring.adapter.in.dtos.request.RefreshRequest;
+import com.securityspring.core.domain.model.auth.LoginResponse;
 import com.securityspring.core.domain.model.auth.TokenPair;
 import com.securityspring.core.ports.in.AuthUseCase;
+import com.securityspring.core.ports.in.UserUseCase;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,8 +30,9 @@ public class AuthControllerTest {
     @BeforeEach
     void setup() {
         authUseCase = mock(AuthUseCase.class);
+        UserUseCase userUseCase = mock(UserUseCase.class);
         ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
-        AuthController controller = new AuthController(authUseCase, publisher, 15);
+        AuthController controller = new AuthController(authUseCase, userUseCase, publisher, 15);
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new com.securityspring.infra.handler.GlobalExceptionHandler())
                 .build();
@@ -42,7 +45,7 @@ public class AuthControllerTest {
         req.setPassword("Admin@dev1");
 
         when(authUseCase.login("admin", "Admin@dev1"))
-                .thenReturn(new TokenPair("access123", "refresh123"));
+                .thenReturn(LoginResponse.success(new TokenPair("access123", "refresh123")));
 
         mockMvc.perform(post("/auth/login")
                 .contentType("application/json")

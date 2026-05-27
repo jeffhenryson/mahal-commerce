@@ -30,8 +30,25 @@ public class LoggingEmailAdapter implements EmailPort {
         lastCodeByUsername.put(username, code);
     }
 
-    /** Returns the last plain-text verification code sent to the given username. Test use only. */
+    @Override
+    public void sendPasswordResetLink(String to, String username, String resetLink) {
+        log.info("DEV EMAIL >> to={} username={} passwordResetLink={}", to, username, resetLink);
+        lastCodeByUsername.put("reset:" + username, resetLink);
+    }
+
+    @Override
+    public void sendEmailChangeNotification(String oldEmail, String username, String newEmail) {
+        log.info("DEV EMAIL >> oldEmail={} username={} newEmail={} [email-change-notification]",
+                oldEmail, username, newEmail);
+    }
+
+    /** Returns the last plain-text verification code or reset link sent to the given username. Test use only. */
     public String getLastCodeForUsername(String username) {
         return lastCodeByUsername.get(username);
+    }
+
+    /** Returns the last password-reset link sent for the given username. Test use only. */
+    public String getLastResetLinkForUsername(String username) {
+        return lastCodeByUsername.get("reset:" + username);
     }
 }

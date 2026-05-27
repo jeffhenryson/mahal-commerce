@@ -147,6 +147,17 @@
       "type": "java.lang.Integer",
       "description": "Número máximo de refresh tokens (sessões) ativos simultâneos por usuário. Ao exceder, a sessão mais antiga é revogada automaticamente. 0 = sem limite.",
       "defaultValue": 5
+    },
+    {
+      "name": "totp.encryption.key",
+      "type": "java.lang.String",
+      "description": "Chave AES-256 para criptografar segredos TOTP em repouso. Deve ser Base64 de exatamente 32 bytes. Gere com: openssl rand -base64 32. OBRIGATÓRIO em hml/prod; em dev aceita placeholder."
+    },
+    {
+      "name": "totp.app-name",
+      "type": "java.lang.String",
+      "description": "Nome exibido no app autenticador (Google Authenticator, Authy, etc.) ao escanear o QR code.",
+      "defaultValue": "security-spring"
     }
   ]
 }

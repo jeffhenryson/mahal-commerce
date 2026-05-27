@@ -2,12 +2,14 @@ package com.securityspring.core.service;
 
 import com.securityspring.core.domain.exception.auth.AccountLockedException;
 import com.securityspring.core.domain.exception.auth.RefreshTokenAlreadyUsedException;
+import com.securityspring.core.domain.model.auth.LoginResponse;
 import com.securityspring.core.domain.model.auth.TokenPair;
 import com.securityspring.core.ports.out.token.AccessTokenPort;
 import com.securityspring.core.ports.out.credential.CredentialVerifierPort;
 import com.securityspring.core.ports.out.ratelimit.LoginAttemptPort;
 import com.securityspring.core.ports.out.token.RefreshTokenPort;
 import com.securityspring.core.ports.out.token.TokenBlocklistPort;
+import com.securityspring.core.ports.out.twofa.TwoFactorAuthPort;
 import com.securityspring.core.ports.out.user.UserAuthoritiesPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -33,13 +35,15 @@ class AuthServiceTest {
     @Mock UserAuthoritiesPort userAuthorities;
     @Mock TokenBlocklistPort tokenBlocklist;
     @Mock LoginAttemptPort loginAttempt;
+    @Mock TwoFactorAuthPort twoFactorAuth;
+    @Mock TotpService totpService;
 
     AuthService authService;
 
     @BeforeEach
     void setUp() {
         authService = new AuthService(credentialVerifier, accessToken, refreshToken,
-                userAuthorities, tokenBlocklist, loginAttempt);
+                userAuthorities, tokenBlocklist, loginAttempt, twoFactorAuth, totpService);
     }
 
     @Test
@@ -47,13 +51,15 @@ class AuthServiceTest {
         when(loginAttempt.isLocked("alice")).thenReturn(false);
         when(credentialVerifier.verify("alice", "pass"))
                 .thenReturn(new CredentialVerifierPort.VerifiedUser("alice", Set.of("ROLE_USER")));
+        when(twoFactorAuth.isEnabled("alice")).thenReturn(false);
         when(accessToken.generateFor("alice", Set.of("ROLE_USER"))).thenReturn("access-token");
         when(refreshToken.issue("alice")).thenReturn("refresh-token");
 
-        TokenPair pair = authService.login("alice", "pass");
+        LoginResponse response = authService.login("alice", "pass");
 
-        assertThat(pair.getAccessToken()).isEqualTo("access-token");
-        assertThat(pair.getRefreshToken()).isEqualTo("refresh-token");
+        assertThat(response.twoFactorRequired()).isFalse();
+        assertThat(response.tokenPair().getAccessToken()).isEqualTo("access-token");
+        assertThat(response.tokenPair().getRefreshToken()).isEqualTo("refresh-token");
         verify(loginAttempt).recordSuccess("alice");
     }
 

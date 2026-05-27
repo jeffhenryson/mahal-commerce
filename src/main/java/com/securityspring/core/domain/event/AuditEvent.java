@@ -17,7 +17,9 @@ public record AuditEvent(EventType type, String username, Instant timestamp, Map
         USER_LOGGED_IN, USER_LOGGED_OUT, USER_SESSIONS_CLEARED,
         USER_CREATED, USER_DELETED, USER_UPDATED, USER_EMAIL_CHANGED,
         USER_ROLE_ASSIGNED, USER_ENABLED, USER_DISABLED,
-        USER_PASSWORD_CHANGED
+        USER_PASSWORD_CHANGED,
+        PASSWORD_RESET_REQUESTED, PASSWORD_RESET_COMPLETED,
+        EMAIL_CHANGE_REQUESTED, EMAIL_CHANGE_CONFIRMED
     }
 
     public static AuditEvent of(EventType type, String username) {

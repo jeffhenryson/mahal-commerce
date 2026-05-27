@@ -2,6 +2,7 @@ package com.securityspring.core.service;
 
 import com.securityspring.core.domain.exception.auth.AccountLockedException;
 import com.securityspring.core.domain.exception.auth.RefreshTokenAlreadyUsedException;
+import com.securityspring.core.domain.model.auth.LoginResponse;
 import com.securityspring.core.domain.model.auth.SessionInfo;
 import com.securityspring.core.domain.model.auth.TokenPair;
 import com.securityspring.core.ports.in.AuthUseCase;
@@ -10,6 +11,7 @@ import com.securityspring.core.ports.out.credential.CredentialVerifierPort;
 import com.securityspring.core.ports.out.ratelimit.LoginAttemptPort;
 import com.securityspring.core.ports.out.token.RefreshTokenPort;
 import com.securityspring.core.ports.out.token.TokenBlocklistPort;
+import com.securityspring.core.ports.out.twofa.TwoFactorAuthPort;
 import com.securityspring.core.ports.out.user.UserAuthoritiesPort;
 
 import java.time.Instant;
@@ -24,36 +26,57 @@ public class AuthService implements AuthUseCase {
     private final UserAuthoritiesPort userAuthorities;
     private final TokenBlocklistPort tokenBlocklist;
     private final LoginAttemptPort loginAttempt;
+    private final TwoFactorAuthPort twoFactorAuth;
+    private final TotpService totpService;
 
     public AuthService(CredentialVerifierPort credentialVerifier,
                        AccessTokenPort accessToken,
                        RefreshTokenPort refreshToken,
                        UserAuthoritiesPort userAuthorities,
                        TokenBlocklistPort tokenBlocklist,
-                       LoginAttemptPort loginAttempt) {
+                       LoginAttemptPort loginAttempt,
+                       TwoFactorAuthPort twoFactorAuth,
+                       TotpService totpService) {
         this.credentialVerifier = credentialVerifier;
         this.accessToken = accessToken;
         this.refreshToken = refreshToken;
         this.userAuthorities = userAuthorities;
         this.tokenBlocklist = tokenBlocklist;
         this.loginAttempt = loginAttempt;
+        this.twoFactorAuth = twoFactorAuth;
+        this.totpService = totpService;
     }
 
     @Override
-    public TokenPair login(String username, String password) {
+    public LoginResponse login(String username, String password) {
         if (loginAttempt.isLocked(username)) {
             throw new AccountLockedException(username);
         }
         try {
             CredentialVerifierPort.VerifiedUser verified = credentialVerifier.verify(username, password);
             loginAttempt.recordSuccess(username);
+
+            if (twoFactorAuth.isEnabled(verified.username())) {
+                String challengeToken = twoFactorAuth.issueChallengeToken(verified.username());
+                return LoginResponse.twoFactorChallenge(challengeToken);
+            }
+
             String access = accessToken.generateFor(verified.username(), verified.authorities());
             String refresh = refreshToken.issue(verified.username());
-            return new TokenPair(access, refresh);
+            return LoginResponse.success(new TokenPair(access, refresh));
         } catch (RuntimeException ex) {
             loginAttempt.recordFailure(username);
             throw ex;
         }
+    }
+
+    @Override
+    public TokenPair completeTwoFactorLogin(String challengeToken, String totpCode) {
+        String username = totpService.completeChallengeLogin(challengeToken, totpCode);
+        Set<String> authorities = userAuthorities.loadAuthoritiesByUsername(username);
+        String access = accessToken.generateFor(username, authorities);
+        String refresh = refreshToken.issue(username);
+        return new TokenPair(access, refresh);
     }
 
     @Override

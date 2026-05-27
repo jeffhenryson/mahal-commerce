@@ -1,0 +1,77 @@
+package com.securityspring.adapter.in.controller;
+
+import com.securityspring.adapter.in.dtos.request.TotpConfirmRequest;
+import com.securityspring.adapter.in.dtos.request.TotpDisableRequest;
+import com.securityspring.adapter.in.dtos.response.TotpConfirmResponseDTO;
+import com.securityspring.adapter.in.dtos.response.TotpSetupResponseDTO;
+import com.securityspring.core.domain.event.AuditEvent;
+import com.securityspring.core.domain.event.AuditEvent.EventType;
+import com.securityspring.core.ports.in.TotpUseCase;
+
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import jakarta.validation.Valid;
+
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+
+@RestController
+@RequestMapping("/auth/2fa")
+@SecurityRequirement(name = "bearerAuth")
+public class TotpController {
+
+    private final TotpUseCase totpUseCase;
+    private final ApplicationEventPublisher publisher;
+
+    public TotpController(TotpUseCase totpUseCase, ApplicationEventPublisher publisher) {
+        this.totpUseCase = totpUseCase;
+        this.publisher = publisher;
+    }
+
+    @Operation(summary = "Inicia configuração do 2FA — retorna secret e URI para QR code")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Secret gerado",
+                    content = @Content(schema = @Schema(implementation = TotpSetupResponseDTO.class))),
+            @ApiResponse(responseCode = "409", description = "2FA já está ativado", content = @Content)
+    })
+    @PostMapping("/setup")
+    ResponseEntity<TotpSetupResponseDTO> setup(Authentication authentication) {
+        TotpUseCase.TotpSetupResult result = totpUseCase.setup(authentication.getName());
+        return ResponseEntity.ok(new TotpSetupResponseDTO(result.secret(), result.otpauthUri()));
+    }
+
+    @Operation(summary = "Confirma o primeiro código TOTP e ativa 2FA — retorna backup codes")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "2FA ativado",
+                    content = @Content(schema = @Schema(implementation = TotpConfirmResponseDTO.class))),
+            @ApiResponse(responseCode = "400", description = "Código inválido", content = @Content)
+    })
+    @PostMapping("/confirm")
+    ResponseEntity<TotpConfirmResponseDTO> confirm(@Valid @RequestBody TotpConfirmRequest request,
+            Authentication authentication) {
+        List<String> backupCodes = totpUseCase.confirm(authentication.getName(), request.getCode());
+        publisher.publishEvent(AuditEvent.of(EventType.USER_UPDATED, authentication.getName()));
+        return ResponseEntity.ok(new TotpConfirmResponseDTO(backupCodes));
+    }
+
+    @Operation(summary = "Desativa 2FA — exige senha atual e código TOTP")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "204", description = "2FA desativado"),
+            @ApiResponse(responseCode = "400", description = "Senha ou código inválido", content = @Content)
+    })
+    @DeleteMapping
+    ResponseEntity<Void> disable(@Valid @RequestBody TotpDisableRequest request,
+            Authentication authentication) {
+        totpUseCase.disable(authentication.getName(), request.getCurrentPassword(), request.getCode());
+        publisher.publishEvent(AuditEvent.of(EventType.USER_UPDATED, authentication.getName()));
+        return ResponseEntity.noContent().build();
+    }
+}

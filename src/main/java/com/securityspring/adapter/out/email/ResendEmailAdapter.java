@@ -40,11 +40,27 @@ public class ResendEmailAdapter implements EmailPort {
 
     @Override
     public void sendVerificationCode(String to, String username, String code) {
-        String html = buildEmailHtml(username, code);
+        String html = buildVerificationEmailHtml(username, code);
+        send(to, emailSubject, html, "email.verification");
+    }
+
+    @Override
+    public void sendPasswordResetLink(String to, String username, String resetLink) {
+        String html = buildPasswordResetEmailHtml(username, resetLink);
+        send(to, "Recuperação de senha", html, "email.password-reset");
+    }
+
+    @Override
+    public void sendEmailChangeNotification(String oldEmail, String username, String newEmail) {
+        String html = buildEmailChangeNotificationHtml(username, newEmail);
+        send(oldEmail, "Seu email foi alterado", html, "email.email-change-notification");
+    }
+
+    private void send(String to, String subject, String html, String logPrefix) {
         Map<String, Object> body = Map.of(
                 "from", fromAddress,
                 "to", List.of(to),
-                "subject", emailSubject,
+                "subject", subject,
                 "html", html
         );
         try {
@@ -53,14 +69,14 @@ public class ResendEmailAdapter implements EmailPort {
                     .body(body)
                     .retrieve()
                     .toBodilessEntity();
-            log.info("email.verification.sent to={}", to);
+            log.info("{}.sent to={}", logPrefix, to);
         } catch (Exception ex) {
-            log.error("email.verification.failed to={} error={}", to, ex.getMessage());
+            log.error("{}.failed to={} error={}", logPrefix, to, ex.getMessage());
             throw new EmailDeliveryException(ex.getMessage());
         }
     }
 
-    private String buildEmailHtml(String username, String code) {
+    private String buildVerificationEmailHtml(String username, String code) {
         return """
                 <div style="font-family:sans-serif;max-width:480px;margin:0 auto">
                   <h2>Confirmação de cadastro</h2>
@@ -74,6 +90,40 @@ public class ResendEmailAdapter implements EmailPort {
                   Se você não solicitou este cadastro, ignore este email.</p>
                 </div>
                 """.formatted(escapeHtml(username), escapeHtml(code), ttlMinutes);
+    }
+
+    private String buildPasswordResetEmailHtml(String username, String resetLink) {
+        return """
+                <div style="font-family:sans-serif;max-width:480px;margin:0 auto">
+                  <h2>Recuperação de senha</h2>
+                  <p>Olá, <strong>%s</strong>!</p>
+                  <p>Recebemos uma solicitação para redefinir a senha da sua conta.</p>
+                  <p style="text-align:center">
+                    <a href="%s"
+                       style="display:inline-block;background:#0070f3;color:#fff;padding:12px 24px;
+                              border-radius:6px;text-decoration:none;font-weight:bold">
+                      Redefinir senha
+                    </a>
+                  </p>
+                  <p style="color:#666;font-size:.85rem">
+                    Este link expira em 15 minutos.<br>
+                    Se você não solicitou a recuperação de senha, ignore este email — sua senha permanece a mesma.
+                  </p>
+                </div>
+                """.formatted(escapeHtml(username), escapeHtml(resetLink));
+    }
+
+    private String buildEmailChangeNotificationHtml(String username, String newEmail) {
+        return """
+                <div style="font-family:sans-serif;max-width:480px;margin:0 auto">
+                  <h2>Email da conta alterado</h2>
+                  <p>Olá, <strong>%s</strong>!</p>
+                  <p>O email de acesso à sua conta foi alterado para <strong>%s</strong>.</p>
+                  <p style="color:#666;font-size:.85rem">
+                    Se você não realizou esta alteração, entre em contato com o suporte imediatamente.
+                  </p>
+                </div>
+                """.formatted(escapeHtml(username), escapeHtml(newEmail));
     }
 
     private static String escapeHtml(String value) {

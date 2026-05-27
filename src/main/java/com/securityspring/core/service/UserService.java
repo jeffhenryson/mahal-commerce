@@ -1,6 +1,8 @@
 package com.securityspring.core.service;
 
 import com.securityspring.core.domain.exception.auth.InvalidPasswordException;
+import com.securityspring.core.domain.exception.auth.PasswordResetTokenExpiredException;
+import com.securityspring.core.domain.exception.auth.PasswordResetTokenNotFoundException;
 import com.securityspring.core.domain.exception.email.EmailAlreadyVerifiedException;
 import com.securityspring.core.domain.exception.email.EmailDeliveryException;
 import com.securityspring.core.domain.exception.email.EmailVerificationCodeExpiredException;
@@ -10,12 +12,14 @@ import com.securityspring.core.domain.exception.user.EmailAlreadyExistsException
 import com.securityspring.core.domain.exception.user.UserNotFoundException;
 import com.securityspring.core.domain.exception.user.UsernameAlreadyExistsException;
 import com.securityspring.core.domain.model.auth.EmailVerificationCode;
+import com.securityspring.core.domain.model.auth.PasswordResetToken;
 import com.securityspring.core.domain.model.PageResult;
 import com.securityspring.core.domain.model.rbac.Role;
 import com.securityspring.core.domain.model.auth.User;
 import com.securityspring.core.ports.in.UserUseCase;
 import com.securityspring.core.ports.out.notification.EmailPort;
 import com.securityspring.core.ports.out.notification.EmailVerificationCodeRepository;
+import com.securityspring.core.ports.out.notification.PasswordResetTokenRepository;
 import com.securityspring.core.ports.out.credential.PasswordHashPort;
 import com.securityspring.core.ports.out.token.RefreshTokenPort;
 import com.securityspring.core.ports.out.role.RoleRepository;
@@ -30,6 +34,7 @@ import com.securityspring.core.domain.PasswordPolicy;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Base64;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
@@ -44,9 +49,12 @@ public class UserService implements UserUseCase {
     private final TokenBlocklistPort tokenBlocklistPort;
     private final EmailPort emailPort;
     private final EmailVerificationCodeRepository verificationCodeRepository;
+    private final PasswordResetTokenRepository passwordResetTokenRepository;
     private final UserCachePort userCachePort;
     private final long verificationCodeTtlMinutes;
     private final long resendCooldownSeconds;
+    private final long passwordResetTtlMinutes;
+    private final String passwordResetFrontendUrl;
     private final SecureRandom secureRandom = new SecureRandom();
 
     public UserService(UserRepository userRepository,
@@ -56,9 +64,12 @@ public class UserService implements UserUseCase {
             TokenBlocklistPort tokenBlocklistPort,
             EmailPort emailPort,
             EmailVerificationCodeRepository verificationCodeRepository,
+            PasswordResetTokenRepository passwordResetTokenRepository,
             UserCachePort userCachePort,
             long verificationCodeTtlMinutes,
-            long resendCooldownSeconds) {
+            long resendCooldownSeconds,
+            long passwordResetTtlMinutes,
+            String passwordResetFrontendUrl) {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.passwordHash = passwordHash;
@@ -66,9 +77,12 @@ public class UserService implements UserUseCase {
         this.tokenBlocklistPort = tokenBlocklistPort;
         this.emailPort = emailPort;
         this.verificationCodeRepository = verificationCodeRepository;
+        this.passwordResetTokenRepository = passwordResetTokenRepository;
         this.userCachePort = userCachePort;
         this.verificationCodeTtlMinutes = verificationCodeTtlMinutes;
         this.resendCooldownSeconds = resendCooldownSeconds;
+        this.passwordResetTtlMinutes = passwordResetTtlMinutes;
+        this.passwordResetFrontendUrl = passwordResetFrontendUrl;
     }
 
     @Override
@@ -191,6 +205,7 @@ public class UserService implements UserUseCase {
         refreshTokenPort.revokeAll(username);
         tokenBlocklistPort.blockAllBefore(username, Instant.now());
         verificationCodeRepository.deleteByUsername(username);
+        passwordResetTokenRepository.deleteByUsername(username);
         userRepository.deleteById(id);
         userCachePort.evict(username);
         return username;
@@ -278,7 +293,90 @@ public class UserService implements UserUseCase {
                 throw new InvalidPasswordException();
             }
         }
-        return updateUser(user.getId(), newUsername, newEmail);
+
+        // Username change: reuse existing logic (passes current email to avoid re-triggering admin flow)
+        User result = updateUser(user.getId(), newUsername, emailChanging ? user.getEmail() : newEmail);
+
+        // Email change: pending confirmation flow — account stays active, old email is notified on confirm
+        if (emailChanging) {
+            userRepository.findByEmail(newEmail).ifPresent(existing -> {
+                if (!existing.getId().equals(result.getId())) throw new EmailAlreadyExistsException(newEmail);
+            });
+            result.setPendingEmail(newEmail);
+            User saved = userRepository.save(result);
+            userCachePort.evict(saved.getUsername());
+            verificationCodeRepository.deleteByUsername(saved.getUsername());
+            issueAndSendCode(saved.getUsername(), newEmail);
+            return saved;
+        }
+
+        return result;
+    }
+
+    @Override
+    @Transactional(noRollbackFor = EmailDeliveryException.class)
+    public void requestPasswordReset(String email) {
+        // Silencioso: sem user enumeration — resposta é sempre 204 independente de o email existir.
+        userRepository.findByEmail(email).ifPresent(user -> {
+            passwordResetTokenRepository.deleteByUsername(user.getUsername());
+            String token = generateResetToken();
+            Instant expiresAt = Instant.now().plus(passwordResetTtlMinutes, ChronoUnit.MINUTES);
+            passwordResetTokenRepository.save(user.getUsername(), token, expiresAt);
+            String link = passwordResetFrontendUrl + "?token=" + token;
+            emailPort.sendPasswordResetLink(email, user.getUsername(), link);
+        });
+    }
+
+    @Override
+    @Transactional
+    public void resetPassword(String token, String newPassword) {
+        if (!isValidPassword(newPassword)) throw new InvalidPasswordException();
+
+        PasswordResetToken record = passwordResetTokenRepository.findByToken(token)
+                .orElseThrow(PasswordResetTokenNotFoundException::new);
+
+        if (record.isExpired() || record.isUsed()) {
+            throw new PasswordResetTokenExpiredException();
+        }
+
+        if (!passwordResetTokenRepository.markAsUsed(token)) {
+            throw new PasswordResetTokenExpiredException();
+        }
+
+        User user = userRepository.findByUsername(record.username())
+                .orElseThrow(() -> new UserNotFoundException(record.username()));
+
+        user.changePassword(passwordHash.hash(newPassword));
+        userRepository.save(user);
+        userCachePort.evict(user.getUsername());
+        refreshTokenPort.revokeAll(user.getUsername());
+        tokenBlocklistPort.blockAllBefore(user.getUsername(), Instant.now());
+    }
+
+    @Override
+    @Transactional(noRollbackFor = EmailDeliveryException.class)
+    public String confirmEmailChange(String code) {
+        EmailVerificationCode record = verificationCodeRepository.findByCode(code)
+                .orElseThrow(EmailVerificationCodeNotFoundException::new);
+
+        if (record.isExpired()) throw new EmailVerificationCodeExpiredException();
+
+        if (!verificationCodeRepository.markAsUsed(code)) throw new EmailVerificationCodeExpiredException();
+
+        User user = userRepository.findByUsername(record.username())
+                .orElseThrow(() -> new UserNotFoundException(record.username()));
+
+        String oldEmail = user.getEmail();
+        String pending = user.getPendingEmail();
+        if (pending == null) throw new EmailVerificationCodeNotFoundException();
+
+        user.applyPendingEmail();
+        userRepository.save(user);
+        verificationCodeRepository.deleteByUsername(record.username());
+        userCachePort.evict(record.username());
+
+        emailPort.sendEmailChangeNotification(oldEmail, user.getUsername(), pending);
+        return user.getUsername();
     }
 
     private void issueAndSendCode(String username, String email) {
@@ -298,6 +396,13 @@ public class UserService implements UserUseCase {
             sb.append(CODE_ALPHABET.charAt(secureRandom.nextInt(CODE_ALPHABET.length())));
         }
         return sb.toString();
+    }
+
+    private String generateResetToken() {
+        // 32 bytes aleatórios → 43 chars URL-safe base64 → 256 bits de entropia.
+        byte[] bytes = new byte[32];
+        secureRandom.nextBytes(bytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
 
     private Set<Role> resolveRoles(List<String> roles) {

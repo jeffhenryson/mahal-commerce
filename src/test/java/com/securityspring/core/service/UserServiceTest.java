@@ -10,6 +10,7 @@ import com.securityspring.core.domain.model.rbac.Role;
 import com.securityspring.core.domain.model.auth.User;
 import com.securityspring.core.ports.out.notification.EmailPort;
 import com.securityspring.core.ports.out.notification.EmailVerificationCodeRepository;
+import com.securityspring.core.ports.out.notification.PasswordResetTokenRepository;
 import com.securityspring.core.ports.out.credential.PasswordHashPort;
 import com.securityspring.core.ports.out.token.RefreshTokenPort;
 import com.securityspring.core.ports.out.role.RoleRepository;
@@ -42,6 +43,7 @@ class UserServiceTest {
     @Mock TokenBlocklistPort tokenBlocklistPort;
     @Mock EmailPort emailPort;
     @Mock EmailVerificationCodeRepository verificationCodeRepository;
+    @Mock PasswordResetTokenRepository passwordResetTokenRepository;
     @Mock UserCachePort userCachePort;
 
     UserService userService;
@@ -50,7 +52,8 @@ class UserServiceTest {
     void setUp() {
         userService = new UserService(userRepository, roleRepository, passwordHash,
                 refreshTokenPort, tokenBlocklistPort, emailPort, verificationCodeRepository,
-                userCachePort, 15L, 60L);
+                passwordResetTokenRepository, userCachePort, 15L, 60L, 15L,
+                "http://localhost:3000/reset-password");
     }
 
     @Test
@@ -255,7 +258,7 @@ class UserServiceTest {
 
     @Test
     void updateUser_usernameChange_revokesSessionsOfOldUsername() {
-        User user = User.fromPersisted(1L, "alice", "hashed", true, null, false, java.util.Set.of());
+        User user = User.fromPersisted(1L, "alice", "hashed", true, null, false, null, java.util.Set.of());
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
         when(userRepository.findByUsername("bob")).thenReturn(Optional.empty());
         when(userRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));

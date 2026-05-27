@@ -16,6 +16,7 @@ public class UserDTOConverter {
         dto.setEnabled(user.isEnabled());
         dto.setEmail(user.getEmail());
         dto.setEmailVerified(user.isEmailVerified());
+        dto.setPendingEmail(user.getPendingEmail());
         dto.setRoles(
             user.getRoles().stream()
                 .map(Role::getName)

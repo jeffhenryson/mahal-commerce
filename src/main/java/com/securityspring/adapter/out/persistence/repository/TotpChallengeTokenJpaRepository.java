@@ -1,0 +1,22 @@
+package com.securityspring.adapter.out.persistence.repository;
+
+import com.securityspring.adapter.out.persistence.entity.TotpChallengeTokenEntity;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+
+import java.time.Instant;
+import java.util.Optional;
+
+public interface TotpChallengeTokenJpaRepository extends JpaRepository<TotpChallengeTokenEntity, Long> {
+    Optional<TotpChallengeTokenEntity> findByTokenHash(String tokenHash);
+
+    @Modifying
+    @Query("update TotpChallengeTokenEntity t set t.usedAt = :now where t.tokenHash = :tokenHash and t.usedAt is null")
+    int markAsUsedIfAvailable(@Param("tokenHash") String tokenHash, @Param("now") Instant now);
+
+    @Modifying
+    @Query("delete from TotpChallengeTokenEntity t where t.expiresAt < :before")
+    void deleteExpiredBefore(@Param("before") Instant before);
+}

@@ -1,0 +1,16 @@
+package com.securityspring.core.ports.out.twofa;
+
+import com.securityspring.core.domain.model.auth.TotpBackupCode;
+
+import java.util.List;
+import java.util.Optional;
+
+public interface TotpBackupCodeRepository {
+    void saveAll(String username, List<String> rawCodes);
+
+    Optional<TotpBackupCode> findByCode(String rawCode);
+
+    boolean markAsUsed(String rawCode);
+
+    void deleteByUsername(String username);
+}

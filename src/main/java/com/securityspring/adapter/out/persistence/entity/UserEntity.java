@@ -38,6 +38,9 @@ public class UserEntity {
     @Column(nullable = false)
     private boolean emailVerified = false;
 
+    @Column(name = "pending_email", length = 254)
+    private String pendingEmail;
+
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(name = "user_roles",
             joinColumns = @JoinColumn(name = "user_id", foreignKey = @ForeignKey(name = "fk_user_roles_user")),

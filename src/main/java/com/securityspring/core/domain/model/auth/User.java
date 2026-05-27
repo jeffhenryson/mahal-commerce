@@ -14,6 +14,7 @@ public class User {
     private boolean enabled = true;
     private String email;
     private boolean emailVerified = false;
+    private String pendingEmail;
     private Set<Role> roles = new HashSet<>();
 
     User() {
@@ -51,7 +52,7 @@ public class User {
      * campos.
      */
     public static User fromPersisted(Long id, String username, String hashedPassword,
-            boolean enabled, String email, boolean emailVerified,
+            boolean enabled, String email, boolean emailVerified, String pendingEmail,
             Set<Role> roles) {
         Objects.requireNonNull(id, "id is required for persisted user");
         User u = of(username, hashedPassword, roles);
@@ -59,6 +60,7 @@ public class User {
         u.enabled = enabled;
         u.email = email;
         u.emailVerified = emailVerified;
+        u.pendingEmail = pendingEmail;
         return u;
     }
 
@@ -97,6 +99,17 @@ public class User {
         this.enabled = true;
     }
 
+    public void setPendingEmail(String email) {
+        Objects.requireNonNull(email, "pendingEmail is required");
+        this.pendingEmail = email;
+    }
+
+    public void applyPendingEmail() {
+        Objects.requireNonNull(pendingEmail, "no pending email to apply");
+        this.email = this.pendingEmail;
+        this.pendingEmail = null;
+    }
+
     public void addRole(Role role) {
         this.roles.add(role);
     }
@@ -125,6 +138,10 @@ public class User {
 
     public boolean isEmailVerified() {
         return emailVerified;
+    }
+
+    public String getPendingEmail() {
+        return pendingEmail;
     }
 
     public Set<Role> getRoles() {
