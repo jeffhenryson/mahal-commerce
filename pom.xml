@@ -204,14 +204,6 @@
 			<groupId>com.github.ben-manes.caffeine</groupId>
 			<artifactId>caffeine</artifactId>
 		</dependency>
-
-		<!-- Spring Shell — CLI administrativo (perfil "shell") -->
-		<dependency>
-			<groupId>org.springframework.shell</groupId>
-			<artifactId>spring-shell-starter</artifactId>
-			<version>4.0.0</version>
-			<optional>true</optional>
-		</dependency>
 	</dependencies>
 
 	<build>
