@@ -1,7 +1,7 @@
 package com.securityspring.core.ports.in;
 
 import com.securityspring.core.domain.model.PageResult;
-import com.securityspring.core.domain.model.User;
+import com.securityspring.core.domain.model.auth.User;
 
 import java.util.List;
 import java.util.Optional;

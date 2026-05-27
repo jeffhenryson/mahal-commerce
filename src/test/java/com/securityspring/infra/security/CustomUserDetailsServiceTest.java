@@ -1,8 +1,8 @@
 package com.securityspring.infra.security;
 
-import com.securityspring.core.domain.model.Permission;
-import com.securityspring.core.domain.model.Role;
-import com.securityspring.core.domain.model.User;
+import com.securityspring.core.domain.model.rbac.Permission;
+import com.securityspring.core.domain.model.rbac.Role;
+import com.securityspring.core.domain.model.auth.User;
 import com.securityspring.core.ports.out.user.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

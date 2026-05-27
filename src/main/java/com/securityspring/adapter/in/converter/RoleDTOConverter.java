@@ -1,8 +1,8 @@
 package com.securityspring.adapter.in.converter;
 
 import com.securityspring.adapter.in.dtos.response.RoleResponseDTO;
-import com.securityspring.core.domain.model.Permission;
-import com.securityspring.core.domain.model.Role;
+import com.securityspring.core.domain.model.rbac.Permission;
+import com.securityspring.core.domain.model.rbac.Role;
 
 import java.util.stream.Collectors;
 

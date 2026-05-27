@@ -3,7 +3,7 @@ package com.securityspring.core.service;
 import com.securityspring.core.domain.exception.PermissionAlreadyExistsException;
 import com.securityspring.core.domain.exception.PermissionNotFoundException;
 import com.securityspring.core.domain.model.PageResult;
-import com.securityspring.core.domain.model.Permission;
+import com.securityspring.core.domain.model.rbac.Permission;
 import com.securityspring.core.ports.out.role.PermissionRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

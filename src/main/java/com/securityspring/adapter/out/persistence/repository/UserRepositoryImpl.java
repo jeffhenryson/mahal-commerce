@@ -14,8 +14,8 @@ import com.securityspring.adapter.out.persistence.converter.UserEntityConverter;
 import com.securityspring.adapter.out.persistence.entity.RoleEntity;
 import com.securityspring.adapter.out.persistence.entity.UserEntity;
 import com.securityspring.core.domain.model.PageResult;
-import com.securityspring.core.domain.model.Role;
-import com.securityspring.core.domain.model.User;
+import com.securityspring.core.domain.model.rbac.Role;
+import com.securityspring.core.domain.model.auth.User;
 import com.securityspring.core.ports.out.user.UserRepository;
 
 @Repository

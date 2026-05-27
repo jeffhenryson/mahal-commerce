@@ -13,7 +13,7 @@ import com.securityspring.core.domain.exception.RoleNotFoundException;
 import com.securityspring.core.domain.exception.UserNotFoundException;
 import com.securityspring.core.domain.exception.UsernameAlreadyExistsException;
 import com.securityspring.core.domain.model.PageResult;
-import com.securityspring.core.domain.model.User;
+import com.securityspring.core.domain.model.auth.User;
 import com.securityspring.core.ports.in.UserUseCase;
 import com.securityspring.infra.handler.GlobalExceptionHandler;
 import org.springframework.context.ApplicationEventPublisher;

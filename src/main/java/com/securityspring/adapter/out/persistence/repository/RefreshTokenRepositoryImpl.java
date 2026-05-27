@@ -20,7 +20,7 @@ import com.securityspring.adapter.out.persistence.entity.UserEntity;
 import com.securityspring.core.domain.exception.InvalidRefreshTokenException;
 import com.securityspring.core.domain.exception.RefreshTokenAlreadyUsedException;
 import com.securityspring.core.domain.exception.RefreshTokenExpiredException;
-import com.securityspring.core.domain.model.SessionInfo;
+import com.securityspring.core.domain.model.auth.SessionInfo;
 import com.securityspring.core.ports.out.token.RefreshTokenPort;
 import com.securityspring.core.domain.TokenHashUtils;
 

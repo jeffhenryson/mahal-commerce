@@ -4,7 +4,7 @@ import com.securityspring.adapter.in.converter.RoleDTOConverter;
 import com.securityspring.adapter.in.dtos.request.RoleRequest;
 import com.securityspring.adapter.in.dtos.response.RoleResponseDTO;
 import com.securityspring.core.domain.model.PageResult;
-import com.securityspring.core.domain.model.Role;
+import com.securityspring.core.domain.model.rbac.Role;
 import com.securityspring.core.ports.in.RoleUseCase;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;

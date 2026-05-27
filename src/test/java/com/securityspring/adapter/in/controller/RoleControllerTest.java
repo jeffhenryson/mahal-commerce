@@ -8,7 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.securityspring.adapter.in.converter.RoleDTOConverter;
 import com.securityspring.core.domain.exception.RoleAlreadyExistsException;
 import com.securityspring.core.domain.exception.RoleNotFoundException;
-import com.securityspring.core.domain.model.Role;
+import com.securityspring.core.domain.model.rbac.Role;
 import com.securityspring.core.ports.in.RoleUseCase;
 import com.securityspring.infra.handler.GlobalExceptionHandler;
 

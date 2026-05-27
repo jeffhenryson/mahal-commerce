@@ -1,4 +1,4 @@
-package com.securityspring.core.domain.model;
+package com.securityspring.core.domain.model.rbac;
 
 import java.util.HashSet;
 import java.util.Set;

@@ -1,7 +1,7 @@
 package com.securityspring.core.ports.in;
 
-import com.securityspring.core.domain.model.SessionInfo;
-import com.securityspring.core.domain.model.TokenPair;
+import com.securityspring.core.domain.model.auth.SessionInfo;
+import com.securityspring.core.domain.model.auth.TokenPair;
 
 import java.util.List;
 

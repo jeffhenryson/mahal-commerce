@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "security-spring",
-    "description": "API de autenticação e usuários — JWT + RBAC com Permissões + Refresh Token + Verificação de Email\n\nFluxo recomendado:\n1. Execute **[Auth] Login (admin)** — accessToken e refreshToken são salvos automaticamente\n2. Todos os requests protegidos já usam {{access_token}}\n3. Ao expirar o access token, execute **[Auth] Refresh**\n4. Para testar como usuário comum, execute **[Auth] Login (user)**\n\nFluxo de autoregistro:\n1. Execute **[Auth] Registrar** → conta criada desabilitada, código enviado ao email\n2. Execute **[Auth] Verificar Email** com o código recebido → conta ativada\n3. Execute **[Auth] Login** normalmente\n\nCredenciais dev (criadas via create-first-admin.sql):\n- admin / Admin@dev1  (ROLE_ADMIN — todas as permissões)\n- user  / User@dev1   (ROLE_USER — apenas USER_READ)\n\nPermissões do ROLE_ADMIN:\n  Usuários: USER_CREATE, USER_READ, USER_UPDATE, USER_DELETE, USER_ROLE_ASSIGN, USER_STATUS\n  Roles:    ROLE_READ, ROLE_CREATE, ROLE_DELETE, ROLE_MANAGE_PERMISSIONS\n  Permissões: PERMISSION_READ, PERMISSION_CREATE, PERMISSION_DELETE",
+    "description": "API de autenticação e usuários — JWT + RBAC com Permissões + Refresh Token + Verificação de Email\n\nFluxo recomendado:\n1. Execute **[Auth] Login (admin)** — accessToken e refreshToken são salvos automaticamente\n2. Todos os requests protegidos já usam {{access_token}}\n3. Ao expirar o access token, execute **[Auth] Refresh**\n4. Para testar como usuário comum, execute **[Auth] Login (user)**\n\nFluxo de autoregistro:\n1. Execute **[Auth] Registrar** → conta criada desabilitada, código enviado ao email\n2. Execute **[Auth] Verificar Email** com o código recebido → conta ativada\n3. Execute **[Auth] Login** normalmente\n\nCredenciais dev (criadas via create-first-admin.sql):\n- admin / Admin@dev1  (ROLE_ADMIN — todas as permissões)\n- user  / User@dev1   (ROLE_USER — apenas USER_READ)\n\nPermissões do ROLE_ADMIN:\n  Usuários: USER_CREATE, USER_READ, USER_UPDATE, USER_DELETE, USER_ROLE_ASSIGN, USER_STATUS\n  Roles:    ROLE_READ, ROLE_CREATE, ROLE_DELETE, ROLE_MANAGE_PERMISSIONS\n  Permissões: PERMISSION_READ, PERMISSION_CREATE, PERMISSION_DELETE\n\nEndpoints disponíveis:\n  Auth:        POST /auth/login | POST /auth/refresh | POST /auth/logout | DELETE /auth/sessions | GET /auth/sessions\n               POST /auth/register | POST /auth/verify-email | POST /auth/resend-verification\n  Usuários:    GET /users/me | PATCH /users/me | PUT /users/me/password\n               GET /users | GET /users/{id} | POST /users | PATCH /users/{id} | DELETE /users/{id}\n               PUT /users/{id}/enable | PUT /users/{id}/disable | POST /users/{username}/roles/{roleName}\n  Roles:       GET /roles | POST /roles | DELETE /roles/{name}\n               POST /roles/{roleName}/permissions/{permissionName} | DELETE /roles/{roleName}/permissions/{permissionName}\n  Permissões:  GET /permissions | POST /permissions | DELETE /permissions/{name}",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -22,6 +22,11 @@
     },
     {
       "key": "created_user_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "created_role_name",
       "value": "",
       "type": "string"
     }
@@ -77,7 +82,8 @@
                   "pm.test('Status 200', () => pm.response.to.have.status(200));",
                   "pm.test('Retorna accessToken', () => pm.expect(pm.response.json().accessToken).to.be.a('string'));",
                   "pm.test('Retorna refreshToken', () => pm.expect(pm.response.json().refreshToken).to.be.a('string'));",
-                  "pm.test('tokenType é Bearer', () => pm.expect(pm.response.json().tokenType).to.eql('Bearer'));"
+                  "pm.test('tokenType é Bearer', () => pm.expect(pm.response.json().tokenType).to.eql('Bearer'));",
+                  "pm.test('Retorna expiresIn', () => pm.expect(pm.response.json().expiresIn).to.be.a('number'));"
                 ],
                 "type": "text/javascript"
               }
@@ -97,7 +103,7 @@
               "host": ["{{base_url}}"],
               "path": ["auth", "login"]
             },
-            "description": "Autentica o admin e salva automaticamente accessToken + refreshToken.\n\nPermissões do admin: todas (USER_CREATE, USER_READ, USER_UPDATE, USER_DELETE, USER_ROLE_ASSIGN, USER_STATUS, ROLE_READ, ROLE_CREATE, ROLE_DELETE, ROLE_MANAGE_PERMISSIONS, PERMISSION_READ, PERMISSION_CREATE, PERMISSION_DELETE)\n\nDev:  admin / Admin@dev1"
+            "description": "Autentica o admin e salva automaticamente accessToken + refreshToken.\n\nPermissões do admin: todas (USER_CREATE, USER_READ, USER_UPDATE, USER_DELETE, USER_ROLE_ASSIGN, USER_STATUS, ROLE_READ, ROLE_CREATE, ROLE_DELETE, ROLE_MANAGE_PERMISSIONS, PERMISSION_READ, PERMISSION_CREATE, PERMISSION_DELETE)\n\nDev:  admin / Admin@dev1\n\nResposta: { accessToken, refreshToken, tokenType: \"Bearer\", expiresIn: <segundos> }"
           }
         },
         {
@@ -203,7 +209,7 @@
               "host": ["{{base_url}}"],
               "path": ["auth", "logout"]
             },
-            "description": "Revoga o refreshToken informado no body.\nApós isso, qualquer tentativa de usar esse refresh retorna 400.\nO accessToken ainda é válido até expirar (stateless)."
+            "description": "Revoga o refreshToken informado no body.\nApós isso, qualquer tentativa de usar esse refresh retorna 401.\nO accessToken ainda é válido até expirar (stateless)."
           }
         },
         {
@@ -230,6 +236,40 @@
               "path": ["auth", "sessions"]
             },
             "description": "Revoga TODOS os refresh tokens do usuário autenticado (logout de todos os dispositivos).\nRequer Bearer token válido. O username é extraído do JWT.\nEndpoint: DELETE /auth/sessions"
+          }
+        },
+        {
+          "name": "[Auth] Listar sessões ativas",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Retorna array de sessões', () => pm.expect(pm.response.json()).to.be.an('array'));",
+                  "const sessions = pm.response.json();",
+                  "if (sessions.length > 0) {",
+                  "    pm.test('Sessão tem id', () => pm.expect(sessions[0].id).to.be.a('number'));",
+                  "    pm.test('Sessão tem createdAt', () => pm.expect(sessions[0].createdAt).to.be.a('string'));",
+                  "    pm.test('Sessão tem expiresAt', () => pm.expect(sessions[0].expiresAt).to.be.a('string'));",
+                  "    console.log('Sessões ativas:', sessions.length);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/sessions",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "sessions"]
+            },
+            "description": "Lista as sessões ativas (refresh tokens válidos) do usuário autenticado.\nCada sessão contém: id, createdAt, expiresAt, ipAddress, userAgent.\n\nRequer Bearer token válido — o username é extraído do JWT.\nEndpoint: GET /auth/sessions"
           }
         },
         {
@@ -321,7 +361,7 @@
               "host": ["{{base_url}}"],
               "path": ["auth", "resend-verification"]
             },
-            "description": "Reenvia o código de verificação para o email informado.\nNão exige autenticação.\n\nRespostas possíveis:\n- 204: Código reenviado\n- 404: Email não encontrado no sistema\n- 409: Email já verificado (conta já está ativa)\n\nEndpoint: POST /auth/resend-verification"
+            "description": "Reenvia o código de verificação para o email informado.\nNão exige autenticação.\n\nPor design de segurança, **sempre retorna 204** — não revela se o email está cadastrado, se já foi verificado, ou se está em cooldown.\n\nEndpoint: POST /auth/resend-verification"
           }
         }
       ]
@@ -338,7 +378,10 @@
                 "exec": [
                   "pm.test('Status 200', () => pm.response.to.have.status(200));",
                   "pm.test('Tem username', () => pm.expect(pm.response.json().username).to.be.a('string'));",
-                  "pm.test('Tem roles', () => pm.expect(pm.response.json().roles).to.be.an('array'));"
+                  "pm.test('Tem roles', () => pm.expect(pm.response.json().roles).to.be.an('array'));",
+                  "pm.test('Tem permissions', () => pm.expect(pm.response.json().permissions).to.be.an('array'));",
+                  "pm.test('Tem email', () => pm.expect(pm.response.json()).to.have.property('email'));",
+                  "pm.test('Tem emailVerified', () => pm.expect(pm.response.json().emailVerified).to.be.a('boolean'));"
                 ],
                 "type": "text/javascript"
               }
@@ -354,7 +397,71 @@
               "host": ["{{base_url}}"],
               "path": ["users", "me"]
             },
-            "description": "Retorna o perfil do usuário autenticado.\nQualquer usuário autenticado pode acessar — não exige permissão específica."
+            "description": "Retorna o perfil do usuário autenticado.\nQualquer usuário autenticado pode acessar — não exige permissão específica.\n\nResposta: { id, username, enabled, email, emailVerified, roles: [...], permissions: [...] }"
+          }
+        },
+        {
+          "name": "[Usuários] Atualizar próprio perfil (PATCH /users/me)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Tem username', () => pm.expect(pm.response.json().username).to.be.a('string'));",
+                  "console.log('Perfil atualizado. Username:', pm.response.json().username);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"admin\",\n  \"email\": \"admin@novo.com\",\n  \"currentPassword\": \"Admin@dev1\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/users/me",
+              "host": ["{{base_url}}"],
+              "path": ["users", "me"]
+            },
+            "description": "Atualiza os dados do próprio perfil (username e/ou email).\nNão exige permissão especial — qualquer usuário autenticado pode usar.\n\nCampos:\n- username (obrigatório): 3–80 chars. Passe o username atual se não quiser alterar.\n- email (opcional): endereço válido, máx 254 chars.\n- currentPassword (obrigatório apenas quando alterar o email): senha atual para confirmar identidade.\n\nErros possíveis:\n- 409: username ou email já em uso por outro usuário\n- 400: currentPassword incorreto ao tentar trocar email\n\nEndpoint: PATCH /users/me"
+          }
+        },
+        {
+          "name": "[Usuários] Trocar minha senha",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 204', () => pm.response.to.have.status(204));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"Admin@dev1\",\n  \"newPassword\": \"NovaSenha@456\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/users/me/password",
+              "host": ["{{base_url}}"],
+              "path": ["users", "me", "password"]
+            },
+            "description": "Troca a senha do usuário autenticado.\nRequer a senha atual correta (campo currentPassword).\nNewPassword: mínimo 8 caracteres com maiúscula, minúscula, dígito e especial.\nQualquer usuário autenticado pode usar — não exige permissão especial.\nEndpoint: PUT /users/me/password"
           }
         },
         {
@@ -401,7 +508,8 @@
                 "exec": [
                   "pm.test('Status 200', () => pm.response.to.have.status(200));",
                   "pm.test('Tem username', () => pm.expect(pm.response.json().username).to.be.a('string'));",
-                  "pm.test('Tem roles', () => pm.expect(pm.response.json().roles).to.be.an('array'));"
+                  "pm.test('Tem roles', () => pm.expect(pm.response.json().roles).to.be.an('array'));",
+                  "pm.test('Tem permissions', () => pm.expect(pm.response.json().permissions).to.be.an('array'));"
                 ],
                 "type": "text/javascript"
               }
@@ -417,7 +525,7 @@
               "host": ["{{base_url}}"],
               "path": ["users", "1"]
             },
-            "description": "Busca usuário pelo ID. Requer permissão USER_READ.\nAltere o ID na URL conforme necessário."
+            "description": "Busca usuário pelo ID. Requer permissão USER_READ.\nAltere o ID na URL conforme necessário.\n\nResposta: { id, username, enabled, email, emailVerified, roles: [...], permissions: [...] }"
           }
         },
         {
@@ -447,18 +555,18 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"username\": \"joao\",\n  \"password\": \"Senha@123\",\n  \"roles\": [\"ROLE_USER\"]\n}"
+              "raw": "{\n  \"username\": \"joao\",\n  \"password\": \"Senha@123\",\n  \"email\": \"joao@exemplo.com\",\n  \"roles\": [\"ROLE_USER\"]\n}"
             },
             "url": {
               "raw": "{{base_url}}/users",
               "host": ["{{base_url}}"],
               "path": ["users"]
             },
-            "description": "Cria um novo usuário com roles. Requer permissão USER_CREATE (apenas ADMIN).\nUsername: 3-80 chars | Password: 8-120 chars\nroles: opcional — ex: [\"ROLE_USER\"] ou [\"ROLE_ADMIN\"]\n\nO ID criado é salvo em {{created_user_id}} para reuso nos demais requests."
+            "description": "Cria um novo usuário com roles. Requer permissão USER_CREATE (apenas ADMIN).\n\nCampos:\n- username (obrigatório): 3–80 chars\n- password (obrigatório): 8–120 chars com maiúscula, minúscula, dígito e especial\n- email (opcional): endereço válido, máx 254 chars\n- roles (opcional): ex [\"ROLE_USER\"] ou [\"ROLE_ADMIN\"]\n\nO ID criado é salvo em {{created_user_id}} para reuso nos demais requests.\nEndpoint: POST /users"
           }
         },
         {
-          "name": "[Usuários] Atualizar username",
+          "name": "[Usuários] Atualizar usuário (admin)",
           "event": [
             {
               "listen": "test",
@@ -479,14 +587,14 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"username\": \"joao_atualizado\"\n}"
+              "raw": "{\n  \"username\": \"joao_atualizado\",\n  \"email\": \"joao_novo@exemplo.com\"\n}"
             },
             "url": {
               "raw": "{{base_url}}/users/{{created_user_id}}",
               "host": ["{{base_url}}"],
               "path": ["users", "{{created_user_id}}"]
             },
-            "description": "Atualiza o username de um usuário. Requer permissão USER_UPDATE (apenas ADMIN).\nUsa o ID salvo em {{created_user_id}} — execute **[Usuários] Criar novo usuário** primeiro.\nEndpoint: PATCH /users/{id}"
+            "description": "Atualiza username e/ou email de um usuário. Requer permissão USER_UPDATE (apenas ADMIN).\n\nCampos:\n- username (obrigatório): 3–80 chars\n- email (opcional): endereço válido, máx 254 chars\n\nUsa o ID salvo em {{created_user_id}} — execute **[Usuários] Criar novo usuário** primeiro.\nEndpoint: PATCH /users/{id}"
           }
         },
         {
@@ -568,37 +676,6 @@
           }
         },
         {
-          "name": "[Usuários] Trocar minha senha",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "exec": [
-                  "pm.test('Status 204', () => pm.response.to.have.status(204));"
-                ],
-                "type": "text/javascript"
-              }
-            }
-          ],
-          "request": {
-            "method": "PUT",
-            "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "Authorization", "value": "Bearer {{access_token}}" }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"currentPassword\": \"Admin@dev1\",\n  \"newPassword\": \"NovaSenha@456\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/users/me/password",
-              "host": ["{{base_url}}"],
-              "path": ["users", "me", "password"]
-            },
-            "description": "Troca a senha do usuário autenticado.\nRequer a senha atual correta (campo currentPassword).\nNewPassword: mínimo 8 caracteres com maiúscula, minúscula, dígito e especial.\nQualquer usuário autenticado pode usar — não exige permissão especial.\nEndpoint: PUT /users/me/password"
-          }
-        },
-        {
           "name": "[Usuários] Deletar por ID",
           "event": [
             {
@@ -630,16 +707,21 @@
       "name": "Roles",
       "item": [
         {
-          "name": "[Roles] Listar todas",
+          "name": "[Roles] Listar paginadas",
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
                   "pm.test('Status 200', () => pm.response.to.have.status(200));",
-                  "pm.test('Retorna array', () => pm.expect(pm.response.json()).to.be.an('array'));",
+                  "pm.test('Retorna content como array', () => pm.expect(pm.response.json().content).to.be.an('array'));",
+                  "pm.test('Tem totalElements', () => pm.expect(pm.response.json().totalElements).to.be.a('number'));",
+                  "pm.test('Tem page', () => pm.expect(pm.response.json().page).to.eql(0));",
                   "pm.test('Cada role tem name', () => {",
-                  "    pm.response.json().forEach(r => pm.expect(r.name).to.be.a('string'));",
+                  "    pm.response.json().content.forEach(r => pm.expect(r.name).to.be.a('string'));",
+                  "});",
+                  "pm.test('Cada role tem permissions', () => {",
+                  "    pm.response.json().content.forEach(r => pm.expect(r.permissions).to.be.an('array'));",
                   "});"
                 ],
                 "type": "text/javascript"
@@ -652,11 +734,15 @@
               { "key": "Authorization", "value": "Bearer {{access_token}}" }
             ],
             "url": {
-              "raw": "{{base_url}}/roles",
+              "raw": "{{base_url}}/roles?page=0&size=20",
               "host": ["{{base_url}}"],
-              "path": ["roles"]
+              "path": ["roles"],
+              "query": [
+                { "key": "page", "value": "0", "description": "Página (base 0)" },
+                { "key": "size", "value": "20", "description": "Itens por página (máx: 100)" }
+              ]
             },
-            "description": "Lista todas as roles cadastradas com suas permissões.\nRequer permissão ROLE_READ (apenas ADMIN).\nEndpoint: GET /roles"
+            "description": "Lista todas as roles cadastradas com suas permissões (resposta paginada).\nRequer permissão ROLE_READ (apenas ADMIN).\n\nResposta: { content: [ { id, name, permissions: [...] } ], page, size, totalElements, totalPages }\nEndpoint: GET /roles"
           }
         },
         {
@@ -668,7 +754,12 @@
                 "exec": [
                   "pm.test('Status 201', () => pm.response.to.have.status(201));",
                   "pm.test('Tem name', () => pm.expect(pm.response.json().name).to.be.a('string'));",
-                  "pm.test('Tem permissions', () => pm.expect(pm.response.json().permissions).to.be.an('array'));"
+                  "pm.test('Tem permissions', () => pm.expect(pm.response.json().permissions).to.be.an('array'));",
+                  "",
+                  "if (pm.response.code === 201) {",
+                  "    pm.collectionVariables.set('created_role_name', pm.response.json().name);",
+                  "    console.log('✅ Role criada:', pm.response.json().name);",
+                  "}"
                 ],
                 "type": "text/javascript"
               }
@@ -689,7 +780,7 @@
               "host": ["{{base_url}}"],
               "path": ["roles"]
             },
-            "description": "Cria uma nova role. Requer permissão ROLE_CREATE (apenas ADMIN).\nname: 3–80 chars\n\nConvenção: usar prefixo ROLE_ (ex: ROLE_MODERADOR).\nApós criar, use **[Roles] Atribuir Permission** para associar permissões.\nEndpoint: POST /roles"
+            "description": "Cria uma nova role. Requer permissão ROLE_CREATE (apenas ADMIN).\nname: 3–80 chars\n\nConvenção: usar prefixo ROLE_ (ex: ROLE_MODERADOR).\nO nome é salvo em {{created_role_name}} para reuso nos requests seguintes.\nApós criar, use **[Roles] Atribuir Permission** para associar permissões.\nEndpoint: POST /roles"
           }
         },
         {
@@ -711,11 +802,11 @@
               { "key": "Authorization", "value": "Bearer {{access_token}}" }
             ],
             "url": {
-              "raw": "{{base_url}}/roles/ROLE_MODERADOR/permissions/USER_READ",
+              "raw": "{{base_url}}/roles/{{created_role_name}}/permissions/USER_READ",
               "host": ["{{base_url}}"],
-              "path": ["roles", "ROLE_MODERADOR", "permissions", "USER_READ"]
+              "path": ["roles", "{{created_role_name}}", "permissions", "USER_READ"]
             },
-            "description": "Atribui uma permission existente a uma role. Requer permissão ROLE_MANAGE_PERMISSIONS (apenas ADMIN).\nAjuste roleName e permissionName na URL conforme necessário.\nEndpoint: POST /roles/{roleName}/permissions/{permissionName}"
+            "description": "Atribui uma permission existente a uma role. Requer permissão ROLE_MANAGE_PERMISSIONS (apenas ADMIN).\nUsa {{created_role_name}} — execute **[Roles] Criar nova role** primeiro.\nAjuste o permissionName na URL conforme necessário.\nEndpoint: POST /roles/{roleName}/permissions/{permissionName}"
           }
         },
         {
@@ -737,11 +828,11 @@
               { "key": "Authorization", "value": "Bearer {{access_token}}" }
             ],
             "url": {
-              "raw": "{{base_url}}/roles/ROLE_MODERADOR/permissions/USER_READ",
+              "raw": "{{base_url}}/roles/{{created_role_name}}/permissions/USER_READ",
               "host": ["{{base_url}}"],
-              "path": ["roles", "ROLE_MODERADOR", "permissions", "USER_READ"]
+              "path": ["roles", "{{created_role_name}}", "permissions", "USER_READ"]
             },
-            "description": "Remove uma permission de uma role. Requer permissão ROLE_MANAGE_PERMISSIONS (apenas ADMIN).\nAjuste roleName e permissionName na URL conforme necessário.\nEndpoint: DELETE /roles/{roleName}/permissions/{permissionName}"
+            "description": "Remove uma permission de uma role. Requer permissão ROLE_MANAGE_PERMISSIONS (apenas ADMIN).\nUsa {{created_role_name}} — execute **[Roles] Criar nova role** primeiro.\nAjuste o permissionName na URL conforme necessário.\nEndpoint: DELETE /roles/{roleName}/permissions/{permissionName}"
           }
         },
         {
@@ -763,11 +854,11 @@
               { "key": "Authorization", "value": "Bearer {{access_token}}" }
             ],
             "url": {
-              "raw": "{{base_url}}/roles/ROLE_MODERADOR",
+              "raw": "{{base_url}}/roles/{{created_role_name}}",
               "host": ["{{base_url}}"],
-              "path": ["roles", "ROLE_MODERADOR"]
+              "path": ["roles", "{{created_role_name}}"]
             },
-            "description": "Remove uma role pelo nome. Requer permissão ROLE_DELETE (apenas ADMIN).\nAtenção: roles com usuários associados podem falhar dependendo do cascade configurado.\nEndpoint: DELETE /roles/{name}"
+            "description": "Remove uma role pelo nome. Requer permissão ROLE_DELETE (apenas ADMIN).\nUsa {{created_role_name}} — execute **[Roles] Criar nova role** primeiro.\nAtenção: roles com usuários associados podem falhar dependendo do cascade configurado.\nEndpoint: DELETE /roles/{name}"
           }
         }
       ]
@@ -776,16 +867,18 @@
       "name": "Permissions",
       "item": [
         {
-          "name": "[Permissions] Listar todas",
+          "name": "[Permissions] Listar paginadas",
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
                   "pm.test('Status 200', () => pm.response.to.have.status(200));",
-                  "pm.test('Retorna array', () => pm.expect(pm.response.json()).to.be.an('array'));",
+                  "pm.test('Retorna content como array', () => pm.expect(pm.response.json().content).to.be.an('array'));",
+                  "pm.test('Tem totalElements', () => pm.expect(pm.response.json().totalElements).to.be.a('number'));",
+                  "pm.test('Tem page', () => pm.expect(pm.response.json().page).to.eql(0));",
                   "pm.test('Cada permission tem name', () => {",
-                  "    pm.response.json().forEach(p => pm.expect(p.name).to.be.a('string'));",
+                  "    pm.response.json().content.forEach(p => pm.expect(p.name).to.be.a('string'));",
                   "});"
                 ],
                 "type": "text/javascript"
@@ -798,11 +891,15 @@
               { "key": "Authorization", "value": "Bearer {{access_token}}" }
             ],
             "url": {
-              "raw": "{{base_url}}/permissions",
+              "raw": "{{base_url}}/permissions?page=0&size=20",
               "host": ["{{base_url}}"],
-              "path": ["permissions"]
+              "path": ["permissions"],
+              "query": [
+                { "key": "page", "value": "0", "description": "Página (base 0)" },
+                { "key": "size", "value": "20", "description": "Itens por página (máx: 100)" }
+              ]
             },
-            "description": "Lista todas as permissions cadastradas.\nRequer permissão PERMISSION_READ (apenas ADMIN).\nEndpoint: GET /permissions"
+            "description": "Lista todas as permissions cadastradas (resposta paginada).\nRequer permissão PERMISSION_READ (apenas ADMIN).\n\nResposta: { content: [ { id, name } ], page, size, totalElements, totalPages }\nEndpoint: GET /permissions"
           }
         },
         {
@@ -814,7 +911,10 @@
                 "exec": [
                   "pm.test('Status 201', () => pm.response.to.have.status(201));",
                   "pm.test('Tem name', () => pm.expect(pm.response.json().name).to.be.a('string'));",
-                  "pm.test('Tem id', () => pm.expect(pm.response.json().id).to.be.a('number'));"
+                  "pm.test('Tem id', () => pm.expect(pm.response.json().id).to.be.a('number'));",
+                  "if (pm.response.code === 201) {",
+                  "    console.log('✅ Permission criada:', pm.response.json().name);",
+                  "}"
                 ],
                 "type": "text/javascript"
               }
@@ -877,7 +977,8 @@
               "script": {
                 "exec": [
                   "pm.test('Status 401', () => pm.response.to.have.status(401));",
-                  "pm.test('Tem message', () => pm.expect(pm.response.json().message).to.be.a('string'));"
+                  "pm.test('Tem message', () => pm.expect(pm.response.json().message).to.be.a('string'));",
+                  "pm.test('Tem code', () => pm.expect(pm.response.json().code).to.eql('INVALID_CREDENTIALS'));"
                 ],
                 "type": "text/javascript"
               }
@@ -897,7 +998,7 @@
               "host": ["{{base_url}}"],
               "path": ["auth", "login"]
             },
-            "description": "Tentativa de login com credenciais inválidas. Espera 401."
+            "description": "Tentativa de login com credenciais inválidas.\nEspera 401 com code INVALID_CREDENTIALS."
           }
         },
         {
@@ -959,7 +1060,8 @@
                 "exec": [
                   "// Execute '[Auth] Login (user comum)' antes deste request",
                   "// O usuário comum tem apenas USER_READ — não pode criar usuários",
-                  "pm.test('Status 403', () => pm.response.to.have.status(403));"
+                  "pm.test('Status 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Tem code ACCESS_DENIED', () => pm.expect(pm.response.json().code).to.eql('ACCESS_DENIED'));"
                 ],
                 "type": "text/javascript"
               }
@@ -980,17 +1082,21 @@
               "host": ["{{base_url}}"],
               "path": ["users"]
             },
-            "description": "POST /users requer permissão USER_CREATE.\nFaça login como 'user' (ROLE_USER) primeiro — ele só tem USER_READ. Espera 403."
+            "description": "POST /users requer permissão USER_CREATE.\nFaça login como 'user' (ROLE_USER) primeiro — ele só tem USER_READ. Espera 403 com code ACCESS_DENIED."
           }
         },
         {
-          "name": "[Erro] Refresh token inválido → 400",
+          "name": "[Erro] Refresh token inválido → 401",
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
-                  "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));",
+                  "pm.test('Tem code', () => {",
+                  "    const code = pm.response.json().code;",
+                  "    pm.expect(['INVALID_REFRESH_TOKEN', 'REFRESH_TOKEN_EXPIRED', 'REFRESH_TOKEN_REUSED']).to.include(code);",
+                  "});"
                 ],
                 "type": "text/javascript"
               }
@@ -1010,7 +1116,7 @@
               "host": ["{{base_url}}"],
               "path": ["auth", "refresh"]
             },
-            "description": "Tentativa de refresh com token inválido, expirado ou revogado. Espera 400."
+            "description": "Tentativa de refresh com token inválido, expirado ou revogado.\nEspera 401 com code INVALID_REFRESH_TOKEN, REFRESH_TOKEN_EXPIRED ou REFRESH_TOKEN_REUSED."
           }
         },
         {
@@ -1021,7 +1127,8 @@
               "script": {
                 "exec": [
                   "pm.test('Status 400', () => pm.response.to.have.status(400));",
-                  "pm.test('Tem message', () => pm.expect(pm.response.json().message).to.be.a('string'));"
+                  "pm.test('Tem message', () => pm.expect(pm.response.json().message).to.be.a('string'));",
+                  "pm.test('Tem code INVALID_PASSWORD', () => pm.expect(pm.response.json().code).to.eql('INVALID_PASSWORD'));"
                 ],
                 "type": "text/javascript"
               }
@@ -1042,7 +1149,7 @@
               "host": ["{{base_url}}"],
               "path": ["users", "me", "password"]
             },
-            "description": "Troca de senha com currentPassword incorreta. Espera 400 com mensagem de erro."
+            "description": "Troca de senha com currentPassword incorreta.\nEspera 400 com code INVALID_PASSWORD."
           }
         },
         {
@@ -1052,7 +1159,8 @@
               "listen": "test",
               "script": {
                 "exec": [
-                  "pm.test('Status 409', () => pm.response.to.have.status(409));"
+                  "pm.test('Status 409', () => pm.response.to.have.status(409));",
+                  "pm.test('Tem code USERNAME_ALREADY_EXISTS', () => pm.expect(pm.response.json().code).to.eql('USERNAME_ALREADY_EXISTS'));"
                 ],
                 "type": "text/javascript"
               }
@@ -1072,7 +1180,7 @@
               "host": ["{{base_url}}"],
               "path": ["auth", "register"]
             },
-            "description": "Tentativa de registro com username já existente. Espera 409 Conflict."
+            "description": "Tentativa de registro com username já existente.\nEspera 409 com code USERNAME_ALREADY_EXISTS."
           }
         },
         {
@@ -1082,7 +1190,11 @@
               "listen": "test",
               "script": {
                 "exec": [
-                  "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Tem code', () => {",
+                  "    const code = pm.response.json().code;",
+                  "    pm.expect(['VERIFICATION_CODE_INVALID', 'VERIFICATION_CODE_EXPIRED']).to.include(code);",
+                  "});"
                 ],
                 "type": "text/javascript"
               }
@@ -1102,17 +1214,20 @@
               "host": ["{{base_url}}"],
               "path": ["auth", "verify-email"]
             },
-            "description": "Tentativa de verificação com código inválido ou expirado. Espera 400."
+            "description": "Tentativa de verificação com código inválido ou expirado.\nEspera 400 com code VERIFICATION_CODE_INVALID ou VERIFICATION_CODE_EXPIRED."
           }
         },
         {
-          "name": "[Erro] Email já verificado → 409",
+          "name": "[Segurança] Resend-verification sempre retorna 204",
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
-                  "pm.test('Status 409', () => pm.response.to.have.status(409));"
+                  "// Por design de segurança, o endpoint resend-verification SEMPRE retorna 204",
+                  "// — independente de o email estar cadastrado, já verificado ou em cooldown.",
+                  "// Isso previne enumeração de usuários (user enumeration).",
+                  "pm.test('Status 204 (segurança por design)', () => pm.response.to.have.status(204));"
                 ],
                 "type": "text/javascript"
               }
@@ -1125,14 +1240,14 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"admin@exemplo.com\"\n}"
+              "raw": "{\n  \"email\": \"email_inexistente@exemplo.com\"\n}"
             },
             "url": {
               "raw": "{{base_url}}/auth/resend-verification",
               "host": ["{{base_url}}"],
               "path": ["auth", "resend-verification"]
             },
-            "description": "Tentativa de reenvio de verificação para email já confirmado. Espera 409 Conflict."
+            "description": "Testa o comportamento de segurança do endpoint resend-verification.\nMesmo com email inexistente, já verificado ou em cooldown, a resposta é sempre 204.\nIsso previne ataques de enumeração de usuários (user enumeration).\n\nEndpoint: POST /auth/resend-verification"
           }
         },
         {
@@ -1164,7 +1279,7 @@
               "host": ["{{base_url}}"],
               "path": ["auth", "login"]
             },
-            "description": "Execute 11x em sequência para acionar o rate limiting.\nLimite padrão: 10 tentativas por 60 segundos por IP. Espera 429 na 11ª tentativa."
+            "description": "Execute 11x em sequência para acionar o rate limiting.\nLimite padrão: 10 tentativas por 60 segundos por IP. Espera 429 na 11ª tentativa.\nQuando o limite é atingido, o header Retry-After indica em segundos quando tentar novamente."
           }
         }
       ]

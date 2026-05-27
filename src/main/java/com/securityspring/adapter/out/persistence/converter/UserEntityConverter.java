@@ -3,9 +3,9 @@ package com.securityspring.adapter.out.persistence.converter;
 import com.securityspring.adapter.out.persistence.entity.PermissionEntity;
 import com.securityspring.adapter.out.persistence.entity.RoleEntity;
 import com.securityspring.adapter.out.persistence.entity.UserEntity;
-import com.securityspring.core.domain.model.Permission;
-import com.securityspring.core.domain.model.Role;
-import com.securityspring.core.domain.model.User;
+import com.securityspring.core.domain.model.rbac.Permission;
+import com.securityspring.core.domain.model.rbac.Role;
+import com.securityspring.core.domain.model.auth.User;
 
 import java.util.HashSet;
 import java.util.Set;

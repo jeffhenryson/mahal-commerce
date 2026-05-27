@@ -6,7 +6,7 @@ import com.securityspring.adapter.in.dtos.request.CreateUserRequest;
 import com.securityspring.adapter.in.dtos.request.UserUpdateRequest;
 import com.securityspring.adapter.in.dtos.response.UserResponseDTO;
 import com.securityspring.core.domain.model.PageResult;
-import com.securityspring.core.domain.model.User;
+import com.securityspring.core.domain.model.auth.User;
 import com.securityspring.core.domain.exception.UserNotFoundException;
 import com.securityspring.core.ports.in.UserUseCase;
 import com.securityspring.core.domain.event.AuditEvent;

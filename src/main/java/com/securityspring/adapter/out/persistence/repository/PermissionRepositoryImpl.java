@@ -2,7 +2,7 @@ package com.securityspring.adapter.out.persistence.repository;
 
 import com.securityspring.adapter.out.persistence.entity.PermissionEntity;
 import com.securityspring.core.domain.model.PageResult;
-import com.securityspring.core.domain.model.Permission;
+import com.securityspring.core.domain.model.rbac.Permission;
 import com.securityspring.core.ports.out.role.PermissionRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;

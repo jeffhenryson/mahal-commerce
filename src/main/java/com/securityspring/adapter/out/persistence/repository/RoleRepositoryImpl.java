@@ -12,8 +12,8 @@ import org.springframework.stereotype.Repository;
 import com.securityspring.adapter.out.persistence.entity.PermissionEntity;
 import com.securityspring.adapter.out.persistence.entity.RoleEntity;
 import com.securityspring.core.domain.model.PageResult;
-import com.securityspring.core.domain.model.Permission;
-import com.securityspring.core.domain.model.Role;
+import com.securityspring.core.domain.model.rbac.Permission;
+import com.securityspring.core.domain.model.rbac.Role;
 import com.securityspring.core.ports.out.role.RoleRepository;
 
 import org.springframework.transaction.annotation.Transactional;

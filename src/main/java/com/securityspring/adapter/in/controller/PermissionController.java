@@ -4,7 +4,7 @@ import com.securityspring.adapter.in.converter.PermissionDTOConverter;
 import com.securityspring.adapter.in.dtos.request.PermissionRequest;
 import com.securityspring.adapter.in.dtos.response.PermissionResponseDTO;
 import com.securityspring.core.domain.model.PageResult;
-import com.securityspring.core.domain.model.Permission;
+import com.securityspring.core.domain.model.rbac.Permission;
 import com.securityspring.core.ports.in.PermissionUseCase;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;

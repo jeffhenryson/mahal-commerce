@@ -9,7 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.securityspring.adapter.in.dtos.request.LoginRequest;
 import com.securityspring.adapter.in.dtos.request.LogoutRequest;
 import com.securityspring.adapter.in.dtos.request.RefreshRequest;
-import com.securityspring.core.domain.model.TokenPair;
+import com.securityspring.core.domain.model.auth.TokenPair;
 import com.securityspring.core.ports.in.AuthUseCase;
 
 import org.junit.jupiter.api.BeforeEach;

@@ -1,6 +1,6 @@
 package com.securityspring.core.ports.out.notification;
 
-import com.securityspring.core.domain.model.EmailVerificationCode;
+import com.securityspring.core.domain.model.auth.EmailVerificationCode;
 
 import java.util.Optional;
 

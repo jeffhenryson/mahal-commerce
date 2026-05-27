@@ -1,6 +1,6 @@
 package com.securityspring.adapter.in.dtos.response;
 
-import com.securityspring.core.domain.model.SessionInfo;
+import com.securityspring.core.domain.model.auth.SessionInfo;
 
 import java.time.Instant;
 

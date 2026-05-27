@@ -1,7 +1,7 @@
 package com.securityspring.infra.cli;
 
-import com.securityspring.core.domain.model.SessionInfo;
-import com.securityspring.core.domain.model.User;
+import com.securityspring.core.domain.model.auth.SessionInfo;
+import com.securityspring.core.domain.model.auth.User;
 import com.securityspring.core.ports.in.UserUseCase;
 import com.securityspring.core.ports.out.credential.PasswordHashPort;
 import com.securityspring.core.ports.out.ratelimit.LoginAttemptPort;

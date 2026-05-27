@@ -1,7 +1,7 @@
 package com.securityspring.core.ports.out.role;
 
 import com.securityspring.core.domain.model.PageResult;
-import com.securityspring.core.domain.model.Role;
+import com.securityspring.core.domain.model.rbac.Role;
 
 import java.util.Optional;
 import java.util.Set;

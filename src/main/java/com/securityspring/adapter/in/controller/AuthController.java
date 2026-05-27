@@ -5,7 +5,7 @@ import com.securityspring.adapter.in.dtos.request.LogoutRequest;
 import com.securityspring.adapter.in.dtos.request.RefreshRequest;
 import com.securityspring.adapter.in.dtos.response.SessionInfoDTO;
 import com.securityspring.adapter.in.dtos.response.TokenPairResponseDTO;
-import com.securityspring.core.domain.model.TokenPair;
+import com.securityspring.core.domain.model.auth.TokenPair;
 import com.securityspring.core.ports.in.AuthUseCase;
 import com.securityspring.core.domain.event.AuditEvent;
 import com.securityspring.core.domain.event.AuditEvent.EventType;

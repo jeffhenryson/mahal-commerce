@@ -1,7 +1,7 @@
 package com.securityspring.adapter.in.converter;
 
 import com.securityspring.adapter.in.dtos.response.PermissionResponseDTO;
-import com.securityspring.core.domain.model.Permission;
+import com.securityspring.core.domain.model.rbac.Permission;
 
 public class PermissionDTOConverter {
 
