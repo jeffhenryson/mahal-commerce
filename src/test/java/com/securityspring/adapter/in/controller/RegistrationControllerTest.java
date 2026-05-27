@@ -104,22 +104,24 @@ class RegistrationControllerTest {
 
     @Test
     void verifyEmail_valid_returns_204() throws Exception {
+        // Código deve ter exatamente 12 caracteres alfanuméricos maiúsculos (VerifyEmailRequest@Pattern)
         mockMvc.perform(post("/auth/verify-email")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"code\":\"ABC123\"}"))
+                .content("{\"code\":\"ABCDEF123456\"}"))
                 .andExpect(status().isNoContent());
 
-        verify(useCase).verifyEmail("ABC123");
+        verify(useCase).verifyEmail("ABCDEF123456");
     }
 
     @Test
     void verifyEmail_invalidCode_returns_400() throws Exception {
+        // Código válido estruturalmente (12 chars) mas inexistente no sistema → 400 VERIFICATION_CODE_INVALID
         doThrow(new EmailVerificationCodeNotFoundException())
-                .when(useCase).verifyEmail("INVALID");
+                .when(useCase).verifyEmail("INVALID12345");
 
         mockMvc.perform(post("/auth/verify-email")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"code\":\"INVALID\"}"))
+                .content("{\"code\":\"INVALID12345\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errorCode").value("VERIFICATION_CODE_INVALID"));
     }
