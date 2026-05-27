@@ -1,6 +1,6 @@
 package com.securityspring.adapter.out.email;
 
-import com.securityspring.core.domain.exception.EmailDeliveryException;
+import com.securityspring.core.domain.exception.email.EmailDeliveryException;
 import com.securityspring.core.ports.out.notification.EmailPort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

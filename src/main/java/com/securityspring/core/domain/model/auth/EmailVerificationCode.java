@@ -8,8 +8,7 @@ public record EmailVerificationCode(
         String code,
         Instant expiresAt,
         Instant sentAt,
-        boolean used
-) {
+        boolean used) {
     public boolean isExpired() {
         return Instant.now().isAfter(expiresAt);
     }

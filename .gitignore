@@ -36,3 +36,5 @@ build/
 .env
 
 /docs
+
+/node_modules

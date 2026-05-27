@@ -23,10 +23,11 @@ services:
     image: redis:7-alpine
     container_name: redis-hml
     restart: unless-stopped
+    command: redis-server --requirepass hml_redis_2026
     ports:
       - "6380:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "hml_redis_2026", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10

@@ -2,7 +2,7 @@ package com.securityspring.core.service;
 
 import com.securityspring.core.domain.exception.PermissionNotFoundException;
 import com.securityspring.core.domain.exception.RoleAlreadyExistsException;
-import com.securityspring.core.domain.exception.RoleNotFoundException;
+import com.securityspring.core.domain.exception.rbac.RoleNotFoundException;
 import com.securityspring.core.domain.model.PageResult;
 import com.securityspring.core.domain.model.rbac.Role;
 import com.securityspring.core.ports.in.RoleUseCase;

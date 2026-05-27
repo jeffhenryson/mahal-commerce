@@ -34,8 +34,8 @@ public class RoleController {
 
     @Operation(summary = "Lista roles paginadas")
     @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "OK"),
-        @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
     })
     @GetMapping
     @PreAuthorize("hasAuthority('ROLE_READ')")
@@ -51,10 +51,9 @@ public class RoleController {
 
     @Operation(summary = "Cria uma nova role")
     @ApiResponses({
-        @ApiResponse(responseCode = "201", description = "Criada",
-            content = @Content(schema = @Schema(implementation = RoleResponseDTO.class))),
-        @ApiResponse(responseCode = "409", description = "Role já existe", content = @Content),
-        @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+            @ApiResponse(responseCode = "201", description = "Criada", content = @Content(schema = @Schema(implementation = RoleResponseDTO.class))),
+            @ApiResponse(responseCode = "409", description = "Role já existe", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
     })
     @PostMapping
     @PreAuthorize("hasAuthority('ROLE_CREATE')")
@@ -66,9 +65,9 @@ public class RoleController {
 
     @Operation(summary = "Remove uma role pelo nome")
     @ApiResponses({
-        @ApiResponse(responseCode = "204", description = "Removida"),
-        @ApiResponse(responseCode = "404", description = "Não encontrada", content = @Content),
-        @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+            @ApiResponse(responseCode = "204", description = "Removida"),
+            @ApiResponse(responseCode = "404", description = "Não encontrada", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
     })
     @DeleteMapping("/{name}")
     @PreAuthorize("hasAuthority('ROLE_DELETE')")
@@ -79,28 +78,28 @@ public class RoleController {
 
     @Operation(summary = "Atribui uma permission a uma role")
     @ApiResponses({
-        @ApiResponse(responseCode = "204", description = "Atribuída"),
-        @ApiResponse(responseCode = "404", description = "Role ou permission não encontrada", content = @Content),
-        @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+            @ApiResponse(responseCode = "204", description = "Atribuída"),
+            @ApiResponse(responseCode = "404", description = "Role ou permission não encontrada", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
     })
     @PostMapping("/{roleName}/permissions/{permissionName}")
     @PreAuthorize("hasAuthority('ROLE_MANAGE_PERMISSIONS')")
     public ResponseEntity<Void> assignPermission(@PathVariable String roleName,
-                                                  @PathVariable String permissionName) {
+            @PathVariable String permissionName) {
         roleUseCase.assignPermission(roleName, permissionName);
         return ResponseEntity.noContent().build();
     }
 
     @Operation(summary = "Remove uma permission de uma role")
     @ApiResponses({
-        @ApiResponse(responseCode = "204", description = "Removida"),
-        @ApiResponse(responseCode = "404", description = "Role não encontrada", content = @Content),
-        @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+            @ApiResponse(responseCode = "204", description = "Removida"),
+            @ApiResponse(responseCode = "404", description = "Role não encontrada", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
     })
     @DeleteMapping("/{roleName}/permissions/{permissionName}")
     @PreAuthorize("hasAuthority('ROLE_MANAGE_PERMISSIONS')")
     public ResponseEntity<Void> removePermission(@PathVariable String roleName,
-                                                  @PathVariable String permissionName) {
+            @PathVariable String permissionName) {
         roleUseCase.removePermission(roleName, permissionName);
         return ResponseEntity.noContent().build();
     }

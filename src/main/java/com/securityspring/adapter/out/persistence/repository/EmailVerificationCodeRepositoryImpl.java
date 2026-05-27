@@ -44,7 +44,7 @@ public class EmailVerificationCodeRepositoryImpl implements EmailVerificationCod
     @Override
     @Transactional(readOnly = true)
     public Optional<EmailVerificationCode> findByUsername(String username) {
-        return jpaRepository.findByUsername(username).map(this::toDomain);
+        return jpaRepository.findFirstByUsernameOrderByExpiresAtDescIdDesc(username).map(this::toDomain);
     }
 
     @Override

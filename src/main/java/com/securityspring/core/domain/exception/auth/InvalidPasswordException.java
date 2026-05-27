@@ -1,4 +1,4 @@
-package com.securityspring.core.domain.exception;
+package com.securityspring.core.domain.exception.auth;
 
 public class InvalidPasswordException extends RuntimeException {
     public InvalidPasswordException() {

@@ -17,9 +17,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.securityspring.adapter.out.persistence.entity.RefreshTokenEntity;
 import com.securityspring.adapter.out.persistence.entity.UserEntity;
-import com.securityspring.core.domain.exception.InvalidRefreshTokenException;
-import com.securityspring.core.domain.exception.RefreshTokenAlreadyUsedException;
-import com.securityspring.core.domain.exception.RefreshTokenExpiredException;
+import com.securityspring.core.domain.exception.auth.InvalidRefreshTokenException;
+import com.securityspring.core.domain.exception.auth.RefreshTokenAlreadyUsedException;
+import com.securityspring.core.domain.exception.auth.RefreshTokenExpiredException;
 import com.securityspring.core.domain.model.auth.SessionInfo;
 import com.securityspring.core.ports.out.token.RefreshTokenPort;
 import com.securityspring.core.domain.TokenHashUtils;

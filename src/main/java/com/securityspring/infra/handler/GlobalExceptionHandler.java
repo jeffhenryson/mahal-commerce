@@ -1,21 +1,22 @@
 package com.securityspring.infra.handler;
 
-import com.securityspring.core.domain.exception.AccountLockedException;
-import com.securityspring.core.domain.exception.EmailDeliveryException;
-import com.securityspring.core.domain.exception.EmailAlreadyExistsException;
-import com.securityspring.core.domain.exception.EmailAlreadyVerifiedException;
-import com.securityspring.core.domain.exception.EmailVerificationCodeExpiredException;
-import com.securityspring.core.domain.exception.EmailVerificationCodeNotFoundException;
-import com.securityspring.core.domain.exception.InvalidPasswordException;
-import com.securityspring.core.domain.exception.InvalidRefreshTokenException;
 import com.securityspring.core.domain.exception.PermissionAlreadyExistsException;
 import com.securityspring.core.domain.exception.PermissionNotFoundException;
-import com.securityspring.core.domain.exception.RefreshTokenAlreadyUsedException;
-import com.securityspring.core.domain.exception.RefreshTokenExpiredException;
 import com.securityspring.core.domain.exception.RoleAlreadyExistsException;
-import com.securityspring.core.domain.exception.RoleNotFoundException;
-import com.securityspring.core.domain.exception.UserNotFoundException;
-import com.securityspring.core.domain.exception.UsernameAlreadyExistsException;
+import com.securityspring.core.domain.exception.auth.AccountLockedException;
+import com.securityspring.core.domain.exception.auth.InvalidPasswordException;
+import com.securityspring.core.domain.exception.auth.InvalidRefreshTokenException;
+import com.securityspring.core.domain.exception.auth.RefreshTokenAlreadyUsedException;
+import com.securityspring.core.domain.exception.auth.RefreshTokenExpiredException;
+import com.securityspring.core.domain.exception.email.EmailAlreadyVerifiedException;
+import com.securityspring.core.domain.exception.email.EmailDeliveryException;
+import com.securityspring.core.domain.exception.email.EmailVerificationCodeExpiredException;
+import com.securityspring.core.domain.exception.email.EmailVerificationCodeNotFoundException;
+import com.securityspring.core.domain.exception.rbac.RoleNotFoundException;
+import com.securityspring.core.domain.exception.user.EmailAlreadyExistsException;
+import com.securityspring.core.domain.exception.user.UserNotFoundException;
+import com.securityspring.core.domain.exception.user.UsernameAlreadyExistsException;
+
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

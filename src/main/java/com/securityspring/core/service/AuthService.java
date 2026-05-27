@@ -1,7 +1,7 @@
 package com.securityspring.core.service;
 
-import com.securityspring.core.domain.exception.AccountLockedException;
-import com.securityspring.core.domain.exception.RefreshTokenAlreadyUsedException;
+import com.securityspring.core.domain.exception.auth.AccountLockedException;
+import com.securityspring.core.domain.exception.auth.RefreshTokenAlreadyUsedException;
 import com.securityspring.core.domain.model.auth.SessionInfo;
 import com.securityspring.core.domain.model.auth.TokenPair;
 import com.securityspring.core.ports.in.AuthUseCase;

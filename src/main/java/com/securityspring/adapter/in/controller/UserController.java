@@ -7,10 +7,11 @@ import com.securityspring.adapter.in.dtos.request.UserUpdateRequest;
 import com.securityspring.adapter.in.dtos.response.UserResponseDTO;
 import com.securityspring.core.domain.model.PageResult;
 import com.securityspring.core.domain.model.auth.User;
-import com.securityspring.core.domain.exception.UserNotFoundException;
 import com.securityspring.core.ports.in.UserUseCase;
 import com.securityspring.core.domain.event.AuditEvent;
 import com.securityspring.core.domain.event.AuditEvent.EventType;
+import com.securityspring.core.domain.exception.user.UserNotFoundException;
+
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -48,11 +49,10 @@ public class UserController {
 
     @Operation(summary = "Cria um novo usuário")
     @ApiResponses(value = {
-        @ApiResponse(responseCode = "201", description = "Criado",
-            content = @Content(schema = @Schema(implementation = UserResponseDTO.class))),
-        @ApiResponse(responseCode = "409", description = "Username já existe", content = @Content),
-        @ApiResponse(responseCode = "401", description = "Não autenticado", content = @Content),
-        @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+            @ApiResponse(responseCode = "201", description = "Criado", content = @Content(schema = @Schema(implementation = UserResponseDTO.class))),
+            @ApiResponse(responseCode = "409", description = "Username já existe", content = @Content),
+            @ApiResponse(responseCode = "401", description = "Não autenticado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
     })
     @PostMapping
     @PreAuthorize("hasAuthority('USER_CREATE')")
@@ -66,10 +66,10 @@ public class UserController {
 
     @Operation(summary = "Atribui uma role ao usuário")
     @ApiResponses(value = {
-        @ApiResponse(responseCode = "204", description = "Atribuída"),
-        @ApiResponse(responseCode = "404", description = "Usuário não encontrado", content = @Content),
-        @ApiResponse(responseCode = "401", description = "Não autenticado", content = @Content),
-        @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+            @ApiResponse(responseCode = "204", description = "Atribuída"),
+            @ApiResponse(responseCode = "404", description = "Usuário não encontrado", content = @Content),
+            @ApiResponse(responseCode = "401", description = "Não autenticado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
     })
     @PostMapping("/{username}/roles/{roleName}")
     @PreAuthorize("hasAuthority('USER_ROLE_ASSIGN')")
@@ -81,9 +81,8 @@ public class UserController {
 
     @Operation(summary = "Retorna o perfil do usuário autenticado")
     @ApiResponses(value = {
-        @ApiResponse(responseCode = "200", description = "OK",
-            content = @Content(schema = @Schema(implementation = UserResponseDTO.class))),
-        @ApiResponse(responseCode = "401", description = "Não autenticado", content = @Content)
+            @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = UserResponseDTO.class))),
+            @ApiResponse(responseCode = "401", description = "Não autenticado", content = @Content)
     })
     @GetMapping("/me")
     public ResponseEntity<UserResponseDTO> me(Authentication authentication) {
@@ -94,13 +93,13 @@ public class UserController {
 
     @Operation(summary = "Troca a senha do usuário autenticado")
     @ApiResponses(value = {
-        @ApiResponse(responseCode = "204", description = "Senha alterada"),
-        @ApiResponse(responseCode = "400", description = "Senha atual incorreta", content = @Content),
-        @ApiResponse(responseCode = "401", description = "Não autenticado", content = @Content)
+            @ApiResponse(responseCode = "204", description = "Senha alterada"),
+            @ApiResponse(responseCode = "400", description = "Senha atual incorreta", content = @Content),
+            @ApiResponse(responseCode = "401", description = "Não autenticado", content = @Content)
     })
     @PutMapping("/me/password")
     public ResponseEntity<Void> changeOwnPassword(@Valid @RequestBody ChangePasswordRequest request,
-                                                   Authentication authentication) {
+            Authentication authentication) {
         useCase.changeOwnPassword(authentication.getName(),
                 request.getCurrentPassword(), request.getNewPassword());
         publisher.publishEvent(AuditEvent.of(EventType.USER_PASSWORD_CHANGED, authentication.getName()));
@@ -109,14 +108,13 @@ public class UserController {
 
     @Operation(summary = "Atualiza os dados do próprio perfil (username e/ou email)")
     @ApiResponses(value = {
-        @ApiResponse(responseCode = "200", description = "Atualizado",
-            content = @Content(schema = @Schema(implementation = UserResponseDTO.class))),
-        @ApiResponse(responseCode = "409", description = "Username ou email já existe", content = @Content),
-        @ApiResponse(responseCode = "401", description = "Não autenticado", content = @Content)
+            @ApiResponse(responseCode = "200", description = "Atualizado", content = @Content(schema = @Schema(implementation = UserResponseDTO.class))),
+            @ApiResponse(responseCode = "409", description = "Username ou email já existe", content = @Content),
+            @ApiResponse(responseCode = "401", description = "Não autenticado", content = @Content)
     })
     @PatchMapping("/me")
     public ResponseEntity<UserResponseDTO> updateOwnProfile(@Valid @RequestBody UserUpdateRequest request,
-                                                             Authentication authentication) {
+            Authentication authentication) {
         User updated = useCase.updateOwnProfile(
                 authentication.getName(), request.getUsername(), request.getEmail(), request.getCurrentPassword());
         publisher.publishEvent(AuditEvent.of(EventType.USER_UPDATED, updated.getUsername()));
@@ -125,10 +123,9 @@ public class UserController {
 
     @Operation(summary = "Busca usuário por id")
     @ApiResponses(value = {
-        @ApiResponse(responseCode = "200", description = "OK",
-            content = @Content(schema = @Schema(implementation = UserResponseDTO.class))),
-        @ApiResponse(responseCode = "404", description = "Não encontrado", content = @Content),
-        @ApiResponse(responseCode = "401", description = "Não autenticado", content = @Content)
+            @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = UserResponseDTO.class))),
+            @ApiResponse(responseCode = "404", description = "Não encontrado", content = @Content),
+            @ApiResponse(responseCode = "401", description = "Não autenticado", content = @Content)
     })
     @GetMapping("/{id}")
     @PreAuthorize("hasAuthority('USER_READ')")
@@ -138,8 +135,8 @@ public class UserController {
 
     @Operation(summary = "Lista usuários paginado")
     @ApiResponses(value = {
-        @ApiResponse(responseCode = "200", description = "OK"),
-        @ApiResponse(responseCode = "401", description = "Não autenticado", content = @Content)
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "401", description = "Não autenticado", content = @Content)
     })
     @GetMapping
     @PreAuthorize("hasAuthority('USER_READ')")
@@ -155,9 +152,9 @@ public class UserController {
 
     @Operation(summary = "Remove usuário por id")
     @ApiResponses(value = {
-        @ApiResponse(responseCode = "204", description = "Removido"),
-        @ApiResponse(responseCode = "401", description = "Não autenticado", content = @Content),
-        @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+            @ApiResponse(responseCode = "204", description = "Removido"),
+            @ApiResponse(responseCode = "401", description = "Não autenticado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
     })
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAuthority('USER_DELETE')")
@@ -169,9 +166,9 @@ public class UserController {
 
     @Operation(summary = "Desativa conta de usuário")
     @ApiResponses(value = {
-        @ApiResponse(responseCode = "204", description = "Desativado"),
-        @ApiResponse(responseCode = "404", description = "Não encontrado", content = @Content),
-        @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+            @ApiResponse(responseCode = "204", description = "Desativado"),
+            @ApiResponse(responseCode = "404", description = "Não encontrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
     })
     @PutMapping("/{id}/disable")
     @PreAuthorize("hasAuthority('USER_STATUS')")
@@ -183,9 +180,9 @@ public class UserController {
 
     @Operation(summary = "Reativa conta de usuário")
     @ApiResponses(value = {
-        @ApiResponse(responseCode = "204", description = "Reativado"),
-        @ApiResponse(responseCode = "404", description = "Não encontrado", content = @Content),
-        @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+            @ApiResponse(responseCode = "204", description = "Reativado"),
+            @ApiResponse(responseCode = "404", description = "Não encontrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
     })
     @PutMapping("/{id}/enable")
     @PreAuthorize("hasAuthority('USER_STATUS')")
@@ -197,17 +194,16 @@ public class UserController {
 
     @Operation(summary = "Atualiza dados básicos do usuário")
     @ApiResponses(value = {
-        @ApiResponse(responseCode = "200", description = "Atualizado",
-            content = @Content(schema = @Schema(implementation = UserResponseDTO.class))),
-        @ApiResponse(responseCode = "404", description = "Não encontrado", content = @Content),
-        @ApiResponse(responseCode = "409", description = "Username já existe", content = @Content),
-        @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+            @ApiResponse(responseCode = "200", description = "Atualizado", content = @Content(schema = @Schema(implementation = UserResponseDTO.class))),
+            @ApiResponse(responseCode = "404", description = "Não encontrado", content = @Content),
+            @ApiResponse(responseCode = "409", description = "Username já existe", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
     })
     @PatchMapping("/{id}")
     @PreAuthorize("hasAuthority('USER_UPDATE')")
     public ResponseEntity<UserResponseDTO> update(@PathVariable Long id,
-                                                   @Valid @RequestBody UserUpdateRequest request) {
-        return ResponseEntity.ok(converter.toResponse(useCase.updateUser(id, request.getUsername(), request.getEmail())));
+            @Valid @RequestBody UserUpdateRequest request) {
+        return ResponseEntity
+                .ok(converter.toResponse(useCase.updateUser(id, request.getUsername(), request.getEmail())));
     }
 }
-

@@ -1,4 +1,4 @@
-package com.securityspring.core.domain.exception;
+package com.securityspring.core.domain.exception.email;
 
 public class EmailDeliveryException extends RuntimeException {
 

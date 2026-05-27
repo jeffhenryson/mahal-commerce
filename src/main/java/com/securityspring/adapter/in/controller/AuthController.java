@@ -36,8 +36,8 @@ public class AuthController {
     private final long accessTtlSeconds;
 
     public AuthController(AuthUseCase authUseCase,
-                          ApplicationEventPublisher publisher,
-                          @Value("${jwt.access-ttl-minutes:15}") long accessTtlMinutes) {
+            ApplicationEventPublisher publisher,
+            @Value("${jwt.access-ttl-minutes:15}") long accessTtlMinutes) {
         this.authUseCase = authUseCase;
         this.publisher = publisher;
         this.accessTtlSeconds = accessTtlMinutes * 60;
@@ -52,7 +52,8 @@ public class AuthController {
     ResponseEntity<TokenPairResponseDTO> login(@Valid @RequestBody LoginRequest request) {
         TokenPair pair = authUseCase.login(request.getUsername(), request.getPassword());
         publisher.publishEvent(AuditEvent.of(EventType.USER_LOGGED_IN, request.getUsername()));
-        return ResponseEntity.ok(new TokenPairResponseDTO(pair.getAccessToken(), pair.getRefreshToken(), accessTtlSeconds));
+        return ResponseEntity
+                .ok(new TokenPairResponseDTO(pair.getAccessToken(), pair.getRefreshToken(), accessTtlSeconds));
     }
 
     @Operation(summary = "Rotaciona refresh e emite novo access + refresh")
@@ -63,7 +64,8 @@ public class AuthController {
     @PostMapping("/refresh")
     ResponseEntity<TokenPairResponseDTO> refresh(@Valid @RequestBody RefreshRequest request) {
         TokenPair pair = authUseCase.refresh(request.getRefreshToken());
-        return ResponseEntity.ok(new TokenPairResponseDTO(pair.getAccessToken(), pair.getRefreshToken(), accessTtlSeconds));
+        return ResponseEntity
+                .ok(new TokenPairResponseDTO(pair.getAccessToken(), pair.getRefreshToken(), accessTtlSeconds));
     }
 
     @Operation(summary = "Revoga o refresh token (logout)")

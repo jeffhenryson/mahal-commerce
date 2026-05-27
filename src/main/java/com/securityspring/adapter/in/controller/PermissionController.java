@@ -34,8 +34,8 @@ public class PermissionController {
 
     @Operation(summary = "Lista permissions paginadas")
     @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "OK"),
-        @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
     })
     @GetMapping
     @PreAuthorize("hasAuthority('PERMISSION_READ')")
@@ -51,10 +51,9 @@ public class PermissionController {
 
     @Operation(summary = "Cria uma nova permission")
     @ApiResponses({
-        @ApiResponse(responseCode = "201", description = "Criada",
-            content = @Content(schema = @Schema(implementation = PermissionResponseDTO.class))),
-        @ApiResponse(responseCode = "409", description = "Permission já existe", content = @Content),
-        @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+            @ApiResponse(responseCode = "201", description = "Criada", content = @Content(schema = @Schema(implementation = PermissionResponseDTO.class))),
+            @ApiResponse(responseCode = "409", description = "Permission já existe", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
     })
     @PostMapping
     @PreAuthorize("hasAuthority('PERMISSION_CREATE')")
@@ -66,9 +65,9 @@ public class PermissionController {
 
     @Operation(summary = "Remove uma permission pelo nome")
     @ApiResponses({
-        @ApiResponse(responseCode = "204", description = "Removida"),
-        @ApiResponse(responseCode = "404", description = "Não encontrada", content = @Content),
-        @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+            @ApiResponse(responseCode = "204", description = "Removida"),
+            @ApiResponse(responseCode = "404", description = "Não encontrada", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
     })
     @DeleteMapping("/{name}")
     @PreAuthorize("hasAuthority('PERMISSION_DELETE')")

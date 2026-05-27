@@ -1,4 +1,4 @@
-package com.securityspring.core.domain.exception;
+package com.securityspring.core.domain.exception.auth;
 
 public class AccountLockedException extends RuntimeException {
     public AccountLockedException(String username) {

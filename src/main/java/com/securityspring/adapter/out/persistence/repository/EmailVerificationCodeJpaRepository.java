@@ -11,7 +11,10 @@ import java.util.Optional;
 public interface EmailVerificationCodeJpaRepository extends JpaRepository<EmailVerificationCodeEntity, Long> {
     Optional<EmailVerificationCodeEntity> findByCode(String code);
 
-    Optional<EmailVerificationCodeEntity> findByUsername(String username);
+    // Use findFirst to avoid IncorrectResultSizeDataAccessException when multiple
+    // stale codes exist for the same username (e.g. after a failed email delivery
+    // left the code committed but the user was later re-created without cleanup).
+    Optional<EmailVerificationCodeEntity> findFirstByUsernameOrderByExpiresAtDescIdDesc(String username);
 
     // CAS atômico: atualiza apenas se used=false, prevenindo race condition em verificações concorrentes.
     @Modifying

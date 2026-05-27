@@ -7,7 +7,8 @@ import java.util.Base64;
 
 public final class TokenHashUtils {
 
-    private TokenHashUtils() {}
+    private TokenHashUtils() {
+    }
 
     public static String sha256(String value) {
         try {

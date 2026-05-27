@@ -1,4 +1,4 @@
-package com.securityspring.core.domain.exception;
+package com.securityspring.core.domain.exception.auth;
 
 public class RefreshTokenExpiredException extends RuntimeException {
     public RefreshTokenExpiredException() {

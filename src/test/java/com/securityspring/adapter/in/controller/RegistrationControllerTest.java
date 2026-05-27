@@ -1,8 +1,8 @@
 package com.securityspring.adapter.in.controller;
 
-import com.securityspring.core.domain.exception.EmailAlreadyExistsException;
-import com.securityspring.core.domain.exception.EmailVerificationCodeNotFoundException;
-import com.securityspring.core.domain.exception.UsernameAlreadyExistsException;
+import com.securityspring.core.domain.exception.email.EmailVerificationCodeNotFoundException;
+import com.securityspring.core.domain.exception.user.EmailAlreadyExistsException;
+import com.securityspring.core.domain.exception.user.UsernameAlreadyExistsException;
 import com.securityspring.core.ports.in.UserUseCase;
 import com.securityspring.infra.handler.GlobalExceptionHandler;
 import org.junit.jupiter.api.BeforeEach;

@@ -1,10 +1,10 @@
 package com.securityspring.core.service;
 
-import com.securityspring.core.domain.exception.EmailAlreadyExistsException;
-import com.securityspring.core.domain.exception.InvalidPasswordException;
-import com.securityspring.core.domain.exception.RoleNotFoundException;
-import com.securityspring.core.domain.exception.UserNotFoundException;
-import com.securityspring.core.domain.exception.UsernameAlreadyExistsException;
+import com.securityspring.core.domain.exception.auth.InvalidPasswordException;
+import com.securityspring.core.domain.exception.rbac.RoleNotFoundException;
+import com.securityspring.core.domain.exception.user.EmailAlreadyExistsException;
+import com.securityspring.core.domain.exception.user.UserNotFoundException;
+import com.securityspring.core.domain.exception.user.UsernameAlreadyExistsException;
 import com.securityspring.core.domain.model.auth.EmailVerificationCode;
 import com.securityspring.core.domain.model.rbac.Role;
 import com.securityspring.core.domain.model.auth.User;
@@ -239,7 +239,7 @@ class UserServiceTest {
         when(verificationCodeRepository.findByCode("INVALID")).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> userService.verifyEmail("INVALID"))
-                .isInstanceOf(com.securityspring.core.domain.exception.EmailVerificationCodeNotFoundException.class);
+                .isInstanceOf(com.securityspring.core.domain.exception.email.EmailVerificationCodeNotFoundException.class);
     }
 
     @Test
@@ -250,7 +250,7 @@ class UserServiceTest {
         when(verificationCodeRepository.markAsUsed("ABC123")).thenReturn(false);
 
         assertThatThrownBy(() -> userService.verifyEmail("ABC123"))
-                .isInstanceOf(com.securityspring.core.domain.exception.EmailVerificationCodeExpiredException.class);
+                .isInstanceOf(com.securityspring.core.domain.exception.email.EmailVerificationCodeExpiredException.class);
     }
 
     @Test

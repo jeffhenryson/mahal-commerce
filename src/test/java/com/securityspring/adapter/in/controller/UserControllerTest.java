@@ -9,9 +9,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.securityspring.adapter.in.converter.UserDTOConverter;
 import com.securityspring.adapter.in.dtos.request.CreateUserRequest;
-import com.securityspring.core.domain.exception.RoleNotFoundException;
-import com.securityspring.core.domain.exception.UserNotFoundException;
-import com.securityspring.core.domain.exception.UsernameAlreadyExistsException;
+import com.securityspring.core.domain.exception.rbac.RoleNotFoundException;
+import com.securityspring.core.domain.exception.user.UserNotFoundException;
+import com.securityspring.core.domain.exception.user.UsernameAlreadyExistsException;
 import com.securityspring.core.domain.model.PageResult;
 import com.securityspring.core.domain.model.auth.User;
 import com.securityspring.core.ports.in.UserUseCase;

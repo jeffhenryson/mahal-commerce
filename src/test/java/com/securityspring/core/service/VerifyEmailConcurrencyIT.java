@@ -1,8 +1,8 @@
 package com.securityspring.core.service;
 
+import com.securityspring.core.domain.exception.email.EmailVerificationCodeExpiredException;
+import com.securityspring.core.domain.exception.email.EmailVerificationCodeNotFoundException;
 import com.securityspring.core.ports.in.UserUseCase;
-import com.securityspring.core.domain.exception.EmailVerificationCodeExpiredException;
-import com.securityspring.core.domain.exception.EmailVerificationCodeNotFoundException;
 import com.securityspring.infra.security.support.EmailVerificationTestHelper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
