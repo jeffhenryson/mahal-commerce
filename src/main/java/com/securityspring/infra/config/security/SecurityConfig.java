@@ -70,6 +70,7 @@ public class SecurityConfig {
                 // GET e DELETE /auth/sessions exigem autenticação; a regra de /auth/** é mais ampla
                 // e cobriria esses endpoints se declarada primeiro. Não reordene sem revisar.
                 .requestMatchers(org.springframework.http.HttpMethod.DELETE, "/auth/sessions").authenticated()
+                .requestMatchers(org.springframework.http.HttpMethod.DELETE, "/auth/sessions/*").authenticated()
                 .requestMatchers(org.springframework.http.HttpMethod.GET, "/auth/sessions").authenticated()
                 .requestMatchers("/auth/verify-email", "/auth/resend-verification").permitAll()
                 .requestMatchers("/auth/2fa/verify").permitAll()
@@ -106,16 +107,22 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource(
             @org.springframework.beans.factory.annotation.Value("${cors.allowed-origins:*}") String allowedOrigins,
-            @org.springframework.beans.factory.annotation.Value("${cors.allowed-methods:GET,POST,PUT,DELETE,OPTIONS}") String allowedMethods,
+            @org.springframework.beans.factory.annotation.Value("${cors.allowed-methods:GET,POST,PUT,DELETE,OPTIONS,PATCH}") String allowedMethods,
             @org.springframework.beans.factory.annotation.Value("${cors.allowed-headers:*}") String allowedHeaders,
-            @org.springframework.beans.factory.annotation.Value("${cors.exposed-headers:X-Trace-Id}") String exposedHeaders) {
+            @org.springframework.beans.factory.annotation.Value("${cors.exposed-headers:X-Trace-Id}") String exposedHeaders,
+            @org.springframework.beans.factory.annotation.Value("${cors.allow-credentials:false}") boolean allowCredentials) {
         CorsConfiguration config = new CorsConfiguration();
+        // allowCredentials=true é incompatível com allowedOrigins("*") pela spec CORS.
+        // Quando cookies HttpOnly estão ativos (hml/prod), origens devem ser explícitas.
+        if (allowCredentials && allowedOrigins.contains("*")) {
+            throw new IllegalStateException(
+                "cors.allow-credentials=true requer origens explícitas em cors.allowed-origins (não pode usar '*')");
+        }
         config.setAllowedOrigins(List.of(allowedOrigins.split(",")));
         config.setAllowedMethods(List.of(allowedMethods.split(",")));
         config.setAllowedHeaders(List.of(allowedHeaders.split(",")));
         config.setExposedHeaders(List.of(exposedHeaders.split(",")));
-        // JWT via Authorization header não usa cookies — credentials mode desnecessário e
-        // incompatível com allowedOrigins("*") pela spec CORS (causaria IllegalArgumentException)
+        config.setAllowCredentials(allowCredentials);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);

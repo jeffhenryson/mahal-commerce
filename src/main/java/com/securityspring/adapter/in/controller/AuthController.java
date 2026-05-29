@@ -23,10 +23,12 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -37,19 +39,24 @@ import java.util.List;
 @RequestMapping("/auth")
 public class AuthController {
 
+    private static final String REFRESH_COOKIE = "refreshToken";
+
     private final AuthUseCase authUseCase;
     private final UserUseCase userUseCase;
     private final ApplicationEventPublisher publisher;
     private final long accessTtlSeconds;
+    private final boolean cookieSecure;
 
     public AuthController(AuthUseCase authUseCase,
             UserUseCase userUseCase,
             ApplicationEventPublisher publisher,
-            @Value("${jwt.access-ttl-minutes:15}") long accessTtlMinutes) {
+            @Value("${jwt.access-ttl-minutes:15}") long accessTtlMinutes,
+            @Value("${cookie.secure:false}") boolean cookieSecure) {
         this.authUseCase = authUseCase;
         this.userUseCase = userUseCase;
         this.publisher = publisher;
         this.accessTtlSeconds = accessTtlMinutes * 60;
+        this.cookieSecure = cookieSecure;
     }
 
     @Operation(summary = "Login — retorna tokens ou challenge de 2FA")
@@ -58,13 +65,15 @@ public class AuthController {
             @ApiResponse(responseCode = "401", description = "Credenciais inválidas", content = @Content(schema = @Schema(implementation = com.securityspring.infra.handler.ApiError.class)))
     })
     @PostMapping("/login")
-    ResponseEntity<?> login(@Valid @RequestBody LoginRequest request) {
-        LoginResponse response = authUseCase.login(request.getUsername(), request.getPassword());
-        if (response.twoFactorRequired()) {
-            return ResponseEntity.ok(new TwoFactorChallengeResponseDTO("PENDING_2FA", response.challengeToken(), 300));
+    ResponseEntity<?> login(@Valid @RequestBody LoginRequest request, HttpServletResponse response) {
+        LoginResponse loginResponse = authUseCase.login(request.getUsername(), request.getPassword());
+        if (loginResponse.twoFactorRequired()) {
+            return ResponseEntity.ok(new TwoFactorChallengeResponseDTO("PENDING_2FA", loginResponse.challengeToken(), 300));
         }
-        TokenPair pair = response.tokenPair();
+        TokenPair pair = loginResponse.tokenPair();
         publisher.publishEvent(AuditEvent.of(EventType.USER_LOGGED_IN, request.getUsername()));
+        setRefreshCookie(response, pair.getRefreshToken());
+        // refreshToken também no body para retrocompatibilidade com clientes que ainda lêem o JSON
         return ResponseEntity.ok(new TokenPairResponseDTO(pair.getAccessToken(), pair.getRefreshToken(), accessTtlSeconds));
     }
 
@@ -75,31 +84,48 @@ public class AuthController {
             @ApiResponse(responseCode = "400", description = "Código inválido ou challenge expirado", content = @Content)
     })
     @PostMapping("/2fa/verify")
-    ResponseEntity<TokenPairResponseDTO> verifyTwoFactor(@Valid @RequestBody TotpVerifyRequest request) {
+    ResponseEntity<TokenPairResponseDTO> verifyTwoFactor(@Valid @RequestBody TotpVerifyRequest request,
+            HttpServletResponse response) {
         TokenPair pair = authUseCase.completeTwoFactorLogin(request.getChallengeToken(), request.getCode());
+        setRefreshCookie(response, pair.getRefreshToken());
         return ResponseEntity.ok(new TokenPairResponseDTO(pair.getAccessToken(), pair.getRefreshToken(), accessTtlSeconds));
     }
 
-    @Operation(summary = "Rotaciona refresh e emite novo access + refresh")
+    @Operation(summary = "Rotaciona refresh e emite novo access + refresh — aceita cookie ou body")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Tokens emitidos", content = @Content(mediaType = "application/json", schema = @Schema(implementation = TokenPairResponseDTO.class))),
             @ApiResponse(responseCode = "401", description = "Refresh inválido/expirado", content = @Content)
     })
     @PostMapping("/refresh")
-    ResponseEntity<TokenPairResponseDTO> refresh(@Valid @RequestBody RefreshRequest request) {
-        TokenPair pair = authUseCase.refresh(request.getRefreshToken());
-        return ResponseEntity
-                .ok(new TokenPairResponseDTO(pair.getAccessToken(), pair.getRefreshToken(), accessTtlSeconds));
+    ResponseEntity<TokenPairResponseDTO> refresh(
+            @RequestBody(required = false) RefreshRequest body,
+            @CookieValue(name = REFRESH_COOKIE, required = false) String cookieToken,
+            HttpServletResponse response) {
+        String token = cookieToken != null ? cookieToken
+                : (body != null ? body.getRefreshToken() : null);
+        if (token == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        TokenPair pair = authUseCase.refresh(token);
+        setRefreshCookie(response, pair.getRefreshToken());
+        return ResponseEntity.ok(new TokenPairResponseDTO(pair.getAccessToken(), pair.getRefreshToken(), accessTtlSeconds));
     }
 
-    @Operation(summary = "Revoga o refresh token (logout)")
+    @Operation(summary = "Revoga o refresh token (logout) — aceita cookie ou body")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "204", description = "Revogado"),
             @ApiResponse(responseCode = "401", description = "Refresh inválido", content = @Content)
     })
     @PostMapping("/logout")
-    ResponseEntity<Void> logout(@Valid @RequestBody LogoutRequest request, Authentication authentication) {
-        authUseCase.logout(request.getRefreshToken());
+    ResponseEntity<Void> logout(
+            @RequestBody(required = false) LogoutRequest body,
+            @CookieValue(name = REFRESH_COOKIE, required = false) String cookieToken,
+            HttpServletResponse response,
+            Authentication authentication) {
+        String token = cookieToken != null ? cookieToken
+                : (body != null ? body.getRefreshToken() : null);
+        if (token != null) authUseCase.logout(token);
+        clearRefreshCookie(response);
         if (authentication != null) {
             publisher.publishEvent(AuditEvent.of(EventType.USER_LOGGED_OUT, authentication.getName()));
         }
@@ -113,8 +139,9 @@ public class AuthController {
             @ApiResponse(responseCode = "401", description = "Não autenticado", content = @Content)
     })
     @DeleteMapping("/sessions")
-    ResponseEntity<Void> logoutAll(Authentication authentication) {
+    ResponseEntity<Void> logoutAll(Authentication authentication, HttpServletResponse response) {
         authUseCase.logoutAll(authentication.getName());
+        clearRefreshCookie(response);
         publisher.publishEvent(AuditEvent.of(EventType.USER_SESSIONS_CLEARED, authentication.getName()));
         return ResponseEntity.noContent().build();
     }
@@ -130,6 +157,19 @@ public class AuthController {
         List<SessionInfoDTO> sessions = authUseCase.listActiveSessions(authentication.getName())
                 .stream().map(SessionInfoDTO::from).toList();
         return ResponseEntity.ok(sessions);
+    }
+
+    @Operation(summary = "Revoga uma sessão específica do usuário autenticado")
+    @SecurityRequirement(name = "bearerAuth")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "204", description = "Sessão revogada"),
+            @ApiResponse(responseCode = "404", description = "Sessão não encontrada", content = @Content),
+            @ApiResponse(responseCode = "401", description = "Não autenticado", content = @Content)
+    })
+    @DeleteMapping("/sessions/{id}")
+    ResponseEntity<Void> revokeSession(@PathVariable Long id, Authentication authentication) {
+        authUseCase.revokeSession(id, authentication.getName());
+        return ResponseEntity.noContent().build();
     }
 
     @Operation(summary = "Inicia o fluxo de recuperação de senha (sempre retorna 204)")
@@ -167,5 +207,26 @@ public class AuthController {
         String username = userUseCase.confirmEmailChange(request.getCode());
         publisher.publishEvent(AuditEvent.of(EventType.EMAIL_CHANGE_CONFIRMED, username));
         return ResponseEntity.noContent().build();
+    }
+
+    // --- helpers de cookie ---
+
+    private void setRefreshCookie(HttpServletResponse response, String token) {
+        response.addHeader("Set-Cookie", buildCookieHeader(token, (int) (accessTtlSeconds * 48)));
+    }
+
+    private void clearRefreshCookie(HttpServletResponse response) {
+        response.addHeader("Set-Cookie", buildCookieHeader("", 0));
+    }
+
+    private String buildCookieHeader(String value, int maxAge) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(REFRESH_COOKIE).append("=").append(value);
+        sb.append("; Path=/auth/refresh");
+        sb.append("; HttpOnly");
+        sb.append("; Max-Age=").append(maxAge);
+        sb.append("; SameSite=Strict");
+        if (cookieSecure) sb.append("; Secure");
+        return sb.toString();
     }
 }

@@ -8,6 +8,7 @@ import java.util.Set;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.securityspring.adapter.out.persistence.entity.PermissionEntity;
 import com.securityspring.adapter.out.persistence.entity.RoleEntity;
@@ -15,8 +16,6 @@ import com.securityspring.core.domain.model.PageResult;
 import com.securityspring.core.domain.model.rbac.Permission;
 import com.securityspring.core.domain.model.rbac.Role;
 import com.securityspring.core.ports.out.role.RoleRepository;
-
-import org.springframework.transaction.annotation.Transactional;
 
 @Repository
 @Transactional
@@ -92,5 +91,19 @@ public class RoleRepositoryImpl implements RoleRepository {
                 .orElseThrow(() -> new IllegalArgumentException("Role not found: " + roleName));
         role.getPermissions().removeIf(p -> p.getName().equals(permissionName));
         roleRepo.save(role);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResult<Role> findByNameContaining(String search, int page, int size) {
+        Page<RoleEntity> p = roleRepo.findByNameContaining(search, PageRequest.of(page, size));
+        List<Role> content = p.getContent().stream().map(this::toDomain).toList();
+        return new PageResult<>(content, page, size, p.getTotalElements(), p.getTotalPages());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public long countAll() {
+        return roleRepo.count();
     }
 }

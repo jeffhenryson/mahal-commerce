@@ -18,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.securityspring.adapter.out.persistence.entity.RefreshTokenEntity;
 import com.securityspring.adapter.out.persistence.entity.UserEntity;
 import com.securityspring.core.domain.exception.auth.InvalidRefreshTokenException;
+import com.securityspring.core.domain.exception.auth.SessionNotFoundException;
 import com.securityspring.core.domain.exception.auth.RefreshTokenAlreadyUsedException;
 import com.securityspring.core.domain.exception.auth.RefreshTokenExpiredException;
 import com.securityspring.core.domain.model.auth.SessionInfo;
@@ -166,6 +167,16 @@ public class RefreshTokenRepositoryImpl implements RefreshTokenPort {
                 .map(r -> new SessionInfo(r.getId(), r.getCreatedAt(), r.getExpiresAt(),
                         r.getIpAddress(), r.getUserAgent()))
                 .toList();
+    }
+
+    @Override
+    public void revokeByIdForUser(Long id, String username) {
+        RefreshTokenEntity rt = refreshRepo.findActiveByIdAndUsername(id, username, Instant.now())
+                .orElseThrow(SessionNotFoundException::new);
+        rt.setRevoked(true);
+        rt.setRotatedAt(Instant.now());
+        refreshRepo.save(rt);
+        log.info("audit.refresh.revokedSingle user={} id={}", username, id);
     }
 
     private String generateOpaqueToken() {

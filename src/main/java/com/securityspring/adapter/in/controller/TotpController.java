@@ -1,5 +1,6 @@
 package com.securityspring.adapter.in.controller;
 
+import com.securityspring.adapter.in.dtos.request.RegenerateBackupCodesRequest;
 import com.securityspring.adapter.in.dtos.request.TotpConfirmRequest;
 import com.securityspring.adapter.in.dtos.request.TotpDisableRequest;
 import com.securityspring.adapter.in.dtos.response.TotpConfirmResponseDTO;
@@ -73,5 +74,21 @@ public class TotpController {
         totpUseCase.disable(authentication.getName(), request.getCurrentPassword(), request.getCode());
         publisher.publishEvent(AuditEvent.of(EventType.USER_UPDATED, authentication.getName()));
         return ResponseEntity.noContent().build();
+    }
+
+    @Operation(summary = "Regenera backup codes — invalida os anteriores, exige senha atual")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Novos backup codes gerados",
+                    content = @Content(schema = @Schema(implementation = TotpConfirmResponseDTO.class))),
+            @ApiResponse(responseCode = "400", description = "Senha inválida ou 2FA não ativado", content = @Content)
+    })
+    @PostMapping("/backup-codes/regenerate")
+    ResponseEntity<TotpConfirmResponseDTO> regenerateBackupCodes(
+            @Valid @RequestBody RegenerateBackupCodesRequest request,
+            Authentication authentication) {
+        List<String> backupCodes = totpUseCase.regenerateBackupCodes(
+                authentication.getName(), request.getCurrentPassword());
+        publisher.publishEvent(AuditEvent.of(EventType.USER_UPDATED, authentication.getName()));
+        return ResponseEntity.ok(new TotpConfirmResponseDTO(backupCodes));
     }
 }

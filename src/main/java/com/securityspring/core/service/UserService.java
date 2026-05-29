@@ -193,8 +193,29 @@ public class UserService implements UserUseCase {
     }
 
     @Override
+    @Transactional
+    public void removeRole(String username, String roleName) {
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new UserNotFoundException(username));
+        Role role = roleRepository.findByName(roleName)
+                .orElseThrow(() -> new RoleNotFoundException(roleName));
+        user.removeRole(role);
+        userRepository.save(user);
+        userCachePort.evict(username);
+    }
+
+    @Override
     public PageResult<User> listAll(int page, int size) {
         return userRepository.findAll(page, size);
+    }
+
+    @Override
+    public PageResult<User> findFiltered(String search, Boolean enabled, int page, int size) {
+        boolean noFilters = (search == null || search.isBlank()) && enabled == null;
+        if (noFilters) return userRepository.findAll(page, size);
+        return userRepository.findFiltered(
+                (search != null && !search.isBlank()) ? search.trim() : null,
+                enabled, page, size);
     }
 
     @Override

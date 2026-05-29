@@ -72,7 +72,7 @@ ON CONFLICT DO NOTHING;
 INSERT INTO users (username, password, enabled, email_verified, email)
 VALUES (
     'admin',
-    '$2b$10$N/7RpqaorLnjXLOBjWEW2OxqLKkua5v6D2SIVTI5umepVK7ur9NMe',
+    '$2b$10$OQVbkT2eHUkt1sSn00p/OesZlENiQJIvlb2jfi6kyjlFqhQANJ9h6',
     TRUE,
     TRUE,
     NULL

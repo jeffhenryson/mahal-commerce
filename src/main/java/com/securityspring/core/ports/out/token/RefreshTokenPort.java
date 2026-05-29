@@ -19,4 +19,7 @@ public interface RefreshTokenPort {
     void deleteExpiredAndRevoked();
 
     List<SessionInfo> findActiveSessions(String username);
+
+    /** Revoga sessão pelo ID somente se pertencer ao username. Lança SessionNotFoundException caso contrário. */
+    void revokeByIdForUser(Long id, String username);
 }

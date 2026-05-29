@@ -132,6 +132,26 @@ public class TotpService implements TotpUseCase, TwoFactorAuthPort {
         totpBackupCodeRepository.deleteByUsername(username);
     }
 
+    @Override
+    @Transactional
+    public List<String> regenerateBackupCodes(String username, String currentPassword) {
+        var user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new UserNotFoundException(username));
+
+        if (!passwordHashPort.matches(currentPassword, user.getPassword())) {
+            throw new InvalidPasswordException();
+        }
+
+        TotpConfig config = totpConfigRepository.findByUsername(username)
+                .orElseThrow(TotpNotEnabledException::new);
+        if (!config.enabled()) throw new TotpNotEnabledException();
+
+        List<String> backupCodes = generateBackupCodes();
+        totpBackupCodeRepository.deleteByUsername(username);
+        totpBackupCodeRepository.saveAll(username, backupCodes);
+        return backupCodes;
+    }
+
     // --- TwoFactorAuthPort ---
 
     @Override

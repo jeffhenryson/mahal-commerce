@@ -114,6 +114,10 @@ public class User {
         this.roles.add(role);
     }
 
+    public void removeRole(Role role) {
+        this.roles.removeIf(r -> r.getName().equals(role.getName()));
+    }
+
     // --- Accessors ---
 
     public Long getId() {

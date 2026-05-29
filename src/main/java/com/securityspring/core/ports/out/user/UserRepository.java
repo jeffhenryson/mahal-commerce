@@ -17,4 +17,10 @@ public interface UserRepository {
     void deleteById(Long id);
 
     Optional<User> findByEmail(String email);
+
+    PageResult<User> findFiltered(String search, Boolean enabled, int page, int size);
+
+    long countAll();
+
+    long countEnabled();
 }

@@ -32,7 +32,7 @@ public class AuthControllerTest {
         authUseCase = mock(AuthUseCase.class);
         UserUseCase userUseCase = mock(UserUseCase.class);
         ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
-        AuthController controller = new AuthController(authUseCase, userUseCase, publisher, 15);
+        AuthController controller = new AuthController(authUseCase, userUseCase, publisher, 15, false);
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new com.securityspring.infra.handler.GlobalExceptionHandler())
                 .build();

@@ -6,9 +6,11 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
+import com.securityspring.core.ports.in.AuditLogsUseCase;
 import com.securityspring.core.ports.in.AuthUseCase;
 import com.securityspring.core.ports.in.PermissionUseCase;
 import com.securityspring.core.ports.in.RoleUseCase;
+import com.securityspring.core.ports.in.StatsUseCase;
 import com.securityspring.core.ports.in.UserUseCase;
 import com.securityspring.core.ports.out.token.AccessTokenPort;
 import com.securityspring.core.ports.out.credential.CredentialVerifierPort;
@@ -29,9 +31,12 @@ import com.securityspring.core.ports.in.TotpUseCase;
 import com.securityspring.core.ports.out.user.UserAuthoritiesPort;
 import com.securityspring.core.ports.out.user.UserCachePort;
 import com.securityspring.core.ports.out.user.UserRepository;
+import com.securityspring.core.ports.out.audit.AuditLogRepository;
+import com.securityspring.core.service.AuditLogsService;
 import com.securityspring.core.service.AuthService;
 import com.securityspring.core.service.PermissionService;
 import com.securityspring.core.service.RoleService;
+import com.securityspring.core.service.StatsService;
 import com.securityspring.core.service.TotpService;
 import com.securityspring.core.service.UserService;
 import dev.samstevens.totp.code.CodeVerifier;
@@ -106,5 +111,17 @@ class CoreBeanConfig {
     @Bean
     PermissionUseCase permissionUseCase(PermissionRepository permissionRepository) {
         return new PermissionService(permissionRepository);
+    }
+
+    @Bean
+    StatsUseCase statsUseCase(UserRepository userRepository,
+            RoleRepository roleRepository,
+            PermissionRepository permissionRepository) {
+        return new StatsService(userRepository, roleRepository, permissionRepository);
+    }
+
+    @Bean
+    AuditLogsUseCase auditLogsUseCase(AuditLogRepository auditLogRepository) {
+        return new AuditLogsService(auditLogRepository);
     }
 }

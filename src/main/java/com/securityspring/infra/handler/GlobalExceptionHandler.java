@@ -14,6 +14,7 @@ import com.securityspring.core.domain.exception.auth.TotpAlreadyEnabledException
 import com.securityspring.core.domain.exception.auth.TotpChallengeExpiredException;
 import com.securityspring.core.domain.exception.auth.TotpNotEnabledException;
 import com.securityspring.core.domain.exception.auth.RefreshTokenExpiredException;
+import com.securityspring.core.domain.exception.auth.SessionNotFoundException;
 import com.securityspring.core.domain.exception.email.EmailAlreadyVerifiedException;
 import com.securityspring.core.domain.exception.email.EmailDeliveryException;
 import com.securityspring.core.domain.exception.email.EmailVerificationCodeExpiredException;
@@ -153,6 +154,11 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(TotpNotEnabledException.class)
     public ResponseEntity<ApiError> handleTotpNotEnabled(TotpNotEnabledException ex, HttpServletRequest req) {
         return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "TOTP_NOT_ENABLED", req);
+    }
+
+    @ExceptionHandler(SessionNotFoundException.class)
+    public ResponseEntity<ApiError> handleSessionNotFound(SessionNotFoundException ex, HttpServletRequest req) {
+        return error(HttpStatus.NOT_FOUND, ex.getMessage(), "SESSION_NOT_FOUND", req);
     }
 
     @ExceptionHandler(InvalidRefreshTokenException.class)

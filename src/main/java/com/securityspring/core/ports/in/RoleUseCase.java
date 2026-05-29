@@ -10,4 +10,6 @@ public interface RoleUseCase {
     void deleteRole(String name);
     void assignPermission(String roleName, String permissionName);
     void removePermission(String roleName, String permissionName);
+
+    PageResult<Role> findByNameContaining(String search, int page, int size);
 }

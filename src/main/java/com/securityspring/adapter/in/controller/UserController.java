@@ -79,6 +79,21 @@ public class UserController {
         return ResponseEntity.noContent().build();
     }
 
+    @Operation(summary = "Remove uma role do usuário")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "204", description = "Removida"),
+            @ApiResponse(responseCode = "404", description = "Usuário ou role não encontrado", content = @Content),
+            @ApiResponse(responseCode = "401", description = "Não autenticado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @DeleteMapping("/{username}/roles/{roleName}")
+    @PreAuthorize("hasAuthority('USER_ROLE_ASSIGN')")
+    public ResponseEntity<Void> removeRole(@PathVariable String username, @PathVariable String roleName) {
+        useCase.removeRole(username, roleName);
+        publisher.publishEvent(AuditEvent.of(EventType.USER_ROLE_REMOVED, username, Map.of("role", roleName)));
+        return ResponseEntity.noContent().build();
+    }
+
     @Operation(summary = "Retorna o perfil do usuário autenticado")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = UserResponseDTO.class))),
@@ -133,7 +148,7 @@ public class UserController {
         return ResponseEntity.ok(converter.toResponse(useCase.getUserById(id)));
     }
 
-    @Operation(summary = "Lista usuários paginado")
+    @Operation(summary = "Lista usuários paginado com filtros opcionais")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "OK"),
             @ApiResponse(responseCode = "401", description = "Não autenticado", content = @Content)
@@ -141,9 +156,11 @@ public class UserController {
     @GetMapping
     @PreAuthorize("hasAuthority('USER_READ')")
     public ResponseEntity<PageResult<UserResponseDTO>> list(
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) Boolean enabled,
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
-        PageResult<User> result = useCase.listAll(page, Math.min(size, 100));
+        PageResult<User> result = useCase.findFiltered(search, enabled, page, Math.min(size, 100));
         PageResult<UserResponseDTO> response = new PageResult<>(
                 result.content().stream().map(converter::toResponse).toList(),
                 result.page(), result.size(), result.totalElements(), result.totalPages());

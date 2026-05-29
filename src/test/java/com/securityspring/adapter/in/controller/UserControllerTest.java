@@ -141,7 +141,7 @@ public class UserControllerTest {
 
     @Test
     void list_users_returns_paged_result() throws Exception {
-        when(useCase.listAll(0, 20)).thenReturn(
+        when(useCase.findFiltered(null, null, 0, 20)).thenReturn(
                 new PageResult<>(List.of(user(1L, "alice"), user(2L, "bob")), 0, 20, 2L, 1));
 
         mockMvc.perform(get("/users"))

@@ -36,4 +36,18 @@ public interface UserJpaRepository extends JpaRepository<UserEntity, Long> {
      */
     @Query("select u.id from UserEntity u where u.username = :username")
     Optional<Long> findIdByUsername(@Param("username") String username);
+
+    long countByEnabledTrue();
+
+    @Query("""
+        select u.id from UserEntity u
+        where (:search is null or lower(u.username) like lower(concat('%', :search, '%'))
+                               or lower(u.email)    like lower(concat('%', :search, '%')))
+          and (:enabled is null or u.enabled = :enabled)
+        order by u.id
+        """)
+    Page<Long> findFilteredIds(
+        @Param("search")  String search,
+        @Param("enabled") Boolean enabled,
+        Pageable pageable);
 }

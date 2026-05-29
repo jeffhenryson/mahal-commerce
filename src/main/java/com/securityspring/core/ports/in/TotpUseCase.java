@@ -12,5 +12,8 @@ public interface TotpUseCase {
     /** Desativa 2FA. Exige senha atual e código TOTP (ou backup code) por segurança. */
     void disable(String username, String currentPassword, String totpCode);
 
+    /** Regenera backup codes. Invalida os anteriores. Exige senha atual. */
+    List<String> regenerateBackupCodes(String username, String currentPassword);
+
     record TotpSetupResult(String secret, String otpauthUri) {}
 }

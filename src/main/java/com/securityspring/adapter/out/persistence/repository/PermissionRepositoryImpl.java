@@ -50,6 +50,12 @@ public class PermissionRepositoryImpl implements PermissionRepository {
         permRepo.findByName(name).ifPresent(permRepo::delete);
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public long countAll() {
+        return permRepo.count();
+    }
+
     private Permission toDomain(PermissionEntity e) {
         return Permission.of(e.getId(), e.getName());
     }

@@ -61,4 +61,9 @@ public class RoleService implements RoleUseCase {
                 .orElseThrow(() -> new RoleNotFoundException(roleName));
         roleRepository.removePermission(roleName, permissionName);
     }
+
+    @Override
+    public PageResult<Role> findByNameContaining(String search, int page, int size) {
+        return roleRepository.findByNameContaining(search, page, size);
+    }
 }

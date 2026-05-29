@@ -20,4 +20,8 @@ public interface RoleRepository {
     void deleteByName(String name);
 
     void removePermission(String roleName, String permissionName);
+
+    PageResult<Role> findByNameContaining(String search, int page, int size);
+
+    long countAll();
 }

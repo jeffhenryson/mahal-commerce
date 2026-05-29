@@ -22,7 +22,11 @@ public interface UserUseCase {
 
     void assignRole(String username, String roleName);
 
+    void removeRole(String username, String roleName);
+
     PageResult<User> listAll(int page, int size);
+
+    PageResult<User> findFiltered(String search, Boolean enabled, int page, int size);
 
     /** Remove o usuário e revoga todas as suas sessões. Retorna o username para auditoria. */
     String deleteUser(Long id);

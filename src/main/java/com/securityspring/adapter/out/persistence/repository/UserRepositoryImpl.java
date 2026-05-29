@@ -88,4 +88,27 @@ public class UserRepositoryImpl implements UserRepository {
     public Optional<User> findByEmail(String email) {
         return userRepo.findByEmailWithRoles(email).map(converter::toDomain);
     }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResult<User> findFiltered(String search, Boolean enabled, int page, int size) {
+        Page<Long> idPage = userRepo.findFilteredIds(search, enabled, PageRequest.of(page, size));
+        List<User> users = idPage.isEmpty()
+                ? List.of()
+                : userRepo.findAllWithRolesByIdIn(idPage.getContent())
+                          .stream().map(converter::toDomain).collect(Collectors.toList());
+        return new PageResult<>(users, page, size, idPage.getTotalElements(), idPage.getTotalPages());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public long countAll() {
+        return userRepo.count();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public long countEnabled() {
+        return userRepo.countByEnabledTrue();
+    }
 }

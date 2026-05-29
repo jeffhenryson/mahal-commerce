@@ -19,4 +19,6 @@ public interface AuthUseCase {
     void logoutAll(String username);
 
     List<SessionInfo> listActiveSessions(String username);
+
+    void revokeSession(Long sessionId, String username);
 }

@@ -110,4 +110,9 @@ public class AuthService implements AuthUseCase {
     public List<SessionInfo> listActiveSessions(String username) {
         return refreshToken.findActiveSessions(username);
     }
+
+    @Override
+    public void revokeSession(Long sessionId, String username) {
+        refreshToken.revokeByIdForUser(sessionId, username);
+    }
 }

@@ -32,7 +32,7 @@ public class RoleController {
         this.converter = converter;
     }
 
-    @Operation(summary = "Lista roles paginadas")
+    @Operation(summary = "Lista roles paginadas com filtro opcional por nome")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "OK"),
             @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
@@ -40,9 +40,13 @@ public class RoleController {
     @GetMapping
     @PreAuthorize("hasAuthority('ROLE_READ')")
     public ResponseEntity<PageResult<RoleResponseDTO>> list(
+            @RequestParam(required = false) String search,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        PageResult<Role> result = roleUseCase.listAll(page, Math.min(size, 100));
+        int capped = Math.min(size, 100);
+        PageResult<Role> result = (search != null && !search.isBlank())
+                ? roleUseCase.findByNameContaining(search.trim(), page, capped)
+                : roleUseCase.listAll(page, capped);
         PageResult<RoleResponseDTO> response = new PageResult<>(
                 result.content().stream().map(converter::toResponse).toList(),
                 result.page(), result.size(), result.totalElements(), result.totalPages());

@@ -10,4 +10,6 @@ public interface PermissionRepository {
     Optional<Permission> findByName(String name);
     PageResult<Permission> findAll(int page, int size);
     void deleteByName(String name);
+
+    long countAll();
 }
