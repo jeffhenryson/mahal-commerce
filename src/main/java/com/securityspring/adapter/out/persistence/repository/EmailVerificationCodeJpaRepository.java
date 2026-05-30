@@ -24,4 +24,8 @@ public interface EmailVerificationCodeJpaRepository extends JpaRepository<EmailV
     @Modifying
     @Query("delete from EmailVerificationCodeEntity e where e.username = :username")
     void deleteByUsername(@Param("username") String username);
+
+    @Modifying
+    @Query("delete from EmailVerificationCodeEntity e where e.expiresAt < :before")
+    void deleteExpiredBefore(@Param("before") java.time.Instant before);
 }

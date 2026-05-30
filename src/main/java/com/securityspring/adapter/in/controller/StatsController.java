@@ -1,6 +1,7 @@
 package com.securityspring.adapter.in.controller;
 
 import com.securityspring.adapter.in.dtos.response.StatsResponseDTO;
+import com.securityspring.core.domain.model.StatsResult;
 import com.securityspring.core.ports.in.StatsUseCase;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -25,6 +26,9 @@ public class StatsController {
     @GetMapping
     @PreAuthorize("hasAuthority('USER_READ') and hasAuthority('ROLE_READ')")
     public ResponseEntity<StatsResponseDTO> stats() {
-        return ResponseEntity.ok(statsUseCase.getStats());
+        StatsResult r = statsUseCase.getStats();
+        return ResponseEntity.ok(new StatsResponseDTO(
+                r.totalUsers(), r.activeUsers(), r.disabledUsers(),
+                r.totalRoles(), r.totalPermissions()));
     }
 }

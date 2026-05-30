@@ -40,7 +40,8 @@ public class SecurityConfig {
                                            RestAuthenticationEntryPoint entryPoint, RestAccessDeniedHandler deniedHandler,
                                            LoginRateLimitingFilter loginRateLimitingFilter,
                                            TraceIdFilter traceIdFilter,
-                                           @org.springframework.beans.factory.annotation.Value("${security.content-security-policy:}") String cspDirective) throws Exception {
+                                           @org.springframework.beans.factory.annotation.Value("${security.content-security-policy:}") String cspDirective,
+                                           @org.springframework.beans.factory.annotation.Value("${springdoc.swagger-ui.enabled:true}") boolean swaggerEnabled) throws Exception {
         // Convenção de autorização: sempre hasAuthority(), nunca hasRole().
         // Roles têm prefixo ROLE_ (ex: ROLE_ADMIN); permissões não (ex: USER_CREATE).
         // hasRole("ADMIN") adiciona o prefixo automaticamente e seria equivalente a
@@ -57,15 +58,19 @@ public class SecurityConfig {
                 if (cspDirective != null && !cspDirective.isBlank()) {
                     headers.contentSecurityPolicy(csp -> csp.policyDirectives(cspDirective));
                 }
+                // Permissions-Policy: restringe features do browser não usadas por uma API REST.
+                headers.addHeaderWriter(new org.springframework.security.web.header.writers.StaticHeadersWriter(
+                        "Permissions-Policy",
+                        "camera=(), microphone=(), geolocation=(), payment=(), usb=()"));
             })
-            .authorizeHttpRequests(auth -> auth
-                .requestMatchers(
-                    "/v3/api-docs/**",
-                    "/swagger-ui/**",
-                    "/swagger-ui.html",
-                    "/actuator/health/**",
-                    "/actuator/info"
-                ).permitAll()
+            .authorizeHttpRequests(auth -> {
+                // Swagger acessível sem autenticação apenas quando explicitamente habilitado.
+                // Em hml/prod springdoc.swagger-ui.enabled=false e essas regras não são registradas.
+                if (swaggerEnabled) {
+                    auth.requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll();
+                }
+                auth
+                .requestMatchers("/actuator/health/**", "/actuator/info").permitAll()
                 // ATENÇÃO: estas regras DEVEM vir antes de /auth/** permitAll abaixo.
                 // GET e DELETE /auth/sessions exigem autenticação; a regra de /auth/** é mais ampla
                 // e cobriria esses endpoints se declarada primeiro. Não reordene sem revisar.
@@ -76,9 +81,12 @@ public class SecurityConfig {
                 .requestMatchers("/auth/2fa/verify").permitAll()
                 .requestMatchers("/auth/2fa/setup", "/auth/2fa/confirm").authenticated()
                 .requestMatchers(org.springframework.http.HttpMethod.DELETE, "/auth/2fa").authenticated()
+                .requestMatchers(org.springframework.http.HttpMethod.GET, "/auth/2fa/status").authenticated()
                 .requestMatchers("/auth/**").permitAll()
+                .requestMatchers(org.springframework.http.HttpMethod.GET, "/avatars/*").permitAll()
                 .requestMatchers("/actuator/**").hasAuthority("ROLE_ADMIN")
-                .anyRequest().authenticated())
+                .anyRequest().authenticated();
+            })
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .httpBasic(b -> b.disable())
             .exceptionHandling(e -> e.authenticationEntryPoint(entryPoint).accessDeniedHandler(deniedHandler))
@@ -96,11 +104,15 @@ public class SecurityConfig {
     // the raw password in the Authentication token is still garbage-collected after the request.
     @Bean
     public AuthenticationManager authenticationManager(UserDetailsService userDetailsService,
-                                                       PasswordEncoder passwordEncoder) {
+                                                       PasswordEncoder passwordEncoder,
+                                                       org.springframework.security.authentication.AuthenticationEventPublisher authEventPublisher) {
         DaoAuthenticationProvider provider = new DaoAuthenticationProvider(userDetailsService);
         provider.setPasswordEncoder(passwordEncoder);
         ProviderManager manager = new ProviderManager(provider);
         manager.setEraseCredentialsAfterAuthentication(false);
+        // Wire the event publisher so ProviderManager fires AbstractAuthenticationFailureEvent
+        // (default NullEventPublisher silently discards auth events when manager is created manually).
+        manager.setAuthenticationEventPublisher(authEventPublisher);
         return manager;
     }
 

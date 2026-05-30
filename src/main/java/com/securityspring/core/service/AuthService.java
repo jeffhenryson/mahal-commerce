@@ -27,7 +27,6 @@ public class AuthService implements AuthUseCase {
     private final TokenBlocklistPort tokenBlocklist;
     private final LoginAttemptPort loginAttempt;
     private final TwoFactorAuthPort twoFactorAuth;
-    private final TotpService totpService;
 
     public AuthService(CredentialVerifierPort credentialVerifier,
                        AccessTokenPort accessToken,
@@ -35,8 +34,7 @@ public class AuthService implements AuthUseCase {
                        UserAuthoritiesPort userAuthorities,
                        TokenBlocklistPort tokenBlocklist,
                        LoginAttemptPort loginAttempt,
-                       TwoFactorAuthPort twoFactorAuth,
-                       TotpService totpService) {
+                       TwoFactorAuthPort twoFactorAuth) {
         this.credentialVerifier = credentialVerifier;
         this.accessToken = accessToken;
         this.refreshToken = refreshToken;
@@ -44,7 +42,6 @@ public class AuthService implements AuthUseCase {
         this.tokenBlocklist = tokenBlocklist;
         this.loginAttempt = loginAttempt;
         this.twoFactorAuth = twoFactorAuth;
-        this.totpService = totpService;
     }
 
     @Override
@@ -72,7 +69,7 @@ public class AuthService implements AuthUseCase {
 
     @Override
     public TokenPair completeTwoFactorLogin(String challengeToken, String totpCode) {
-        String username = totpService.completeChallengeLogin(challengeToken, totpCode);
+        String username = twoFactorAuth.completeChallengeLogin(challengeToken, totpCode);
         Set<String> authorities = userAuthorities.loadAuthoritiesByUsername(username);
         String access = accessToken.generateFor(username, authorities);
         String refresh = refreshToken.issue(username);

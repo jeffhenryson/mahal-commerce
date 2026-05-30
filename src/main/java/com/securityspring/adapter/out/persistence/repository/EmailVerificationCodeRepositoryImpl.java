@@ -52,6 +52,11 @@ public class EmailVerificationCodeRepositoryImpl implements EmailVerificationCod
         jpaRepository.deleteByUsername(username);
     }
 
+    @Override
+    public void deleteExpiredBefore(Instant before) {
+        jpaRepository.deleteExpiredBefore(before);
+    }
+
     private EmailVerificationCode toDomain(EmailVerificationCodeEntity e) {
         return new EmailVerificationCode(e.getId(), e.getUsername(), e.getCode(), e.getExpiresAt(), e.getSentAt(), e.isUsed());
     }

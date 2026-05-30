@@ -1,6 +1,6 @@
 package com.securityspring.core.service;
 
-import com.securityspring.adapter.in.dtos.response.StatsResponseDTO;
+import com.securityspring.core.domain.model.StatsResult;
 import com.securityspring.core.ports.in.StatsUseCase;
 import com.securityspring.core.ports.out.role.PermissionRepository;
 import com.securityspring.core.ports.out.role.RoleRepository;
@@ -21,10 +21,11 @@ public class StatsService implements StatsUseCase {
     }
 
     @Override
-    public StatsResponseDTO getStats() {
-        return new StatsResponseDTO(
+    public StatsResult getStats() {
+        return new StatsResult(
                 userRepository.countAll(),
                 userRepository.countEnabled(),
+                userRepository.countDisabled(),
                 roleRepository.countAll(),
                 permissionRepository.countAll()
         );

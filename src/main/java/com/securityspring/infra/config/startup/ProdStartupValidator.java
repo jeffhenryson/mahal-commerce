@@ -41,6 +41,12 @@ public class ProdStartupValidator {
     @Value("${resend.from:}")
     private String resendFrom;
 
+    @Value("${totp.encryption.key:}")
+    private String totpEncryptionKey;
+
+    @Value("${avatar.base-url:}")
+    private String avatarBaseUrl;
+
     @PostConstruct
     public void validate() {
         List<String> errors = new ArrayList<>();
@@ -74,6 +80,14 @@ public class ProdStartupValidator {
         }
         if ("security-spring".equalsIgnoreCase(applicationName) || isBlankOrPlaceholder(applicationName)) {
             errors.add("spring.application.name ainda é 'security-spring' (nome do template) — renomeie em application.properties e no artifactId do pom.xml");
+        }
+        if (isBlankOrPlaceholder(totpEncryptionKey)) {
+            errors.add("totp.encryption.key (TOTP_ENCRYPTION_KEY) está ausente — gere com: openssl rand -base64 32");
+        } else if (totpEncryptionKey.length() < 32) {
+            errors.add("totp.encryption.key parece curto demais — use ao menos 32 caracteres (Base64 de 256 bits)");
+        }
+        if (isBlankOrPlaceholder(avatarBaseUrl, "localhost")) {
+            errors.add("avatar.base-url (AVATAR_BASE_URL) está ausente — URLs de avatar não funcionarão corretamente");
         }
 
         if (!errors.isEmpty()) {

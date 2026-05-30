@@ -14,12 +14,24 @@ import java.util.Map;
 public record AuditEvent(EventType type, String username, Instant timestamp, Map<String, Object> details) {
 
     public enum EventType {
+        // Auth
         USER_LOGGED_IN, USER_LOGGED_OUT, USER_SESSIONS_CLEARED,
+        LOGIN_FAILED, ACCOUNT_LOCKED, TOKEN_THEFT_DETECTED,
+        // User lifecycle
+        USER_REGISTERED, USER_EMAIL_VERIFIED,
         USER_CREATED, USER_DELETED, USER_UPDATED, USER_EMAIL_CHANGED,
         USER_ROLE_ASSIGNED, USER_ROLE_REMOVED, USER_ENABLED, USER_DISABLED,
         USER_PASSWORD_CHANGED,
+        // Password reset
         PASSWORD_RESET_REQUESTED, PASSWORD_RESET_COMPLETED,
-        EMAIL_CHANGE_REQUESTED, EMAIL_CHANGE_CONFIRMED
+        // Email change
+        EMAIL_CHANGE_REQUESTED, EMAIL_CHANGE_CONFIRMED,
+        // RBAC management
+        ROLE_CREATED, ROLE_DELETED,
+        PERMISSION_CREATED, PERMISSION_DELETED,
+        PERMISSION_ASSIGNED_TO_ROLE, PERMISSION_REMOVED_FROM_ROLE,
+        // 2FA
+        TOTP_ENABLED, TOTP_DISABLED, TOTP_BACKUP_CODES_REGENERATED
     }
 
     public static AuditEvent of(EventType type, String username) {

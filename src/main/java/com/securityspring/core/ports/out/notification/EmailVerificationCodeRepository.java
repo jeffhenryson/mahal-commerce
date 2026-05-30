@@ -19,4 +19,6 @@ public interface EmailVerificationCodeRepository {
     boolean markAsUsed(String code);
 
     void deleteByUsername(String username);
+
+    void deleteExpiredBefore(java.time.Instant before);
 }

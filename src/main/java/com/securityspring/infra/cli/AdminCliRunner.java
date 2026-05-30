@@ -1,5 +1,7 @@
 package com.securityspring.infra.cli;
 
+import com.securityspring.core.domain.event.AuditEvent;
+import com.securityspring.core.domain.event.AuditEvent.EventType;
 import com.securityspring.core.domain.model.auth.SessionInfo;
 import com.securityspring.core.domain.model.auth.User;
 import com.securityspring.core.ports.in.UserUseCase;
@@ -8,6 +10,7 @@ import com.securityspring.core.ports.out.ratelimit.LoginAttemptPort;
 import com.securityspring.core.ports.out.token.RefreshTokenPort;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
@@ -57,15 +60,18 @@ public class AdminCliRunner implements ApplicationRunner {
     private final UserUseCase userUseCase;
     private final RefreshTokenPort refreshTokenPort;
     private final LoginAttemptPort loginAttemptPort;
+    private final ApplicationEventPublisher publisher;
 
     public AdminCliRunner(PasswordHashPort passwordHashPort,
                           UserUseCase userUseCase,
                           RefreshTokenPort refreshTokenPort,
-                          LoginAttemptPort loginAttemptPort) {
+                          LoginAttemptPort loginAttemptPort,
+                          ApplicationEventPublisher publisher) {
         this.passwordHashPort = passwordHashPort;
         this.userUseCase = userUseCase;
         this.refreshTokenPort = refreshTokenPort;
         this.loginAttemptPort = loginAttemptPort;
+        this.publisher = publisher;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -142,6 +148,8 @@ public class AdminCliRunner implements ApplicationRunner {
             return "ℹ Conta '" + username + "' não está bloqueada.";
         }
         loginAttemptPort.recordSuccess(username);
+        publisher.publishEvent(AuditEvent.of(EventType.ACCOUNT_LOCKED, username,
+                java.util.Map.of("action", "unlocked-by-cli")));
         return "✓ Bloqueio removido: " + username;
     }
 

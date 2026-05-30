@@ -5,6 +5,8 @@ import com.securityspring.core.domain.model.PageResult;
 import com.securityspring.core.ports.in.AuditLogsUseCase;
 import com.securityspring.core.ports.out.audit.AuditLogRepository;
 
+import java.time.Instant;
+
 public class AuditLogsService implements AuditLogsUseCase {
 
     private final AuditLogRepository repository;
@@ -14,7 +16,7 @@ public class AuditLogsService implements AuditLogsUseCase {
     }
 
     @Override
-    public PageResult<AuditLogEntry> list(String username, String action, int page, int size) {
-        return repository.findFiltered(username, action, page, size);
+    public PageResult<AuditLogEntry> list(String username, String action, Instant from, Instant to, int page, int size) {
+        return repository.findFiltered(username, action, from, to, page, size);
     }
 }

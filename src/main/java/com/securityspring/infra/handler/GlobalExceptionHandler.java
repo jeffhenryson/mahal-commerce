@@ -1,5 +1,7 @@
 package com.securityspring.infra.handler;
 
+import com.securityspring.core.domain.exception.avatar.AvatarTooLargeException;
+import com.securityspring.core.domain.exception.avatar.InvalidAvatarFormatException;
 import com.securityspring.core.domain.exception.PermissionAlreadyExistsException;
 import com.securityspring.core.domain.exception.PermissionNotFoundException;
 import com.securityspring.core.domain.exception.RoleAlreadyExistsException;
@@ -25,6 +27,7 @@ import com.securityspring.core.domain.exception.user.UserNotFoundException;
 import com.securityspring.core.domain.exception.user.UsernameAlreadyExistsException;
 
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -176,6 +179,16 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.UNAUTHORIZED, "Sessão inválida — faça login novamente", "REFRESH_TOKEN_REUSED", req);
     }
 
+    @ExceptionHandler(AvatarTooLargeException.class)
+    public ResponseEntity<ApiError> handleAvatarTooLarge(AvatarTooLargeException ex, HttpServletRequest req) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "AVATAR_TOO_LARGE", req);
+    }
+
+    @ExceptionHandler(InvalidAvatarFormatException.class)
+    public ResponseEntity<ApiError> handleInvalidAvatarFormat(InvalidAvatarFormatException ex, HttpServletRequest req) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "INVALID_AVATAR_FORMAT", req);
+    }
+
     @ExceptionHandler(EmailDeliveryException.class)
     public ResponseEntity<ApiError> handleEmailDelivery(EmailDeliveryException ex, HttpServletRequest req) {
         // Conta criada, mas email não entregue. Cliente deve orientar o usuário a usar resend-verification.
@@ -191,6 +204,14 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiError> handleValidation(MethodArgumentNotValidException ex, HttpServletRequest req) {
         String message = ex.getBindingResult().getFieldErrors().stream()
                 .map(FieldError::getDefaultMessage)
+                .collect(Collectors.joining(", "));
+        return error(HttpStatus.BAD_REQUEST, message, "VALIDATION_ERROR", req);
+    }
+
+    @ExceptionHandler(ConstraintViolationException.class)
+    public ResponseEntity<ApiError> handleConstraintViolation(ConstraintViolationException ex, HttpServletRequest req) {
+        String message = ex.getConstraintViolations().stream()
+                .map(cv -> cv.getPropertyPath() + ": " + cv.getMessage())
                 .collect(Collectors.joining(", "));
         return error(HttpStatus.BAD_REQUEST, message, "VALIDATION_ERROR", req);
     }

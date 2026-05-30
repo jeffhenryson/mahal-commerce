@@ -3,11 +3,13 @@ package com.securityspring.adapter.out.persistence.repository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import com.securityspring.adapter.out.persistence.entity.UserEntity;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -39,15 +41,10 @@ public interface UserJpaRepository extends JpaRepository<UserEntity, Long> {
 
     long countByEnabledTrue();
 
-    @Query("""
-        select u.id from UserEntity u
-        where (:search is null or lower(u.username) like lower(concat('%', :search, '%'))
-                               or lower(u.email)    like lower(concat('%', :search, '%')))
-          and (:enabled is null or u.enabled = :enabled)
-        order by u.id
-        """)
-    Page<Long> findFilteredIds(
-        @Param("search")  String search,
-        @Param("enabled") Boolean enabled,
-        Pageable pageable);
+    long countByEnabledFalse();
+
+    /** Soft delete: marca deleted_at sem remover o registro do banco. */
+    @Modifying
+    @Query("UPDATE UserEntity u SET u.deletedAt = :deletedAt WHERE u.id = :id")
+    void softDeleteById(@Param("id") Long id, @Param("deletedAt") Instant deletedAt);
 }

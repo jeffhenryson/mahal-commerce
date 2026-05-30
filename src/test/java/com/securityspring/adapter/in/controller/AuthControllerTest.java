@@ -1,7 +1,7 @@
 package com.securityspring.adapter.in.controller;
 
 import static org.mockito.Mockito.*;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -9,7 +9,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.securityspring.adapter.in.dtos.request.LoginRequest;
 import com.securityspring.adapter.in.dtos.request.LogoutRequest;
 import com.securityspring.adapter.in.dtos.request.RefreshRequest;
+import com.securityspring.core.domain.exception.auth.PasswordResetTokenExpiredException;
+import com.securityspring.core.domain.exception.auth.PasswordResetTokenNotFoundException;
 import com.securityspring.core.domain.model.auth.LoginResponse;
+import com.securityspring.core.domain.model.auth.SessionInfo;
 import com.securityspring.core.domain.model.auth.TokenPair;
 import com.securityspring.core.ports.in.AuthUseCase;
 import com.securityspring.core.ports.in.UserUseCase;
@@ -17,22 +20,31 @@ import com.securityspring.core.ports.in.UserUseCase;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.http.MediaType;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+
+import java.time.Instant;
+import java.util.List;
 
 public class AuthControllerTest {
 
     private MockMvc mockMvc;
     private AuthUseCase authUseCase;
+    private UserUseCase userUseCase;
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    private static final UsernamePasswordAuthenticationToken AUTH =
+            new UsernamePasswordAuthenticationToken("alice", null, List.of());
 
     @BeforeEach
     void setup() {
         authUseCase = mock(AuthUseCase.class);
-        UserUseCase userUseCase = mock(UserUseCase.class);
+        userUseCase = mock(UserUseCase.class);
         ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
-        AuthController controller = new AuthController(authUseCase, userUseCase, publisher, 15, false);
+        AuthController controller = new AuthController(authUseCase, userUseCase, publisher, 15, 7L, false);
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new com.securityspring.infra.handler.GlobalExceptionHandler())
                 .build();
@@ -113,5 +125,128 @@ public class AuthControllerTest {
                 .andExpect(status().isNoContent());
 
         verify(authUseCase, times(1)).logout("ref");
+    }
+
+    @Test
+    void login_when_2fa_enabled_returns_pending_challenge() throws Exception {
+        when(authUseCase.login("admin", "Admin@dev1"))
+                .thenReturn(LoginResponse.twoFactorChallenge("challenge-token-xyz"));
+
+        mockMvc.perform(post("/auth/login")
+                        .contentType("application/json")
+                        .content("{\"username\":\"admin\",\"password\":\"Admin@dev1\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("PENDING_2FA"))
+                .andExpect(jsonPath("$.challengeToken").value("challenge-token-xyz"))
+                .andExpect(jsonPath("$.expiresInSeconds").value(300))
+                .andExpect(jsonPath("$.accessToken").doesNotExist());
+    }
+
+    @Test
+    void logout_without_token_returns_204_silently() throws Exception {
+        mockMvc.perform(post("/auth/logout"))
+                .andExpect(status().isNoContent());
+
+        verify(authUseCase, never()).logout(any());
+    }
+
+    @Test
+    void refresh_without_body_or_cookie_returns_401() throws Exception {
+        mockMvc.perform(post("/auth/refresh"))
+                .andExpect(status().isUnauthorized());
+
+        verify(authUseCase, never()).refresh(any());
+    }
+
+    // ── sessions ──────────────────────────────────────────────────────────────
+
+    @Test
+    void list_sessions_returns_200_with_sessions() throws Exception {
+        Instant now = Instant.now();
+        Instant exp = now.plusSeconds(86400);
+        when(authUseCase.listActiveSessions("alice"))
+                .thenReturn(List.of(new SessionInfo(1L, now, exp, "127.0.0.1", "Mozilla/5.0")));
+
+        mockMvc.perform(get("/auth/sessions").principal(AUTH))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray())
+                .andExpect(jsonPath("$[0].id").value(1))
+                .andExpect(jsonPath("$[0].ipAddress").value("127.0.0.1"));
+    }
+
+    @Test
+    void logout_all_sessions_returns_204() throws Exception {
+        mockMvc.perform(delete("/auth/sessions").principal(AUTH))
+                .andExpect(status().isNoContent());
+
+        verify(authUseCase).logoutAll("alice");
+    }
+
+    @Test
+    void revoke_specific_session_returns_204() throws Exception {
+        mockMvc.perform(delete("/auth/sessions/42").principal(AUTH))
+                .andExpect(status().isNoContent());
+
+        verify(authUseCase).revokeSession(42L, "alice");
+    }
+
+    // ── forgot / reset password ───────────────────────────────────────────────
+
+    @Test
+    void forgot_password_always_returns_204() throws Exception {
+        mockMvc.perform(post("/auth/forgot-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"alice@example.com\"}"))
+                .andExpect(status().isNoContent());
+
+        verify(userUseCase).requestPasswordReset("alice@example.com");
+    }
+
+    @Test
+    void reset_password_returns_204_on_success() throws Exception {
+        when(userUseCase.resetPassword("validtoken", "NewPass@1")).thenReturn("alice");
+
+        mockMvc.perform(post("/auth/reset-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"validtoken\",\"newPassword\":\"NewPass@1\"}"))
+                .andExpect(status().isNoContent());
+
+        verify(userUseCase).resetPassword("validtoken", "NewPass@1");
+    }
+
+    @Test
+    void reset_password_with_expired_token_returns_400() throws Exception {
+        when(userUseCase.resetPassword(any(), any()))
+                .thenThrow(new PasswordResetTokenExpiredException());
+
+        mockMvc.perform(post("/auth/reset-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"expiredtoken\",\"newPassword\":\"NewPass@1\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void reset_password_with_invalid_token_returns_400() throws Exception {
+        when(userUseCase.resetPassword(any(), any()))
+                .thenThrow(new PasswordResetTokenNotFoundException());
+
+        mockMvc.perform(post("/auth/reset-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"unknowntoken\",\"newPassword\":\"NewPass@1\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    // ── confirm email change ──────────────────────────────────────────────────
+
+    @Test
+    void confirm_email_change_returns_204_on_success() throws Exception {
+        when(userUseCase.confirmEmailChange("ABCDEF123456")).thenReturn("alice");
+
+        mockMvc.perform(post("/auth/confirm-email-change")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"code\":\"ABCDEF123456\"}"))
+                .andExpect(status().isNoContent());
+
+        verify(userUseCase).confirmEmailChange("ABCDEF123456");
     }
 }

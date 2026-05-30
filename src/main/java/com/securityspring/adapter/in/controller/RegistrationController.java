@@ -3,6 +3,9 @@ package com.securityspring.adapter.in.controller;
 import com.securityspring.adapter.in.dtos.request.RegisterRequest;
 import com.securityspring.adapter.in.dtos.request.ResendVerificationRequest;
 import com.securityspring.adapter.in.dtos.request.VerifyEmailRequest;
+import com.securityspring.core.domain.event.AuditEvent;
+import com.securityspring.core.domain.event.AuditEvent.EventType;
+import com.securityspring.core.domain.model.auth.User;
 import com.securityspring.core.ports.in.UserUseCase;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -16,6 +19,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -24,11 +28,14 @@ import org.springframework.web.bind.annotation.*;
 public class RegistrationController {
 
         private final UserUseCase userUseCase;
+        private final ApplicationEventPublisher publisher;
         private final List<String> defaultRoles;
 
         public RegistrationController(UserUseCase userUseCase,
+                        ApplicationEventPublisher publisher,
                         @Value("${auth.registration.default-roles:}") String defaultRolesProperty) {
                 this.userUseCase = userUseCase;
+                this.publisher = publisher;
                 // Property: auth.registration.default-roles=ROLE_USER,ROLE_ANOTHER
                 // Vazio por padrão — sem role automática no auto-registro (princípio do mínimo
                 // privilégio).
@@ -47,8 +54,9 @@ public class RegistrationController {
         })
         @PostMapping("/register")
         ResponseEntity<Void> register(@Valid @RequestBody RegisterRequest request) {
-                userUseCase.registerUser(request.getUsername(), request.getPassword(), request.getEmail(),
-                                defaultRoles);
+                User registered = userUseCase.registerUser(request.getUsername(), request.getPassword(),
+                                request.getEmail(), defaultRoles);
+                publisher.publishEvent(AuditEvent.of(EventType.USER_REGISTERED, registered.getUsername()));
                 return ResponseEntity.status(201).build();
         }
 
@@ -59,7 +67,8 @@ public class RegistrationController {
         })
         @PostMapping("/verify-email")
         ResponseEntity<Void> verifyEmail(@Valid @RequestBody VerifyEmailRequest request) {
-                userUseCase.verifyEmail(request.getCode());
+                String username = userUseCase.verifyEmail(request.getCode());
+                publisher.publishEvent(AuditEvent.of(EventType.USER_EMAIL_VERIFIED, username));
                 return ResponseEntity.noContent().build();
         }
 

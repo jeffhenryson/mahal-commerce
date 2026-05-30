@@ -4,8 +4,15 @@ import com.securityspring.core.domain.exception.*;
 import com.securityspring.core.domain.exception.auth.AccountLockedException;
 import com.securityspring.core.domain.exception.auth.InvalidPasswordException;
 import com.securityspring.core.domain.exception.auth.InvalidRefreshTokenException;
+import com.securityspring.core.domain.exception.auth.InvalidTotpCodeException;
+import com.securityspring.core.domain.exception.auth.PasswordResetTokenExpiredException;
+import com.securityspring.core.domain.exception.auth.PasswordResetTokenNotFoundException;
 import com.securityspring.core.domain.exception.auth.RefreshTokenAlreadyUsedException;
 import com.securityspring.core.domain.exception.auth.RefreshTokenExpiredException;
+import com.securityspring.core.domain.exception.auth.SessionNotFoundException;
+import com.securityspring.core.domain.exception.auth.TotpAlreadyEnabledException;
+import com.securityspring.core.domain.exception.auth.TotpChallengeExpiredException;
+import com.securityspring.core.domain.exception.auth.TotpNotEnabledException;
 import com.securityspring.core.domain.exception.email.EmailAlreadyVerifiedException;
 import com.securityspring.core.domain.exception.email.EmailDeliveryException;
 import com.securityspring.core.domain.exception.email.EmailVerificationCodeExpiredException;
@@ -16,11 +23,22 @@ import com.securityspring.core.domain.exception.user.UserNotFoundException;
 import com.securityspring.core.domain.exception.user.UsernameAlreadyExistsException;
 
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.ConstraintViolationException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.mock.http.MockHttpInputMessage;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.DisabledException;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.validation.BindingResult;
+import org.springframework.validation.FieldError;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+
+import java.util.List;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -178,6 +196,124 @@ class GlobalExceptionHandlerTest {
         ResponseEntity<ApiError> resp = handler.handleUnexpected(new RuntimeException("boom"), req);
         assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
         assertThat(resp.getBody().errorCode()).isEqualTo("INTERNAL_ERROR");
+    }
+
+    // ── 401 Unauthorized — auth ───────────────────────────────────────────────
+
+    @Test
+    void disabled_returns401_withoutAccountDisclosure() {
+        ResponseEntity<ApiError> resp = handler.handleDisabled(new DisabledException("disabled"), req);
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(resp.getBody().errorCode()).isEqualTo("INVALID_CREDENTIALS");
+        assertThat(resp.getBody().message()).isEqualTo("Credenciais inválidas");
+    }
+
+    @Test
+    void totpChallengeExpired_returns401_withCode() {
+        ResponseEntity<ApiError> resp = handler.handleTotpChallengeExpired(new TotpChallengeExpiredException(), req);
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(resp.getBody().errorCode()).isEqualTo("TOTP_CHALLENGE_EXPIRED");
+    }
+
+    // ── 403 Forbidden ─────────────────────────────────────────────────────────
+
+    @Test
+    void accessDenied_returns403_withCode() {
+        ResponseEntity<ApiError> resp = handler.handleAccessDenied(new AccessDeniedException("forbidden"), req);
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(resp.getBody().errorCode()).isEqualTo("ACCESS_DENIED");
+    }
+
+    // ── 404 Not Found — session ───────────────────────────────────────────────
+
+    @Test
+    void sessionNotFound_returns404_withCode() {
+        ResponseEntity<ApiError> resp = handler.handleSessionNotFound(new SessionNotFoundException(), req);
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(resp.getBody().errorCode()).isEqualTo("SESSION_NOT_FOUND");
+    }
+
+    // ── 400 Bad Request — TOTP ────────────────────────────────────────────────
+
+    @Test
+    void invalidTotpCode_returns400_withCode() {
+        ResponseEntity<ApiError> resp = handler.handleInvalidTotpCode(new InvalidTotpCodeException(), req);
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(resp.getBody().errorCode()).isEqualTo("INVALID_TOTP_CODE");
+    }
+
+    @Test
+    void totpNotEnabled_returns400_withCode() {
+        ResponseEntity<ApiError> resp = handler.handleTotpNotEnabled(new TotpNotEnabledException(), req);
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(resp.getBody().errorCode()).isEqualTo("TOTP_NOT_ENABLED");
+    }
+
+    // ── 409 Conflict — TOTP ───────────────────────────────────────────────────
+
+    @Test
+    void totpAlreadyEnabled_returns409_withCode() {
+        ResponseEntity<ApiError> resp = handler.handleTotpAlreadyEnabled(new TotpAlreadyEnabledException(), req);
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(resp.getBody().errorCode()).isEqualTo("TOTP_ALREADY_ENABLED");
+    }
+
+    // ── 409 Conflict — permission ─────────────────────────────────────────────
+
+    @Test
+    void permissionAlreadyExists_returns409_withCode() {
+        ResponseEntity<ApiError> resp = handler.handlePermissionExists(new PermissionAlreadyExistsException("USER_READ"), req);
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(resp.getBody().errorCode()).isEqualTo("PERMISSION_ALREADY_EXISTS");
+    }
+
+    // ── 400 Bad Request — password reset ─────────────────────────────────────
+
+    @Test
+    void passwordResetTokenNotFound_returns400_withCode() {
+        ResponseEntity<ApiError> resp = handler.handlePasswordResetTokenNotFound(new PasswordResetTokenNotFoundException(), req);
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(resp.getBody().errorCode()).isEqualTo("PASSWORD_RESET_TOKEN_INVALID");
+    }
+
+    @Test
+    void passwordResetTokenExpired_returns400_withCode() {
+        ResponseEntity<ApiError> resp = handler.handlePasswordResetTokenExpired(new PasswordResetTokenExpiredException(), req);
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(resp.getBody().errorCode()).isEqualTo("PASSWORD_RESET_TOKEN_EXPIRED");
+    }
+
+    // ── 400 Bad Request — validation ──────────────────────────────────────────
+
+    @Test
+    void methodArgumentNotValid_returns400_withFieldMessage() {
+        MethodArgumentNotValidException ex = mock(MethodArgumentNotValidException.class);
+        BindingResult br = mock(BindingResult.class);
+        when(ex.getBindingResult()).thenReturn(br);
+        when(br.getFieldErrors()).thenReturn(List.of(
+                new FieldError("obj", "username", "must not be blank")));
+
+        ResponseEntity<ApiError> resp = handler.handleValidation(ex, req);
+
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(resp.getBody().errorCode()).isEqualTo("VALIDATION_ERROR");
+        assertThat(resp.getBody().message()).contains("must not be blank");
+    }
+
+    @Test
+    void constraintViolation_returns400_withValidationErrorCode() {
+        ResponseEntity<ApiError> resp = handler.handleConstraintViolation(
+                new ConstraintViolationException("invalid", Set.of()), req);
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(resp.getBody().errorCode()).isEqualTo("VALIDATION_ERROR");
+    }
+
+    @Test
+    void unreadableBody_returns400_withCode() {
+        ResponseEntity<ApiError> resp = handler.handleUnreadableBody(
+                new HttpMessageNotReadableException("bad body", new MockHttpInputMessage(new byte[0])), req);
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(resp.getBody().errorCode()).isEqualTo("UNREADABLE_BODY");
     }
 
     // ── path e timestamp na resposta ─────────────────────────────────────────

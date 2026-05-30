@@ -18,9 +18,11 @@ public interface UserRepository {
 
     Optional<User> findByEmail(String email);
 
-    PageResult<User> findFiltered(String search, Boolean enabled, int page, int size);
+    PageResult<User> findFiltered(String search, Boolean enabled, String sortBy, String sortDir, int page, int size);
 
     long countAll();
 
     long countEnabled();
+
+    long countDisabled();
 }

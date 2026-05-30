@@ -13,4 +13,6 @@ public interface TotpConfigRepository {
     void enable(String username, Instant confirmedAt);
 
     void deleteByUsername(String username);
+
+    void deleteUnconfirmedBefore(java.time.Instant before);
 }

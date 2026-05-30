@@ -5,6 +5,7 @@ import com.securityspring.adapter.in.dtos.request.TotpConfirmRequest;
 import com.securityspring.adapter.in.dtos.request.TotpDisableRequest;
 import com.securityspring.adapter.in.dtos.response.TotpConfirmResponseDTO;
 import com.securityspring.adapter.in.dtos.response.TotpSetupResponseDTO;
+import com.securityspring.adapter.in.dtos.response.TotpStatusResponseDTO;
 import com.securityspring.core.domain.event.AuditEvent;
 import com.securityspring.core.domain.event.AuditEvent.EventType;
 import com.securityspring.core.ports.in.TotpUseCase;
@@ -37,6 +38,16 @@ public class TotpController {
         this.publisher = publisher;
     }
 
+    @Operation(summary = "Retorna se o 2FA está ativo para o usuário autenticado")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Status do 2FA")
+    })
+    @GetMapping("/status")
+    ResponseEntity<TotpStatusResponseDTO> status(Authentication authentication) {
+        boolean enabled = totpUseCase.isEnabled(authentication.getName());
+        return ResponseEntity.ok(new TotpStatusResponseDTO(enabled));
+    }
+
     @Operation(summary = "Inicia configuração do 2FA — retorna secret e URI para QR code")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Secret gerado",
@@ -59,7 +70,7 @@ public class TotpController {
     ResponseEntity<TotpConfirmResponseDTO> confirm(@Valid @RequestBody TotpConfirmRequest request,
             Authentication authentication) {
         List<String> backupCodes = totpUseCase.confirm(authentication.getName(), request.getCode());
-        publisher.publishEvent(AuditEvent.of(EventType.USER_UPDATED, authentication.getName()));
+        publisher.publishEvent(AuditEvent.of(EventType.TOTP_ENABLED, authentication.getName()));
         return ResponseEntity.ok(new TotpConfirmResponseDTO(backupCodes));
     }
 
@@ -72,7 +83,7 @@ public class TotpController {
     ResponseEntity<Void> disable(@Valid @RequestBody TotpDisableRequest request,
             Authentication authentication) {
         totpUseCase.disable(authentication.getName(), request.getCurrentPassword(), request.getCode());
-        publisher.publishEvent(AuditEvent.of(EventType.USER_UPDATED, authentication.getName()));
+        publisher.publishEvent(AuditEvent.of(EventType.TOTP_DISABLED, authentication.getName()));
         return ResponseEntity.noContent().build();
     }
 
@@ -88,7 +99,7 @@ public class TotpController {
             Authentication authentication) {
         List<String> backupCodes = totpUseCase.regenerateBackupCodes(
                 authentication.getName(), request.getCurrentPassword());
-        publisher.publishEvent(AuditEvent.of(EventType.USER_UPDATED, authentication.getName()));
+        publisher.publishEvent(AuditEvent.of(EventType.TOTP_BACKUP_CODES_REGENERATED, authentication.getName()));
         return ResponseEntity.ok(new TotpConfirmResponseDTO(backupCodes));
     }
 }

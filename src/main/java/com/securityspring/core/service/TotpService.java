@@ -211,20 +211,21 @@ public class TotpService implements TotpUseCase, TwoFactorAuthPort {
         List<String> codes = new ArrayList<>(BACKUP_CODE_COUNT);
         for (int i = 0; i < BACKUP_CODE_COUNT; i++) {
             // Formato: XXXX-XXXX-XXXX (12 chars alfanuméricos agrupados para legibilidade)
-            byte[] b = new byte[6];
+            // Um byte por caractere — 12 bytes independentes para 12 posições sem viés de bit-shift.
+            byte[] b = new byte[12];
             secureRandom.nextBytes(b);
-            String hex = bytesToAlpha(b);
-            codes.add(hex.substring(0, 4) + "-" + hex.substring(4, 8) + "-" + hex.substring(8, 12));
+            String code = bytesToAlpha(b);
+            codes.add(code.substring(0, 4) + "-" + code.substring(4, 8) + "-" + code.substring(8, 12));
         }
         return codes;
     }
 
     private static String bytesToAlpha(byte[] bytes) {
         final String ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-        StringBuilder sb = new StringBuilder(bytes.length * 2);
+        StringBuilder sb = new StringBuilder(bytes.length);
         for (byte b : bytes) {
-            sb.append(ALPHABET.charAt(Math.abs(b % ALPHABET.length())));
-            sb.append(ALPHABET.charAt(Math.abs((b >> 4) % ALPHABET.length())));
+            // Byte.toUnsignedInt evita o colapso de sinal que b>>4 causava (só 9 chars possíveis).
+            sb.append(ALPHABET.charAt(Byte.toUnsignedInt(b) % ALPHABET.length()));
         }
         return sb.toString();
     }

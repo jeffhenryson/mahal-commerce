@@ -3,14 +3,18 @@ package com.securityspring.adapter.in.controller;
 import com.securityspring.core.domain.exception.email.EmailVerificationCodeNotFoundException;
 import com.securityspring.core.domain.exception.user.EmailAlreadyExistsException;
 import com.securityspring.core.domain.exception.user.UsernameAlreadyExistsException;
+import com.securityspring.core.domain.model.auth.User;
 import com.securityspring.core.ports.in.UserUseCase;
 import com.securityspring.infra.handler.GlobalExceptionHandler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.MediaType;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+
+import java.util.HashSet;
 
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -29,19 +33,27 @@ class RegistrationControllerTest {
     @BeforeEach
     void setup() {
         useCase = mock(UserUseCase.class);
+        ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
         GlobalExceptionHandler exceptionHandler = new GlobalExceptionHandler();
         ReflectionTestUtils.setField(exceptionHandler, "lockoutDurationMinutes", 15L);
 
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new RegistrationController(useCase, ""))
+                .standaloneSetup(new RegistrationController(useCase, publisher, ""))
                 .setControllerAdvice(exceptionHandler)
                 .build();
+    }
+
+    private User user(String username) {
+        return User.fromPersisted(1L, username, "hashed", false, "u@t.com", false, null, null, null, new HashSet<>());
     }
 
     // ── /auth/register ────────────────────────────────────────────────────────
 
     @Test
     void register_valid_returns_201() throws Exception {
+        when(useCase.registerUser(eq("newuser"), eq("Secure@1"), eq("user@test.com"), any()))
+                .thenReturn(user("newuser"));
+
         mockMvc.perform(post("/auth/register")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"username\":\"newuser\",\"password\":\"Secure@1\",\"email\":\"user@test.com\"}"))
@@ -104,7 +116,8 @@ class RegistrationControllerTest {
 
     @Test
     void verifyEmail_valid_returns_204() throws Exception {
-        // Código deve ter exatamente 12 caracteres alfanuméricos maiúsculos (VerifyEmailRequest@Pattern)
+        when(useCase.verifyEmail("ABCDEF123456")).thenReturn("newuser");
+
         mockMvc.perform(post("/auth/verify-email")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"code\":\"ABCDEF123456\"}"))
@@ -115,7 +128,6 @@ class RegistrationControllerTest {
 
     @Test
     void verifyEmail_invalidCode_returns_400() throws Exception {
-        // Código válido estruturalmente (12 chars) mas inexistente no sistema → 400 VERIFICATION_CODE_INVALID
         doThrow(new EmailVerificationCodeNotFoundException())
                 .when(useCase).verifyEmail("INVALID12345");
 
@@ -130,7 +142,6 @@ class RegistrationControllerTest {
 
     @Test
     void resendVerification_always_returns_204() throws Exception {
-        // Endpoint é opaco: não revela se o email existe (defesa contra enumeração)
         mockMvc.perform(post("/auth/resend-verification")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"email\":\"nobody@test.com\"}"))

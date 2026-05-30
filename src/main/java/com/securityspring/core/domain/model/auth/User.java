@@ -2,6 +2,7 @@ package com.securityspring.core.domain.model.auth;
 
 import com.securityspring.core.domain.model.rbac.Role;
 
+import java.time.Instant;
 import java.util.HashSet;
 import java.util.Objects;
 import java.util.Set;
@@ -15,15 +16,13 @@ public class User {
     private String email;
     private boolean emailVerified = false;
     private String pendingEmail;
+    private String avatarFilename;
+    private Instant createdAt;
     private Set<Role> roles = new HashSet<>();
 
     User() {
     }
 
-    /**
-     * Factory para criação de novo usuário sem email (ex: seed, admin). Criado com
-     * enabled=true.
-     */
     public static User of(String username, String hashedPassword, Set<Role> roles) {
         Objects.requireNonNull(username, "username is required");
         Objects.requireNonNull(hashedPassword, "password is required");
@@ -34,10 +33,6 @@ public class User {
         return u;
     }
 
-    /**
-     * Factory para criação via cadastro externo. Criado com enabled=false até
-     * confirmação de email.
-     */
     public static User ofPendingVerification(String username, String hashedPassword,
             String email, Set<Role> roles) {
         Objects.requireNonNull(email, "email is required");
@@ -47,13 +42,9 @@ public class User {
         return u;
     }
 
-    /**
-     * Factory para reconstituição a partir de persistência — preserva todos os
-     * campos.
-     */
     public static User fromPersisted(Long id, String username, String hashedPassword,
             boolean enabled, String email, boolean emailVerified, String pendingEmail,
-            Set<Role> roles) {
+            String avatarFilename, Instant createdAt, Set<Role> roles) {
         Objects.requireNonNull(id, "id is required for persisted user");
         User u = of(username, hashedPassword, roles);
         u.id = id;
@@ -61,6 +52,8 @@ public class User {
         u.email = email;
         u.emailVerified = emailVerified;
         u.pendingEmail = pendingEmail;
+        u.avatarFilename = avatarFilename;
+        u.createdAt = createdAt;
         return u;
     }
 
@@ -110,6 +103,14 @@ public class User {
         this.pendingEmail = null;
     }
 
+    public void setAvatar(String avatarFilename) {
+        this.avatarFilename = avatarFilename;
+    }
+
+    public void clearAvatar() {
+        this.avatarFilename = null;
+    }
+
     public void addRole(Role role) {
         this.roles.add(role);
     }
@@ -120,35 +121,14 @@ public class User {
 
     // --- Accessors ---
 
-    public Long getId() {
-        return id;
-    }
-
-    public String getUsername() {
-        return username;
-    }
-
-    public String getPassword() {
-        return password;
-    }
-
-    public boolean isEnabled() {
-        return enabled;
-    }
-
-    public String getEmail() {
-        return email;
-    }
-
-    public boolean isEmailVerified() {
-        return emailVerified;
-    }
-
-    public String getPendingEmail() {
-        return pendingEmail;
-    }
-
-    public Set<Role> getRoles() {
-        return roles;
-    }
+    public Long getId() { return id; }
+    public String getUsername() { return username; }
+    public String getPassword() { return password; }
+    public boolean isEnabled() { return enabled; }
+    public String getEmail() { return email; }
+    public boolean isEmailVerified() { return emailVerified; }
+    public String getPendingEmail() { return pendingEmail; }
+    public String getAvatarFilename() { return avatarFilename; }
+    public Instant getCreatedAt() { return createdAt; }
+    public Set<Role> getRoles() { return roles; }
 }

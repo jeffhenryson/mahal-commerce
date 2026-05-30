@@ -1,6 +1,7 @@
 package com.securityspring.core.ports.in;
 
 import com.securityspring.core.domain.model.PageResult;
+import com.securityspring.core.domain.model.auth.UpdateProfileResult;
 import com.securityspring.core.domain.model.auth.User;
 
 import java.util.List;
@@ -26,7 +27,7 @@ public interface UserUseCase {
 
     PageResult<User> listAll(int page, int size);
 
-    PageResult<User> findFiltered(String search, Boolean enabled, int page, int size);
+    PageResult<User> findFiltered(String search, Boolean enabled, String sortBy, String sortDir, int page, int size);
 
     /** Remove o usuário e revoga todas as suas sessões. Retorna o username para auditoria. */
     String deleteUser(Long id);
@@ -36,20 +37,21 @@ public interface UserUseCase {
     /** Ativa ou desativa a conta. Retorna o username para auditoria. */
     String setUserEnabled(Long id, boolean enabled);
 
-    User updateUser(Long id, String newUsername, String newEmail);
+    UpdateProfileResult updateUser(Long id, String newUsername, String newEmail);
 
     /** Auto-atualização: requer senha atual quando o email está sendo alterado. */
-    User updateOwnProfile(String username, String newUsername, String newEmail, String currentPassword);
+    UpdateProfileResult updateOwnProfile(String username, String newUsername, String newEmail, String currentPassword);
 
-    void verifyEmail(String code);
+    /** Confirma email com código. Retorna o username para auditoria. */
+    String verifyEmail(String code);
 
     void resendVerification(String email);
 
     /** Inicia o fluxo de recuperação de senha. Sempre silencioso para evitar enumeração de emails. */
     void requestPasswordReset(String email);
 
-    /** Conclui o fluxo de recuperação de senha. Revoga todas as sessões ao final. */
-    void resetPassword(String token, String newPassword);
+    /** Conclui o fluxo de recuperação de senha. Revoga todas as sessões ao final. Retorna o username para auditoria. */
+    String resetPassword(String token, String newPassword);
 
     /** Confirma a troca de email via código enviado ao novo endereço. Retorna o username para auditoria. */
     String confirmEmailChange(String code);

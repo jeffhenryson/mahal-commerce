@@ -4,26 +4,25 @@
 FROM maven:3.9-eclipse-temurin-21 AS build
 WORKDIR /app
 
-# Copy only pom.xml first to leverage Docker layer caching
+# Copy only pom.xml first so the dependency download layer is cached separately
+# from source changes (re-downloads only when pom.xml changes)
 COPY pom.xml .
+RUN mvn -B -ntp dependency:go-offline -q
 
-# Copy sources
+# Copy sources and build (tests run in CI, not here)
 COPY src ./src
-
-# Build application (skip tests here; CI covers tests)
 RUN mvn -B -ntp -DskipTests package
 
 # ===== Runtime stage =====
-FROM eclipse-temurin:21-jre
+FROM eclipse-temurin:21-jre-alpine
 
 ENV JAVA_OPTS=""
 WORKDIR /app
 
-# Create non-root user for security
-RUN useradd -r -u 10001 spring && chown -R spring:spring /app
+# Non-root user for security
+RUN addgroup -S spring && adduser -S -G spring spring
 USER spring
 
-# Copy fat jar from build stage
 COPY --from=build /app/target/security-spring-*-SNAPSHOT.jar /app/app.jar
 
 EXPOSE 8080

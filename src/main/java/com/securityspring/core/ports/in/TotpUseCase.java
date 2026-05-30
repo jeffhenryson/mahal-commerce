@@ -15,5 +15,8 @@ public interface TotpUseCase {
     /** Regenera backup codes. Invalida os anteriores. Exige senha atual. */
     List<String> regenerateBackupCodes(String username, String currentPassword);
 
+    /** Retorna true se o 2FA (TOTP) está ativado para o usuário. */
+    boolean isEnabled(String username);
+
     record TotpSetupResult(String secret, String otpauthUri) {}
 }

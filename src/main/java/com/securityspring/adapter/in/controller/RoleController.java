@@ -3,6 +3,8 @@ package com.securityspring.adapter.in.controller;
 import com.securityspring.adapter.in.converter.RoleDTOConverter;
 import com.securityspring.adapter.in.dtos.request.RoleRequest;
 import com.securityspring.adapter.in.dtos.response.RoleResponseDTO;
+import com.securityspring.core.domain.event.AuditEvent;
+import com.securityspring.core.domain.event.AuditEvent.EventType;
 import com.securityspring.core.domain.model.PageResult;
 import com.securityspring.core.domain.model.rbac.Role;
 import com.securityspring.core.ports.in.RoleUseCase;
@@ -13,11 +15,14 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/roles")
@@ -26,10 +31,12 @@ public class RoleController {
 
     private final RoleUseCase roleUseCase;
     private final RoleDTOConverter converter;
+    private final ApplicationEventPublisher publisher;
 
-    public RoleController(RoleUseCase roleUseCase, RoleDTOConverter converter) {
+    public RoleController(RoleUseCase roleUseCase, RoleDTOConverter converter, ApplicationEventPublisher publisher) {
         this.roleUseCase = roleUseCase;
         this.converter = converter;
+        this.publisher = publisher;
     }
 
     @Operation(summary = "Lista roles paginadas com filtro opcional por nome")
@@ -53,6 +60,18 @@ public class RoleController {
         return ResponseEntity.ok(response);
     }
 
+    @Operation(summary = "Busca uma role pelo nome")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = RoleResponseDTO.class))),
+            @ApiResponse(responseCode = "404", description = "Não encontrada", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/{name}")
+    @PreAuthorize("hasAuthority('ROLE_READ')")
+    public ResponseEntity<RoleResponseDTO> getByName(@PathVariable String name) {
+        return ResponseEntity.ok(converter.toResponse(roleUseCase.findByName(name)));
+    }
+
     @Operation(summary = "Cria uma nova role")
     @ApiResponses({
             @ApiResponse(responseCode = "201", description = "Criada", content = @Content(schema = @Schema(implementation = RoleResponseDTO.class))),
@@ -61,8 +80,11 @@ public class RoleController {
     })
     @PostMapping
     @PreAuthorize("hasAuthority('ROLE_CREATE')")
-    public ResponseEntity<RoleResponseDTO> create(@Valid @RequestBody RoleRequest request) {
+    public ResponseEntity<RoleResponseDTO> create(@Valid @RequestBody RoleRequest request,
+            Authentication authentication) {
         Role created = roleUseCase.createRole(request.getName());
+        publisher.publishEvent(AuditEvent.of(EventType.ROLE_CREATED,
+                authentication.getName(), Map.of("role", created.getName())));
         return ResponseEntity.created(URI.create("/roles/" + created.getName()))
                 .body(converter.toResponse(created));
     }
@@ -75,8 +97,10 @@ public class RoleController {
     })
     @DeleteMapping("/{name}")
     @PreAuthorize("hasAuthority('ROLE_DELETE')")
-    public ResponseEntity<Void> delete(@PathVariable String name) {
+    public ResponseEntity<Void> delete(@PathVariable String name, Authentication authentication) {
         roleUseCase.deleteRole(name);
+        publisher.publishEvent(AuditEvent.of(EventType.ROLE_DELETED,
+                authentication.getName(), Map.of("role", name)));
         return ResponseEntity.noContent().build();
     }
 
@@ -89,8 +113,10 @@ public class RoleController {
     @PostMapping("/{roleName}/permissions/{permissionName}")
     @PreAuthorize("hasAuthority('ROLE_MANAGE_PERMISSIONS')")
     public ResponseEntity<Void> assignPermission(@PathVariable String roleName,
-            @PathVariable String permissionName) {
+            @PathVariable String permissionName, Authentication authentication) {
         roleUseCase.assignPermission(roleName, permissionName);
+        publisher.publishEvent(AuditEvent.of(EventType.PERMISSION_ASSIGNED_TO_ROLE,
+                authentication.getName(), Map.of("role", roleName, "permission", permissionName)));
         return ResponseEntity.noContent().build();
     }
 
@@ -103,9 +129,10 @@ public class RoleController {
     @DeleteMapping("/{roleName}/permissions/{permissionName}")
     @PreAuthorize("hasAuthority('ROLE_MANAGE_PERMISSIONS')")
     public ResponseEntity<Void> removePermission(@PathVariable String roleName,
-            @PathVariable String permissionName) {
+            @PathVariable String permissionName, Authentication authentication) {
         roleUseCase.removePermission(roleName, permissionName);
+        publisher.publishEvent(AuditEvent.of(EventType.PERMISSION_REMOVED_FROM_ROLE,
+                authentication.getName(), Map.of("role", roleName, "permission", permissionName)));
         return ResponseEntity.noContent().build();
     }
-
 }

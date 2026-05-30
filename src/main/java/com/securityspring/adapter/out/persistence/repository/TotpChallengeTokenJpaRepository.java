@@ -17,6 +17,10 @@ public interface TotpChallengeTokenJpaRepository extends JpaRepository<TotpChall
     int markAsUsedIfAvailable(@Param("tokenHash") String tokenHash, @Param("now") Instant now);
 
     @Modifying
+    @Query("delete from TotpChallengeTokenEntity t where t.username = :username")
+    void deleteByUsername(@Param("username") String username);
+
+    @Modifying
     @Query("delete from TotpChallengeTokenEntity t where t.expiresAt < :before")
     void deleteExpiredBefore(@Param("before") Instant before);
 }

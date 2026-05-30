@@ -2,6 +2,10 @@ package com.securityspring.adapter.out.persistence.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.SQLRestriction;
+
+import java.time.Instant;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -11,6 +15,7 @@ import java.util.Set;
 @NoArgsConstructor
 @Entity
 @EqualsAndHashCode(onlyExplicitlyIncluded = true)
+@SQLRestriction("deleted_at IS NULL")
 @Table(name = "users",
         uniqueConstraints = {
                 @UniqueConstraint(name = "uk_user_username", columnNames = "username"),
@@ -40,6 +45,16 @@ public class UserEntity {
 
     @Column(name = "pending_email", length = 254)
     private String pendingEmail;
+
+    @Column(name = "avatar_filename", length = 64)
+    private String avatarFilename;
+
+    @CreationTimestamp
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private Instant createdAt;
+
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
 
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(name = "user_roles",

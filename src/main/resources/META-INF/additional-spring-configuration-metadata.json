@@ -158,6 +158,82 @@
       "type": "java.lang.String",
       "description": "Nome exibido no app autenticador (Google Authenticator, Authy, etc.) ao escanear o QR code.",
       "defaultValue": "security-spring"
+    },
+    {
+      "name": "cors.allow-credentials",
+      "type": "java.lang.Boolean",
+      "description": "Permite envio de cookies/credentials cross-origin (CORS). Exige que allowed-origins não seja '*'.",
+      "defaultValue": false
+    },
+    {
+      "name": "cookie.secure",
+      "type": "java.lang.Boolean",
+      "description": "Define o atributo Secure do cookie refreshToken. true em hml/prod (HTTPS obrigatório); false em dev (HTTP local).",
+      "defaultValue": true
+    },
+    {
+      "name": "password-reset.ttl-minutes",
+      "type": "java.lang.Long",
+      "description": "Tempo de vida do token de reset de senha em minutos.",
+      "defaultValue": 15
+    },
+    {
+      "name": "password-reset.frontend-url",
+      "type": "java.lang.String",
+      "description": "URL base do frontend para o link de reset de senha. O token é anexado como query param ?token=.",
+      "defaultValue": "http://localhost:3000/reset-password"
+    },
+    {
+      "name": "avatar.storage.type",
+      "type": "java.lang.String",
+      "description": "Tipo de armazenamento de avatares: 'local' (disco) ou 's3' (Amazon S3). Use 's3' em produção multi-instância.",
+      "defaultValue": "local"
+    },
+    {
+      "name": "avatar.storage.dir",
+      "type": "java.lang.String",
+      "description": "Diretório local para armazenamento de avatares (ativo quando avatar.storage.type=local).",
+      "defaultValue": "./uploads/avatars"
+    },
+    {
+      "name": "avatar.base-url",
+      "type": "java.lang.String",
+      "description": "URL pública base para servir avatares (prefixo antes do filename). Ex: https://cdn.example.com/avatars",
+      "defaultValue": "http://localhost:8080"
+    },
+    {
+      "name": "avatar.max-size-bytes",
+      "type": "java.lang.Long",
+      "description": "Tamanho máximo permitido para upload de avatar em bytes.",
+      "defaultValue": 2097152
+    },
+    {
+      "name": "avatar.s3.bucket",
+      "type": "java.lang.String",
+      "description": "Nome do bucket S3 para armazenamento de avatares (ativo quando avatar.storage.type=s3).",
+      "defaultValue": ""
+    },
+    {
+      "name": "avatar.s3.region",
+      "type": "java.lang.String",
+      "description": "Região AWS do bucket S3.",
+      "defaultValue": "us-east-1"
+    },
+    {
+      "name": "avatar.s3.public-url-base",
+      "type": "java.lang.String",
+      "description": "URL pública base para objetos no S3 (CloudFront CDN ou URL direta do bucket).",
+      "defaultValue": ""
+    },
+    {
+      "name": "avatar.s3.access-key",
+      "type": "java.lang.String",
+      "description": "AWS access key para acesso ao S3. Em ECS/EC2 com IAM role, deixar vazio (usa role da instância)."
+    },
+    {
+      "name": "avatar.s3.secret-key",
+      "type": "java.lang.String",
+      "description": "AWS secret key para acesso ao S3. Em ECS/EC2 com IAM role, deixar vazio (usa role da instância)."
     }
   ]
 }

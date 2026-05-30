@@ -4,10 +4,12 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 import com.securityspring.core.ports.in.AuditLogsUseCase;
 import com.securityspring.core.ports.in.AuthUseCase;
+import com.securityspring.core.ports.in.AvatarUseCase;
 import com.securityspring.core.ports.in.PermissionUseCase;
 import com.securityspring.core.ports.in.RoleUseCase;
 import com.securityspring.core.ports.in.StatsUseCase;
@@ -32,13 +34,20 @@ import com.securityspring.core.ports.out.user.UserAuthoritiesPort;
 import com.securityspring.core.ports.out.user.UserCachePort;
 import com.securityspring.core.ports.out.user.UserRepository;
 import com.securityspring.core.ports.out.audit.AuditLogRepository;
+import com.securityspring.adapter.out.storage.LocalAvatarStorageAdapter;
+import com.securityspring.core.ports.out.storage.AvatarStoragePort;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import com.securityspring.core.service.AuditLogsService;
 import com.securityspring.core.service.AuthService;
+import com.securityspring.core.service.AvatarService;
 import com.securityspring.core.service.PermissionService;
 import com.securityspring.core.service.RoleService;
 import com.securityspring.core.service.StatsService;
 import com.securityspring.core.service.TotpService;
 import com.securityspring.core.service.UserService;
+
+import java.nio.file.Path;
+
 import dev.samstevens.totp.code.CodeVerifier;
 import dev.samstevens.totp.code.DefaultCodeGenerator;
 import dev.samstevens.totp.code.DefaultCodeVerifier;
@@ -48,6 +57,7 @@ import dev.samstevens.totp.time.SystemTimeProvider;
 
 @Configuration
 @EnableScheduling
+@EnableAsync
 @EnableCaching
 class CoreBeanConfig {
 
@@ -61,6 +71,10 @@ class CoreBeanConfig {
             EmailVerificationCodeRepository verificationCodeRepository,
             PasswordResetTokenRepository passwordResetTokenRepository,
             UserCachePort userCachePort,
+            TotpConfigRepository totpConfigRepository,
+            TotpBackupCodeRepository totpBackupCodeRepository,
+            TotpChallengeTokenRepository totpChallengeTokenRepository,
+            AvatarStoragePort avatarStoragePort,
             @Value("${email.verification.ttl-minutes:15}") long verificationCodeTtlMinutes,
             @Value("${email.verification.resend-cooldown-seconds:60}") long resendCooldownSeconds,
             @Value("${password-reset.ttl-minutes:15}") long passwordResetTtlMinutes,
@@ -68,7 +82,8 @@ class CoreBeanConfig {
         return new UserService(userRepository, roleRepository, passwordHashPort,
                 refreshTokenPort, tokenBlocklistPort, emailPort,
                 verificationCodeRepository, passwordResetTokenRepository, userCachePort,
-                verificationCodeTtlMinutes, resendCooldownSeconds,
+                totpConfigRepository, totpBackupCodeRepository, totpChallengeTokenRepository,
+                avatarStoragePort, verificationCodeTtlMinutes, resendCooldownSeconds,
                 passwordResetTtlMinutes, passwordResetFrontendUrl);
     }
 
@@ -100,7 +115,7 @@ class CoreBeanConfig {
             LoginAttemptPort loginAttempt,
             TotpService totpService) {
         return new AuthService(credentialVerifier, accessToken, refreshToken,
-                userAuthorities, tokenBlocklist, loginAttempt, totpService, totpService);
+                userAuthorities, tokenBlocklist, loginAttempt, totpService);
     }
 
     @Bean
@@ -123,5 +138,20 @@ class CoreBeanConfig {
     @Bean
     AuditLogsUseCase auditLogsUseCase(AuditLogRepository auditLogRepository) {
         return new AuditLogsService(auditLogRepository);
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "avatar.storage.type", havingValue = "local", matchIfMissing = true)
+    AvatarStoragePort avatarStoragePort(AvatarProperties avatarProps) {
+        return new LocalAvatarStorageAdapter(Path.of(avatarProps.getStorageDir()));
+    }
+
+    @Bean
+    AvatarUseCase avatarUseCase(UserRepository userRepository,
+            AvatarStoragePort storagePort,
+            UserCachePort userCachePort,
+            AvatarProperties avatarProps) {
+        return new AvatarService(userRepository, storagePort, userCachePort,
+                avatarProps.getMaxSizeBytes(), avatarProps.getBaseUrl());
     }
 }

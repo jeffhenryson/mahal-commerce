@@ -4,8 +4,10 @@ import com.securityspring.adapter.in.converter.UserDTOConverter;
 import com.securityspring.adapter.in.dtos.request.ChangePasswordRequest;
 import com.securityspring.adapter.in.dtos.request.CreateUserRequest;
 import com.securityspring.adapter.in.dtos.request.UserUpdateRequest;
+import com.securityspring.adapter.in.dtos.response.UserProfileDTO;
 import com.securityspring.adapter.in.dtos.response.UserResponseDTO;
 import com.securityspring.core.domain.model.PageResult;
+import com.securityspring.core.domain.model.auth.UpdateProfileResult;
 import com.securityspring.core.domain.model.auth.User;
 import com.securityspring.core.ports.in.UserUseCase;
 import com.securityspring.core.domain.event.AuditEvent;
@@ -96,14 +98,14 @@ public class UserController {
 
     @Operation(summary = "Retorna o perfil do usuário autenticado")
     @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = UserResponseDTO.class))),
+            @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = UserProfileDTO.class))),
             @ApiResponse(responseCode = "401", description = "Não autenticado", content = @Content)
     })
     @GetMapping("/me")
-    public ResponseEntity<UserResponseDTO> me(Authentication authentication) {
+    public ResponseEntity<UserProfileDTO> me(Authentication authentication) {
         User user = useCase.findByUsername(authentication.getName())
                 .orElseThrow(() -> new UserNotFoundException(authentication.getName()));
-        return ResponseEntity.ok(converter.toResponse(user));
+        return ResponseEntity.ok(converter.toProfile(user));
     }
 
     @Operation(summary = "Troca a senha do usuário autenticado")
@@ -123,17 +125,21 @@ public class UserController {
 
     @Operation(summary = "Atualiza os dados do próprio perfil (username e/ou email)")
     @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Atualizado", content = @Content(schema = @Schema(implementation = UserResponseDTO.class))),
+            @ApiResponse(responseCode = "200", description = "Atualizado", content = @Content(schema = @Schema(implementation = UserProfileDTO.class))),
             @ApiResponse(responseCode = "409", description = "Username ou email já existe", content = @Content),
             @ApiResponse(responseCode = "401", description = "Não autenticado", content = @Content)
     })
     @PatchMapping("/me")
-    public ResponseEntity<UserResponseDTO> updateOwnProfile(@Valid @RequestBody UserUpdateRequest request,
+    public ResponseEntity<UserProfileDTO> updateOwnProfile(@Valid @RequestBody UserUpdateRequest request,
             Authentication authentication) {
-        User updated = useCase.updateOwnProfile(
+        UpdateProfileResult result = useCase.updateOwnProfile(
                 authentication.getName(), request.getUsername(), request.getEmail(), request.getCurrentPassword());
-        publisher.publishEvent(AuditEvent.of(EventType.USER_UPDATED, updated.getUsername()));
-        return ResponseEntity.ok(converter.toResponse(updated));
+        if (result.emailChangePending()) {
+            publisher.publishEvent(AuditEvent.of(EventType.EMAIL_CHANGE_REQUESTED, result.user().getUsername()));
+        } else {
+            publisher.publishEvent(AuditEvent.of(EventType.USER_UPDATED, result.user().getUsername()));
+        }
+        return ResponseEntity.ok(converter.toProfile(result.user()));
     }
 
     @Operation(summary = "Busca usuário por id")
@@ -158,9 +164,13 @@ public class UserController {
     public ResponseEntity<PageResult<UserResponseDTO>> list(
             @RequestParam(required = false) String search,
             @RequestParam(required = false) Boolean enabled,
+            @io.swagger.v3.oas.annotations.Parameter(description = "Campo de ordenação: id, username, email, enabled, createdAt")
+            @RequestParam(defaultValue = "id") String sortBy,
+            @io.swagger.v3.oas.annotations.Parameter(description = "Direção: asc ou desc")
+            @RequestParam(defaultValue = "asc") String sortDir,
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
-        PageResult<User> result = useCase.findFiltered(search, enabled, page, Math.min(size, 100));
+        PageResult<User> result = useCase.findFiltered(search, enabled, sortBy, sortDir, page, Math.min(size, 100));
         PageResult<UserResponseDTO> response = new PageResult<>(
                 result.content().stream().map(converter::toResponse).toList(),
                 result.page(), result.size(), result.totalElements(), result.totalPages());
@@ -220,7 +230,12 @@ public class UserController {
     @PreAuthorize("hasAuthority('USER_UPDATE')")
     public ResponseEntity<UserResponseDTO> update(@PathVariable Long id,
             @Valid @RequestBody UserUpdateRequest request) {
-        return ResponseEntity
-                .ok(converter.toResponse(useCase.updateUser(id, request.getUsername(), request.getEmail())));
+        UpdateProfileResult result = useCase.updateUser(id, request.getUsername(), request.getEmail());
+        if (result.emailChangePending()) {
+            publisher.publishEvent(AuditEvent.of(EventType.EMAIL_CHANGE_REQUESTED, result.user().getUsername()));
+        } else {
+            publisher.publishEvent(AuditEvent.of(EventType.USER_UPDATED, result.user().getUsername()));
+        }
+        return ResponseEntity.ok(converter.toResponse(result.user()));
     }
 }

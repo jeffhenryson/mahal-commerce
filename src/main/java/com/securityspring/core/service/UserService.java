@@ -13,9 +13,13 @@ import com.securityspring.core.domain.exception.user.UserNotFoundException;
 import com.securityspring.core.domain.exception.user.UsernameAlreadyExistsException;
 import com.securityspring.core.domain.model.auth.EmailVerificationCode;
 import com.securityspring.core.domain.model.auth.PasswordResetToken;
+import com.securityspring.core.domain.model.auth.UpdateProfileResult;
 import com.securityspring.core.domain.model.PageResult;
 import com.securityspring.core.domain.model.rbac.Role;
 import com.securityspring.core.domain.model.auth.User;
+import com.securityspring.core.ports.out.twofa.TotpBackupCodeRepository;
+import com.securityspring.core.ports.out.twofa.TotpChallengeTokenRepository;
+import com.securityspring.core.ports.out.twofa.TotpConfigRepository;
 import com.securityspring.core.ports.in.UserUseCase;
 import com.securityspring.core.ports.out.notification.EmailPort;
 import com.securityspring.core.ports.out.notification.EmailVerificationCodeRepository;
@@ -24,10 +28,13 @@ import com.securityspring.core.ports.out.credential.PasswordHashPort;
 import com.securityspring.core.ports.out.token.RefreshTokenPort;
 import com.securityspring.core.ports.out.role.RoleRepository;
 import com.securityspring.core.ports.out.token.TokenBlocklistPort;
+import com.securityspring.core.ports.out.storage.AvatarStoragePort;
 import com.securityspring.core.ports.out.user.UserCachePort;
 import com.securityspring.core.ports.out.user.UserRepository;
 
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.securityspring.core.domain.PasswordPolicy;
 
@@ -51,6 +58,10 @@ public class UserService implements UserUseCase {
     private final EmailVerificationCodeRepository verificationCodeRepository;
     private final PasswordResetTokenRepository passwordResetTokenRepository;
     private final UserCachePort userCachePort;
+    private final TotpConfigRepository totpConfigRepository;
+    private final TotpBackupCodeRepository totpBackupCodeRepository;
+    private final TotpChallengeTokenRepository totpChallengeTokenRepository;
+    private final AvatarStoragePort avatarStoragePort;
     private final long verificationCodeTtlMinutes;
     private final long resendCooldownSeconds;
     private final long passwordResetTtlMinutes;
@@ -66,6 +77,10 @@ public class UserService implements UserUseCase {
             EmailVerificationCodeRepository verificationCodeRepository,
             PasswordResetTokenRepository passwordResetTokenRepository,
             UserCachePort userCachePort,
+            TotpConfigRepository totpConfigRepository,
+            TotpBackupCodeRepository totpBackupCodeRepository,
+            TotpChallengeTokenRepository totpChallengeTokenRepository,
+            AvatarStoragePort avatarStoragePort,
             long verificationCodeTtlMinutes,
             long resendCooldownSeconds,
             long passwordResetTtlMinutes,
@@ -79,6 +94,10 @@ public class UserService implements UserUseCase {
         this.verificationCodeRepository = verificationCodeRepository;
         this.passwordResetTokenRepository = passwordResetTokenRepository;
         this.userCachePort = userCachePort;
+        this.totpConfigRepository = totpConfigRepository;
+        this.totpBackupCodeRepository = totpBackupCodeRepository;
+        this.totpChallengeTokenRepository = totpChallengeTokenRepository;
+        this.avatarStoragePort = avatarStoragePort;
         this.verificationCodeTtlMinutes = verificationCodeTtlMinutes;
         this.resendCooldownSeconds = resendCooldownSeconds;
         this.passwordResetTtlMinutes = passwordResetTtlMinutes;
@@ -106,7 +125,9 @@ public class UserService implements UserUseCase {
         Set<Role> roleSet = resolveRoles(roles);
         User user = User.of(username, passwordHash.hash(rawPassword), roleSet);
         if (email != null) user.assignEmail(email);
-        return userRepository.save(user);
+        User saved = userRepository.save(user);
+        userCachePort.evict(username);
+        return saved;
     }
 
     @Override
@@ -128,7 +149,7 @@ public class UserService implements UserUseCase {
 
     @Override
     @Transactional
-    public void verifyEmail(String code) {
+    public String verifyEmail(String code) {
         EmailVerificationCode record = verificationCodeRepository.findByCode(code)
                 .orElseThrow(EmailVerificationCodeNotFoundException::new);
 
@@ -151,6 +172,7 @@ public class UserService implements UserUseCase {
         userRepository.save(user);
         verificationCodeRepository.deleteByUsername(record.username());
         userCachePort.evict(record.username());
+        return user.getUsername();
     }
 
     @Override
@@ -176,6 +198,7 @@ public class UserService implements UserUseCase {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public Optional<User> findByUsername(String username) {
         return userRepository.findByUsername(username);
     }
@@ -210,12 +233,10 @@ public class UserService implements UserUseCase {
     }
 
     @Override
-    public PageResult<User> findFiltered(String search, Boolean enabled, int page, int size) {
-        boolean noFilters = (search == null || search.isBlank()) && enabled == null;
-        if (noFilters) return userRepository.findAll(page, size);
+    public PageResult<User> findFiltered(String search, Boolean enabled, String sortBy, String sortDir, int page, int size) {
         return userRepository.findFiltered(
                 (search != null && !search.isBlank()) ? search.trim() : null,
-                enabled, page, size);
+                enabled, sortBy, sortDir, page, size);
     }
 
     @Override
@@ -227,6 +248,10 @@ public class UserService implements UserUseCase {
         tokenBlocklistPort.blockAllBefore(username, Instant.now());
         verificationCodeRepository.deleteByUsername(username);
         passwordResetTokenRepository.deleteByUsername(username);
+        totpChallengeTokenRepository.deleteByUsername(username);
+        totpBackupCodeRepository.deleteByUsername(username);
+        totpConfigRepository.deleteByUsername(username);
+        if (user.getAvatarFilename() != null) avatarStoragePort.delete(user.getAvatarFilename());
         userRepository.deleteById(id);
         userCachePort.evict(username);
         return username;
@@ -263,7 +288,7 @@ public class UserService implements UserUseCase {
 
     @Override
     @Transactional(noRollbackFor = EmailDeliveryException.class)
-    public User updateUser(Long id, String newUsername, String newEmail) {
+    public UpdateProfileResult updateUser(Long id, String newUsername, String newEmail) {
         User user = userRepository.findById(id).orElseThrow(() -> new UserNotFoundException(id));
         userRepository.findByUsername(newUsername).ifPresent(existing -> {
             if (!existing.getId().equals(id)) throw new UsernameAlreadyExistsException(newUsername);
@@ -272,40 +297,50 @@ public class UserService implements UserUseCase {
         boolean usernameChanged = !oldUsername.equals(newUsername);
         user.rename(newUsername);
 
-        boolean emailChanged = newEmail != null && !newEmail.equalsIgnoreCase(user.getEmail());
-        if (emailChanged) {
+        boolean emailChanging = newEmail != null && !newEmail.equalsIgnoreCase(user.getEmail());
+        if (emailChanging) {
             userRepository.findByEmail(newEmail).ifPresent(existing -> {
                 if (!existing.getId().equals(id)) throw new EmailAlreadyExistsException(newEmail);
             });
-            user.changeEmail(newEmail);
-            // Disable the account until the new email address is verified.
-            user.disable();
+            user.setPendingEmail(newEmail);
         }
 
         User saved = userRepository.save(user);
-        userCachePort.evict(oldUsername);
-        if (usernameChanged) userCachePort.evict(newUsername);
+
+        // Evict após commit para evitar que leituras dentro da transação (READ_COMMITTED)
+        // repovoem o cache com dados ainda não persistidos.
+        evictAfterCommit(oldUsername);
+        if (usernameChanged) evictAfterCommit(newUsername);
 
         if (usernameChanged) {
-            // JWT claims carry the old username; revoke all active sessions to force re-login.
             refreshTokenPort.revokeAll(oldUsername);
             tokenBlocklistPort.blockAllBefore(oldUsername, Instant.now());
         }
 
-        if (emailChanged) {
-            // Revoke active sessions — account is disabled until new email is verified.
-            refreshTokenPort.revokeAll(saved.getUsername());
-            tokenBlocklistPort.blockAllBefore(saved.getUsername(), Instant.now());
+        if (emailChanging) {
             verificationCodeRepository.deleteByUsername(saved.getUsername());
             issueAndSendCode(saved.getUsername(), newEmail);
         }
 
-        return saved;
+        return new UpdateProfileResult(saved, emailChanging);
+    }
+
+    private void evictAfterCommit(String username) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    userCachePort.evict(username);
+                }
+            });
+        } else {
+            userCachePort.evict(username);
+        }
     }
 
     @Override
     @Transactional(noRollbackFor = EmailDeliveryException.class)
-    public User updateOwnProfile(String username, String newUsername, String newEmail, String currentPassword) {
+    public UpdateProfileResult updateOwnProfile(String username, String newUsername, String newEmail, String currentPassword) {
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new UserNotFoundException(username));
         boolean emailChanging = newEmail != null && !newEmail.equalsIgnoreCase(user.getEmail());
@@ -314,24 +349,7 @@ public class UserService implements UserUseCase {
                 throw new InvalidPasswordException();
             }
         }
-
-        // Username change: reuse existing logic (passes current email to avoid re-triggering admin flow)
-        User result = updateUser(user.getId(), newUsername, emailChanging ? user.getEmail() : newEmail);
-
-        // Email change: pending confirmation flow — account stays active, old email is notified on confirm
-        if (emailChanging) {
-            userRepository.findByEmail(newEmail).ifPresent(existing -> {
-                if (!existing.getId().equals(result.getId())) throw new EmailAlreadyExistsException(newEmail);
-            });
-            result.setPendingEmail(newEmail);
-            User saved = userRepository.save(result);
-            userCachePort.evict(saved.getUsername());
-            verificationCodeRepository.deleteByUsername(saved.getUsername());
-            issueAndSendCode(saved.getUsername(), newEmail);
-            return saved;
-        }
-
-        return result;
+        return updateUser(user.getId(), newUsername, newEmail);
     }
 
     @Override
@@ -350,7 +368,7 @@ public class UserService implements UserUseCase {
 
     @Override
     @Transactional
-    public void resetPassword(String token, String newPassword) {
+    public String resetPassword(String token, String newPassword) {
         if (!isValidPassword(newPassword)) throw new InvalidPasswordException();
 
         PasswordResetToken record = passwordResetTokenRepository.findByToken(token)
@@ -372,6 +390,7 @@ public class UserService implements UserUseCase {
         userCachePort.evict(user.getUsername());
         refreshTokenPort.revokeAll(user.getUsername());
         tokenBlocklistPort.blockAllBefore(user.getUsername(), Instant.now());
+        return user.getUsername();
     }
 
     @Override

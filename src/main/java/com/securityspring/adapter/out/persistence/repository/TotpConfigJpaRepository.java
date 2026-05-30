@@ -19,4 +19,8 @@ public interface TotpConfigJpaRepository extends JpaRepository<TotpConfigEntity,
     @Modifying
     @Query("delete from TotpConfigEntity t where t.username = :username")
     void deleteByUsername(@Param("username") String username);
+
+    @Modifying
+    @Query("delete from TotpConfigEntity t where t.enabled = false and t.createdAt < :before")
+    void deleteUnconfirmedBefore(@Param("before") Instant before);
 }

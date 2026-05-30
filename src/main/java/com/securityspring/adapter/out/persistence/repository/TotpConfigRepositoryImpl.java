@@ -43,6 +43,11 @@ public class TotpConfigRepositoryImpl implements TotpConfigRepository {
         jpaRepository.deleteByUsername(username);
     }
 
+    @Override
+    public void deleteUnconfirmedBefore(Instant before) {
+        jpaRepository.deleteUnconfirmedBefore(before);
+    }
+
     private TotpConfig toDomain(TotpConfigEntity e) {
         return new TotpConfig(e.getId(), e.getUsername(), e.getSecretEncrypted(), e.isEnabled(), e.getConfirmedAt());
     }

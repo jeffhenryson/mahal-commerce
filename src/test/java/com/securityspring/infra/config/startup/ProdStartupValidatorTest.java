@@ -28,6 +28,8 @@ class ProdStartupValidatorTest {
         ReflectionTestUtils.setField(v, "dbUrl", dbUrl);
         ReflectionTestUtils.setField(v, "resendApiKey", resendKey);
         ReflectionTestUtils.setField(v, "resendFrom", resendFrom);
+        ReflectionTestUtils.setField(v, "totpEncryptionKey", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==");
+        ReflectionTestUtils.setField(v, "avatarBaseUrl", "https://cdn.meudominio.com/avatars");
         return v;
     }
 
@@ -151,6 +153,46 @@ class ProdStartupValidatorTest {
         assertThatThrownBy(v::validate)
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("spring.application.name");
+    }
+
+    // ── totp.encryption.key ───────────────────────────────────────────────────
+
+    @Test
+    void deve_rejeitar_totp_encryption_key_ausente() {
+        ProdStartupValidator v = validadorValido();
+        ReflectionTestUtils.setField(v, "totpEncryptionKey", "");
+        assertThatThrownBy(v::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("totp.encryption.key");
+    }
+
+    @Test
+    void deve_rejeitar_totp_encryption_key_curto_demais() {
+        ProdStartupValidator v = validadorValido();
+        ReflectionTestUtils.setField(v, "totpEncryptionKey", "curto");
+        assertThatThrownBy(v::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("totp.encryption.key");
+    }
+
+    // ── avatar.base-url ───────────────────────────────────────────────────────
+
+    @Test
+    void deve_rejeitar_avatar_base_url_ausente() {
+        ProdStartupValidator v = validadorValido();
+        ReflectionTestUtils.setField(v, "avatarBaseUrl", "");
+        assertThatThrownBy(v::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("avatar.base-url");
+    }
+
+    @Test
+    void deve_rejeitar_avatar_base_url_localhost() {
+        ProdStartupValidator v = validadorValido();
+        ReflectionTestUtils.setField(v, "avatarBaseUrl", "http://localhost:8080/avatars");
+        assertThatThrownBy(v::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("avatar.base-url");
     }
 
     // ── múltiplos erros — todos reportados juntos ─────────────────────────────

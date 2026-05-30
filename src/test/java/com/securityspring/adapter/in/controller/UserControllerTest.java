@@ -1,6 +1,7 @@
 package com.securityspring.adapter.in.controller;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -9,42 +10,49 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.securityspring.adapter.in.converter.UserDTOConverter;
 import com.securityspring.adapter.in.dtos.request.CreateUserRequest;
+import com.securityspring.core.domain.event.AuditEvent;
 import com.securityspring.core.domain.exception.rbac.RoleNotFoundException;
 import com.securityspring.core.domain.exception.user.UserNotFoundException;
 import com.securityspring.core.domain.exception.user.UsernameAlreadyExistsException;
 import com.securityspring.core.domain.model.PageResult;
+import com.securityspring.core.domain.model.auth.UpdateProfileResult;
 import com.securityspring.core.domain.model.auth.User;
 import com.securityspring.core.ports.in.UserUseCase;
 import com.securityspring.infra.handler.GlobalExceptionHandler;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.http.MediaType;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.util.HashSet;
 import java.util.List;
 
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.isNull;
+
 public class UserControllerTest {
 
     private MockMvc mockMvc;
     private UserUseCase useCase;
+    private ApplicationEventPublisher publisher;
     private final ObjectMapper om = new ObjectMapper();
 
     @BeforeEach
     void setup() {
         useCase = mock(UserUseCase.class);
-        ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
+        publisher = mock(ApplicationEventPublisher.class);
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new UserController(useCase, new UserDTOConverter(), publisher))
+                .standaloneSetup(new UserController(useCase, new UserDTOConverter("http://localhost:8080"), publisher))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }
 
     private User user(Long id, String username) {
-        return User.fromPersisted(id, username, "hashed", true, null, false, null, new HashSet<>());
+        return User.fromPersisted(id, username, "hashed", true, null, false, null, null, null, new HashSet<>());
     }
 
     @Test
@@ -141,7 +149,7 @@ public class UserControllerTest {
 
     @Test
     void list_users_returns_paged_result() throws Exception {
-        when(useCase.findFiltered(null, null, 0, 20)).thenReturn(
+        when(useCase.findFiltered(null, null, "id", "asc", 0, 20)).thenReturn(
                 new PageResult<>(List.of(user(1L, "alice"), user(2L, "bob")), 0, 20, 2L, 1));
 
         mockMvc.perform(get("/users"))
@@ -150,5 +158,46 @@ public class UserControllerTest {
                 .andExpect(jsonPath("$.content[0].username").value("alice"))
                 .andExpect(jsonPath("$.totalElements").value(2))
                 .andExpect(jsonPath("$.totalPages").value(1));
+    }
+
+    @Test
+    void update_user_without_email_change_publishes_USER_UPDATED() throws Exception {
+        User alice = user(1L, "alice");
+        when(useCase.updateUser(1L, "alice", null))
+                .thenReturn(new UpdateProfileResult(alice, false));
+
+        mockMvc.perform(patch("/users/1")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"username\":\"alice\"}"))
+                .andExpect(status().isOk());
+
+        verify(publisher).publishEvent((Object) argThat(e ->
+                e instanceof AuditEvent ae &&
+                ae.type() == AuditEvent.EventType.USER_UPDATED));
+    }
+
+    @Test
+    void update_user_with_email_change_publishes_EMAIL_CHANGE_REQUESTED() throws Exception {
+        User alice = user(1L, "alice");
+        when(useCase.updateUser(1L, "alice", "new@email.com"))
+                .thenReturn(new UpdateProfileResult(alice, true));
+
+        mockMvc.perform(patch("/users/1")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"username\":\"alice\",\"email\":\"new@email.com\"}"))
+                .andExpect(status().isOk());
+
+        verify(publisher).publishEvent((Object) argThat(e ->
+                e instanceof AuditEvent ae &&
+                ae.type() == AuditEvent.EventType.EMAIL_CHANGE_REQUESTED));
+    }
+
+    @Test
+    void update_user_empty_email_returns_400() throws Exception {
+        mockMvc.perform(patch("/users/1")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"username\":\"alice\",\"email\":\"\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("VALIDATION_ERROR"));
     }
 }

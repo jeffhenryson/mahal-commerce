@@ -10,6 +10,8 @@ import com.securityspring.adapter.in.dtos.request.VerifyEmailRequest;
 import com.securityspring.adapter.in.dtos.response.SessionInfoDTO;
 import com.securityspring.adapter.in.dtos.response.TokenPairResponseDTO;
 import com.securityspring.adapter.in.dtos.response.TwoFactorChallengeResponseDTO;
+import com.securityspring.core.domain.exception.auth.AccountLockedException;
+import com.securityspring.core.domain.exception.auth.RefreshTokenAlreadyUsedException;
 import com.securityspring.core.domain.model.auth.LoginResponse;
 import com.securityspring.core.domain.model.auth.TokenPair;
 import com.securityspring.core.ports.in.AuthUseCase;
@@ -29,6 +31,7 @@ import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -45,17 +48,20 @@ public class AuthController {
     private final UserUseCase userUseCase;
     private final ApplicationEventPublisher publisher;
     private final long accessTtlSeconds;
+    private final long refreshTtlSeconds;
     private final boolean cookieSecure;
 
     public AuthController(AuthUseCase authUseCase,
             UserUseCase userUseCase,
             ApplicationEventPublisher publisher,
             @Value("${jwt.access-ttl-minutes:15}") long accessTtlMinutes,
-            @Value("${cookie.secure:false}") boolean cookieSecure) {
+            @Value("${jwt.refresh-ttl-days:7}") long refreshTtlDays,
+            @Value("${cookie.secure:true}") boolean cookieSecure) {
         this.authUseCase = authUseCase;
         this.userUseCase = userUseCase;
         this.publisher = publisher;
         this.accessTtlSeconds = accessTtlMinutes * 60;
+        this.refreshTtlSeconds = refreshTtlDays * 86400;
         this.cookieSecure = cookieSecure;
     }
 
@@ -66,15 +72,20 @@ public class AuthController {
     })
     @PostMapping("/login")
     ResponseEntity<?> login(@Valid @RequestBody LoginRequest request, HttpServletResponse response) {
-        LoginResponse loginResponse = authUseCase.login(request.getUsername(), request.getPassword());
-        if (loginResponse.twoFactorRequired()) {
-            return ResponseEntity.ok(new TwoFactorChallengeResponseDTO("PENDING_2FA", loginResponse.challengeToken(), 300));
+        try {
+            LoginResponse loginResponse = authUseCase.login(request.getUsername(), request.getPassword());
+            if (loginResponse.twoFactorRequired()) {
+                return ResponseEntity.ok(new TwoFactorChallengeResponseDTO("PENDING_2FA", loginResponse.challengeToken(), 300));
+            }
+            TokenPair pair = loginResponse.tokenPair();
+            publisher.publishEvent(AuditEvent.of(EventType.USER_LOGGED_IN, request.getUsername()));
+            setRefreshCookie(response, pair.getRefreshToken());
+            // refreshToken também no body para retrocompatibilidade com clientes que ainda lêem o JSON
+            return ResponseEntity.ok(new TokenPairResponseDTO(pair.getAccessToken(), pair.getRefreshToken(), accessTtlSeconds));
+        } catch (AccountLockedException ex) {
+            publisher.publishEvent(AuditEvent.of(EventType.ACCOUNT_LOCKED, request.getUsername()));
+            throw ex;
         }
-        TokenPair pair = loginResponse.tokenPair();
-        publisher.publishEvent(AuditEvent.of(EventType.USER_LOGGED_IN, request.getUsername()));
-        setRefreshCookie(response, pair.getRefreshToken());
-        // refreshToken também no body para retrocompatibilidade com clientes que ainda lêem o JSON
-        return ResponseEntity.ok(new TokenPairResponseDTO(pair.getAccessToken(), pair.getRefreshToken(), accessTtlSeconds));
     }
 
     @Operation(summary = "Completa o login 2FA com código TOTP ou backup code")
@@ -106,9 +117,14 @@ public class AuthController {
         if (token == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
-        TokenPair pair = authUseCase.refresh(token);
-        setRefreshCookie(response, pair.getRefreshToken());
-        return ResponseEntity.ok(new TokenPairResponseDTO(pair.getAccessToken(), pair.getRefreshToken(), accessTtlSeconds));
+        try {
+            TokenPair pair = authUseCase.refresh(token);
+            setRefreshCookie(response, pair.getRefreshToken());
+            return ResponseEntity.ok(new TokenPairResponseDTO(pair.getAccessToken(), pair.getRefreshToken(), accessTtlSeconds));
+        } catch (RefreshTokenAlreadyUsedException ex) {
+            publisher.publishEvent(AuditEvent.of(EventType.TOKEN_THEFT_DETECTED, ex.getUsername()));
+            throw ex;
+        }
     }
 
     @Operation(summary = "Revoga o refresh token (logout) — aceita cookie ou body")
@@ -191,8 +207,8 @@ public class AuthController {
     })
     @PostMapping("/reset-password")
     ResponseEntity<Void> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
-        userUseCase.resetPassword(request.getToken(), request.getNewPassword());
-        publisher.publishEvent(AuditEvent.of(EventType.PASSWORD_RESET_COMPLETED, "token:" + request.getToken().substring(0, 6)));
+        String username = userUseCase.resetPassword(request.getToken(), request.getNewPassword());
+        publisher.publishEvent(AuditEvent.of(EventType.PASSWORD_RESET_COMPLETED, username));
         return ResponseEntity.noContent().build();
     }
 
@@ -212,21 +228,22 @@ public class AuthController {
     // --- helpers de cookie ---
 
     private void setRefreshCookie(HttpServletResponse response, String token) {
-        response.addHeader("Set-Cookie", buildCookieHeader(token, (int) (accessTtlSeconds * 48)));
+        response.addHeader("Set-Cookie", buildCookie(token, refreshTtlSeconds).toString());
     }
 
     private void clearRefreshCookie(HttpServletResponse response) {
-        response.addHeader("Set-Cookie", buildCookieHeader("", 0));
+        response.addHeader("Set-Cookie", buildCookie("", 0).toString());
     }
 
-    private String buildCookieHeader(String value, int maxAge) {
-        StringBuilder sb = new StringBuilder();
-        sb.append(REFRESH_COOKIE).append("=").append(value);
-        sb.append("; Path=/auth/refresh");
-        sb.append("; HttpOnly");
-        sb.append("; Max-Age=").append(maxAge);
-        sb.append("; SameSite=Strict");
-        if (cookieSecure) sb.append("; Secure");
-        return sb.toString();
+    private ResponseCookie buildCookie(String value, long maxAge) {
+        // Path=/auth restringe o envio do cookie apenas aos endpoints de auth,
+        // evitando que o refreshToken apareça nos logs de acesso de outros endpoints.
+        return ResponseCookie.from(REFRESH_COOKIE, value)
+                .httpOnly(true)
+                .path("/auth")
+                .maxAge(maxAge)
+                .sameSite("Strict")
+                .secure(cookieSecure)
+                .build();
     }
 }

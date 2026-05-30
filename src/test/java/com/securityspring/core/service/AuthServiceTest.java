@@ -36,14 +36,13 @@ class AuthServiceTest {
     @Mock TokenBlocklistPort tokenBlocklist;
     @Mock LoginAttemptPort loginAttempt;
     @Mock TwoFactorAuthPort twoFactorAuth;
-    @Mock TotpService totpService;
 
     AuthService authService;
 
     @BeforeEach
     void setUp() {
         authService = new AuthService(credentialVerifier, accessToken, refreshToken,
-                userAuthorities, tokenBlocklist, loginAttempt, twoFactorAuth, totpService);
+                userAuthorities, tokenBlocklist, loginAttempt, twoFactorAuth);
     }
 
     @Test
@@ -128,6 +127,54 @@ class AuthServiceTest {
 
         verify(refreshToken).revoke("unknown-token");
         verifyNoInteractions(tokenBlocklist);
+    }
+
+    @Test
+    void login_when2faEnabled_issuesChallengeAndReturnsTwoFactorResponse() {
+        when(loginAttempt.isLocked("alice")).thenReturn(false);
+        when(credentialVerifier.verify("alice", "pass"))
+                .thenReturn(new CredentialVerifierPort.VerifiedUser("alice", Set.of("ROLE_USER")));
+        when(twoFactorAuth.isEnabled("alice")).thenReturn(true);
+        when(twoFactorAuth.issueChallengeToken("alice")).thenReturn("challenge-abc");
+
+        LoginResponse response = authService.login("alice", "pass");
+
+        assertThat(response.twoFactorRequired()).isTrue();
+        assertThat(response.challengeToken()).isEqualTo("challenge-abc");
+        assertThat(response.tokenPair()).isNull();
+        verify(twoFactorAuth).issueChallengeToken("alice");
+        verify(accessToken, never()).generateFor(any(), any());
+    }
+
+    @Test
+    void completeTwoFactorLogin_returnsTokenPairOnSuccess() {
+        when(twoFactorAuth.completeChallengeLogin("challenge-token", "123456")).thenReturn("alice");
+        when(userAuthorities.loadAuthoritiesByUsername("alice")).thenReturn(Set.of("ROLE_USER"));
+        when(accessToken.generateFor("alice", Set.of("ROLE_USER"))).thenReturn("new-access");
+        when(refreshToken.issue("alice")).thenReturn("new-refresh");
+
+        TokenPair pair = authService.completeTwoFactorLogin("challenge-token", "123456");
+
+        assertThat(pair.getAccessToken()).isEqualTo("new-access");
+        assertThat(pair.getRefreshToken()).isEqualTo("new-refresh");
+    }
+
+    @Test
+    void completeTwoFactorLogin_propagatesInvalidCodeException() {
+        when(twoFactorAuth.completeChallengeLogin(any(), any()))
+                .thenThrow(new com.securityspring.core.domain.exception.auth.InvalidTotpCodeException());
+
+        assertThatThrownBy(() -> authService.completeTwoFactorLogin("token", "bad-code"))
+                .isInstanceOf(com.securityspring.core.domain.exception.auth.InvalidTotpCodeException.class);
+    }
+
+    @Test
+    void completeTwoFactorLogin_propagatesChallengeExpiredException() {
+        when(twoFactorAuth.completeChallengeLogin(any(), any()))
+                .thenThrow(new com.securityspring.core.domain.exception.auth.TotpChallengeExpiredException());
+
+        assertThatThrownBy(() -> authService.completeTwoFactorLogin("expired-token", "123456"))
+                .isInstanceOf(com.securityspring.core.domain.exception.auth.TotpChallengeExpiredException.class);
     }
 
     @Test

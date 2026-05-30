@@ -39,6 +39,7 @@
 		<testcontainers.version>1.21.3</testcontainers.version>
 		<springdoc.version>3.0.2</springdoc.version>
 		<shedlock.version>5.16.0</shedlock.version>
+		<aws.sdk.version>2.28.0</aws.sdk.version>
 	</properties>
 	<dependencies>
 
@@ -59,6 +60,14 @@
 		<dependency>
 			<groupId>org.springframework.security</groupId>
 			<artifactId>spring-security-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+
+		<!-- ArchUnit — testes de fronteiras arquiteturais -->
+		<dependency>
+			<groupId>com.tngtech.archunit</groupId>
+			<artifactId>archunit-junit5</artifactId>
+			<version>1.3.0</version>
 			<scope>test</scope>
 		</dependency>
 
@@ -183,6 +192,12 @@
 			<artifactId>spring-boot-starter-actuator</artifactId>
 		</dependency>
 
+		<!-- Micrometer Prometheus registry — expõe /actuator/prometheus para scraping -->
+		<dependency>
+			<groupId>io.micrometer</groupId>
+			<artifactId>micrometer-registry-prometheus</artifactId>
+		</dependency>
+
 		<!-- Redis -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
@@ -211,6 +226,14 @@
 			<artifactId>totp</artifactId>
 			<version>1.7.1</version>
 		</dependency>
+
+		<!-- AWS SDK v2 S3 — armazenamento de avatares em produção -->
+		<dependency>
+			<groupId>software.amazon.awssdk</groupId>
+			<artifactId>s3</artifactId>
+			<version>${aws.sdk.version}</version>
+			<optional>true</optional>
+		</dependency>
 	</dependencies>
 
 	<build>
@@ -226,6 +249,33 @@
 					</includes>
 				</configuration>
 			</plugin>
+			<plugin>
+				<groupId>org.jacoco</groupId>
+				<artifactId>jacoco-maven-plugin</artifactId>
+				<version>0.8.12</version>
+				<executions>
+					<execution>
+						<id>prepare-agent</id>
+						<goals><goal>prepare-agent</goal></goals>
+					</execution>
+					<execution>
+						<id>report</id>
+						<phase>verify</phase>
+						<goals><goal>report</goal></goals>
+					</execution>
+				</executions>
+				<configuration>
+					<excludes>
+						<!-- DTOs, entidades JPA e exceções não precisam de cobertura direta -->
+						<exclude>**/adapter/in/dtos/**</exclude>
+						<exclude>**/adapter/out/persistence/entity/**</exclude>
+						<exclude>**/core/domain/exception/**</exclude>
+						<exclude>**/infra/cli/**</exclude>
+						<exclude>**/SecuritySpringApplication.class</exclude>
+					</excludes>
+				</configuration>
+			</plugin>
+
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>

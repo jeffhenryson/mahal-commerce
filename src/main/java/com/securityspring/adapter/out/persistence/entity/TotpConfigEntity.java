@@ -30,4 +30,12 @@ public class TotpConfigEntity {
 
     @Column(name = "confirmed_at")
     private Instant confirmedAt;
+
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private Instant createdAt;
+
+    @jakarta.persistence.PrePersist
+    void prePersist() {
+        if (createdAt == null) createdAt = Instant.now();
+    }
 }

@@ -3,6 +3,8 @@ package com.securityspring.adapter.in.controller;
 import com.securityspring.adapter.in.converter.PermissionDTOConverter;
 import com.securityspring.adapter.in.dtos.request.PermissionRequest;
 import com.securityspring.adapter.in.dtos.response.PermissionResponseDTO;
+import com.securityspring.core.domain.event.AuditEvent;
+import com.securityspring.core.domain.event.AuditEvent.EventType;
 import com.securityspring.core.domain.model.PageResult;
 import com.securityspring.core.domain.model.rbac.Permission;
 import com.securityspring.core.ports.in.PermissionUseCase;
@@ -13,11 +15,14 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/permissions")
@@ -26,10 +31,13 @@ public class PermissionController {
 
     private final PermissionUseCase permissionUseCase;
     private final PermissionDTOConverter converter;
+    private final ApplicationEventPublisher publisher;
 
-    public PermissionController(PermissionUseCase permissionUseCase, PermissionDTOConverter converter) {
+    public PermissionController(PermissionUseCase permissionUseCase, PermissionDTOConverter converter,
+            ApplicationEventPublisher publisher) {
         this.permissionUseCase = permissionUseCase;
         this.converter = converter;
+        this.publisher = publisher;
     }
 
     @Operation(summary = "Lista permissions paginadas")
@@ -49,6 +57,18 @@ public class PermissionController {
         return ResponseEntity.ok(response);
     }
 
+    @Operation(summary = "Busca uma permission pelo nome")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = PermissionResponseDTO.class))),
+            @ApiResponse(responseCode = "404", description = "Não encontrada", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/{name}")
+    @PreAuthorize("hasAuthority('PERMISSION_READ')")
+    public ResponseEntity<PermissionResponseDTO> getByName(@PathVariable String name) {
+        return ResponseEntity.ok(converter.toResponse(permissionUseCase.findByName(name)));
+    }
+
     @Operation(summary = "Cria uma nova permission")
     @ApiResponses({
             @ApiResponse(responseCode = "201", description = "Criada", content = @Content(schema = @Schema(implementation = PermissionResponseDTO.class))),
@@ -57,8 +77,11 @@ public class PermissionController {
     })
     @PostMapping
     @PreAuthorize("hasAuthority('PERMISSION_CREATE')")
-    public ResponseEntity<PermissionResponseDTO> create(@Valid @RequestBody PermissionRequest request) {
+    public ResponseEntity<PermissionResponseDTO> create(@Valid @RequestBody PermissionRequest request,
+            Authentication authentication) {
         Permission created = permissionUseCase.createPermission(request.getName());
+        publisher.publishEvent(AuditEvent.of(EventType.PERMISSION_CREATED,
+                authentication.getName(), Map.of("permission", created.getName())));
         return ResponseEntity.created(URI.create("/permissions/" + created.getName()))
                 .body(converter.toResponse(created));
     }
@@ -71,9 +94,10 @@ public class PermissionController {
     })
     @DeleteMapping("/{name}")
     @PreAuthorize("hasAuthority('PERMISSION_DELETE')")
-    public ResponseEntity<Void> delete(@PathVariable String name) {
+    public ResponseEntity<Void> delete(@PathVariable String name, Authentication authentication) {
         permissionUseCase.deletePermission(name);
+        publisher.publishEvent(AuditEvent.of(EventType.PERMISSION_DELETED,
+                authentication.getName(), Map.of("permission", name)));
         return ResponseEntity.noContent().build();
     }
-
 }

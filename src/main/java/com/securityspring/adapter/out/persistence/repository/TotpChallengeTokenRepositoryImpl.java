@@ -41,6 +41,11 @@ public class TotpChallengeTokenRepositoryImpl implements TotpChallengeTokenRepos
     }
 
     @Override
+    public void deleteByUsername(String username) {
+        jpaRepository.deleteByUsername(username);
+    }
+
+    @Override
     public void deleteExpiredBefore(Instant before) {
         jpaRepository.deleteExpiredBefore(before);
     }

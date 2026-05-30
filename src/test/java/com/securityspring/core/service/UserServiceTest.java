@@ -6,6 +6,7 @@ import com.securityspring.core.domain.exception.user.EmailAlreadyExistsException
 import com.securityspring.core.domain.exception.user.UserNotFoundException;
 import com.securityspring.core.domain.exception.user.UsernameAlreadyExistsException;
 import com.securityspring.core.domain.model.auth.EmailVerificationCode;
+import com.securityspring.core.domain.model.auth.UpdateProfileResult;
 import com.securityspring.core.domain.model.rbac.Role;
 import com.securityspring.core.domain.model.auth.User;
 import com.securityspring.core.ports.out.notification.EmailPort;
@@ -15,6 +16,10 @@ import com.securityspring.core.ports.out.credential.PasswordHashPort;
 import com.securityspring.core.ports.out.token.RefreshTokenPort;
 import com.securityspring.core.ports.out.role.RoleRepository;
 import com.securityspring.core.ports.out.token.TokenBlocklistPort;
+import com.securityspring.core.ports.out.twofa.TotpBackupCodeRepository;
+import com.securityspring.core.ports.out.twofa.TotpChallengeTokenRepository;
+import com.securityspring.core.ports.out.twofa.TotpConfigRepository;
+import com.securityspring.core.ports.out.storage.AvatarStoragePort;
 import com.securityspring.core.ports.out.user.UserCachePort;
 import com.securityspring.core.ports.out.user.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -27,6 +32,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -45,6 +51,10 @@ class UserServiceTest {
     @Mock EmailVerificationCodeRepository verificationCodeRepository;
     @Mock PasswordResetTokenRepository passwordResetTokenRepository;
     @Mock UserCachePort userCachePort;
+    @Mock TotpConfigRepository totpConfigRepository;
+    @Mock TotpBackupCodeRepository totpBackupCodeRepository;
+    @Mock TotpChallengeTokenRepository totpChallengeTokenRepository;
+    @Mock AvatarStoragePort avatarStoragePort;
 
     UserService userService;
 
@@ -52,8 +62,9 @@ class UserServiceTest {
     void setUp() {
         userService = new UserService(userRepository, roleRepository, passwordHash,
                 refreshTokenPort, tokenBlocklistPort, emailPort, verificationCodeRepository,
-                passwordResetTokenRepository, userCachePort, 15L, 60L, 15L,
-                "http://localhost:3000/reset-password");
+                passwordResetTokenRepository, userCachePort,
+                totpConfigRepository, totpBackupCodeRepository, totpChallengeTokenRepository,
+                avatarStoragePort, 15L, 60L, 15L, "http://localhost:3000/reset-password");
     }
 
     @Test
@@ -257,8 +268,75 @@ class UserServiceTest {
     }
 
     @Test
+    void removeRole_removesRoleAndEvictsCache() {
+        Role role = new Role("ROLE_MANAGER");
+        User user = User.of("alice", "hashed", java.util.Set.of(role));
+        when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user));
+        when(roleRepository.findByName("ROLE_MANAGER")).thenReturn(Optional.of(role));
+        when(userRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        userService.removeRole("alice", "ROLE_MANAGER");
+
+        verify(userRepository).save(any(User.class));
+        verify(userCachePort).evict("alice");
+    }
+
+    @Test
+    void removeRole_throwsWhenRoleNotFound() {
+        User user = User.of("alice", "hashed", null);
+        when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user));
+        when(roleRepository.findByName("ROLE_UNKNOWN")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.removeRole("alice", "ROLE_UNKNOWN"))
+                .isInstanceOf(com.securityspring.core.domain.exception.rbac.RoleNotFoundException.class);
+    }
+
+    @Test
+    void updateOwnProfile_emailChange_requiresCurrentPassword() {
+        User user = User.fromPersisted(1L, "alice", "hashed", true, "alice@old.com", true, null, null, null, java.util.Set.of());
+        when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user));
+        when(passwordHash.matches("wrongpass", "hashed")).thenReturn(false);
+
+        assertThatThrownBy(() -> userService.updateOwnProfile("alice", "alice", "alice@new.com", "wrongpass"))
+                .isInstanceOf(com.securityspring.core.domain.exception.auth.InvalidPasswordException.class);
+    }
+
+    @Test
+    void updateOwnProfile_emailChange_setsPendingEmailAndSendsCode() {
+        User user = User.fromPersisted(1L, "alice", "hashed", true, "alice@old.com", true, null, null, null, java.util.Set.of());
+        when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user));
+        when(passwordHash.matches("current", "hashed")).thenReturn(true);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user));
+        when(userRepository.findByEmail("alice@new.com")).thenReturn(Optional.empty());
+        when(userRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(verificationCodeRepository.save(anyString(), anyString(), any()))
+                .thenReturn(new EmailVerificationCode(1L, "alice", "HASH", Instant.now().plusSeconds(900), Instant.now(), false));
+
+        UpdateProfileResult result = userService.updateOwnProfile("alice", "alice", "alice@new.com", "current");
+
+        assertThat(result.user().getPendingEmail()).isEqualTo("alice@new.com");
+        assertThat(result.emailChangePending()).isTrue();
+        verify(emailPort).sendVerificationCode(eq("alice@new.com"), eq("alice"), anyString());
+        verify(userCachePort, atLeastOnce()).evict("alice");
+    }
+
+    @Test
+    void deleteUser_cleansUpAllTotpData() {
+        User user = User.fromPersisted(1L, "alice", "hashed", true, null, false, null, null, null, java.util.Set.of());
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+
+        userService.deleteUser(1L);
+
+        verify(totpChallengeTokenRepository).deleteByUsername("alice");
+        verify(totpBackupCodeRepository).deleteByUsername("alice");
+        verify(totpConfigRepository).deleteByUsername("alice");
+        verify(userRepository).deleteById(1L);
+    }
+
+    @Test
     void updateUser_usernameChange_revokesSessionsOfOldUsername() {
-        User user = User.fromPersisted(1L, "alice", "hashed", true, null, false, null, java.util.Set.of());
+        User user = User.fromPersisted(1L, "alice", "hashed", true, null, false, null, null, null, java.util.Set.of());
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
         when(userRepository.findByUsername("bob")).thenReturn(Optional.empty());
         when(userRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -268,5 +346,37 @@ class UserServiceTest {
         verify(refreshTokenPort).revokeAll("alice");
         verify(tokenBlocklistPort).blockAllBefore(eq("alice"), any());
         verify(userCachePort).evict("alice");
+    }
+
+    @Test
+    void updateUser_emailChange_setsPendingEmailWithoutDisablingAccount() {
+        User user = User.fromPersisted(1L, "alice", "hashed", true, "alice@old.com", true, null, null, null, java.util.Set.of());
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.findByUsername("alice")).thenReturn(Optional.empty());
+        when(userRepository.findByEmail("alice@new.com")).thenReturn(Optional.empty());
+        when(userRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(verificationCodeRepository.save(anyString(), anyString(), any()))
+                .thenReturn(new EmailVerificationCode(1L, "alice", "HASH", Instant.now().plusSeconds(900), Instant.now(), false));
+
+        UpdateProfileResult result = userService.updateUser(1L, "alice", "alice@new.com");
+
+        assertThat(result.emailChangePending()).isTrue();
+        assertThat(result.user().isEnabled()).isTrue();
+        assertThat(result.user().getPendingEmail()).isEqualTo("alice@new.com");
+        assertThat(result.user().getEmail()).isEqualTo("alice@old.com");
+        verify(emailPort).sendVerificationCode(eq("alice@new.com"), eq("alice"), anyString());
+        verify(refreshTokenPort, never()).revokeAll(any());
+    }
+
+    @Test
+    void updateUser_emailChange_rejectsAlreadyUsedEmail() {
+        User alice = User.fromPersisted(1L, "alice", "hashed", true, "alice@old.com", true, null, null, null, java.util.Set.of());
+        User bob   = User.fromPersisted(2L, "bob",   "hashed", true, "bob@email.com", true, null, null, null, java.util.Set.of());
+        when(userRepository.findById(1L)).thenReturn(Optional.of(alice));
+        when(userRepository.findByUsername("alice")).thenReturn(Optional.empty());
+        when(userRepository.findByEmail("bob@email.com")).thenReturn(Optional.of(bob));
+
+        assertThatThrownBy(() -> userService.updateUser(1L, "alice", "bob@email.com"))
+                .isInstanceOf(EmailAlreadyExistsException.class);
     }
 }

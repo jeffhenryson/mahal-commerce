@@ -12,5 +12,7 @@ public interface TotpChallengeTokenRepository {
 
     boolean markAsUsed(String rawToken);
 
+    void deleteByUsername(String username);
+
     void deleteExpiredBefore(Instant before);
 }

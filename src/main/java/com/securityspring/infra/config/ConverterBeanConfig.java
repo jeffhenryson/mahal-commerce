@@ -1,5 +1,6 @@
 package com.securityspring.infra.config;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -17,8 +18,8 @@ class ConverterBeanConfig {
     }
 
     @Bean
-    UserDTOConverter userDTOConverter() {
-        return new UserDTOConverter();
+    UserDTOConverter userDTOConverter(@Value("${avatar.base-url:http://localhost:8080}") String avatarBaseUrl) {
+        return new UserDTOConverter(avatarBaseUrl);
     }
 
     @Bean

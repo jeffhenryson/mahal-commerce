@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
@@ -38,18 +39,21 @@ public class ResendEmailAdapter implements EmailPort {
                 .build();
     }
 
+    @Async("emailTaskExecutor")
     @Override
     public void sendVerificationCode(String to, String username, String code) {
         String html = buildVerificationEmailHtml(username, code);
         send(to, emailSubject, html, "email.verification");
     }
 
+    @Async("emailTaskExecutor")
     @Override
     public void sendPasswordResetLink(String to, String username, String resetLink) {
         String html = buildPasswordResetEmailHtml(username, resetLink);
         send(to, "Recuperação de senha", html, "email.password-reset");
     }
 
+    @Async("emailTaskExecutor")
     @Override
     public void sendEmailChangeNotification(String oldEmail, String username, String newEmail) {
         String html = buildEmailChangeNotificationHtml(username, newEmail);

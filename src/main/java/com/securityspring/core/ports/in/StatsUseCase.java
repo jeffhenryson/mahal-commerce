@@ -1,7 +1,7 @@
 package com.securityspring.core.ports.in;
 
-import com.securityspring.adapter.in.dtos.response.StatsResponseDTO;
+import com.securityspring.core.domain.model.StatsResult;
 
 public interface StatsUseCase {
-    StatsResponseDTO getStats();
+    StatsResult getStats();
 }

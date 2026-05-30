@@ -17,7 +17,8 @@ public class UserEntityConverter {
         if (entity == null) return null;
         return User.fromPersisted(entity.getId(), entity.getUsername(), entity.getPassword(),
                 entity.isEnabled(), entity.getEmail(), entity.isEmailVerified(),
-                entity.getPendingEmail(), toDomainRoles(entity.getRoles()));
+                entity.getPendingEmail(), entity.getAvatarFilename(),
+                entity.getCreatedAt(), toDomainRoles(entity.getRoles()));
     }
 
     public UserEntity toEntityBase(User domain) {
@@ -30,6 +31,7 @@ public class UserEntityConverter {
         entity.setEmail(domain.getEmail());
         entity.setEmailVerified(domain.isEmailVerified());
         entity.setPendingEmail(domain.getPendingEmail());
+        entity.setAvatarFilename(domain.getAvatarFilename());
         return entity;
     }
 

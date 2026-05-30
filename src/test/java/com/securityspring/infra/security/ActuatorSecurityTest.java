@@ -42,4 +42,9 @@ public class ActuatorSecurityTest {
         mockMvc.perform(get("/actuator/metrics").with(user("admin").roles("ADMIN")))
                 .andExpect(status().isOk());
     }
+
+    @Test
+    void twofa_status_requires_auth() throws Exception {
+        mockMvc.perform(get("/auth/2fa/status")).andExpect(status().isUnauthorized());
+    }
 }
