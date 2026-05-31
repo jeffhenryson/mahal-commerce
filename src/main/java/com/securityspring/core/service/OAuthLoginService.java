@@ -12,9 +12,9 @@ import com.securityspring.core.ports.out.role.RoleRepository;
 import com.securityspring.core.ports.out.token.AccessTokenPort;
 import com.securityspring.core.ports.out.token.RefreshTokenPort;
 import com.securityspring.core.ports.out.user.UserAuthoritiesPort;
+import com.securityspring.core.domain.exception.auth.AccountDisabledException;
 import com.securityspring.core.ports.out.user.UserCachePort;
 import com.securityspring.core.ports.out.user.UserRepository;
-import org.springframework.security.authentication.DisabledException;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.HashSet;
@@ -64,7 +64,7 @@ public class OAuthLoginService implements OAuthLoginUseCase {
         User user = resolveUser(googleInfo);
 
         if (!user.isEnabled()) {
-            throw new DisabledException("Conta desativada");
+            throw new AccountDisabledException(user.getUsername());
         }
 
         Set<String> authorities = userAuthorities.loadAuthoritiesByUsername(user.getUsername());

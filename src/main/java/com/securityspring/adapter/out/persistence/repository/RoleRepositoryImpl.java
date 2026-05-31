@@ -2,8 +2,10 @@ package com.securityspring.adapter.out.persistence.repository;
 
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -12,6 +14,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.securityspring.adapter.out.persistence.entity.PermissionEntity;
 import com.securityspring.adapter.out.persistence.entity.RoleEntity;
+import com.securityspring.core.domain.exception.PermissionNotFoundException;
+import com.securityspring.core.domain.exception.rbac.RoleNotFoundException;
 import com.securityspring.core.domain.model.PageResult;
 import com.securityspring.core.domain.model.rbac.Permission;
 import com.securityspring.core.domain.model.rbac.Role;
@@ -63,18 +67,18 @@ public class RoleRepositoryImpl implements RoleRepository {
     @Override
     @Transactional(readOnly = true)
     public PageResult<Role> findAll(int page, int size) {
-        Page<RoleEntity> p = roleRepo.findAll(PageRequest.of(page, size));
-        List<Role> content = p.getContent().stream().map(this::toDomain).toList();
-        return new PageResult<>(content, page, size, p.getTotalElements(), p.getTotalPages());
+        Page<Long> idPage = roleRepo.findAllIds(PageRequest.of(page, size));
+        List<Role> content = loadByIds(idPage.getContent());
+        return new PageResult<>(content, page, size, idPage.getTotalElements(), idPage.getTotalPages());
     }
 
     @Override
     public void addPermissions(String roleName, Set<String> permissionNames) {
         RoleEntity role = roleRepo.findByName(roleName)
-                .orElseThrow(() -> new IllegalArgumentException("Role not found: " + roleName));
+                .orElseThrow(() -> new RoleNotFoundException(roleName));
         for (String name : permissionNames) {
             PermissionEntity perm = permRepo.findByName(name)
-                    .orElseThrow(() -> new IllegalArgumentException("Permission not found: " + name));
+                    .orElseThrow(() -> new PermissionNotFoundException(name));
             role.getPermissions().add(perm);
         }
         roleRepo.save(role);
@@ -88,7 +92,7 @@ public class RoleRepositoryImpl implements RoleRepository {
     @Override
     public void removePermission(String roleName, String permissionName) {
         RoleEntity role = roleRepo.findByName(roleName)
-                .orElseThrow(() -> new IllegalArgumentException("Role not found: " + roleName));
+                .orElseThrow(() -> new RoleNotFoundException(roleName));
         role.getPermissions().removeIf(p -> p.getName().equals(permissionName));
         roleRepo.save(role);
     }
@@ -96,9 +100,16 @@ public class RoleRepositoryImpl implements RoleRepository {
     @Override
     @Transactional(readOnly = true)
     public PageResult<Role> findByNameContaining(String search, int page, int size) {
-        Page<RoleEntity> p = roleRepo.findByNameContaining(search, PageRequest.of(page, size));
-        List<Role> content = p.getContent().stream().map(this::toDomain).toList();
-        return new PageResult<>(content, page, size, p.getTotalElements(), p.getTotalPages());
+        Page<Long> idPage = roleRepo.findIdsByNameContaining(search, PageRequest.of(page, size));
+        List<Role> content = loadByIds(idPage.getContent());
+        return new PageResult<>(content, page, size, idPage.getTotalElements(), idPage.getTotalPages());
+    }
+
+    private List<Role> loadByIds(List<Long> ids) {
+        if (ids.isEmpty()) return List.of();
+        Map<Long, RoleEntity> byId = roleRepo.findAllWithPermissionsByIdIn(ids)
+                .stream().collect(Collectors.toMap(RoleEntity::getId, r -> r));
+        return ids.stream().filter(byId::containsKey).map(id -> toDomain(byId.get(id))).toList();
     }
 
     @Override

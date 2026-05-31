@@ -80,7 +80,7 @@ public class RegistrationController {
         ResponseEntity<Void> resendVerification(@Valid @RequestBody ResendVerificationRequest request) {
                 try {
                         userUseCase.resendVerification(request.getEmail());
-                } catch (Exception ignored) {
+                } catch (RuntimeException ignored) {
                         // Security: always 204 — never reveal whether email is registered,
                         // verified, on cooldown, or whether delivery failed.
                 }

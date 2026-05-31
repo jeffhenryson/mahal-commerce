@@ -19,7 +19,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.security.authentication.DisabledException;
+import com.securityspring.core.domain.exception.auth.AccountDisabledException;
 
 import java.util.Optional;
 import java.util.Set;
@@ -178,6 +178,6 @@ class OAuthLoginServiceTest {
         when(userRepository.findByGoogleId("google-123")).thenReturn(Optional.of(disabled));
 
         assertThatThrownBy(() -> service.loginWithGoogle("id-token"))
-                .isInstanceOf(DisabledException.class);
+                .isInstanceOf(AccountDisabledException.class);
     }
 }

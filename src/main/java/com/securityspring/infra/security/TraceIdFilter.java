@@ -30,10 +30,15 @@ public class TraceIdFilter extends OncePerRequestFilter {
                 : UUID.randomUUID().toString();
         MDC.put(MDC_KEY, traceId);
         response.setHeader(TRACE_ID_HEADER, traceId);
+
+        String ua = request.getHeader("User-Agent");
+        DeviceInfoContext.set(request.getRemoteAddr(), ua != null && ua.length() > 512 ? ua.substring(0, 512) : ua);
+
         try {
             chain.doFilter(request, response);
         } finally {
             MDC.remove(MDC_KEY);
+            DeviceInfoContext.clear();
         }
     }
 }

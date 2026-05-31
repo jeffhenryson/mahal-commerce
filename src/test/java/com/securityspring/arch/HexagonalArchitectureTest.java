@@ -78,6 +78,16 @@ class HexagonalArchitectureTest {
     }
 
     @Test
+    void adapter_in_must_not_depend_on_output_ports() {
+        ArchRule rule = noClasses()
+                .that().resideInAPackage("..adapter.in..")
+                .should().dependOnClassesThat()
+                .resideInAPackage("..core.ports.out..");
+
+        rule.check(classes);
+    }
+
+    @Test
     void services_must_only_implement_use_case_ports() {
         ArchRule rule = classes()
                 .that().resideInAPackage("..core.service..")

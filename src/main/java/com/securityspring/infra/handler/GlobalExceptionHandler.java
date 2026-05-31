@@ -5,6 +5,7 @@ import com.securityspring.core.domain.exception.avatar.InvalidAvatarFormatExcept
 import com.securityspring.core.domain.exception.PermissionAlreadyExistsException;
 import com.securityspring.core.domain.exception.PermissionNotFoundException;
 import com.securityspring.core.domain.exception.RoleAlreadyExistsException;
+import com.securityspring.core.domain.exception.auth.AccountDisabledException;
 import com.securityspring.core.domain.exception.auth.AccountLockedException;
 import com.securityspring.core.domain.exception.auth.InvalidPasswordException;
 import com.securityspring.core.domain.exception.auth.OAuthTokenInvalidException;
@@ -117,6 +118,11 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                 .header("Retry-After", String.valueOf(lockoutDurationMinutes * 60))
                 .body(ApiError.of(ex.getMessage(), "ACCOUNT_LOCKED", req.getRequestURI(), MDC.get("traceId")));
+    }
+
+    @ExceptionHandler(AccountDisabledException.class)
+    public ResponseEntity<ApiError> handleAccountDisabled(AccountDisabledException ex, HttpServletRequest req) {
+        return error(HttpStatus.UNAUTHORIZED, "Credenciais inválidas", "INVALID_CREDENTIALS", req);
     }
 
     @ExceptionHandler(DisabledException.class)

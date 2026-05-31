@@ -1,13 +1,11 @@
 package com.securityspring.adapter.out.persistence.repository;
 
-import jakarta.servlet.http.HttpServletRequest;
+import com.securityspring.infra.security.DeviceInfoContext;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Base64;
 import java.util.List;
-import org.springframework.web.context.request.RequestContextHolder;
-import org.springframework.web.context.request.ServletRequestAttributes;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -86,22 +84,11 @@ public class RefreshTokenRepositoryImpl implements RefreshTokenPort {
         return token;
     }
 
-    /**
-     * Popula IP e User-Agent a partir do contexto HTTP corrente, se disponível.
-     * É silenciosamente ignorado em contextos sem request (testes, jobs, etc.).
-     */
     private void resolveDeviceInfo(RefreshTokenEntity rt) {
-        try {
-            var attrs = RequestContextHolder.getRequestAttributes();
-            if (attrs instanceof ServletRequestAttributes sra) {
-                HttpServletRequest req = sra.getRequest();
-                rt.setIpAddress(req.getRemoteAddr());
-                String ua = req.getHeader("User-Agent");
-                if (ua != null && ua.length() > 512) ua = ua.substring(0, 512);
-                rt.setUserAgent(ua);
-            }
-        } catch (Exception ignored) {
-            // Contexto sem request HTTP — device info fica null.
+        DeviceInfoContext.DeviceInfo info = DeviceInfoContext.get();
+        if (info != null) {
+            rt.setIpAddress(info.ipAddress());
+            rt.setUserAgent(info.userAgent());
         }
     }
 
@@ -131,6 +118,9 @@ public class RefreshTokenRepositoryImpl implements RefreshTokenPort {
         rt.setUser(found.getUser());
         rt.setTokenHash(TokenHashUtils.sha256(newToken));
         rt.setExpiresAt(Instant.now().plus(refreshTtlDays, ChronoUnit.DAYS));
+        // Preserva device info da sessão original — evita perda de IP/UA após rotação.
+        rt.setIpAddress(found.getIpAddress());
+        rt.setUserAgent(found.getUserAgent());
         refreshRepo.save(rt);
         log.info("audit.refresh.rotated user={}", username);
         return new RotationResult(username, newToken);

@@ -22,11 +22,16 @@ public class GoogleTokenVerifierAdapter implements GoogleTokenVerifierPort {
     public GoogleUserInfo verify(String idToken) {
         try {
             Jwt jwt = googleJwtDecoder.decode(idToken);
+            if (!Boolean.TRUE.equals(jwt.getClaimAsBoolean("email_verified"))) {
+                throw new OAuthTokenInvalidException("Email Google não verificado");
+            }
             return new GoogleUserInfo(
                     jwt.getSubject(),
                     jwt.getClaimAsString("email"),
                     jwt.getClaimAsString("name")
             );
+        } catch (OAuthTokenInvalidException ex) {
+            throw ex;
         } catch (JwtException ex) {
             throw new OAuthTokenInvalidException("Token Google inválido ou expirado");
         }

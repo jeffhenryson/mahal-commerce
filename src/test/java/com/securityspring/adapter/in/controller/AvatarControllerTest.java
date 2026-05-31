@@ -8,8 +8,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.securityspring.core.domain.exception.avatar.AvatarTooLargeException;
 import com.securityspring.core.domain.exception.avatar.InvalidAvatarFormatException;
+import com.securityspring.core.domain.model.AvatarServeResult;
 import com.securityspring.core.ports.in.AvatarUseCase;
-import com.securityspring.core.ports.out.storage.AvatarStoragePort;
 import com.securityspring.infra.handler.GlobalExceptionHandler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -19,15 +19,12 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-import java.io.ByteArrayInputStream;
 import java.util.List;
-import java.util.Optional;
 
 class AvatarControllerTest {
 
     private MockMvc mockMvc;
     private AvatarUseCase avatarUseCase;
-    private AvatarStoragePort storagePort;
 
     private static final UsernamePasswordAuthenticationToken AUTH =
             new UsernamePasswordAuthenticationToken("alice", null, List.of());
@@ -37,9 +34,8 @@ class AvatarControllerTest {
     @BeforeEach
     void setup() {
         avatarUseCase = mock(AvatarUseCase.class);
-        storagePort   = mock(AvatarStoragePort.class);
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new AvatarController(avatarUseCase, storagePort))
+                .standaloneSetup(new AvatarController(avatarUseCase))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }
@@ -92,9 +88,9 @@ class AvatarControllerTest {
     }
 
     @Test
-    void serve_existing_file_returns_200_with_cache_headers() throws Exception {
-        when(storagePort.load("uuid.jpg"))
-                .thenReturn(Optional.of(new ByteArrayInputStream(JPEG_BYTES)));
+    void serve_local_file_returns_200_with_cache_headers() throws Exception {
+        when(avatarUseCase.serve("uuid.jpg"))
+                .thenReturn(new AvatarServeResult.LocalFile(JPEG_BYTES, "jpg"));
 
         mockMvc.perform(get("/avatars/uuid.jpg"))
                 .andExpect(status().isOk())
@@ -103,8 +99,19 @@ class AvatarControllerTest {
     }
 
     @Test
+    void serve_s3_file_returns_redirect() throws Exception {
+        when(avatarUseCase.serve("uuid.jpg"))
+                .thenReturn(new AvatarServeResult.Redirect("https://cdn.example.com/uuid.jpg"));
+
+        mockMvc.perform(get("/avatars/uuid.jpg"))
+                .andExpect(status().is(308))
+                .andExpect(header().string("Location", "https://cdn.example.com/uuid.jpg"));
+    }
+
+    @Test
     void serve_missing_file_returns_404() throws Exception {
-        when(storagePort.load("missing.jpg")).thenReturn(Optional.empty());
+        when(avatarUseCase.serve("missing.jpg"))
+                .thenReturn(new AvatarServeResult.NotFound());
 
         mockMvc.perform(get("/avatars/missing.jpg"))
                 .andExpect(status().isNotFound());

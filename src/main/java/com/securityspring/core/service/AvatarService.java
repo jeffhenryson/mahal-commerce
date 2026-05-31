@@ -3,12 +3,16 @@ package com.securityspring.core.service;
 import com.securityspring.core.domain.exception.avatar.AvatarTooLargeException;
 import com.securityspring.core.domain.exception.avatar.InvalidAvatarFormatException;
 import com.securityspring.core.domain.exception.user.UserNotFoundException;
+import com.securityspring.core.domain.model.AvatarServeResult;
 import com.securityspring.core.domain.model.auth.User;
 import com.securityspring.core.ports.in.AvatarUseCase;
 import com.securityspring.core.ports.out.storage.AvatarStoragePort;
 import com.securityspring.core.ports.out.user.UserCachePort;
 import com.securityspring.core.ports.out.user.UserRepository;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.io.IOException;
+import java.io.InputStream;
 
 public class AvatarService implements AvatarUseCase {
 
@@ -62,6 +66,24 @@ public class AvatarService implements AvatarUseCase {
         user.clearAvatar();
         userRepository.save(user);
         userCachePort.evict(username);
+    }
+
+    @Override
+    public AvatarServeResult serve(String filename) {
+        java.util.Optional<String> publicUrl = storagePort.getPublicUrl(filename);
+        if (publicUrl.isPresent()) {
+            return new AvatarServeResult.Redirect(publicUrl.get());
+        }
+        return storagePort.load(filename).map(stream -> {
+            try (InputStream is = stream) {
+                String ext = filename.contains(".")
+                        ? filename.substring(filename.lastIndexOf('.') + 1).toLowerCase()
+                        : "";
+                return (AvatarServeResult) new AvatarServeResult.LocalFile(is.readAllBytes(), ext);
+            } catch (IOException e) {
+                return (AvatarServeResult) new AvatarServeResult.NotFound();
+            }
+        }).orElse(new AvatarServeResult.NotFound());
     }
 
     // --- Validação por magic bytes ---

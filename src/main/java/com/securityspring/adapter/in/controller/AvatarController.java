@@ -1,8 +1,8 @@
 package com.securityspring.adapter.in.controller;
 
 import com.securityspring.core.domain.exception.avatar.InvalidAvatarFormatException;
+import com.securityspring.core.domain.model.AvatarServeResult;
 import com.securityspring.core.ports.in.AvatarUseCase;
-import com.securityspring.core.ports.out.storage.AvatarStoragePort;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import org.springframework.http.CacheControl;
@@ -15,20 +15,16 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 @RestController
 public class AvatarController {
 
     private final AvatarUseCase avatarUseCase;
-    private final AvatarStoragePort storagePort;
 
-    public AvatarController(AvatarUseCase avatarUseCase, AvatarStoragePort storagePort) {
+    public AvatarController(AvatarUseCase avatarUseCase) {
         this.avatarUseCase = avatarUseCase;
-        this.storagePort = storagePort;
     }
 
     @Operation(summary = "Faz upload do avatar do usuário autenticado")
@@ -63,33 +59,25 @@ public class AvatarController {
         if (filename.contains("/") || filename.contains("\\") || filename.contains("..")) {
             return ResponseEntity.notFound().build();
         }
-        // S3 / CDN: redireciona para URL pública com cache imutável no cliente
-        Optional<String> publicUrl = storagePort.getPublicUrl(filename);
-        if (publicUrl.isPresent()) {
-            return ResponseEntity.status(HttpStatus.PERMANENT_REDIRECT)
-                    .header(HttpHeaders.LOCATION, publicUrl.get())
+        return switch (avatarUseCase.serve(filename)) {
+            case AvatarServeResult.Redirect r -> ResponseEntity.status(HttpStatus.PERMANENT_REDIRECT)
+                    .header(HttpHeaders.LOCATION, r.url())
                     .cacheControl(CacheControl.maxAge(365, TimeUnit.DAYS).immutable())
                     .build();
-        }
-        // Armazenamento local: serve os bytes diretamente
-        Optional<InputStream> stream = storagePort.load(filename);
-        if (stream.isEmpty()) return ResponseEntity.notFound().build();
-        try {
-            byte[] bytes = stream.get().readAllBytes();
-            return ResponseEntity.ok()
-                    .contentType(resolveMediaType(filename))
+            case AvatarServeResult.LocalFile f -> ResponseEntity.ok()
+                    .contentType(resolveMediaType(f.extension()))
                     .cacheControl(CacheControl.maxAge(365, TimeUnit.DAYS).immutable())
-                    .body(bytes);
-        } catch (IOException e) {
-            return ResponseEntity.internalServerError().build();
-        }
+                    .body(f.bytes());
+            case AvatarServeResult.NotFound ignored -> ResponseEntity.notFound().build();
+        };
     }
 
-    private MediaType resolveMediaType(String filename) {
-        String lower = filename.toLowerCase();
-        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return MediaType.IMAGE_JPEG;
-        if (lower.endsWith(".png"))  return MediaType.IMAGE_PNG;
-        if (lower.endsWith(".webp")) return MediaType.parseMediaType("image/webp");
-        return MediaType.APPLICATION_OCTET_STREAM;
+    private MediaType resolveMediaType(String extension) {
+        return switch (extension) {
+            case "jpg", "jpeg" -> MediaType.IMAGE_JPEG;
+            case "png"         -> MediaType.IMAGE_PNG;
+            case "webp"        -> MediaType.parseMediaType("image/webp");
+            default            -> MediaType.APPLICATION_OCTET_STREAM;
+        };
     }
 }
