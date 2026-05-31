@@ -22,6 +22,7 @@ class HmlStartupValidatorTest {
         ReflectionTestUtils.setField(v, "resendApiKey", resendKey);
         ReflectionTestUtils.setField(v, "resendFrom", resendFrom);
         ReflectionTestUtils.setField(v, "corsAllowedOrigins", corsOrigins);
+        ReflectionTestUtils.setField(v, "googleClientId", "123456789-abc.apps.googleusercontent.com");
         return v;
     }
 
@@ -116,6 +117,17 @@ class HmlStartupValidatorTest {
                 .hasMessageContaining("cors.allowed-origins");
     }
 
+    // ── oauth2.google.client-id ───────────────────────────────────────────────
+
+    @Test
+    void deve_rejeitar_google_client_id_ausente() {
+        HmlStartupValidator v = validadorValido();
+        ReflectionTestUtils.setField(v, "googleClientId", "");
+        assertThatThrownBy(v::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("oauth2.google.client-id");
+    }
+
     // ── múltiplos erros ───────────────────────────────────────────────────────
 
     @Test
@@ -128,6 +140,7 @@ class HmlStartupValidatorTest {
                 "noreply@example.com", // from inválido
                 "*"                    // CORS wildcard
         );
+        ReflectionTestUtils.setField(v, "googleClientId", "");
         assertThatThrownBy(v::validate)
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContainingAll(
@@ -136,6 +149,7 @@ class HmlStartupValidatorTest {
                         "spring.data.redis.password",
                         "resend.api-key",
                         "resend.from",
-                        "cors.allowed-origins");
+                        "cors.allowed-origins",
+                        "oauth2.google.client-id");
     }
 }

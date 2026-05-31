@@ -46,7 +46,8 @@ public class LoginRateLimitingFilter extends OncePerRequestFilter {
                 && !"/auth/refresh".equals(path)
                 && !"/auth/forgot-password".equals(path)
                 && !"/auth/reset-password".equals(path)
-                && !"/auth/2fa/verify".equals(path);
+                && !"/auth/2fa/verify".equals(path)
+                && !"/auth/2fa/confirm".equals(path);
     }
 
     @Override

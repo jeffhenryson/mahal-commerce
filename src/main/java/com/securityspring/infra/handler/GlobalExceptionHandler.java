@@ -7,6 +7,7 @@ import com.securityspring.core.domain.exception.PermissionNotFoundException;
 import com.securityspring.core.domain.exception.RoleAlreadyExistsException;
 import com.securityspring.core.domain.exception.auth.AccountLockedException;
 import com.securityspring.core.domain.exception.auth.InvalidPasswordException;
+import com.securityspring.core.domain.exception.auth.OAuthTokenInvalidException;
 import com.securityspring.core.domain.exception.auth.InvalidRefreshTokenException;
 import com.securityspring.core.domain.exception.auth.InvalidTotpCodeException;
 import com.securityspring.core.domain.exception.auth.PasswordResetTokenExpiredException;
@@ -22,6 +23,7 @@ import com.securityspring.core.domain.exception.email.EmailDeliveryException;
 import com.securityspring.core.domain.exception.email.EmailVerificationCodeExpiredException;
 import com.securityspring.core.domain.exception.email.EmailVerificationCodeNotFoundException;
 import com.securityspring.core.domain.exception.rbac.RoleNotFoundException;
+import com.securityspring.core.domain.event.AuditEvent;
 import com.securityspring.core.domain.exception.user.EmailAlreadyExistsException;
 import com.securityspring.core.domain.exception.user.UserNotFoundException;
 import com.securityspring.core.domain.exception.user.UsernameAlreadyExistsException;
@@ -31,17 +33,22 @@ import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.DisabledException;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @RestControllerAdvice
@@ -51,6 +58,9 @@ public class GlobalExceptionHandler {
 
     @org.springframework.beans.factory.annotation.Value("${auth.lockout.duration-minutes:15}")
     private long lockoutDurationMinutes;
+
+    @Autowired(required = false)
+    private ApplicationEventPublisher publisher;
 
     @ExceptionHandler(UserNotFoundException.class)
     public ResponseEntity<ApiError> handleUserNotFound(UserNotFoundException ex, HttpServletRequest req) {
@@ -121,7 +131,23 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ApiError> handleAccessDenied(AccessDeniedException ex, HttpServletRequest req) {
+        if (publisher != null) {
+            publisher.publishEvent(AuditEvent.of(
+                    AuditEvent.EventType.ACCESS_DENIED,
+                    resolveUsername(),
+                    Map.of("path", req.getRequestURI())
+            ));
+        }
         return error(HttpStatus.FORBIDDEN, "Acesso negado", "ACCESS_DENIED", req);
+    }
+
+    private static String resolveUsername() {
+        try {
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            return (auth != null && auth.isAuthenticated()) ? auth.getName() : "anonymous";
+        } catch (Exception ignored) {
+            return "anonymous";
+        }
     }
 
     @ExceptionHandler(InvalidPasswordException.class)
@@ -177,6 +203,11 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(RefreshTokenAlreadyUsedException.class)
     public ResponseEntity<ApiError> handleRefreshTokenReuse(RefreshTokenAlreadyUsedException ex, HttpServletRequest req) {
         return error(HttpStatus.UNAUTHORIZED, "Sessão inválida — faça login novamente", "REFRESH_TOKEN_REUSED", req);
+    }
+
+    @ExceptionHandler(OAuthTokenInvalidException.class)
+    public ResponseEntity<ApiError> handleOAuthTokenInvalid(OAuthTokenInvalidException ex, HttpServletRequest req) {
+        return error(HttpStatus.UNAUTHORIZED, ex.getMessage(), "OAUTH_TOKEN_INVALID", req);
     }
 
     @ExceptionHandler(AvatarTooLargeException.class)

@@ -19,6 +19,8 @@ public class User {
     private String avatarFilename;
     private Instant createdAt;
     private Set<Role> roles = new HashSet<>();
+    private String googleId;
+    private AuthProvider authProvider = AuthProvider.LOCAL;
 
     User() {
     }
@@ -42,18 +44,39 @@ public class User {
         return u;
     }
 
+    public static User fromGoogle(String googleId, String username, String email, Set<Role> roles) {
+        Objects.requireNonNull(googleId, "googleId is required");
+        Objects.requireNonNull(username, "username is required");
+        Objects.requireNonNull(email, "email is required");
+        User u = new User();
+        u.googleId = googleId;
+        u.username = username;
+        u.email = email;
+        u.emailVerified = true;
+        u.enabled = true;
+        u.authProvider = AuthProvider.GOOGLE;
+        u.roles = roles != null ? new HashSet<>(roles) : new HashSet<>();
+        return u;
+    }
+
     public static User fromPersisted(Long id, String username, String hashedPassword,
             boolean enabled, String email, boolean emailVerified, String pendingEmail,
-            String avatarFilename, Instant createdAt, Set<Role> roles) {
+            String avatarFilename, Instant createdAt, Set<Role> roles,
+            String googleId, AuthProvider authProvider) {
         Objects.requireNonNull(id, "id is required for persisted user");
-        User u = of(username, hashedPassword, roles);
+        User u = new User();
         u.id = id;
+        u.username = username;
+        u.password = hashedPassword;
         u.enabled = enabled;
         u.email = email;
         u.emailVerified = emailVerified;
         u.pendingEmail = pendingEmail;
         u.avatarFilename = avatarFilename;
         u.createdAt = createdAt;
+        u.roles = roles != null ? new HashSet<>(roles) : new HashSet<>();
+        u.googleId = googleId;
+        u.authProvider = authProvider != null ? authProvider : AuthProvider.LOCAL;
         return u;
     }
 
@@ -119,6 +142,11 @@ public class User {
         this.roles.removeIf(r -> r.getName().equals(role.getName()));
     }
 
+    public void linkGoogle(String googleId) {
+        Objects.requireNonNull(googleId, "googleId is required");
+        this.googleId = googleId;
+    }
+
     // --- Accessors ---
 
     public Long getId() { return id; }
@@ -131,4 +159,6 @@ public class User {
     public String getAvatarFilename() { return avatarFilename; }
     public Instant getCreatedAt() { return createdAt; }
     public Set<Role> getRoles() { return roles; }
+    public String getGoogleId() { return googleId; }
+    public AuthProvider getAuthProvider() { return authProvider; }
 }

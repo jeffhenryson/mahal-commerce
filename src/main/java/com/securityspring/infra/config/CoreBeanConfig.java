@@ -10,6 +10,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 import com.securityspring.core.ports.in.AuditLogsUseCase;
 import com.securityspring.core.ports.in.AuthUseCase;
 import com.securityspring.core.ports.in.AvatarUseCase;
+import com.securityspring.core.ports.in.OAuthLoginUseCase;
 import com.securityspring.core.ports.in.PermissionUseCase;
 import com.securityspring.core.ports.in.RoleUseCase;
 import com.securityspring.core.ports.in.StatsUseCase;
@@ -30,6 +31,7 @@ import com.securityspring.core.ports.out.twofa.TotpChallengeTokenRepository;
 import com.securityspring.core.ports.out.twofa.TotpConfigRepository;
 import com.securityspring.core.ports.out.twofa.TotpEncryptionPort;
 import com.securityspring.core.ports.in.TotpUseCase;
+import com.securityspring.core.ports.out.oauth.GoogleTokenVerifierPort;
 import com.securityspring.core.ports.out.user.UserAuthoritiesPort;
 import com.securityspring.core.ports.out.user.UserCachePort;
 import com.securityspring.core.ports.out.user.UserRepository;
@@ -40,6 +42,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import com.securityspring.core.service.AuditLogsService;
 import com.securityspring.core.service.AuthService;
 import com.securityspring.core.service.AvatarService;
+import com.securityspring.core.service.OAuthLoginService;
 import com.securityspring.core.service.PermissionService;
 import com.securityspring.core.service.RoleService;
 import com.securityspring.core.service.StatsService;
@@ -133,6 +136,18 @@ class CoreBeanConfig {
             RoleRepository roleRepository,
             PermissionRepository permissionRepository) {
         return new StatsService(userRepository, roleRepository, permissionRepository);
+    }
+
+    @Bean
+    OAuthLoginUseCase oAuthLoginUseCase(GoogleTokenVerifierPort tokenVerifier,
+            UserRepository userRepository,
+            RoleRepository roleRepository,
+            AccessTokenPort accessToken,
+            RefreshTokenPort refreshToken,
+            UserAuthoritiesPort userAuthorities,
+            UserCachePort userCachePort) {
+        return new OAuthLoginService(tokenVerifier, userRepository, roleRepository,
+                accessToken, refreshToken, userAuthorities, userCachePort);
     }
 
     @Bean

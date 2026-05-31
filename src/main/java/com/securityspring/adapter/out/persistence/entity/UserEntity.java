@@ -1,5 +1,6 @@
 package com.securityspring.adapter.out.persistence.entity;
 
+import com.securityspring.core.domain.model.auth.AuthProvider;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
@@ -31,7 +32,7 @@ public class UserEntity {
     @Column(nullable = false, length = 80, unique = true)
     private String username;
 
-    @Column(nullable = false, length = 255)
+    @Column(length = 255)
     private String password;
 
     @Column(nullable = false)
@@ -55,6 +56,13 @@ public class UserEntity {
 
     @Column(name = "deleted_at")
     private Instant deletedAt;
+
+    @Column(name = "google_id", length = 255)
+    private String googleId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "auth_provider", length = 20, nullable = false)
+    private AuthProvider authProvider = AuthProvider.LOCAL;
 
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(name = "user_roles",

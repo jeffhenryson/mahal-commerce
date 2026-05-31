@@ -104,6 +104,12 @@ public class UserRepositoryImpl implements UserRepository {
 
     @Override
     @Transactional(readOnly = true)
+    public Optional<User> findByGoogleId(String googleId) {
+        return userRepo.findByGoogleIdWithRoles(googleId).map(converter::toDomain);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public PageResult<User> findFiltered(String search, Boolean enabled, String sortBy, String sortDir, int page, int size) {
         Sort sort = buildSort(sortBy, sortDir);
         Specification<UserEntity> spec = buildSpec(search, enabled);

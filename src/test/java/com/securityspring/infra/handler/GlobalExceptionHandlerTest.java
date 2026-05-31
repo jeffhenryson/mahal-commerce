@@ -1,5 +1,6 @@
 package com.securityspring.infra.handler;
 
+import com.securityspring.core.domain.event.AuditEvent;
 import com.securityspring.core.domain.exception.*;
 import com.securityspring.core.domain.exception.auth.AccountLockedException;
 import com.securityspring.core.domain.exception.auth.InvalidPasswordException;
@@ -37,11 +38,15 @@ import org.springframework.validation.BindingResult;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 
+import org.springframework.context.ApplicationEventPublisher;
+
 import java.util.List;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -222,6 +227,24 @@ class GlobalExceptionHandlerTest {
         ResponseEntity<ApiError> resp = handler.handleAccessDenied(new AccessDeniedException("forbidden"), req);
         assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
         assertThat(resp.getBody().errorCode()).isEqualTo("ACCESS_DENIED");
+    }
+
+    @Test
+    void accessDenied_publishes_audit_event() {
+        ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
+        ReflectionTestUtils.setField(handler, "publisher", publisher);
+
+        handler.handleAccessDenied(new AccessDeniedException("forbidden"), req);
+
+        verify(publisher).publishEvent(any(AuditEvent.class));
+    }
+
+    @Test
+    void accessDenied_without_publisher_does_not_throw() {
+        // publisher é null quando não injetado (teste sem contexto Spring)
+        ReflectionTestUtils.setField(handler, "publisher", null);
+        ResponseEntity<ApiError> resp = handler.handleAccessDenied(new AccessDeniedException("forbidden"), req);
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
     }
 
     // ── 404 Not Found — session ───────────────────────────────────────────────

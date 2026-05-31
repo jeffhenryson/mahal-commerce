@@ -47,6 +47,9 @@ public class ProdStartupValidator {
     @Value("${avatar.base-url:}")
     private String avatarBaseUrl;
 
+    @Value("${oauth2.google.client-id:}")
+    private String googleClientId;
+
     @PostConstruct
     public void validate() {
         List<String> errors = new ArrayList<>();
@@ -88,6 +91,9 @@ public class ProdStartupValidator {
         }
         if (isBlankOrPlaceholder(avatarBaseUrl, "localhost")) {
             errors.add("avatar.base-url (AVATAR_BASE_URL) está ausente — URLs de avatar não funcionarão corretamente");
+        }
+        if (isBlankOrPlaceholder(googleClientId)) {
+            errors.add("oauth2.google.client-id (GOOGLE_CLIENT_ID) está ausente — autenticação OAuth2 Google pode ser bypassada com qualquer token");
         }
 
         if (!errors.isEmpty()) {

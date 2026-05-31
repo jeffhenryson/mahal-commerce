@@ -18,6 +18,8 @@ public interface UserRepository {
 
     Optional<User> findByEmail(String email);
 
+    Optional<User> findByGoogleId(String googleId);
+
     PageResult<User> findFiltered(String search, Boolean enabled, String sortBy, String sortDir, int page, int size);
 
     long countAll();

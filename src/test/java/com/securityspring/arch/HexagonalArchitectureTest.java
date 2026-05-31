@@ -82,6 +82,7 @@ class HexagonalArchitectureTest {
         ArchRule rule = classes()
                 .that().resideInAPackage("..core.service..")
                 .and().areNotInterfaces()
+                .and().areNotAnonymousClasses()
                 .should().implement(
                         com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAPackage("..core.ports.in..")
                                 .or(com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAPackage("..core.ports.out.."))

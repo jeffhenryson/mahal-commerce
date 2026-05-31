@@ -31,6 +31,8 @@ class LoginRateLimitingFilterTest {
         @PostMapping("/auth/resend-verification") public void resend()    {}
         @PostMapping("/auth/refresh")        public void refresh()        {}
         @PostMapping("/auth/logout")         public void logout()         {}
+        @PostMapping("/auth/2fa/verify")     public void totpVerify()     {}
+        @PostMapping("/auth/2fa/confirm")    public void totpConfirm()    {}
         @GetMapping("/users/me")             public void me()             {}
     }
 
@@ -120,5 +122,26 @@ class LoginRateLimitingFilterTest {
 
         mockMvc.perform(post("/auth/register").contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isTooManyRequests());
+    }
+
+    // ── /auth/2fa/confirm rate-limiting ─────────────────────────────────────
+
+    @Test
+    void totp_confirm_within_limit_passes_through() throws Exception {
+        when(rateLimiter.tryConsume(any())).thenReturn(true);
+
+        mockMvc.perform(post("/auth/2fa/confirm").contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk());
+        verify(rateLimiter).tryConsume(any());
+    }
+
+    @Test
+    void totp_confirm_exceeded_returns_429() throws Exception {
+        when(rateLimiter.tryConsume(any())).thenReturn(false);
+
+        mockMvc.perform(post("/auth/2fa/confirm").contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().exists("Retry-After"))
+                .andExpect(jsonPath("$.errorCode").value("TOO_MANY_REQUESTS"));
     }
 }

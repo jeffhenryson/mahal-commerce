@@ -116,4 +116,16 @@ class AvatarControllerTest {
         mockMvc.perform(get("/avatars/..secret.jpg"))
                 .andExpect(status().isNotFound());
     }
+
+    // ── upload validation ────────────────────────────────────────────────────
+
+    @Test
+    void upload_empty_file_returns_400_INVALID_AVATAR_FORMAT() throws Exception {
+        MockMultipartFile empty = new MockMultipartFile(
+                "file", "empty.jpg", MediaType.IMAGE_JPEG_VALUE, new byte[0]);
+
+        mockMvc.perform(multipart("/users/me/avatar").file(empty).principal(AUTH))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("INVALID_AVATAR_FORMAT"));
+    }
 }

@@ -44,7 +44,7 @@ class RegistrationControllerTest {
     }
 
     private User user(String username) {
-        return User.fromPersisted(1L, username, "hashed", false, "u@t.com", false, null, null, null, new HashSet<>());
+        return User.fromPersisted(1L, username, "hashed", false, "u@t.com", false, null, null, null, new HashSet<>(), null, null);
     }
 
     // ── /auth/register ────────────────────────────────────────────────────────

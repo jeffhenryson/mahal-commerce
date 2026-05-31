@@ -114,17 +114,18 @@ public class UserService implements UserUseCase {
     @Transactional
     public User createUser(String username, String rawPassword, String email, List<String> roles) {
         if (!isValidPassword(rawPassword)) throw new InvalidPasswordException();
+        String normalizedEmail = normalizeEmail(email);
         userRepository.findByUsername(username).ifPresent(u -> {
             throw new UsernameAlreadyExistsException(username);
         });
-        if (email != null) {
-            userRepository.findByEmail(email).ifPresent(u -> {
-                throw new EmailAlreadyExistsException(email);
+        if (normalizedEmail != null) {
+            userRepository.findByEmail(normalizedEmail).ifPresent(u -> {
+                throw new EmailAlreadyExistsException(normalizedEmail);
             });
         }
         Set<Role> roleSet = resolveRoles(roles);
         User user = User.of(username, passwordHash.hash(rawPassword), roleSet);
-        if (email != null) user.assignEmail(email);
+        if (normalizedEmail != null) user.assignEmail(normalizedEmail);
         User saved = userRepository.save(user);
         userCachePort.evict(username);
         return saved;
@@ -134,16 +135,17 @@ public class UserService implements UserUseCase {
     @Transactional(noRollbackFor = EmailDeliveryException.class)
     public User registerUser(String username, String rawPassword, String email, List<String> roles) {
         if (!isValidPassword(rawPassword)) throw new InvalidPasswordException();
+        String normalizedEmail = normalizeEmail(email);
         userRepository.findByUsername(username).ifPresent(u -> {
             throw new UsernameAlreadyExistsException(username);
         });
-        userRepository.findByEmail(email).ifPresent(u -> {
-            throw new EmailAlreadyExistsException(email);
+        userRepository.findByEmail(normalizedEmail).ifPresent(u -> {
+            throw new EmailAlreadyExistsException(normalizedEmail);
         });
         Set<Role> roleSet = resolveRoles(roles);
-        User user = User.ofPendingVerification(username, passwordHash.hash(rawPassword), email, roleSet);
+        User user = User.ofPendingVerification(username, passwordHash.hash(rawPassword), normalizedEmail, roleSet);
         User saved = userRepository.save(user);
-        issueAndSendCode(username, email);
+        issueAndSendCode(username, normalizedEmail);
         return saved;
     }
 
@@ -180,7 +182,7 @@ public class UserService implements UserUseCase {
     public void resendVerification(String email) {
         // Return silently when email is not found to prevent user enumeration.
         // Callers always receive 204 regardless of whether the email exists.
-        userRepository.findByEmail(email).ifPresent(user -> {
+        userRepository.findByEmail(normalizeEmail(email)).ifPresent(user -> {
             if (user.isEmailVerified()) return;
             // Cooldown por destinatário: evita spam e custo excessivo no provedor de email.
             boolean onCooldown = verificationCodeRepository.findByUsername(user.getUsername())
@@ -289,6 +291,7 @@ public class UserService implements UserUseCase {
     @Override
     @Transactional(noRollbackFor = EmailDeliveryException.class)
     public UpdateProfileResult updateUser(Long id, String newUsername, String newEmail) {
+        String normalizedEmail = normalizeEmail(newEmail);
         User user = userRepository.findById(id).orElseThrow(() -> new UserNotFoundException(id));
         userRepository.findByUsername(newUsername).ifPresent(existing -> {
             if (!existing.getId().equals(id)) throw new UsernameAlreadyExistsException(newUsername);
@@ -297,12 +300,12 @@ public class UserService implements UserUseCase {
         boolean usernameChanged = !oldUsername.equals(newUsername);
         user.rename(newUsername);
 
-        boolean emailChanging = newEmail != null && !newEmail.equalsIgnoreCase(user.getEmail());
+        boolean emailChanging = normalizedEmail != null && !normalizedEmail.equalsIgnoreCase(user.getEmail());
         if (emailChanging) {
-            userRepository.findByEmail(newEmail).ifPresent(existing -> {
-                if (!existing.getId().equals(id)) throw new EmailAlreadyExistsException(newEmail);
+            userRepository.findByEmail(normalizedEmail).ifPresent(existing -> {
+                if (!existing.getId().equals(id)) throw new EmailAlreadyExistsException(normalizedEmail);
             });
-            user.setPendingEmail(newEmail);
+            user.setPendingEmail(normalizedEmail);
         }
 
         User saved = userRepository.save(user);
@@ -319,7 +322,7 @@ public class UserService implements UserUseCase {
 
         if (emailChanging) {
             verificationCodeRepository.deleteByUsername(saved.getUsername());
-            issueAndSendCode(saved.getUsername(), newEmail);
+            issueAndSendCode(saved.getUsername(), normalizedEmail);
         }
 
         return new UpdateProfileResult(saved, emailChanging);
@@ -341,28 +344,30 @@ public class UserService implements UserUseCase {
     @Override
     @Transactional(noRollbackFor = EmailDeliveryException.class)
     public UpdateProfileResult updateOwnProfile(String username, String newUsername, String newEmail, String currentPassword) {
+        String normalizedEmail = normalizeEmail(newEmail);
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new UserNotFoundException(username));
-        boolean emailChanging = newEmail != null && !newEmail.equalsIgnoreCase(user.getEmail());
+        boolean emailChanging = normalizedEmail != null && !normalizedEmail.equalsIgnoreCase(user.getEmail());
         if (emailChanging) {
             if (currentPassword == null || !passwordHash.matches(currentPassword, user.getPassword())) {
                 throw new InvalidPasswordException();
             }
         }
-        return updateUser(user.getId(), newUsername, newEmail);
+        return updateUser(user.getId(), newUsername, normalizedEmail);
     }
 
     @Override
     @Transactional(noRollbackFor = EmailDeliveryException.class)
     public void requestPasswordReset(String email) {
         // Silencioso: sem user enumeration — resposta é sempre 204 independente de o email existir.
-        userRepository.findByEmail(email).ifPresent(user -> {
+        String normalizedEmail = normalizeEmail(email);
+        userRepository.findByEmail(normalizedEmail).ifPresent(user -> {
             passwordResetTokenRepository.deleteByUsername(user.getUsername());
             String token = generateResetToken();
             Instant expiresAt = Instant.now().plus(passwordResetTtlMinutes, ChronoUnit.MINUTES);
             passwordResetTokenRepository.save(user.getUsername(), token, expiresAt);
             String link = passwordResetFrontendUrl + "?token=" + token;
-            emailPort.sendPasswordResetLink(email, user.getUsername(), link);
+            emailPort.sendPasswordResetLink(normalizedEmail, user.getUsername(), link);
         });
     }
 
@@ -459,5 +464,10 @@ public class UserService implements UserUseCase {
 
     private static boolean isValidPassword(String password) {
         return PasswordPolicy.isValid(password);
+    }
+
+    private static String normalizeEmail(String email) {
+        if (email == null) return null;
+        return email.strip().toLowerCase();
     }
 }

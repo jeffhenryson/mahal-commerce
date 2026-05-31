@@ -16,7 +16,7 @@ public record AuditEvent(EventType type, String username, Instant timestamp, Map
     public enum EventType {
         // Auth
         USER_LOGGED_IN, USER_LOGGED_OUT, USER_SESSIONS_CLEARED,
-        LOGIN_FAILED, ACCOUNT_LOCKED, TOKEN_THEFT_DETECTED,
+        LOGIN_FAILED, ACCOUNT_LOCKED, TOKEN_THEFT_DETECTED, ACCESS_DENIED,
         // User lifecycle
         USER_REGISTERED, USER_EMAIL_VERIFIED,
         USER_CREATED, USER_DELETED, USER_UPDATED, USER_EMAIL_CHANGED,
@@ -31,7 +31,9 @@ public record AuditEvent(EventType type, String username, Instant timestamp, Map
         PERMISSION_CREATED, PERMISSION_DELETED,
         PERMISSION_ASSIGNED_TO_ROLE, PERMISSION_REMOVED_FROM_ROLE,
         // 2FA
-        TOTP_ENABLED, TOTP_DISABLED, TOTP_BACKUP_CODES_REGENERATED
+        TOTP_ENABLED, TOTP_DISABLED, TOTP_BACKUP_CODES_REGENERATED,
+        // OAuth
+        OAUTH_GOOGLE_LOGIN
     }
 
     public static AuditEvent of(EventType type, String username) {

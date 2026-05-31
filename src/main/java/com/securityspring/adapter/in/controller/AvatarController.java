@@ -1,5 +1,6 @@
 package com.securityspring.adapter.in.controller;
 
+import com.securityspring.core.domain.exception.avatar.InvalidAvatarFormatException;
 import com.securityspring.core.ports.in.AvatarUseCase;
 import com.securityspring.core.ports.out.storage.AvatarStoragePort;
 import io.swagger.v3.oas.annotations.Operation;
@@ -35,8 +36,14 @@ public class AvatarController {
     @PostMapping("/users/me/avatar")
     public ResponseEntity<Map<String, String>> upload(
             @RequestParam("file") MultipartFile file,
-            Authentication authentication) throws IOException {
-        byte[] bytes = file.getBytes();
+            Authentication authentication) {
+        if (file == null || file.isEmpty()) throw new InvalidAvatarFormatException();
+        byte[] bytes;
+        try {
+            bytes = file.getBytes();
+        } catch (IOException e) {
+            throw new InvalidAvatarFormatException();
+        }
         String avatarUrl = avatarUseCase.upload(authentication.getName(), bytes, file.getOriginalFilename());
         return ResponseEntity.ok(Map.of("avatarUrl", avatarUrl));
     }

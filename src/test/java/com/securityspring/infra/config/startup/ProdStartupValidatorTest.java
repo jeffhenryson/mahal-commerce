@@ -30,6 +30,7 @@ class ProdStartupValidatorTest {
         ReflectionTestUtils.setField(v, "resendFrom", resendFrom);
         ReflectionTestUtils.setField(v, "totpEncryptionKey", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==");
         ReflectionTestUtils.setField(v, "avatarBaseUrl", "https://cdn.meudominio.com/avatars");
+        ReflectionTestUtils.setField(v, "googleClientId", "123456789-abc.apps.googleusercontent.com");
         return v;
     }
 
@@ -193,6 +194,26 @@ class ProdStartupValidatorTest {
         assertThatThrownBy(v::validate)
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("avatar.base-url");
+    }
+
+    // ── oauth2.google.client-id ───────────────────────────────────────────────
+
+    @Test
+    void deve_rejeitar_google_client_id_ausente() {
+        ProdStartupValidator v = validadorValido();
+        ReflectionTestUtils.setField(v, "googleClientId", "");
+        assertThatThrownBy(v::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("oauth2.google.client-id");
+    }
+
+    @Test
+    void deve_rejeitar_google_client_id_nulo() {
+        ProdStartupValidator v = validadorValido();
+        ReflectionTestUtils.setField(v, "googleClientId", null);
+        assertThatThrownBy(v::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("oauth2.google.client-id");
     }
 
     // ── múltiplos erros — todos reportados juntos ─────────────────────────────

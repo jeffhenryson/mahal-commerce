@@ -293,7 +293,7 @@ class UserServiceTest {
 
     @Test
     void updateOwnProfile_emailChange_requiresCurrentPassword() {
-        User user = User.fromPersisted(1L, "alice", "hashed", true, "alice@old.com", true, null, null, null, java.util.Set.of());
+        User user = User.fromPersisted(1L, "alice", "hashed", true, "alice@old.com", true, null, null, null, java.util.Set.of(), null, null);
         when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user));
         when(passwordHash.matches("wrongpass", "hashed")).thenReturn(false);
 
@@ -303,7 +303,7 @@ class UserServiceTest {
 
     @Test
     void updateOwnProfile_emailChange_setsPendingEmailAndSendsCode() {
-        User user = User.fromPersisted(1L, "alice", "hashed", true, "alice@old.com", true, null, null, null, java.util.Set.of());
+        User user = User.fromPersisted(1L, "alice", "hashed", true, "alice@old.com", true, null, null, null, java.util.Set.of(), null, null);
         when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user));
         when(passwordHash.matches("current", "hashed")).thenReturn(true);
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
@@ -323,7 +323,7 @@ class UserServiceTest {
 
     @Test
     void deleteUser_cleansUpAllTotpData() {
-        User user = User.fromPersisted(1L, "alice", "hashed", true, null, false, null, null, null, java.util.Set.of());
+        User user = User.fromPersisted(1L, "alice", "hashed", true, null, false, null, null, null, java.util.Set.of(), null, null);
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
 
         userService.deleteUser(1L);
@@ -336,7 +336,7 @@ class UserServiceTest {
 
     @Test
     void updateUser_usernameChange_revokesSessionsOfOldUsername() {
-        User user = User.fromPersisted(1L, "alice", "hashed", true, null, false, null, null, null, java.util.Set.of());
+        User user = User.fromPersisted(1L, "alice", "hashed", true, null, false, null, null, null, java.util.Set.of(), null, null);
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
         when(userRepository.findByUsername("bob")).thenReturn(Optional.empty());
         when(userRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -350,7 +350,7 @@ class UserServiceTest {
 
     @Test
     void updateUser_emailChange_setsPendingEmailWithoutDisablingAccount() {
-        User user = User.fromPersisted(1L, "alice", "hashed", true, "alice@old.com", true, null, null, null, java.util.Set.of());
+        User user = User.fromPersisted(1L, "alice", "hashed", true, "alice@old.com", true, null, null, null, java.util.Set.of(), null, null);
         when(userRepository.findById(1L)).thenReturn(Optional.of(user));
         when(userRepository.findByUsername("alice")).thenReturn(Optional.empty());
         when(userRepository.findByEmail("alice@new.com")).thenReturn(Optional.empty());
@@ -370,13 +370,68 @@ class UserServiceTest {
 
     @Test
     void updateUser_emailChange_rejectsAlreadyUsedEmail() {
-        User alice = User.fromPersisted(1L, "alice", "hashed", true, "alice@old.com", true, null, null, null, java.util.Set.of());
-        User bob   = User.fromPersisted(2L, "bob",   "hashed", true, "bob@email.com", true, null, null, null, java.util.Set.of());
+        User alice = User.fromPersisted(1L, "alice", "hashed", true, "alice@old.com", true, null, null, null, java.util.Set.of(), null, null);
+        User bob   = User.fromPersisted(2L, "bob",   "hashed", true, "bob@email.com", true, null, null, null, java.util.Set.of(), null, null);
         when(userRepository.findById(1L)).thenReturn(Optional.of(alice));
         when(userRepository.findByUsername("alice")).thenReturn(Optional.empty());
         when(userRepository.findByEmail("bob@email.com")).thenReturn(Optional.of(bob));
 
         assertThatThrownBy(() -> userService.updateUser(1L, "alice", "bob@email.com"))
                 .isInstanceOf(EmailAlreadyExistsException.class);
+    }
+
+    // ── email normalization ───────────────────────────────────────────────────
+
+    @Test
+    void registerUser_normalizesEmailToLowercase() {
+        when(userRepository.findByUsername(anyString())).thenReturn(Optional.empty());
+        when(userRepository.findByEmail("alice@test.com")).thenReturn(Optional.empty());
+        when(passwordHash.hash(anyString())).thenReturn("hashed");
+        when(userRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(verificationCodeRepository.save(anyString(), anyString(), any()))
+                .thenReturn(new EmailVerificationCode(1L, "alice", "CODE", Instant.now().plusSeconds(900), Instant.now(), false));
+
+        User created = userService.registerUser("alice", "Password@123", "Alice@Test.COM", List.of());
+
+        assertThat(created.getEmail()).isEqualTo("alice@test.com");
+        verify(userRepository).findByEmail("alice@test.com");
+        verify(emailPort).sendVerificationCode(eq("alice@test.com"), eq("alice"), anyString());
+    }
+
+    @Test
+    void registerUser_rejectsDuplicateEmailRegardlessOfCase() {
+        when(userRepository.findByUsername(anyString())).thenReturn(Optional.empty());
+        when(userRepository.findByEmail("alice@test.com"))
+                .thenReturn(Optional.of(User.of("other", "hashed", null)));
+
+        assertThatThrownBy(() -> userService.registerUser("alice", "Password@123", "Alice@Test.COM", List.of()))
+                .isInstanceOf(EmailAlreadyExistsException.class);
+    }
+
+    @Test
+    void requestPasswordReset_normalizesEmail() {
+        when(userRepository.findByEmail("alice@test.com")).thenReturn(Optional.empty());
+
+        userService.requestPasswordReset("Alice@Test.COM");
+
+        verify(userRepository).findByEmail("alice@test.com");
+        verifyNoInteractions(emailPort);
+    }
+
+    @Test
+    void updateUser_normalizesNewEmailBeforeSave() {
+        User user = User.fromPersisted(1L, "alice", "hashed", true, "alice@old.com", true, null, null, null, java.util.Set.of(), null, null);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(userRepository.findByUsername("alice")).thenReturn(Optional.empty());
+        when(userRepository.findByEmail("alice@new.com")).thenReturn(Optional.empty());
+        when(userRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(verificationCodeRepository.save(anyString(), anyString(), any()))
+                .thenReturn(new EmailVerificationCode(1L, "alice", "CODE", Instant.now().plusSeconds(900), Instant.now(), false));
+
+        UpdateProfileResult result = userService.updateUser(1L, "alice", "Alice@New.COM");
+
+        assertThat(result.user().getPendingEmail()).isEqualTo("alice@new.com");
+        verify(userRepository).findByEmail("alice@new.com");
+        verify(emailPort).sendVerificationCode(eq("alice@new.com"), eq("alice"), anyString());
     }
 }

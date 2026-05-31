@@ -52,7 +52,7 @@ public class UserControllerTest {
     }
 
     private User user(Long id, String username) {
-        return User.fromPersisted(id, username, "hashed", true, null, false, null, null, null, new HashSet<>());
+        return User.fromPersisted(id, username, "hashed", true, null, false, null, null, null, new HashSet<>(), null, null);
     }
 
     @Test

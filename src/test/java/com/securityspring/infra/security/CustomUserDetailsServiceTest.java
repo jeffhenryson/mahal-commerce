@@ -42,7 +42,7 @@ class CustomUserDetailsServiceTest {
 
     @Test
     void loadUserByUsername_returnsUserDetails_forExistingUser() {
-        User user = User.fromPersisted(1L, "alice", "hashed", true, "alice@test.com", true, null, null, null, Set.of());
+        User user = User.fromPersisted(1L, "alice", "hashed", true, "alice@test.com", true, null, null, null, Set.of(), null, null);
         when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user));
 
         UserDetails result = service.loadUserByUsername("alice");
@@ -58,7 +58,7 @@ class CustomUserDetailsServiceTest {
     void loadUserByUsername_buildsRolesAndPermissionsAsAuthorities() {
         Permission perm = Permission.of(1L, "USER_READ");
         Role role = Role.of(1L, "ROLE_USER", Set.of(perm));
-        User user = User.fromPersisted(1L, "bob", "pwd", true, null, false, null, null, null, Set.of(role));
+        User user = User.fromPersisted(1L, "bob", "pwd", true, null, false, null, null, null, Set.of(role), null, null);
         when(userRepository.findByUsername("bob")).thenReturn(Optional.of(user));
 
         UserDetails result = service.loadUserByUsername("bob");
@@ -75,7 +75,7 @@ class CustomUserDetailsServiceTest {
         Permission write = Permission.of(2L, "USER_WRITE");
         Role user  = Role.of(1L, "ROLE_USER",  Set.of(read));
         Role admin = Role.of(2L, "ROLE_ADMIN", Set.of(write));
-        User domainUser = User.fromPersisted(1L, "carol", "pwd", true, null, false, null, null, null, Set.of(user, admin));
+        User domainUser = User.fromPersisted(1L, "carol", "pwd", true, null, false, null, null, null, Set.of(user, admin), null, null);
         when(userRepository.findByUsername("carol")).thenReturn(Optional.of(domainUser));
 
         UserDetails result = service.loadUserByUsername("carol");
@@ -88,7 +88,7 @@ class CustomUserDetailsServiceTest {
 
     @Test
     void loadUserByUsername_setsDisabled_whenUserNotEnabled() {
-        User disabled = User.fromPersisted(2L, "dave", "pwd", false, null, false, null, null, null, Set.of());
+        User disabled = User.fromPersisted(2L, "dave", "pwd", false, null, false, null, null, null, Set.of(), null, null);
         when(userRepository.findByUsername("dave")).thenReturn(Optional.of(disabled));
 
         UserDetails result = service.loadUserByUsername("dave");

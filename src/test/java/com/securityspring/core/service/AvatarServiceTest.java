@@ -59,11 +59,11 @@ class AvatarServiceTest {
     private static final byte[] PDF_BYTES = new byte[]{0x25, 0x50, 0x44, 0x46, 0x2D};
 
     private User userWithoutAvatar() {
-        return User.fromPersisted(1L, "alice", "hashed", true, null, false, null, null, null, Set.of());
+        return User.fromPersisted(1L, "alice", "hashed", true, null, false, null, null, null, Set.of(), null, null);
     }
 
     private User userWithAvatar(String filename) {
-        User u = User.fromPersisted(1L, "alice", "hashed", true, null, false, null, filename, null, Set.of());
+        User u = User.fromPersisted(1L, "alice", "hashed", true, null, false, null, filename, null, Set.of(), null, null);
         return u;
     }
 

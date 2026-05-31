@@ -34,6 +34,9 @@ public class HmlStartupValidator {
     @Value("${cors.allowed-origins:}")
     private String corsAllowedOrigins;
 
+    @Value("${oauth2.google.client-id:}")
+    private String googleClientId;
+
     @PostConstruct
     public void validate() {
         List<String> errors = new ArrayList<>();
@@ -55,6 +58,9 @@ public class HmlStartupValidator {
         }
         if (isBlankOrPlaceholder(corsAllowedOrigins, "*")) {
             errors.add("cors.allowed-origins não pode ser '*' em hml — defina CORS_ALLOWED_ORIGINS com a origem do ambiente de staging");
+        }
+        if (isBlankOrPlaceholder(googleClientId)) {
+            errors.add("oauth2.google.client-id (GOOGLE_CLIENT_ID) está ausente — autenticação OAuth2 Google pode ser bypassada com qualquer token");
         }
 
         if (!errors.isEmpty()) {

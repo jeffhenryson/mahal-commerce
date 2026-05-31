@@ -31,6 +31,9 @@ public interface UserJpaRepository extends JpaRepository<UserEntity, Long> {
     @Query("select u from UserEntity u left join fetch u.roles r left join fetch r.permissions where u.email = :email")
     Optional<UserEntity> findByEmailWithRoles(@Param("email") String email);
 
+    @Query("select u from UserEntity u left join fetch u.roles r left join fetch r.permissions where u.googleId = :googleId")
+    Optional<UserEntity> findByGoogleIdWithRoles(@Param("googleId") String googleId);
+
     /**
      * Retorna apenas o ID do usuário pelo username.
      * Usado por adaptadores de persistência vizinhos que precisam de uma referência JPA
