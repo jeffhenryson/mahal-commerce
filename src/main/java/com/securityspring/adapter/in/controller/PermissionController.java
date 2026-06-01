@@ -76,7 +76,7 @@ public class PermissionController {
             @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
     })
     @PostMapping
-    @PreAuthorize("hasAuthority('PERMISSION_CREATE')")
+    @PreAuthorize("hasAuthority('DEV_PERMISSION_MANAGE')")
     public ResponseEntity<PermissionResponseDTO> create(@Valid @RequestBody PermissionRequest request,
             Authentication authentication) {
         Permission created = permissionUseCase.createPermission(request.getName());
@@ -93,7 +93,7 @@ public class PermissionController {
             @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
     })
     @DeleteMapping("/{name}")
-    @PreAuthorize("hasAuthority('PERMISSION_DELETE')")
+    @PreAuthorize("hasAuthority('DEV_PERMISSION_MANAGE')")
     public ResponseEntity<Void> delete(@PathVariable String name, Authentication authentication) {
         permissionUseCase.deletePermission(name);
         publisher.publishEvent(AuditEvent.of(EventType.PERMISSION_DELETED,

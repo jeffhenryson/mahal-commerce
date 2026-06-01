@@ -8,4 +8,16 @@ public interface TwoFactorAuthPort {
 
     /** Valida challenge token + código TOTP (ou backup code). Retorna o username se válido. */
     String completeChallengeLogin(String challengeToken, String totpCode);
+
+    /**
+     * Etapa 1 DEV: valida o primeiro código TOTP e armazena o período T.
+     * Retorna um rawDevToken (TTL 90s) que identifica o desafio para a etapa 2.
+     */
+    String issueDevFirstCode(String username, String firstTotpCode);
+
+    /**
+     * Etapa 2 DEV: valida que o segundo código pertence ao período T+1.
+     * Retorna o username se o par de códigos consecutivos é válido.
+     */
+    String completeDevChallenge(String rawDevToken, String secondTotpCode);
 }

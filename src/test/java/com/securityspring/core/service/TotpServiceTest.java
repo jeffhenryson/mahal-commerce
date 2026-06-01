@@ -10,6 +10,7 @@ import com.securityspring.core.domain.model.auth.TotpChallengeToken;
 import com.securityspring.core.domain.model.auth.TotpConfig;
 import com.securityspring.core.domain.model.auth.User;
 import com.securityspring.core.ports.out.credential.PasswordHashPort;
+import com.securityspring.core.ports.out.twofa.DevChallengeRepository;
 import com.securityspring.core.ports.out.twofa.TotpBackupCodeRepository;
 import com.securityspring.core.ports.out.twofa.TotpChallengeTokenRepository;
 import com.securityspring.core.ports.out.twofa.TotpConfigRepository;
@@ -40,6 +41,7 @@ class TotpServiceTest {
     @Mock TotpConfigRepository totpConfigRepository;
     @Mock TotpBackupCodeRepository totpBackupCodeRepository;
     @Mock TotpChallengeTokenRepository totpChallengeTokenRepository;
+    @Mock DevChallengeRepository devChallengeRepository;
     @Mock TotpEncryptionPort encryptionPort;
     @Mock PasswordHashPort passwordHashPort;
     @Mock UserRepository userRepository;
@@ -51,8 +53,8 @@ class TotpServiceTest {
     @BeforeEach
     void setUp() {
         totpService = new TotpService(totpConfigRepository, totpBackupCodeRepository,
-                totpChallengeTokenRepository, encryptionPort, passwordHashPort,
-                userRepository, secretGenerator, codeVerifier, "TestApp");
+                totpChallengeTokenRepository, devChallengeRepository, encryptionPort,
+                passwordHashPort, userRepository, secretGenerator, codeVerifier, "TestApp");
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────

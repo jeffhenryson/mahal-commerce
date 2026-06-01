@@ -35,11 +35,17 @@ public class ActuatorSecurityTest {
     }
 
     @Test
-    void metrics_requires_admin() throws Exception {
+    void metrics_requires_dev_elevated() throws Exception {
+        // Actuator exige DEV_ELEVATED (duplo TOTP concluído) — ROLE_ADMIN não tem acesso direto.
         mockMvc.perform(get("/actuator/metrics")).andExpect(status().isUnauthorized());
         mockMvc.perform(get("/actuator/metrics").with(user("bob").roles("USER")))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/actuator/metrics").with(user("admin").roles("ADMIN")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/actuator/metrics")
+                .with(user("dev").authorities(
+                    org.springframework.security.core.authority.AuthorityUtils
+                        .createAuthorityList("ROLE_DEV", "DEV_ELEVATED"))))
                 .andExpect(status().isOk());
     }
 

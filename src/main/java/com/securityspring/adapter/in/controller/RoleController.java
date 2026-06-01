@@ -79,7 +79,7 @@ public class RoleController {
             @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
     })
     @PostMapping
-    @PreAuthorize("hasAuthority('ROLE_CREATE')")
+    @PreAuthorize("hasAuthority('DEV_ROLE_MANAGE')")
     public ResponseEntity<RoleResponseDTO> create(@Valid @RequestBody RoleRequest request,
             Authentication authentication) {
         Role created = roleUseCase.createRole(request.getName());
@@ -96,7 +96,7 @@ public class RoleController {
             @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
     })
     @DeleteMapping("/{name}")
-    @PreAuthorize("hasAuthority('ROLE_DELETE')")
+    @PreAuthorize("hasAuthority('DEV_ROLE_MANAGE')")
     public ResponseEntity<Void> delete(@PathVariable String name, Authentication authentication) {
         roleUseCase.deleteRole(name);
         publisher.publishEvent(AuditEvent.of(EventType.ROLE_DELETED,

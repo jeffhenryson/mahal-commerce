@@ -3,8 +3,6 @@ package com.securityspring.adapter.out.email;
 import com.securityspring.core.ports.out.notification.EmailPort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.annotation.Profile;
-import org.springframework.stereotype.Component;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -16,8 +14,6 @@ import java.util.concurrent.ConcurrentHashMap;
  * Também retém o último código enviado por username para que testes de integração
  * possam recuperar o código em texto puro sem precisar inverter o hash.
  */
-@Component
-@Profile("dev")
 public class LoggingEmailAdapter implements EmailPort {
 
     private static final Logger log = LoggerFactory.getLogger(LoggingEmailAdapter.class);

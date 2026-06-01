@@ -107,6 +107,30 @@
       "defaultValue": "User@dev1"
     },
     {
+      "name": "email.provider",
+      "type": "java.lang.String",
+      "description": "Adapter de email ativo: 'logging' (padrão dev — loga no console) ou 'resend' (envia via API Resend). Defina EMAIL_PROVIDER=resend em dev para testar envio real.",
+      "defaultValue": "logging"
+    },
+    {
+      "name": "dev.challenge.cleanup.cron",
+      "type": "java.lang.String",
+      "description": "Expressão cron para limpeza de dev_challenge_tokens expirados.",
+      "defaultValue": "0 45 3 * * *"
+    },
+    {
+      "name": "seed.dev.email",
+      "type": "java.lang.String",
+      "description": "E-mail do usuário DEV criado pelo SeedConfig. Vazio = usuário DEV não é criado. Override via DEV_EMAIL.",
+      "defaultValue": ""
+    },
+    {
+      "name": "seed.dev.password",
+      "type": "java.lang.String",
+      "description": "Senha do usuário DEV criado pelo SeedConfig. Override via DEV_PASSWORD.",
+      "defaultValue": "Dev@secure1!"
+    },
+    {
       "name": "security.content-security-policy",
       "type": "java.lang.String",
       "description": "Diretiva Content-Security-Policy enviada em todas as respostas. Vazio desabilita o header (padrão em dev). Em hml/prod use 'default-src none; frame-ancestors none'.",

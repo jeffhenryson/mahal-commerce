@@ -1,5 +1,6 @@
 package com.securityspring.core.ports.in;
 
+import com.securityspring.core.domain.model.auth.DevElevationResult;
 import com.securityspring.core.domain.model.auth.LoginResponse;
 import com.securityspring.core.domain.model.auth.SessionInfo;
 import com.securityspring.core.domain.model.auth.TokenPair;
@@ -11,6 +12,13 @@ public interface AuthUseCase {
 
     /** Conclui o login após validação do código TOTP ou backup code. */
     TokenPair completeTwoFactorLogin(String challengeToken, String totpCode);
+
+    /**
+     * Conclui a elevação DEV: valida o segundo TOTP consecutivo e emite um access token
+     * com a authority DEV_ELEVATED. Sem refresh token — sessão DEV expira com o access token.
+     * Retorna username + token para que o controller possa publicar o evento de auditoria.
+     */
+    DevElevationResult completeDevElevation(String rawDevToken, String secondTotpCode);
 
     TokenPair refresh(String oldRefreshToken);
 

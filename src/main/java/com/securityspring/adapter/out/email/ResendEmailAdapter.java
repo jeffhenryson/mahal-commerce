@@ -7,14 +7,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.scheduling.annotation.Async;
-import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 import java.util.List;
 import java.util.Map;
 
-@Component
-@org.springframework.context.annotation.Profile({"hml", "prod"})
 public class ResendEmailAdapter implements EmailPort {
 
     private static final Logger log = LoggerFactory.getLogger(ResendEmailAdapter.class);

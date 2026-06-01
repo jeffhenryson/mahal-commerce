@@ -3,6 +3,7 @@ package com.securityspring.adapter.in.controller;
 import com.securityspring.adapter.in.dtos.request.RegenerateBackupCodesRequest;
 import com.securityspring.adapter.in.dtos.request.TotpConfirmRequest;
 import com.securityspring.adapter.in.dtos.request.TotpDisableRequest;
+import com.securityspring.adapter.in.dtos.request.TotpReplaceRequest;
 import com.securityspring.adapter.in.dtos.response.TotpConfirmResponseDTO;
 import com.securityspring.adapter.in.dtos.response.TotpSetupResponseDTO;
 import com.securityspring.adapter.in.dtos.response.TotpStatusResponseDTO;
@@ -85,6 +86,22 @@ public class TotpController {
         totpUseCase.disable(authentication.getName(), request.getCurrentPassword(), request.getCode());
         publisher.publishEvent(AuditEvent.of(EventType.TOTP_DISABLED, authentication.getName()));
         return ResponseEntity.noContent().build();
+    }
+
+    @Operation(summary = "Troca o dispositivo 2FA — valida código atual, gera novo QR e novos backup codes")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Novo secret gerado — confirme com /auth/2fa/confirm",
+                    content = @Content(schema = @Schema(implementation = TotpSetupResponseDTO.class))),
+            @ApiResponse(responseCode = "400", description = "Código atual inválido", content = @Content),
+            @ApiResponse(responseCode = "400", description = "2FA não está ativo", content = @Content)
+    })
+    @PostMapping("/replace")
+    ResponseEntity<TotpSetupResponseDTO> replace(@Valid @RequestBody TotpReplaceRequest request,
+            Authentication authentication) {
+        TotpUseCase.TotpSetupResult result = totpUseCase.replaceTotp(
+                authentication.getName(), request.getCurrentTotpCode());
+        publisher.publishEvent(AuditEvent.of(EventType.TOTP_REPLACED, authentication.getName()));
+        return ResponseEntity.ok(new TotpSetupResponseDTO(result.secret(), result.otpauthUri()));
     }
 
     @Operation(summary = "Regenera backup codes — invalida os anteriores, exige senha atual")

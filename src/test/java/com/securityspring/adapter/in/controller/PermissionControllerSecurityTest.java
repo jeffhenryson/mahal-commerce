@@ -65,14 +65,15 @@ public class PermissionControllerSecurityTest {
     }
 
     @Test
-    void create_permission_with_permission_create_returns_201() throws Exception {
+    void create_permission_with_dev_permission_manage_returns_201() throws Exception {
         String name = "PERM_SEC_TEST_" + System.currentTimeMillis();
         mockMvc.perform(post("/permissions")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"" + name + "\"}")
-                .with(user("admin").authorities(
-                        new SimpleGrantedAuthority("ROLE_ADMIN"),
-                        new SimpleGrantedAuthority("PERMISSION_CREATE"))))
+                .with(user("dev").authorities(
+                        new SimpleGrantedAuthority("ROLE_DEV"),
+                        new SimpleGrantedAuthority("DEV_ELEVATED"),
+                        new SimpleGrantedAuthority("DEV_PERMISSION_MANAGE"))))
                 .andExpect(status().isCreated());
     }
 

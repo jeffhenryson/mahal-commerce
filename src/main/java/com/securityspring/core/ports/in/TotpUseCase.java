@@ -18,5 +18,23 @@ public interface TotpUseCase {
     /** Retorna true se o 2FA (TOTP) está ativado para o usuário. */
     boolean isEnabled(String username);
 
+    /**
+     * Inicia troca de dispositivo 2FA. Valida o código atual antes de gerar novo secret,
+     * garantindo que apenas quem possui acesso ao app atual pode trocar.
+     */
+    TotpSetupResult replaceTotp(String username, String currentTotpCode);
+
+    /**
+     * Etapa 1 do duplo TOTP DEV: valida o primeiro código e armazena o período T.
+     * Retorna um rawDevToken temporário (TTL 90s) que o frontend usa na etapa 2.
+     */
+    String issueDevFirstCode(String username, String firstTotpCode);
+
+    /**
+     * Etapa 2 do duplo TOTP DEV: valida que o segundo código pertence ao período T+1.
+     * Retorna o username se válido — o caller emite o access token DEV-elevado.
+     */
+    String completeDevChallenge(String rawDevToken, String secondTotpCode);
+
     record TotpSetupResult(String secret, String otpauthUri) {}
 }

@@ -19,12 +19,16 @@ public class SeedConfig {
 
     private static final Logger log = LoggerFactory.getLogger(SeedConfig.class);
 
+    // Permissões do ADMIN: gestão de usuários, leitura de roles/permissões, auditoria de negócio.
+    // ADMIN NÃO pode criar/deletar roles ou permissões — isso é exclusivo do DEV.
     private static final String[] ADMIN_PERMISSIONS = {
         "USER_CREATE", "USER_READ", "USER_UPDATE", "USER_DELETE", "USER_ROLE_ASSIGN", "USER_STATUS",
-        "ROLE_READ", "ROLE_CREATE", "ROLE_DELETE", "ROLE_MANAGE_PERMISSIONS",
-        "PERMISSION_READ", "PERMISSION_CREATE", "PERMISSION_DELETE",
+        "ROLE_READ", "ROLE_MANAGE_PERMISSIONS",
+        "PERMISSION_READ",
         "AUDIT_READ"
     };
+
+    // DEV_ONLY_PERMISSIONS e ROLE_DEV são gerenciados pelo DevRoleBootstrapConfig (todos os profiles).
 
     @Bean
     CommandLineRunner seedAll(UserUseCase userUseCase,
@@ -41,34 +45,25 @@ public class SeedConfig {
 
     private void seedPermissions(PermissionUseCase permissionUseCase) {
         for (String name : ADMIN_PERMISSIONS) {
-            try {
-                permissionUseCase.createPermission(name);
-            } catch (Exception e) {
-                log.debug("seed.permission.skip name={} reason={}", name, e.getMessage());
-            }
+            try { permissionUseCase.createPermission(name); }
+            catch (Exception e) { log.debug("seed.permission.skip name={} reason={}", name, e.getMessage()); }
         }
+        // DEV_ONLY_PERMISSIONS e ROLE_DEV são gerenciados pelo DevRoleBootstrapConfig (todos os profiles).
     }
 
     private void seedRoles(RoleUseCase roleUseCase) {
         for (String name : new String[]{"ROLE_ADMIN", "ROLE_USER"}) {
-            try {
-                roleUseCase.createRole(name);
-            } catch (Exception e) {
-                log.debug("seed.role.skip name={} reason={}", name, e.getMessage());
-            }
+            try { roleUseCase.createRole(name); }
+            catch (Exception e) { log.debug("seed.role.skip name={} reason={}", name, e.getMessage()); }
         }
+
         for (String perm : ADMIN_PERMISSIONS) {
-            try {
-                roleUseCase.assignPermission("ROLE_ADMIN", perm);
-            } catch (Exception e) {
-                log.debug("seed.role.assignPermission.skip role=ROLE_ADMIN perm={} reason={}", perm, e.getMessage());
-            }
+            try { roleUseCase.assignPermission("ROLE_ADMIN", perm); }
+            catch (Exception e) { log.debug("seed.role.assignPermission.skip role=ROLE_ADMIN perm={} reason={}", perm, e.getMessage()); }
         }
-        try {
-            roleUseCase.assignPermission("ROLE_USER", "USER_READ");
-        } catch (Exception e) {
-            log.debug("seed.role.assignPermission.skip role=ROLE_USER perm=USER_READ reason={}", e.getMessage());
-        }
+
+        try { roleUseCase.assignPermission("ROLE_USER", "USER_READ"); }
+        catch (Exception e) { log.debug("seed.role.assignPermission.skip role=ROLE_USER perm=USER_READ reason={}", e.getMessage()); }
     }
 
     private void seedUsers(UserUseCase userUseCase, String adminPassword, String userPassword) {

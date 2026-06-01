@@ -7,6 +7,7 @@ import com.securityspring.core.domain.exception.PermissionNotFoundException;
 import com.securityspring.core.domain.exception.RoleAlreadyExistsException;
 import com.securityspring.core.domain.exception.auth.AccountDisabledException;
 import com.securityspring.core.domain.exception.auth.AccountLockedException;
+import com.securityspring.core.domain.exception.auth.DevChallengeExpiredException;
 import com.securityspring.core.domain.exception.auth.InvalidPasswordException;
 import com.securityspring.core.domain.exception.auth.OAuthTokenInvalidException;
 import com.securityspring.core.domain.exception.auth.InvalidRefreshTokenException;
@@ -16,6 +17,8 @@ import com.securityspring.core.domain.exception.auth.PasswordResetTokenNotFoundE
 import com.securityspring.core.domain.exception.auth.RefreshTokenAlreadyUsedException;
 import com.securityspring.core.domain.exception.auth.TotpAlreadyEnabledException;
 import com.securityspring.core.domain.exception.auth.TotpChallengeExpiredException;
+import com.securityspring.core.domain.exception.auth.TotpCodeRequiredException;
+import com.securityspring.core.domain.exception.auth.TotpNotConsecutiveException;
 import com.securityspring.core.domain.exception.auth.TotpNotEnabledException;
 import com.securityspring.core.domain.exception.auth.RefreshTokenExpiredException;
 import com.securityspring.core.domain.exception.auth.SessionNotFoundException;
@@ -189,6 +192,21 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(TotpNotEnabledException.class)
     public ResponseEntity<ApiError> handleTotpNotEnabled(TotpNotEnabledException ex, HttpServletRequest req) {
         return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "TOTP_NOT_ENABLED", req);
+    }
+
+    @ExceptionHandler(TotpCodeRequiredException.class)
+    public ResponseEntity<ApiError> handleTotpCodeRequired(TotpCodeRequiredException ex, HttpServletRequest req) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "TOTP_CODE_REQUIRED", req);
+    }
+
+    @ExceptionHandler(TotpNotConsecutiveException.class)
+    public ResponseEntity<ApiError> handleTotpNotConsecutive(TotpNotConsecutiveException ex, HttpServletRequest req) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "TOTP_NOT_CONSECUTIVE", req);
+    }
+
+    @ExceptionHandler(DevChallengeExpiredException.class)
+    public ResponseEntity<ApiError> handleDevChallengeExpired(DevChallengeExpiredException ex, HttpServletRequest req) {
+        return error(HttpStatus.GONE, ex.getMessage(), "DEV_CHALLENGE_EXPIRED", req);
     }
 
     @ExceptionHandler(SessionNotFoundException.class)

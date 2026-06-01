@@ -26,6 +26,7 @@ import com.securityspring.core.ports.out.role.PermissionRepository;
 import com.securityspring.core.ports.out.token.RefreshTokenPort;
 import com.securityspring.core.ports.out.role.RoleRepository;
 import com.securityspring.core.ports.out.token.TokenBlocklistPort;
+import com.securityspring.core.ports.out.twofa.DevChallengeRepository;
 import com.securityspring.core.ports.out.twofa.TotpBackupCodeRepository;
 import com.securityspring.core.ports.out.twofa.TotpChallengeTokenRepository;
 import com.securityspring.core.ports.out.twofa.TotpConfigRepository;
@@ -94,6 +95,7 @@ class CoreBeanConfig {
     TotpService totpService(TotpConfigRepository totpConfigRepository,
             TotpBackupCodeRepository totpBackupCodeRepository,
             TotpChallengeTokenRepository totpChallengeTokenRepository,
+            DevChallengeRepository devChallengeRepository,
             TotpEncryptionPort totpEncryptionPort,
             PasswordHashPort passwordHashPort,
             UserRepository userRepository,
@@ -101,7 +103,8 @@ class CoreBeanConfig {
         SecretGenerator secretGenerator = new DefaultSecretGenerator();
         CodeVerifier codeVerifier = new DefaultCodeVerifier(new DefaultCodeGenerator(), new SystemTimeProvider());
         return new TotpService(totpConfigRepository, totpBackupCodeRepository, totpChallengeTokenRepository,
-                totpEncryptionPort, passwordHashPort, userRepository, secretGenerator, codeVerifier, appName);
+                devChallengeRepository, totpEncryptionPort, passwordHashPort, userRepository,
+                secretGenerator, codeVerifier, appName);
     }
 
     @Bean

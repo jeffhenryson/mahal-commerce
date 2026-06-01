@@ -1,14 +1,18 @@
 package com.securityspring.core.service;
 
+import com.securityspring.core.domain.exception.auth.DevChallengeExpiredException;
 import com.securityspring.core.domain.exception.auth.InvalidPasswordException;
 import com.securityspring.core.domain.exception.auth.InvalidTotpCodeException;
 import com.securityspring.core.domain.exception.auth.TotpAlreadyEnabledException;
 import com.securityspring.core.domain.exception.auth.TotpChallengeExpiredException;
+import com.securityspring.core.domain.exception.auth.TotpNotConsecutiveException;
 import com.securityspring.core.domain.exception.auth.TotpNotEnabledException;
+import com.securityspring.core.domain.model.auth.DevChallengeToken;
 import com.securityspring.core.domain.model.auth.TotpChallengeToken;
 import com.securityspring.core.domain.model.auth.TotpConfig;
 import com.securityspring.core.ports.in.TotpUseCase;
 import com.securityspring.core.ports.out.credential.PasswordHashPort;
+import com.securityspring.core.ports.out.twofa.DevChallengeRepository;
 import com.securityspring.core.ports.out.twofa.TotpBackupCodeRepository;
 import com.securityspring.core.ports.out.twofa.TotpChallengeTokenRepository;
 import com.securityspring.core.ports.out.twofa.TotpConfigRepository;
@@ -32,10 +36,13 @@ public class TotpService implements TotpUseCase, TwoFactorAuthPort {
 
     private static final int BACKUP_CODE_COUNT = 8;
     private static final int CHALLENGE_TTL_MINUTES = 5;
+    private static final int DEV_CHALLENGE_TTL_SECONDS = 90;
+    private static final long TOTP_PERIOD_SECONDS = 30L;
 
     private final TotpConfigRepository totpConfigRepository;
     private final TotpBackupCodeRepository totpBackupCodeRepository;
     private final TotpChallengeTokenRepository totpChallengeTokenRepository;
+    private final DevChallengeRepository devChallengeRepository;
     private final TotpEncryptionPort encryptionPort;
     private final PasswordHashPort passwordHashPort;
     private final UserRepository userRepository;
@@ -47,6 +54,7 @@ public class TotpService implements TotpUseCase, TwoFactorAuthPort {
     public TotpService(TotpConfigRepository totpConfigRepository,
             TotpBackupCodeRepository totpBackupCodeRepository,
             TotpChallengeTokenRepository totpChallengeTokenRepository,
+            DevChallengeRepository devChallengeRepository,
             TotpEncryptionPort encryptionPort,
             PasswordHashPort passwordHashPort,
             UserRepository userRepository,
@@ -56,6 +64,7 @@ public class TotpService implements TotpUseCase, TwoFactorAuthPort {
         this.totpConfigRepository = totpConfigRepository;
         this.totpBackupCodeRepository = totpBackupCodeRepository;
         this.totpChallengeTokenRepository = totpChallengeTokenRepository;
+        this.devChallengeRepository = devChallengeRepository;
         this.encryptionPort = encryptionPort;
         this.passwordHashPort = passwordHashPort;
         this.userRepository = userRepository;
@@ -198,6 +207,81 @@ public class TotpService implements TotpUseCase, TwoFactorAuthPort {
         }
 
         return username;
+    }
+
+    // --- replaceTotp (P2: trocar dispositivo 2FA) ---
+
+    @Override
+    @Transactional
+    public TotpSetupResult replaceTotp(String username, String currentTotpCode) {
+        TotpConfig config = totpConfigRepository.findByUsername(username)
+                .orElseThrow(TotpNotEnabledException::new);
+        if (!config.enabled()) throw new TotpNotEnabledException();
+
+        String secret = encryptionPort.decrypt(config.secretEncrypted());
+        if (!codeVerifier.isValidCode(secret, currentTotpCode)) {
+            throw new InvalidTotpCodeException();
+        }
+
+        // Apaga configuração e backup codes atuais; setup() cria uma nova configuração.
+        totpConfigRepository.deleteByUsername(username);
+        totpBackupCodeRepository.deleteByUsername(username);
+        return setup(username);
+    }
+
+    // --- Duplo TOTP DEV (P5) ---
+
+    @Override
+    @Transactional
+    public String issueDevFirstCode(String username, String firstTotpCode) {
+        TotpConfig config = totpConfigRepository.findByUsername(username)
+                .orElseThrow(TotpNotEnabledException::new);
+        if (!config.enabled()) throw new TotpNotEnabledException();
+
+        String secret = encryptionPort.decrypt(config.secretEncrypted());
+        if (!codeVerifier.isValidCode(secret, firstTotpCode)) {
+            throw new InvalidTotpCodeException();
+        }
+
+        long periodT = Instant.now().getEpochSecond() / TOTP_PERIOD_SECONDS;
+
+        byte[] bytes = new byte[32];
+        secureRandom.nextBytes(bytes);
+        String rawDevToken = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+        Instant expiresAt = Instant.now().plus(DEV_CHALLENGE_TTL_SECONDS, ChronoUnit.SECONDS);
+
+        devChallengeRepository.save(username, rawDevToken, periodT, expiresAt);
+        return rawDevToken;
+    }
+
+    @Override
+    @Transactional
+    public String completeDevChallenge(String rawDevToken, String secondTotpCode) {
+        DevChallengeToken challenge = devChallengeRepository.findByToken(rawDevToken)
+                .orElseThrow(DevChallengeExpiredException::new);
+
+        if (challenge.isExpired() || challenge.isUsed()) throw new DevChallengeExpiredException();
+
+        long currentPeriod = Instant.now().getEpochSecond() / TOTP_PERIOD_SECONDS;
+
+        // O segundo código deve pertencer ao período imediatamente seguinte ao primeiro.
+        if (currentPeriod != challenge.periodT() + 1) {
+            throw new TotpNotConsecutiveException();
+        }
+
+        TotpConfig config = totpConfigRepository.findByUsername(challenge.username())
+                .orElseThrow(TotpNotEnabledException::new);
+
+        String secret = encryptionPort.decrypt(config.secretEncrypted());
+        if (!codeVerifier.isValidCode(secret, secondTotpCode)) {
+            throw new InvalidTotpCodeException();
+        }
+
+        if (!devChallengeRepository.consume(rawDevToken)) {
+            throw new DevChallengeExpiredException();
+        }
+
+        return challenge.username();
     }
 
     private boolean isValidBackupCode(String username, String code) {

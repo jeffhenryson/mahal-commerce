@@ -2,6 +2,7 @@ package com.securityspring.core.service;
 
 import com.securityspring.core.domain.exception.auth.AccountLockedException;
 import com.securityspring.core.domain.exception.auth.RefreshTokenAlreadyUsedException;
+import com.securityspring.core.domain.model.auth.DevElevationResult;
 import com.securityspring.core.domain.model.auth.LoginResponse;
 import com.securityspring.core.domain.model.auth.SessionInfo;
 import com.securityspring.core.domain.model.auth.TokenPair;
@@ -15,6 +16,7 @@ import com.securityspring.core.ports.out.twofa.TwoFactorAuthPort;
 import com.securityspring.core.ports.out.user.UserAuthoritiesPort;
 
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -111,5 +113,15 @@ public class AuthService implements AuthUseCase {
     @Override
     public void revokeSession(Long sessionId, String username) {
         refreshToken.revokeByIdForUser(sessionId, username);
+    }
+
+    @Override
+    public DevElevationResult completeDevElevation(String rawDevToken, String secondTotpCode) {
+        String username = twoFactorAuth.completeDevChallenge(rawDevToken, secondTotpCode);
+        Set<String> authorities = new HashSet<>(userAuthorities.loadAuthoritiesByUsername(username));
+        // DEV_ELEVATED sinaliza que o duplo TOTP foi concluído — protege endpoints da área DEV.
+        authorities.add("DEV_ELEVATED");
+        String devAccessToken = accessToken.generateFor(username, authorities);
+        return new DevElevationResult(username, devAccessToken);
     }
 }
