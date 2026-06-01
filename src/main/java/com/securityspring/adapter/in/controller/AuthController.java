@@ -98,6 +98,7 @@ public class AuthController {
     ResponseEntity<TokenPairResponseDTO> verifyTwoFactor(@Valid @RequestBody TotpVerifyRequest request,
             HttpServletResponse response) {
         TokenPair pair = authUseCase.completeTwoFactorLogin(request.getChallengeToken(), request.getCode());
+        publisher.publishEvent(AuditEvent.of(EventType.USER_LOGGED_IN, pair.getUsername()));
         setRefreshCookie(response, pair.getRefreshToken());
         return ResponseEntity.ok(new TokenPairResponseDTO(pair.getAccessToken(), pair.getRefreshToken(), accessTtlSeconds));
     }

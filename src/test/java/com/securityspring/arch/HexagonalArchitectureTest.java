@@ -7,6 +7,10 @@ import com.tngtech.archunit.lang.ArchRule;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import com.tngtech.archunit.base.DescribedPredicate;
+import com.tngtech.archunit.core.domain.JavaClass;
+
+import static com.tngtech.archunit.base.DescribedPredicate.not;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 
@@ -85,6 +89,32 @@ class HexagonalArchitectureTest {
                 .resideInAPackage("..core.ports.out..");
 
         rule.check(classes);
+    }
+
+    @Test
+    void core_domain_and_ports_must_not_depend_on_spring() {
+        // core/domain e core/ports não devem ter nenhuma dependência de Spring.
+        noClasses()
+                .that().resideInAnyPackage("..core.domain..", "..core.ports..")
+                .should().dependOnClassesThat()
+                .resideInAPackage("org.springframework..")
+                .check(classes);
+    }
+
+    @Test
+    void core_service_may_only_use_spring_transaction() {
+        // Exceção consciente: @Transactional em core/service é aceito para manter
+        // a demarcação transacional no nível do use-case, evitando transações
+        // órfãs em operações multi-passo. Spring MVC, Data, Security e outros
+        // módulos Spring continuam proibidos em core/.
+        DescribedPredicate<JavaClass> springButNotTransaction =
+                JavaClass.Predicates.resideInAPackage("org.springframework..")
+                        .and(not(JavaClass.Predicates.resideInAPackage("org.springframework.transaction..")));
+
+        noClasses()
+                .that().resideInAPackage("..core.service..")
+                .should().dependOnClassesThat(springButNotTransaction)
+                .check(classes);
     }
 
     @Test

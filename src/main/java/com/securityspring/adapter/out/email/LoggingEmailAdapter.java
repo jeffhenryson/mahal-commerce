@@ -42,6 +42,26 @@ public class LoggingEmailAdapter implements EmailPort {
                 oldEmail, username, newEmail);
     }
 
+    @Override
+    public void sendPasswordChangedAlert(String to, String username) {
+        log.info("DEV EMAIL >> to={} username={} [security-alert:password-changed]", to, username);
+    }
+
+    @Override
+    public void sendAccountLockedAlert(String to, String username) {
+        log.info("DEV EMAIL >> to={} username={} [security-alert:account-locked]", to, username);
+    }
+
+    @Override
+    public void sendTotpStatusAlert(String to, String username, boolean enabled) {
+        log.info("DEV EMAIL >> to={} username={} enabled={} [security-alert:totp-status]", to, username, enabled);
+    }
+
+    @Override
+    public void sendTokenTheftAlert(String to, String username) {
+        log.info("DEV EMAIL >> to={} username={} [security-alert:token-theft]", to, username);
+    }
+
     /** Returns the last plain-text verification code or reset link sent to the given username. Test use only. */
     public String getLastCodeForUsername(String username) {
         return lastCodeByUsername.get(username);

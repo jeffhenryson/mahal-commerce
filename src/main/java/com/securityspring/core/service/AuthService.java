@@ -73,7 +73,7 @@ public class AuthService implements AuthUseCase {
         Set<String> authorities = userAuthorities.loadAuthoritiesByUsername(username);
         String access = accessToken.generateFor(username, authorities);
         String refresh = refreshToken.issue(username);
-        return new TokenPair(access, refresh);
+        return new TokenPair(access, refresh, username);
     }
 
     @Override

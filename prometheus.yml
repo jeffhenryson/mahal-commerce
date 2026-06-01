@@ -1,0 +1,12 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: security-spring
+    metrics_path: /actuator/prometheus
+    static_configs:
+      # host.docker.internal resolve para o host no Docker Desktop (Mac/Windows) e
+      # em Linux com --add-host=host.docker.internal:host-gateway no container.
+      # Se rodar a app dentro do compose, substitua pelo nome do service.
+      - targets: ["host.docker.internal:8080"]

@@ -1,6 +1,7 @@
 package com.securityspring.infra.security;
 
 import com.securityspring.core.ports.out.ratelimit.LoginRateLimiterPort;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -44,7 +45,7 @@ class LoginRateLimitingFilterTest {
         rateLimiter = mock(LoginRateLimiterPort.class);
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new StubController())
-                .addFilters(new LoginRateLimitingFilter(rateLimiter, 60L))
+                .addFilters(new LoginRateLimitingFilter(rateLimiter, new SimpleMeterRegistry(), 60L))
                 .build();
     }
 

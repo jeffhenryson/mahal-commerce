@@ -1,5 +1,10 @@
 version: "3.9"
 
+# Stack de homologação: PostgreSQL + Redis + Prometheus
+# Uso: docker compose up -d
+# A aplicação roda fora do compose — inicie com SPRING_PROFILES_ACTIVE=hml ./mvnw spring-boot:run
+# Prometheus scrapa http://host.docker.internal:8080/actuator/prometheus a cada 15s
+
 services:
   postgres-hml:
     image: postgres:16-alpine
@@ -32,5 +37,22 @@ services:
       timeout: 3s
       retries: 10
 
+  prometheus-hml:
+    image: prom/prometheus:v2.52.0
+    container_name: prometheus-hml
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheusdata_hml:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=7d"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
 volumes:
   pgdata_hml:
+  prometheusdata_hml:

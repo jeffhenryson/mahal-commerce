@@ -60,6 +60,50 @@ public class ResendEmailAdapter implements EmailPort {
         send(oldEmail, "Seu email foi alterado", html, "email.email-change-notification");
     }
 
+    @Async("emailTaskExecutor")
+    @Override
+    public void sendPasswordChangedAlert(String to, String username) {
+        String html = buildSecurityAlertHtml(username,
+                "Sua senha foi alterada",
+                "A senha da sua conta foi alterada agora.",
+                "Se não foi você, entre em contato com o suporte imediatamente e revogue suas sessões.");
+        send(to, "Alerta de segurança: senha alterada", html, "email.security-alert.password-changed");
+    }
+
+    @Async("emailTaskExecutor")
+    @Override
+    public void sendAccountLockedAlert(String to, String username) {
+        String html = buildSecurityAlertHtml(username,
+                "Conta temporariamente bloqueada",
+                "Sua conta foi bloqueada temporariamente devido a múltiplas tentativas de login malsucedidas.",
+                "Aguarde alguns minutos e tente novamente. Se não foi você, sua senha pode estar comprometida.");
+        send(to, "Alerta de segurança: conta bloqueada", html, "email.security-alert.account-locked");
+    }
+
+    @Async("emailTaskExecutor")
+    @Override
+    public void sendTotpStatusAlert(String to, String username, boolean enabled) {
+        String action = enabled ? "ativada" : "desativada";
+        String detail = enabled
+                ? "A autenticação em dois fatores foi ativada na sua conta."
+                : "A autenticação em dois fatores foi desativada na sua conta.";
+        String html = buildSecurityAlertHtml(username,
+                "Autenticação em dois fatores " + action,
+                detail,
+                "Se não foi você, acesse sua conta e revogue todas as sessões ativas imediatamente.");
+        send(to, "Alerta de segurança: 2FA " + action, html, "email.security-alert.totp-" + (enabled ? "enabled" : "disabled"));
+    }
+
+    @Async("emailTaskExecutor")
+    @Override
+    public void sendTokenTheftAlert(String to, String username) {
+        String html = buildSecurityAlertHtml(username,
+                "Acesso suspeito detectado",
+                "Detectamos o reuso de uma credencial de sessão já utilizada — todas as sessões da sua conta foram encerradas automaticamente.",
+                "Se não foi você, sua conta pode estar comprometida. Troque sua senha imediatamente.");
+        send(to, "Alerta de segurança: acesso suspeito", html, "email.security-alert.token-theft");
+    }
+
     private void send(String to, String subject, String html, String logPrefix) {
         Map<String, Object> body = Map.of(
                 "from", fromAddress,
@@ -128,6 +172,17 @@ public class ResendEmailAdapter implements EmailPort {
                   </p>
                 </div>
                 """.formatted(escapeHtml(username), escapeHtml(newEmail));
+    }
+
+    private String buildSecurityAlertHtml(String username, String title, String message, String footer) {
+        return """
+                <div style="font-family:sans-serif;max-width:480px;margin:0 auto">
+                  <h2 style="color:#c0392b">%s</h2>
+                  <p>Olá, <strong>%s</strong>!</p>
+                  <p>%s</p>
+                  <p style="color:#666;font-size:.85rem">%s</p>
+                </div>
+                """.formatted(escapeHtml(title), escapeHtml(username), escapeHtml(message), escapeHtml(footer));
     }
 
     private static String escapeHtml(String value) {

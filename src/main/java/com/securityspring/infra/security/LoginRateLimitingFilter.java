@@ -3,6 +3,8 @@ package com.securityspring.infra.security;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.securityspring.core.ports.out.ratelimit.LoginRateLimiterPort;
 import com.securityspring.infra.handler.ApiError;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -26,11 +28,14 @@ public class LoginRateLimitingFilter extends OncePerRequestFilter {
 
     private final LoginRateLimiterPort rateLimiter;
     private final long windowSeconds;
+    private final Counter rateLimitBlockedCounter;
 
     public LoginRateLimitingFilter(LoginRateLimiterPort rateLimiter,
+                                   MeterRegistry meterRegistry,
                                    @Value("${rate.limit.login.window-seconds:60}") long windowSeconds) {
         this.rateLimiter = rateLimiter;
         this.windowSeconds = windowSeconds;
+        this.rateLimitBlockedCounter = meterRegistry.counter("auth.rate_limit.blocked.total");
     }
 
     @Override
@@ -54,6 +59,7 @@ public class LoginRateLimitingFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
         if (!rateLimiter.tryConsume(clientIp(request))) {
+            rateLimitBlockedCounter.increment();
             ApiError error = ApiError.of(
                     "Muitas tentativas — aguarde antes de tentar novamente",
                     "TOO_MANY_REQUESTS",
