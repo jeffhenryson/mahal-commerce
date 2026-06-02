@@ -37,6 +37,9 @@ public class HmlStartupValidator {
     @Value("${oauth2.google.client-id:}")
     private String googleClientId;
 
+    @Value("${totp.encryption.key:}")
+    private String totpEncryptionKey;
+
     @PostConstruct
     public void validate() {
         List<String> errors = new ArrayList<>();
@@ -61,6 +64,11 @@ public class HmlStartupValidator {
         }
         if (isBlankOrPlaceholder(googleClientId)) {
             errors.add("oauth2.google.client-id (GOOGLE_CLIENT_ID) está ausente — autenticação OAuth2 Google pode ser bypassada com qualquer token");
+        }
+        if (isBlankOrPlaceholder(totpEncryptionKey)) {
+            errors.add("totp.encryption.key (TOTP_ENCRYPTION_KEY) está ausente — secrets TOTP serão criptografados com chave de zeros (inseguro)");
+        } else if (totpEncryptionKey.length() < 32) {
+            errors.add("totp.encryption.key parece curto demais — use ao menos 32 caracteres (Base64 de 256 bits)");
         }
 
         if (!errors.isEmpty()) {

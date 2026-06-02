@@ -20,4 +20,10 @@ public interface TwoFactorAuthPort {
      * Retorna o username se o par de códigos consecutivos é válido.
      */
     String completeDevChallenge(String rawDevToken, String secondTotpCode);
+
+    /**
+     * Valida um código TOTP (ou backup code) para o usuário sem gerar tokens.
+     * Retorna true se o código é válido; não lança exceção — o chamador decide o erro.
+     */
+    boolean validateTotpCode(String username, String code);
 }

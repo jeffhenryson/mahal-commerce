@@ -13,4 +13,7 @@ public interface TotpBackupCodeRepository {
     boolean markAsUsed(String rawCode);
 
     void deleteByUsername(String username);
+
+    /** Conta quantos backup codes ainda não foram usados para o usuário. */
+    int countRemainingByUsername(String username);
 }

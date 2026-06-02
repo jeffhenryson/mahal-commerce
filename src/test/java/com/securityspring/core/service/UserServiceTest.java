@@ -16,9 +16,12 @@ import com.securityspring.core.ports.out.credential.PasswordHashPort;
 import com.securityspring.core.ports.out.token.RefreshTokenPort;
 import com.securityspring.core.ports.out.role.RoleRepository;
 import com.securityspring.core.ports.out.token.TokenBlocklistPort;
+import com.securityspring.core.domain.exception.auth.InvalidTotpCodeException;
+import com.securityspring.core.domain.exception.auth.TotpCodeRequiredException;
 import com.securityspring.core.ports.out.twofa.TotpBackupCodeRepository;
 import com.securityspring.core.ports.out.twofa.TotpChallengeTokenRepository;
 import com.securityspring.core.ports.out.twofa.TotpConfigRepository;
+import com.securityspring.core.ports.out.twofa.TwoFactorAuthPort;
 import com.securityspring.core.ports.out.storage.AvatarStoragePort;
 import com.securityspring.core.ports.out.user.UserCachePort;
 import com.securityspring.core.ports.out.user.UserRepository;
@@ -54,6 +57,7 @@ class UserServiceTest {
     @Mock TotpConfigRepository totpConfigRepository;
     @Mock TotpBackupCodeRepository totpBackupCodeRepository;
     @Mock TotpChallengeTokenRepository totpChallengeTokenRepository;
+    @Mock TwoFactorAuthPort twoFactorAuthPort;
     @Mock AvatarStoragePort avatarStoragePort;
 
     UserService userService;
@@ -64,7 +68,7 @@ class UserServiceTest {
                 refreshTokenPort, tokenBlocklistPort, emailPort, verificationCodeRepository,
                 passwordResetTokenRepository, userCachePort,
                 totpConfigRepository, totpBackupCodeRepository, totpChallengeTokenRepository,
-                avatarStoragePort, 15L, 60L, 15L, "http://localhost:3000/reset-password");
+                twoFactorAuthPort, avatarStoragePort, 15L, 60L, 15L, "http://localhost:3000/reset-password");
     }
 
     @Test
@@ -136,23 +140,76 @@ class UserServiceTest {
         when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user));
         when(passwordHash.matches("wrong", "hashed")).thenReturn(false);
 
-        assertThatThrownBy(() -> userService.changeOwnPassword("alice", "wrong", "NewPass@123"))
+        assertThatThrownBy(() -> userService.changeOwnPassword("alice", "wrong", "NewPass@123", null, false))
                 .isInstanceOf(InvalidPasswordException.class);
         verifyNoInteractions(refreshTokenPort, tokenBlocklistPort);
     }
 
     @Test
-    void changeOwnPassword_invalidatesAllSessions() {
+    void changeOwnPassword_withRevokeOtherSessions_invalidatesAllSessions() {
         User user = User.of("alice", "hashed", null);
         when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user));
         when(passwordHash.matches("current", "hashed")).thenReturn(true);
         when(passwordHash.hash("NewPass@123")).thenReturn("newHashed");
         when(userRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(twoFactorAuthPort.isEnabled("alice")).thenReturn(false);
 
-        userService.changeOwnPassword("alice", "current", "NewPass@123");
+        userService.changeOwnPassword("alice", "current", "NewPass@123", null, true);
 
         verify(refreshTokenPort).revokeAll("alice");
         verify(tokenBlocklistPort).blockAllBefore(eq("alice"), any());
+    }
+
+    @Test
+    void changeOwnPassword_withoutRevokeOtherSessions_keepsSessionsActive() {
+        User user = User.of("alice", "hashed", null);
+        when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user));
+        when(passwordHash.matches("current", "hashed")).thenReturn(true);
+        when(passwordHash.hash("NewPass@123")).thenReturn("newHashed");
+        when(userRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(twoFactorAuthPort.isEnabled("alice")).thenReturn(false);
+
+        userService.changeOwnPassword("alice", "current", "NewPass@123", null, false);
+
+        verifyNoInteractions(refreshTokenPort, tokenBlocklistPort);
+    }
+
+    @Test
+    void changeOwnPassword_withTotp_requiresCodeWhenEnabled() {
+        User user = User.of("alice", "hashed", null);
+        when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user));
+        when(passwordHash.matches("current", "hashed")).thenReturn(true);
+        when(twoFactorAuthPort.isEnabled("alice")).thenReturn(true);
+
+        assertThatThrownBy(() -> userService.changeOwnPassword("alice", "current", "NewPass@123", null, false))
+                .isInstanceOf(TotpCodeRequiredException.class);
+    }
+
+    @Test
+    void changeOwnPassword_withTotp_rejectsInvalidCode() {
+        User user = User.of("alice", "hashed", null);
+        when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user));
+        when(passwordHash.matches("current", "hashed")).thenReturn(true);
+        when(twoFactorAuthPort.isEnabled("alice")).thenReturn(true);
+        when(twoFactorAuthPort.validateTotpCode("alice", "000000")).thenReturn(false);
+
+        assertThatThrownBy(() -> userService.changeOwnPassword("alice", "current", "NewPass@123", "000000", false))
+                .isInstanceOf(InvalidTotpCodeException.class);
+    }
+
+    @Test
+    void changeOwnPassword_withTotp_succeedsWithValidCode() {
+        User user = User.of("alice", "hashed", null);
+        when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user));
+        when(passwordHash.matches("current", "hashed")).thenReturn(true);
+        when(passwordHash.hash("NewPass@123")).thenReturn("newHashed");
+        when(userRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(twoFactorAuthPort.isEnabled("alice")).thenReturn(true);
+        when(twoFactorAuthPort.validateTotpCode("alice", "123456")).thenReturn(true);
+
+        userService.changeOwnPassword("alice", "current", "NewPass@123", "123456", false);
+
+        verify(userRepository).save(any(User.class));
     }
 
     @Test

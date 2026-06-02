@@ -111,14 +111,15 @@ public class UserController {
     @Operation(summary = "Troca a senha do usuário autenticado")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "204", description = "Senha alterada"),
-            @ApiResponse(responseCode = "400", description = "Senha atual incorreta", content = @Content),
+            @ApiResponse(responseCode = "400", description = "Senha atual incorreta ou código 2FA inválido", content = @Content),
             @ApiResponse(responseCode = "401", description = "Não autenticado", content = @Content)
     })
     @PutMapping("/me/password")
     public ResponseEntity<Void> changeOwnPassword(@Valid @RequestBody ChangePasswordRequest request,
             Authentication authentication) {
         useCase.changeOwnPassword(authentication.getName(),
-                request.getCurrentPassword(), request.getNewPassword());
+                request.getCurrentPassword(), request.getNewPassword(),
+                request.getTotpCode(), request.isRevokeOtherSessions());
         publisher.publishEvent(AuditEvent.of(EventType.USER_PASSWORD_CHANGED, authentication.getName()));
         return ResponseEntity.noContent().build();
     }

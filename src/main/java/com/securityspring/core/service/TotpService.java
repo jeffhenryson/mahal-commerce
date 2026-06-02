@@ -161,6 +161,12 @@ public class TotpService implements TotpUseCase, TwoFactorAuthPort {
         return backupCodes;
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public int countBackupCodesRemaining(String username) {
+        return totpBackupCodeRepository.countRemainingByUsername(username);
+    }
+
     // --- TwoFactorAuthPort ---
 
     @Override
@@ -282,6 +288,21 @@ public class TotpService implements TotpUseCase, TwoFactorAuthPort {
         }
 
         return challenge.username();
+    }
+
+    // --- TwoFactorAuthPort: validateTotpCode (P7 — trocar senha com 2FA) ---
+
+    @Override
+    @Transactional
+    public boolean validateTotpCode(String username, String code) {
+        return totpConfigRepository.findByUsername(username)
+                .filter(TotpConfig::enabled)
+                .map(config -> {
+                    String secret = encryptionPort.decrypt(config.secretEncrypted());
+                    if (codeVerifier.isValidCode(secret, code)) return true;
+                    return isValidBackupCode(username, code);
+                })
+                .orElse(false);
     }
 
     private boolean isValidBackupCode(String username, String code) {

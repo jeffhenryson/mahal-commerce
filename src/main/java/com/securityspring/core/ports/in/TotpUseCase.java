@@ -18,6 +18,9 @@ public interface TotpUseCase {
     /** Retorna true se o 2FA (TOTP) está ativado para o usuário. */
     boolean isEnabled(String username);
 
+    /** Conta quantos backup codes ainda não foram usados para o usuário. */
+    int countBackupCodesRemaining(String username);
+
     /**
      * Inicia troca de dispositivo 2FA. Valida o código atual antes de gerar novo secret,
      * garantindo que apenas quem possui acesso ao app atual pode trocar.

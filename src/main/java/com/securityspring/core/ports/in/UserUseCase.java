@@ -32,7 +32,13 @@ public interface UserUseCase {
     /** Remove o usuário e revoga todas as suas sessões. Retorna o username para auditoria. */
     String deleteUser(Long id);
 
-    void changeOwnPassword(String username, String currentPassword, String newPassword);
+    /**
+     * Troca a senha do próprio usuário.
+     * Se o usuário tiver 2FA ativo, {@code totpCode} é obrigatório.
+     * Se {@code revokeOtherSessions} for true, revoga todos os refresh tokens e bloqueia JWTs anteriores.
+     */
+    void changeOwnPassword(String username, String currentPassword, String newPassword,
+                           String totpCode, boolean revokeOtherSessions);
 
     /** Ativa ou desativa a conta. Retorna o username para auditoria. */
     String setUserEnabled(Long id, boolean enabled);

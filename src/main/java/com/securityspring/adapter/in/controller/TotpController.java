@@ -45,8 +45,10 @@ public class TotpController {
     })
     @GetMapping("/status")
     ResponseEntity<TotpStatusResponseDTO> status(Authentication authentication) {
-        boolean enabled = totpUseCase.isEnabled(authentication.getName());
-        return ResponseEntity.ok(new TotpStatusResponseDTO(enabled));
+        String username = authentication.getName();
+        boolean enabled = totpUseCase.isEnabled(username);
+        int remaining = enabled ? totpUseCase.countBackupCodesRemaining(username) : 0;
+        return ResponseEntity.ok(new TotpStatusResponseDTO(enabled, remaining));
     }
 
     @Operation(summary = "Inicia configuração do 2FA — retorna secret e URI para QR code")

@@ -23,6 +23,7 @@ class HmlStartupValidatorTest {
         ReflectionTestUtils.setField(v, "resendFrom", resendFrom);
         ReflectionTestUtils.setField(v, "corsAllowedOrigins", corsOrigins);
         ReflectionTestUtils.setField(v, "googleClientId", "123456789-abc.apps.googleusercontent.com");
+        ReflectionTestUtils.setField(v, "totpEncryptionKey", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
         return v;
     }
 
@@ -128,6 +129,26 @@ class HmlStartupValidatorTest {
                 .hasMessageContaining("oauth2.google.client-id");
     }
 
+    // ── totp.encryption.key ───────────────────────────────────────────────────
+
+    @Test
+    void deve_rejeitar_totp_encryption_key_ausente() {
+        HmlStartupValidator v = validadorValido();
+        ReflectionTestUtils.setField(v, "totpEncryptionKey", "");
+        assertThatThrownBy(v::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("totp.encryption.key");
+    }
+
+    @Test
+    void deve_rejeitar_totp_encryption_key_curta_demais() {
+        HmlStartupValidator v = validadorValido();
+        ReflectionTestUtils.setField(v, "totpEncryptionKey", "chave-curta");
+        assertThatThrownBy(v::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("totp.encryption.key");
+    }
+
     // ── múltiplos erros ───────────────────────────────────────────────────────
 
     @Test
@@ -141,6 +162,7 @@ class HmlStartupValidatorTest {
                 "*"                    // CORS wildcard
         );
         ReflectionTestUtils.setField(v, "googleClientId", "");
+        ReflectionTestUtils.setField(v, "totpEncryptionKey", "");
         assertThatThrownBy(v::validate)
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContainingAll(
@@ -150,6 +172,7 @@ class HmlStartupValidatorTest {
                         "resend.api-key",
                         "resend.from",
                         "cors.allowed-origins",
-                        "oauth2.google.client-id");
+                        "oauth2.google.client-id",
+                        "totp.encryption.key");
     }
 }

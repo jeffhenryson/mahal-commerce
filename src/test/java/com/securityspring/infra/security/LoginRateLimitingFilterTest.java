@@ -26,15 +26,16 @@ class LoginRateLimitingFilterTest {
     /** Controller mínimo para dar rotas ao MockMvc. */
     @RestController
     static class StubController {
-        @PostMapping("/auth/login")          public void login()          {}
-        @PostMapping("/auth/register")       public void register()       {}
-        @PostMapping("/auth/verify-email")   public void verifyEmail()    {}
-        @PostMapping("/auth/resend-verification") public void resend()    {}
-        @PostMapping("/auth/refresh")        public void refresh()        {}
-        @PostMapping("/auth/logout")         public void logout()         {}
-        @PostMapping("/auth/2fa/verify")     public void totpVerify()     {}
-        @PostMapping("/auth/2fa/confirm")    public void totpConfirm()    {}
-        @GetMapping("/users/me")             public void me()             {}
+        @PostMapping("/auth/login")            public void login()          {}
+        @PostMapping("/auth/register")         public void register()       {}
+        @PostMapping("/auth/verify-email")     public void verifyEmail()    {}
+        @PostMapping("/auth/resend-verification") public void resend()      {}
+        @PostMapping("/auth/refresh")          public void refresh()        {}
+        @PostMapping("/auth/logout")           public void logout()         {}
+        @PostMapping("/auth/2fa/verify")       public void totpVerify()     {}
+        @PostMapping("/auth/2fa/confirm")      public void totpConfirm()    {}
+        @PostMapping("/auth/oauth2/google")    public void oauthGoogle()    {}
+        @GetMapping("/users/me")               public void me()             {}
     }
 
     private LoginRateLimiterPort rateLimiter;
@@ -141,6 +142,27 @@ class LoginRateLimitingFilterTest {
         when(rateLimiter.tryConsume(any())).thenReturn(false);
 
         mockMvc.perform(post("/auth/2fa/confirm").contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().exists("Retry-After"))
+                .andExpect(jsonPath("$.errorCode").value("TOO_MANY_REQUESTS"));
+    }
+
+    // ── /auth/oauth2/google rate-limiting ────────────────────────────────────
+
+    @Test
+    void oauth_google_within_limit_passes_through() throws Exception {
+        when(rateLimiter.tryConsume(any())).thenReturn(true);
+
+        mockMvc.perform(post("/auth/oauth2/google").contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk());
+        verify(rateLimiter).tryConsume(any());
+    }
+
+    @Test
+    void oauth_google_exceeded_returns_429() throws Exception {
+        when(rateLimiter.tryConsume(any())).thenReturn(false);
+
+        mockMvc.perform(post("/auth/oauth2/google").contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isTooManyRequests())
                 .andExpect(header().exists("Retry-After"))
                 .andExpect(jsonPath("$.errorCode").value("TOO_MANY_REQUESTS"));

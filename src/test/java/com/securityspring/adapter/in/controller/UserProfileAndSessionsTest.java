@@ -157,10 +157,10 @@ public class UserProfileAndSessionsTest {
                 .andReturn();
         String accessToken = om.readTree(r.getResponse().getContentAsString()).get("accessToken").asText();
 
-        // Change password — must invalidate all existing sessions
+        // Change password with revokeOtherSessions=true — must invalidate all existing sessions
         mockMvc.perform(put("/users/me/password")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"currentPassword\":\"Pass1@word\",\"newPassword\":\"NewPass@999\"}")
+                .content("{\"currentPassword\":\"Pass1@word\",\"newPassword\":\"NewPass@999\",\"revokeOtherSessions\":true}")
                 .with(user(username).authorities(new SimpleGrantedAuthority("ROLE_USER"))))
                 .andExpect(status().isNoContent());
 
@@ -168,6 +168,37 @@ public class UserProfileAndSessionsTest {
         mockMvc.perform(get("/users/me")
                 .header("Authorization", "Bearer " + accessToken))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void password_change_without_revoke_keeps_existing_sessions_active() throws Exception {
+        String username = "pwkeep_" + System.currentTimeMillis();
+        mockMvc.perform(post("/users")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(String.format("{\"username\":\"%s\",\"password\":\"Pass1@word\"}", username))
+                .with(user("admin").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("USER_CREATE"))))
+                .andExpect(status().isCreated());
+
+        MvcResult r = mockMvc.perform(post("/auth/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(String.format("{\"username\":\"%s\",\"password\":\"Pass1@word\"}", username)))
+                .andExpect(status().isOk())
+                .andReturn();
+        String accessToken = om.readTree(r.getResponse().getContentAsString()).get("accessToken").asText();
+
+        // Change password with revokeOtherSessions=false — session must remain active
+        mockMvc.perform(put("/users/me/password")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"currentPassword\":\"Pass1@word\",\"newPassword\":\"NewPass@999\",\"revokeOtherSessions\":false}")
+                .with(user(username).authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isNoContent());
+
+        // Existing access token must still be valid
+        mockMvc.perform(get("/users/me")
+                .header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isOk());
     }
 
     @Test

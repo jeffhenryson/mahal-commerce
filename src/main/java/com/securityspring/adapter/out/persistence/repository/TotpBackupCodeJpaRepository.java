@@ -19,4 +19,7 @@ public interface TotpBackupCodeJpaRepository extends JpaRepository<TotpBackupCod
     @Modifying
     @Query("delete from TotpBackupCodeEntity b where b.username = :username")
     void deleteByUsername(@Param("username") String username);
+
+    @Query("select count(b) from TotpBackupCodeEntity b where b.username = :username and b.usedAt is null")
+    int countRemainingByUsername(@Param("username") String username);
 }

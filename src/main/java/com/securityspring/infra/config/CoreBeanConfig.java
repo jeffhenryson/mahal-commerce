@@ -31,6 +31,7 @@ import com.securityspring.core.ports.out.twofa.TotpBackupCodeRepository;
 import com.securityspring.core.ports.out.twofa.TotpChallengeTokenRepository;
 import com.securityspring.core.ports.out.twofa.TotpConfigRepository;
 import com.securityspring.core.ports.out.twofa.TotpEncryptionPort;
+import com.securityspring.core.ports.out.twofa.TwoFactorAuthPort;
 import com.securityspring.core.ports.in.TotpUseCase;
 import com.securityspring.core.ports.out.oauth.GoogleTokenVerifierPort;
 import com.securityspring.core.ports.out.user.UserAuthoritiesPort;
@@ -78,6 +79,7 @@ class CoreBeanConfig {
             TotpConfigRepository totpConfigRepository,
             TotpBackupCodeRepository totpBackupCodeRepository,
             TotpChallengeTokenRepository totpChallengeTokenRepository,
+            TwoFactorAuthPort twoFactorAuthPort,
             AvatarStoragePort avatarStoragePort,
             @Value("${email.verification.ttl-minutes:15}") long verificationCodeTtlMinutes,
             @Value("${email.verification.resend-cooldown-seconds:60}") long resendCooldownSeconds,
@@ -87,7 +89,7 @@ class CoreBeanConfig {
                 refreshTokenPort, tokenBlocklistPort, emailPort,
                 verificationCodeRepository, passwordResetTokenRepository, userCachePort,
                 totpConfigRepository, totpBackupCodeRepository, totpChallengeTokenRepository,
-                avatarStoragePort, verificationCodeTtlMinutes, resendCooldownSeconds,
+                twoFactorAuthPort, avatarStoragePort, verificationCodeTtlMinutes, resendCooldownSeconds,
                 passwordResetTtlMinutes, passwordResetFrontendUrl);
     }
 

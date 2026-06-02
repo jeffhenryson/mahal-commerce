@@ -20,6 +20,9 @@ import com.securityspring.core.domain.model.auth.User;
 import com.securityspring.core.ports.out.twofa.TotpBackupCodeRepository;
 import com.securityspring.core.ports.out.twofa.TotpChallengeTokenRepository;
 import com.securityspring.core.ports.out.twofa.TotpConfigRepository;
+import com.securityspring.core.ports.out.twofa.TwoFactorAuthPort;
+import com.securityspring.core.domain.exception.auth.InvalidTotpCodeException;
+import com.securityspring.core.domain.exception.auth.TotpCodeRequiredException;
 import com.securityspring.core.ports.in.UserUseCase;
 import com.securityspring.core.ports.out.notification.EmailPort;
 import com.securityspring.core.ports.out.notification.EmailVerificationCodeRepository;
@@ -61,6 +64,7 @@ public class UserService implements UserUseCase {
     private final TotpConfigRepository totpConfigRepository;
     private final TotpBackupCodeRepository totpBackupCodeRepository;
     private final TotpChallengeTokenRepository totpChallengeTokenRepository;
+    private final TwoFactorAuthPort twoFactorAuthPort;
     private final AvatarStoragePort avatarStoragePort;
     private final long verificationCodeTtlMinutes;
     private final long resendCooldownSeconds;
@@ -80,6 +84,7 @@ public class UserService implements UserUseCase {
             TotpConfigRepository totpConfigRepository,
             TotpBackupCodeRepository totpBackupCodeRepository,
             TotpChallengeTokenRepository totpChallengeTokenRepository,
+            TwoFactorAuthPort twoFactorAuthPort,
             AvatarStoragePort avatarStoragePort,
             long verificationCodeTtlMinutes,
             long resendCooldownSeconds,
@@ -97,6 +102,7 @@ public class UserService implements UserUseCase {
         this.totpConfigRepository = totpConfigRepository;
         this.totpBackupCodeRepository = totpBackupCodeRepository;
         this.totpChallengeTokenRepository = totpChallengeTokenRepository;
+        this.twoFactorAuthPort = twoFactorAuthPort;
         this.avatarStoragePort = avatarStoragePort;
         this.verificationCodeTtlMinutes = verificationCodeTtlMinutes;
         this.resendCooldownSeconds = resendCooldownSeconds;
@@ -261,16 +267,25 @@ public class UserService implements UserUseCase {
 
     @Override
     @Transactional
-    public void changeOwnPassword(String username, String currentPassword, String newPassword) {
+    public void changeOwnPassword(String username, String currentPassword, String newPassword,
+                                  String totpCode, boolean revokeOtherSessions) {
         if (!isValidPassword(newPassword)) throw new InvalidPasswordException();
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new UserNotFoundException(username));
         if (!passwordHash.matches(currentPassword, user.getPassword())) throw new InvalidPasswordException();
+
+        if (twoFactorAuthPort.isEnabled(username)) {
+            if (totpCode == null || totpCode.isBlank()) throw new TotpCodeRequiredException();
+            if (!twoFactorAuthPort.validateTotpCode(username, totpCode)) throw new InvalidTotpCodeException();
+        }
+
         user.changePassword(passwordHash.hash(newPassword));
         userRepository.save(user);
         userCachePort.evict(username);
-        refreshTokenPort.revokeAll(username);
-        tokenBlocklistPort.blockAllBefore(username, Instant.now());
+        if (revokeOtherSessions) {
+            refreshTokenPort.revokeAll(username);
+            tokenBlocklistPort.blockAllBefore(username, Instant.now());
+        }
     }
 
     @Override

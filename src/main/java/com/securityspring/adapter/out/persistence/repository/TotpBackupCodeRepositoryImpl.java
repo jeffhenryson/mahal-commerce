@@ -48,6 +48,12 @@ public class TotpBackupCodeRepositoryImpl implements TotpBackupCodeRepository {
         jpaRepository.deleteByUsername(username);
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public int countRemainingByUsername(String username) {
+        return jpaRepository.countRemainingByUsername(username);
+    }
+
     private TotpBackupCode toDomain(TotpBackupCodeEntity e) {
         return new TotpBackupCode(e.getId(), e.getUsername(), e.getCodeHash(), e.getUsedAt());
     }

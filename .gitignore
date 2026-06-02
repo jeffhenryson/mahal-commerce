@@ -35,6 +35,9 @@ build/
 # Ambiente Var
 .env
 
+# Configuração de desenvolvimento local — use application-dev.properties.example como template
+src/main/resources/application-dev.properties
+
 /docs
 
 /node_modules
