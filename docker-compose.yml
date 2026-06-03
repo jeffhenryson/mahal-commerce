@@ -53,6 +53,29 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+  grafana-hml:
+    image: grafana/grafana:11.0.0
+    container_name: grafana-hml
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+      GF_USERS_DEFAULT_THEME: "dark"
+      GF_SERVER_ROOT_URL: "http://localhost:3000"
+      GF_UNIFIED_ALERTING_ENABLED: "true"
+      GF_ALERTING_ENABLED: "false"
+    volumes:
+      - grafanadata_hml:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus-hml
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
 volumes:
   pgdata_hml:
   prometheusdata_hml:
+  grafanadata_hml:

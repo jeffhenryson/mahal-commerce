@@ -1,0 +1,160 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: security-spring
+    folder: Security Alerts
+    interval: 1m
+    rules:
+
+      - uid: token-theft-alert
+        title: Token Theft Detectado
+        condition: C
+        data:
+          - refId: B
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: increase(auth_token_theft_total[5m])
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: "-100"
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - type: query
+                  evaluator:
+                    params: [0]
+                    type: gt
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: "Token theft detectado em {{ $labels.job }}"
+          description: "{{ $values.B }} evento(s) de token theft nos últimos 5 minutos. Verifique sessões suspeitas e considere revogar todos os tokens do usuário afetado."
+        labels:
+          severity: critical
+          team: security
+
+      - uid: account-lockout-spike
+        title: Pico de Bloqueios de Conta
+        condition: C
+        data:
+          - refId: B
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: increase(auth_account_locked_total[5m])
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: "-100"
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - type: query
+                  evaluator:
+                    params: [5]
+                    type: gt
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: "Pico de bloqueios: {{ $values.B }} contas nos últimos 5 minutos"
+          description: "Possível ataque de força bruta ou credential stuffing em andamento. Verifique os logs de auditoria e considere aumentar o rate limiting."
+        labels:
+          severity: warning
+          team: security
+
+      - uid: high-error-rate
+        title: Alta Taxa de Erros HTTP 5xx
+        condition: C
+        data:
+          - refId: B
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m]))
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: "-100"
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - type: query
+                  evaluator:
+                    params: [0.1]
+                    type: gt
+        noDataState: OK
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: "Taxa de erros 5xx: {{ $values.B | printf \"%.2f\" }} req/s"
+          description: "A taxa de erros HTTP 5xx está acima de 0.1 req/s há mais de 2 minutos. Verifique os logs da aplicação."
+        labels:
+          severity: warning
+          team: backend
+
+      - uid: high-p95-latency
+        title: Latência p95 Alta
+        condition: C
+        data:
+          - refId: B
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket[5m])) by (le))
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: "-100"
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - type: query
+                  evaluator:
+                    params: [1]
+                    type: gt
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "Latência p95: {{ $values.B | printf \"%.2f\" }}s"
+          description: "A latência p95 está acima de 1 segundo há mais de 5 minutos. Investigue queries lentas, pool de conexões ou problemas de infraestrutura."
+        labels:
+          severity: warning
+          team: backend

@@ -9,4 +9,6 @@ scrape_configs:
       # host.docker.internal resolve para o host no Docker Desktop (Mac/Windows) e
       # em Linux com --add-host=host.docker.internal:host-gateway no container.
       # Se rodar a app dentro do compose, substitua pelo nome do service.
-      - targets: ["host.docker.internal:8080"]
+      # Em hml: actuator na porta 8081 (sem filtro JWT)
+      # Em dev local sem management.server.port: mudar para 8080
+      - targets: ["host.docker.internal:8081"]
