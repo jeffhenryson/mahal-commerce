@@ -6,6 +6,7 @@ import com.securityspring.core.domain.model.auth.User;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 public interface UserUseCase {
     /** Criação administrativa sem verificação de email (ex: SeedConfig, admin API). */
@@ -27,7 +28,7 @@ public interface UserUseCase {
 
     PageResult<User> listAll(int page, int size);
 
-    PageResult<User> findFiltered(String search, Boolean enabled, String sortBy, String sortDir, int page, int size);
+    PageResult<User> findFiltered(String search, Boolean enabled, String sortBy, String sortDir, int page, int size, Set<String> excludeRoles);
 
     /** Remove o usuário e revoga todas as suas sessões. Retorna o username para auditoria. */
     String deleteUser(Long id);

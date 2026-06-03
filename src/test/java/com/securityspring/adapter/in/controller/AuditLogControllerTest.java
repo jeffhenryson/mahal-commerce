@@ -1,5 +1,6 @@
 package com.securityspring.adapter.in.controller;
 
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -39,7 +40,7 @@ public class AuditLogControllerTest {
 
     @Test
     void list_returns_200_with_paged_entries() throws Exception {
-        when(useCase.list(null, null, null, null, 0, 20))
+        when(useCase.list(isNull(), isNull(), isNull(), isNull(), eq(0), eq(20), any()))
                 .thenReturn(new PageResult<>(List.of(entry(1L, "alice", "USER_CREATED")), 0, 20, 1L, 1));
 
         mockMvc.perform(get("/audit-logs"))
@@ -55,55 +56,55 @@ public class AuditLogControllerTest {
 
     @Test
     void list_with_username_filter_passes_to_use_case() throws Exception {
-        when(useCase.list("alice", null, null, null, 0, 20))
+        when(useCase.list(eq("alice"), isNull(), isNull(), isNull(), eq(0), eq(20), any()))
                 .thenReturn(new PageResult<>(List.of(entry(1L, "alice", "USER_LOGGED_IN")), 0, 20, 1L, 1));
 
         mockMvc.perform(get("/audit-logs").param("username", "alice"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].who").value("alice"));
 
-        verify(useCase).list("alice", null, null, null, 0, 20);
+        verify(useCase).list(eq("alice"), isNull(), isNull(), isNull(), eq(0), eq(20), any());
     }
 
     @Test
     void list_with_action_filter_passes_to_use_case() throws Exception {
-        when(useCase.list(null, "USER_DELETED", null, null, 0, 20))
+        when(useCase.list(isNull(), eq("USER_DELETED"), isNull(), isNull(), eq(0), eq(20), any()))
                 .thenReturn(new PageResult<>(List.of(entry(2L, "admin", "USER_DELETED")), 0, 20, 1L, 1));
 
         mockMvc.perform(get("/audit-logs").param("action", "USER_DELETED"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].action").value("USER_DELETED"));
 
-        verify(useCase).list(null, "USER_DELETED", null, null, 0, 20);
+        verify(useCase).list(isNull(), eq("USER_DELETED"), isNull(), isNull(), eq(0), eq(20), any());
     }
 
     @Test
     void list_with_pagination_params_passes_to_use_case() throws Exception {
-        when(useCase.list(null, null, null, null, 2, 10))
+        when(useCase.list(isNull(), isNull(), isNull(), isNull(), eq(2), eq(10), any()))
                 .thenReturn(new PageResult<>(List.of(), 2, 10, 0L, 0));
 
         mockMvc.perform(get("/audit-logs").param("page", "2").param("size", "10"))
                 .andExpect(status().isOk());
 
-        verify(useCase).list(null, null, null, null, 2, 10);
+        verify(useCase).list(isNull(), isNull(), isNull(), isNull(), eq(2), eq(10), any());
     }
 
     @Test
     void list_caps_size_at_100() throws Exception {
-        when(useCase.list(null, null, null, null, 0, 100))
+        when(useCase.list(isNull(), isNull(), isNull(), isNull(), eq(0), eq(100), any()))
                 .thenReturn(new PageResult<>(List.of(), 0, 100, 0L, 0));
 
         mockMvc.perform(get("/audit-logs").param("size", "200"))
                 .andExpect(status().isOk());
 
-        verify(useCase).list(null, null, null, null, 0, 100);
+        verify(useCase).list(isNull(), isNull(), isNull(), isNull(), eq(0), eq(100), any());
     }
 
     @Test
     void list_with_date_range_passes_to_use_case() throws Exception {
         Instant from = Instant.parse("2026-05-01T00:00:00Z");
         Instant to = Instant.parse("2026-05-31T23:59:59Z");
-        when(useCase.list(null, null, from, to, 0, 20))
+        when(useCase.list(isNull(), isNull(), eq(from), eq(to), eq(0), eq(20), any()))
                 .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0));
 
         mockMvc.perform(get("/audit-logs")
@@ -111,12 +112,12 @@ public class AuditLogControllerTest {
                         .param("to", "2026-05-31T23:59:59Z"))
                 .andExpect(status().isOk());
 
-        verify(useCase).list(null, null, from, to, 0, 20);
+        verify(useCase).list(isNull(), isNull(), eq(from), eq(to), eq(0), eq(20), any());
     }
 
     @Test
     void list_response_serializes_timestamp_as_iso_string() throws Exception {
-        when(useCase.list(null, null, null, null, 0, 20))
+        when(useCase.list(isNull(), isNull(), isNull(), isNull(), eq(0), eq(20), any()))
                 .thenReturn(new PageResult<>(List.of(entry(1L, "alice", "USER_LOGGED_IN")), 0, 20, 1L, 1));
 
         mockMvc.perform(get("/audit-logs"))

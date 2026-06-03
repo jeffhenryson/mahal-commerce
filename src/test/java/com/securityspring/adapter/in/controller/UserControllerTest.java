@@ -3,6 +3,7 @@ package com.securityspring.adapter.in.controller;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -149,7 +150,7 @@ public class UserControllerTest {
 
     @Test
     void list_users_returns_paged_result() throws Exception {
-        when(useCase.findFiltered(null, null, "id", "asc", 0, 20)).thenReturn(
+        when(useCase.findFiltered(isNull(), isNull(), eq("id"), eq("asc"), eq(0), eq(20), any())).thenReturn(
                 new PageResult<>(List.of(user(1L, "alice"), user(2L, "bob")), 0, 20, 2L, 1));
 
         mockMvc.perform(get("/users"))

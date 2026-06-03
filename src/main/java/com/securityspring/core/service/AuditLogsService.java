@@ -6,6 +6,7 @@ import com.securityspring.core.ports.in.AuditLogsUseCase;
 import com.securityspring.core.ports.out.audit.AuditLogRepository;
 
 import java.time.Instant;
+import java.util.Set;
 
 public class AuditLogsService implements AuditLogsUseCase {
 
@@ -16,7 +17,7 @@ public class AuditLogsService implements AuditLogsUseCase {
     }
 
     @Override
-    public PageResult<AuditLogEntry> list(String username, String action, Instant from, Instant to, int page, int size) {
-        return repository.findFiltered(username, action, from, to, page, size);
+    public PageResult<AuditLogEntry> list(String username, String action, Instant from, Instant to, int page, int size, Set<String> excludeActions) {
+        return repository.findFiltered(username, action, from, to, page, size, excludeActions);
     }
 }

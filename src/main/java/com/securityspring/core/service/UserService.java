@@ -45,6 +45,7 @@ import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Base64;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
@@ -241,10 +242,11 @@ public class UserService implements UserUseCase {
     }
 
     @Override
-    public PageResult<User> findFiltered(String search, Boolean enabled, String sortBy, String sortDir, int page, int size) {
+    public PageResult<User> findFiltered(String search, Boolean enabled, String sortBy, String sortDir, int page, int size, Set<String> excludeRoles) {
         return userRepository.findFiltered(
                 (search != null && !search.isBlank()) ? search.trim() : null,
-                enabled, sortBy, sortDir, page, size);
+                enabled, sortBy, sortDir, page, size,
+                excludeRoles != null ? excludeRoles : Collections.emptySet());
     }
 
     @Override

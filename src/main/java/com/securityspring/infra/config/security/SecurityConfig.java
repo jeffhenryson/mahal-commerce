@@ -30,6 +30,12 @@ import java.util.List;
 @EnableMethodSecurity
 public class SecurityConfig {
 
+    @org.springframework.beans.factory.annotation.Value("${management.server.port:-1}")
+    private int managementPort;
+
+    @org.springframework.beans.factory.annotation.Value("${server.port:8080}")
+    private int serverPort;
+
     @Bean
     public PasswordEncoder passwordEncoder() {
     return new BCryptPasswordEncoder();
@@ -69,6 +75,8 @@ public class SecurityConfig {
                 if (swaggerEnabled) {
                     auth.requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll();
                 }
+                // Actuator roda em management.server.port=8081 (hml/prod) — sem filtros desta
+                // SecurityFilterChain. Em dev (mesma porta), as regras abaixo se aplicam.
                 auth
                 .requestMatchers("/actuator/health/**", "/actuator/info").permitAll()
                 // ATENÇÃO: estas regras DEVEM vir antes de /auth/** permitAll abaixo.
@@ -77,6 +85,7 @@ public class SecurityConfig {
                 .requestMatchers(org.springframework.http.HttpMethod.DELETE, "/auth/sessions").authenticated()
                 .requestMatchers(org.springframework.http.HttpMethod.DELETE, "/auth/sessions/*").authenticated()
                 .requestMatchers(org.springframework.http.HttpMethod.GET, "/auth/sessions").authenticated()
+                .requestMatchers("/system/config/public").permitAll()
                 .requestMatchers("/auth/verify-email", "/auth/resend-verification").permitAll()
                 .requestMatchers("/auth/2fa/verify").permitAll()
                 .requestMatchers("/auth/2fa/setup", "/auth/2fa/confirm", "/auth/2fa/replace").authenticated()
@@ -88,10 +97,16 @@ public class SecurityConfig {
                 // Etapa 2 DEV é pública — devToken é a prova de identidade
                 .requestMatchers("/auth/dev/complete").permitAll()
                 .requestMatchers("/auth/**").permitAll()
-                .requestMatchers(org.springframework.http.HttpMethod.GET, "/avatars/*").permitAll()
-                // Actuator e endpoints técnicos requerem DEV_ELEVATED (token pós-duplo-TOTP)
-                .requestMatchers("/actuator/**").hasAuthority("DEV_ELEVATED")
-                .anyRequest().authenticated();
+                .requestMatchers(org.springframework.http.HttpMethod.GET, "/avatars/*").permitAll();
+                // Em hml/prod management.server.port != server.port: actuator só existe na porta
+                // de management (8081) e é protegido por rede — sem auth JWT necessária.
+                // Em dev (mesma porta): exige DEV_ELEVATED para não expor métricas publicamente.
+                if (managementPort > 0 && managementPort != serverPort) {
+                    auth.requestMatchers("/actuator/**").permitAll();
+                } else {
+                    auth.requestMatchers("/actuator/**").hasAuthority("DEV_ELEVATED");
+                }
+                auth.anyRequest().authenticated();
             })
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .httpBasic(b -> b.disable())

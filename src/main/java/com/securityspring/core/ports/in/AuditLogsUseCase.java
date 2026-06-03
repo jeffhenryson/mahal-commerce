@@ -4,7 +4,8 @@ import com.securityspring.core.domain.model.AuditLogEntry;
 import com.securityspring.core.domain.model.PageResult;
 
 import java.time.Instant;
+import java.util.Set;
 
 public interface AuditLogsUseCase {
-    PageResult<AuditLogEntry> list(String username, String action, Instant from, Instant to, int page, int size);
+    PageResult<AuditLogEntry> list(String username, String action, Instant from, Instant to, int page, int size, Set<String> excludeActions);
 }

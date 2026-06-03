@@ -8,6 +8,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import jakarta.persistence.criteria.Subquery;
+
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import jakarta.persistence.TypedQuery;
@@ -110,9 +112,9 @@ public class UserRepositoryImpl implements UserRepository {
 
     @Override
     @Transactional(readOnly = true)
-    public PageResult<User> findFiltered(String search, Boolean enabled, String sortBy, String sortDir, int page, int size) {
+    public PageResult<User> findFiltered(String search, Boolean enabled, String sortBy, String sortDir, int page, int size, Set<String> excludeRoles) {
         Sort sort = buildSort(sortBy, sortDir);
-        Specification<UserEntity> spec = buildSpec(search, enabled);
+        Specification<UserEntity> spec = buildSpec(search, enabled, excludeRoles);
         Pageable pageable = PageRequest.of(page, size, sort);
 
         Page<Long> idPage = findFilteredIds(spec, pageable);
@@ -163,7 +165,7 @@ public class UserRepositoryImpl implements UserRepository {
         return new PageImpl<>(query.getResultList(), pageable, total);
     }
 
-    private static Specification<UserEntity> buildSpec(String search, Boolean enabled) {
+    private static Specification<UserEntity> buildSpec(String search, Boolean enabled, Set<String> excludeRoles) {
         return (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
             if (search != null && !search.isBlank()) {
@@ -175,6 +177,17 @@ public class UserRepositoryImpl implements UserRepository {
             }
             if (enabled != null) {
                 predicates.add(cb.equal(root.get("enabled"), enabled));
+            }
+            if (excludeRoles != null && !excludeRoles.isEmpty()) {
+                Subquery<Long> sub = query.subquery(Long.class);
+                var subUser = sub.from(UserEntity.class);
+                var rolesJoin = subUser.join("roles");
+                sub.select(subUser.get("id"))
+                   .where(cb.and(
+                       cb.equal(subUser.get("id"), root.get("id")),
+                       rolesJoin.get("name").in(excludeRoles)
+                   ));
+                predicates.add(cb.not(cb.exists(sub)));
             }
             return cb.and(predicates.toArray(new Predicate[0]));
         };

@@ -32,6 +32,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
 import java.util.Map;
+import java.util.Set;
 
 @RestController
 @RequestMapping("/users")
@@ -75,7 +76,18 @@ public class UserController {
     })
     @PostMapping("/{username}/roles/{roleName}")
     @PreAuthorize("hasAuthority('USER_ROLE_ASSIGN')")
-    public ResponseEntity<Void> assignRole(@PathVariable String username, @PathVariable String roleName) {
+    public ResponseEntity<Void> assignRole(@PathVariable String username, @PathVariable String roleName,
+            Authentication auth) {
+        if ("ROLE_DEV".equals(roleName)) {
+            boolean hasDevRoleManage = auth.getAuthorities().stream()
+                .anyMatch(a -> "DEV_ROLE_MANAGE".equals(a.getAuthority()));
+            boolean hasDevElevated = auth.getAuthorities().stream()
+                .anyMatch(a -> "DEV_ELEVATED".equals(a.getAuthority()));
+            if (!hasDevRoleManage || !hasDevElevated) {
+                throw new org.springframework.security.access.AccessDeniedException(
+                    "Atribuição de ROLE_DEV requer DEV_ROLE_MANAGE com token elevado");
+            }
+        }
         useCase.assignRole(username, roleName);
         publisher.publishEvent(AuditEvent.of(EventType.USER_ROLE_ASSIGNED, username, Map.of("role", roleName)));
         return ResponseEntity.noContent().build();
@@ -170,8 +182,10 @@ public class UserController {
             @io.swagger.v3.oas.annotations.Parameter(description = "Direção: asc ou desc")
             @RequestParam(defaultValue = "asc") String sortDir,
             @RequestParam(defaultValue = "0") @Min(0) int page,
-            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
-        PageResult<User> result = useCase.findFiltered(search, enabled, sortBy, sortDir, page, Math.min(size, 100));
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size,
+            Authentication auth) {
+        Set<String> excludeRoles = AuthUtils.isDevAccess(auth) ? Set.of() : Set.of("ROLE_DEV");
+        PageResult<User> result = useCase.findFiltered(search, enabled, sortBy, sortDir, page, Math.min(size, 100), excludeRoles);
         PageResult<UserResponseDTO> response = new PageResult<>(
                 result.content().stream().map(converter::toResponse).toList(),
                 result.page(), result.size(), result.totalElements(), result.totalPages());

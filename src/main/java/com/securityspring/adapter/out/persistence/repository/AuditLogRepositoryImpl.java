@@ -23,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Repository
@@ -59,13 +60,17 @@ public class AuditLogRepositoryImpl implements AuditLogRepository {
     @Transactional(readOnly = true)
     public PageResult<AuditLogEntry> findFiltered(String username, String action,
                                                    Instant from, Instant to,
-                                                   int page, int size) {
+                                                   int page, int size,
+                                                   Set<String> excludeActions) {
         Specification<AuditLogEntity> spec = (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
             if (username != null) predicates.add(cb.equal(root.get("username"), username));
             if (action   != null) predicates.add(cb.equal(root.get("action"), action));
             if (from     != null) predicates.add(cb.greaterThanOrEqualTo(root.get("timestamp"), from));
             if (to       != null) predicates.add(cb.lessThanOrEqualTo(root.get("timestamp"), to));
+            if (excludeActions != null && !excludeActions.isEmpty()) {
+                predicates.add(cb.not(root.get("action").in(excludeActions)));
+            }
             return cb.and(predicates.toArray(new Predicate[0]));
         };
         Page<AuditLogEntity> p = jpaRepo.findAll(spec,
