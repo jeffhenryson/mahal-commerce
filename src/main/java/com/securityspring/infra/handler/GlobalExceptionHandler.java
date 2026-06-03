@@ -1,5 +1,7 @@
 package com.securityspring.infra.handler;
 
+import com.securityspring.core.domain.exception.ModuleDisabledException;
+import com.securityspring.core.domain.exception.auth.TotpSetupRequiredException;
 import com.securityspring.core.domain.exception.avatar.AvatarTooLargeException;
 import com.securityspring.core.domain.exception.avatar.InvalidAvatarFormatException;
 import com.securityspring.core.domain.exception.PermissionAlreadyExistsException;
@@ -189,9 +191,19 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.CONFLICT, ex.getMessage(), "TOTP_ALREADY_ENABLED", req);
     }
 
+    @ExceptionHandler(TotpSetupRequiredException.class)
+    public ResponseEntity<ApiError> handleTotpSetupRequired(TotpSetupRequiredException ex, HttpServletRequest req) {
+        return error(HttpStatus.FORBIDDEN, ex.getMessage(), "TOTP_SETUP_REQUIRED", req);
+    }
+
     @ExceptionHandler(TotpNotEnabledException.class)
     public ResponseEntity<ApiError> handleTotpNotEnabled(TotpNotEnabledException ex, HttpServletRequest req) {
         return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "TOTP_NOT_ENABLED", req);
+    }
+
+    @ExceptionHandler(ModuleDisabledException.class)
+    public ResponseEntity<ApiError> handleModuleDisabled(ModuleDisabledException ex, HttpServletRequest req) {
+        return error(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), "MODULE_DISABLED", req);
     }
 
     @ExceptionHandler(TotpCodeRequiredException.class)

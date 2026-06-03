@@ -2,6 +2,8 @@ package com.securityspring.core.service;
 
 import com.securityspring.core.domain.exception.auth.AccountLockedException;
 import com.securityspring.core.domain.exception.auth.RefreshTokenAlreadyUsedException;
+import com.securityspring.core.domain.exception.auth.TotpSetupRequiredException;
+import com.securityspring.core.ports.out.SystemConfigPort;
 import com.securityspring.core.domain.model.auth.DevElevationResult;
 import com.securityspring.core.domain.model.auth.LoginResponse;
 import com.securityspring.core.domain.model.auth.SessionInfo;
@@ -29,6 +31,7 @@ public class AuthService implements AuthUseCase {
     private final TokenBlocklistPort tokenBlocklist;
     private final LoginAttemptPort loginAttempt;
     private final TwoFactorAuthPort twoFactorAuth;
+    private final SystemConfigPort systemConfig;
 
     public AuthService(CredentialVerifierPort credentialVerifier,
                        AccessTokenPort accessToken,
@@ -36,7 +39,8 @@ public class AuthService implements AuthUseCase {
                        UserAuthoritiesPort userAuthorities,
                        TokenBlocklistPort tokenBlocklist,
                        LoginAttemptPort loginAttempt,
-                       TwoFactorAuthPort twoFactorAuth) {
+                       TwoFactorAuthPort twoFactorAuth,
+                       SystemConfigPort systemConfig) {
         this.credentialVerifier = credentialVerifier;
         this.accessToken = accessToken;
         this.refreshToken = refreshToken;
@@ -44,6 +48,7 @@ public class AuthService implements AuthUseCase {
         this.tokenBlocklist = tokenBlocklist;
         this.loginAttempt = loginAttempt;
         this.twoFactorAuth = twoFactorAuth;
+        this.systemConfig = systemConfig;
     }
 
     @Override
@@ -54,6 +59,12 @@ public class AuthService implements AuthUseCase {
         try {
             CredentialVerifierPort.VerifiedUser verified = credentialVerifier.verify(username, password);
             loginAttempt.recordSuccess(username);
+
+            // Bloqueia login se 2FA obrigatório globalmente e o usuário ainda não o configurou.
+            if (systemConfig.getBoolean("security.2fa.required", false)
+                    && !twoFactorAuth.isEnabled(verified.username())) {
+                throw new TotpSetupRequiredException();
+            }
 
             if (twoFactorAuth.isEnabled(verified.username())) {
                 String challengeToken = twoFactorAuth.issueChallengeToken(verified.username());
