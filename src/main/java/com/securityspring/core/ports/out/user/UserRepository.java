@@ -4,6 +4,7 @@ import com.securityspring.core.domain.model.PageResult;
 import com.securityspring.core.domain.model.auth.User;
 
 import java.util.Optional;
+import java.util.Set;
 
 public interface UserRepository {
     User save(User user);
@@ -20,7 +21,7 @@ public interface UserRepository {
 
     Optional<User> findByGoogleId(String googleId);
 
-    PageResult<User> findFiltered(String search, Boolean enabled, String sortBy, String sortDir, int page, int size);
+    PageResult<User> findFiltered(String search, Boolean enabled, String sortBy, String sortDir, int page, int size, Set<String> excludeRoles);
 
     long countAll();
 
