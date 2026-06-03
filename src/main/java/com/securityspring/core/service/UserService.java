@@ -202,6 +202,7 @@ public class UserService implements UserUseCase {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public User getUserById(Long id) {
         return userRepository.findById(id).orElseThrow(() -> new UserNotFoundException(id));
     }
@@ -237,11 +238,13 @@ public class UserService implements UserUseCase {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public PageResult<User> listAll(int page, int size) {
         return userRepository.findAll(page, size);
     }
 
     @Override
+    @Transactional(readOnly = true)
     public PageResult<User> findFiltered(String search, Boolean enabled, String sortBy, String sortDir, int page, int size, Set<String> excludeRoles) {
         return userRepository.findFiltered(
                 (search != null && !search.isBlank()) ? search.trim() : null,

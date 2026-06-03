@@ -69,6 +69,7 @@ public class AvatarService implements AvatarUseCase {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public AvatarServeResult serve(String filename) {
         java.util.Optional<String> publicUrl = storagePort.getPublicUrl(filename);
         if (publicUrl.isPresent()) {
