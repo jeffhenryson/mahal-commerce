@@ -10,6 +10,7 @@ import com.securityspring.core.domain.exception.RoleAlreadyExistsException;
 import com.securityspring.core.domain.exception.rbac.RoleNotFoundException;
 import com.securityspring.core.domain.model.rbac.Role;
 import com.securityspring.core.ports.in.RoleUseCase;
+import com.securityspring.core.ports.in.SystemConfigUseCase;
 import com.securityspring.infra.handler.GlobalExceptionHandler;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -37,8 +38,10 @@ public class RoleControllerTest {
     void setup() {
         roleUseCase = mock(RoleUseCase.class);
         ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
+        SystemConfigUseCase systemConfig = mock(SystemConfigUseCase.class);
+        when(systemConfig.getBoolean("module.roles.enabled", true)).thenReturn(true);
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new RoleController(roleUseCase, new RoleDTOConverter(), publisher))
+                .standaloneSetup(new RoleController(roleUseCase, new RoleDTOConverter(), publisher, systemConfig))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }

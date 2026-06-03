@@ -60,6 +60,7 @@ public class LoginRateLimitingFilter extends OncePerRequestFilter {
                 && !"/auth/2fa/verify".equals(path)
                 && !"/auth/2fa/confirm".equals(path)
                 && !"/auth/2fa/replace".equals(path)
+                && !"/auth/2fa/backup-codes/regenerate".equals(path)
                 && !"/auth/oauth2/google".equals(path)
                 && !"/auth/dev/first-code".equals(path)
                 && !"/auth/dev/complete".equals(path);

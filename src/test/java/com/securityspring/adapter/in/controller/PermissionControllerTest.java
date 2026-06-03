@@ -10,6 +10,7 @@ import com.securityspring.core.domain.exception.PermissionAlreadyExistsException
 import com.securityspring.core.domain.model.PageResult;
 import com.securityspring.core.domain.model.rbac.Permission;
 import com.securityspring.core.ports.in.PermissionUseCase;
+import com.securityspring.core.ports.in.SystemConfigUseCase;
 import com.securityspring.infra.handler.GlobalExceptionHandler;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -34,8 +35,10 @@ public class PermissionControllerTest {
     void setup() {
         permissionUseCase = mock(PermissionUseCase.class);
         ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
+        SystemConfigUseCase systemConfig = mock(SystemConfigUseCase.class);
+        when(systemConfig.getBoolean("module.roles.enabled", true)).thenReturn(true);
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new PermissionController(permissionUseCase, new PermissionDTOConverter(), publisher))
+                .standaloneSetup(new PermissionController(permissionUseCase, new PermissionDTOConverter(), publisher, systemConfig))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }

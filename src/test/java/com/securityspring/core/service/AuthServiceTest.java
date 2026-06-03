@@ -8,6 +8,7 @@ import com.securityspring.core.ports.out.token.AccessTokenPort;
 import com.securityspring.core.ports.out.credential.CredentialVerifierPort;
 import com.securityspring.core.ports.out.ratelimit.LoginAttemptPort;
 import com.securityspring.core.ports.out.token.RefreshTokenPort;
+import com.securityspring.core.ports.out.SystemConfigPort;
 import com.securityspring.core.ports.out.token.TokenBlocklistPort;
 import com.securityspring.core.ports.out.twofa.TwoFactorAuthPort;
 import com.securityspring.core.ports.out.user.UserAuthoritiesPort;
@@ -36,13 +37,16 @@ class AuthServiceTest {
     @Mock TokenBlocklistPort tokenBlocklist;
     @Mock LoginAttemptPort loginAttempt;
     @Mock TwoFactorAuthPort twoFactorAuth;
+    @Mock SystemConfigPort systemConfig;
 
     AuthService authService;
 
     @BeforeEach
     void setUp() {
+        // lenient: só é invocado em testes de login; outros testes (logout, refresh) não o chamam.
+        lenient().when(systemConfig.getBoolean("security.2fa.required", false)).thenReturn(false);
         authService = new AuthService(credentialVerifier, accessToken, refreshToken,
-                userAuthorities, tokenBlocklist, loginAttempt, twoFactorAuth);
+                userAuthorities, tokenBlocklist, loginAttempt, twoFactorAuth, systemConfig);
     }
 
     @Test
