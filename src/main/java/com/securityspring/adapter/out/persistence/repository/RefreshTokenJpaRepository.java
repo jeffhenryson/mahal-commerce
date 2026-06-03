@@ -46,4 +46,7 @@ public interface RefreshTokenJpaRepository extends JpaRepository<RefreshTokenEnt
     @Query("SELECT r FROM RefreshTokenEntity r WHERE r.id = :id AND r.user.username = :username AND r.revoked = false AND r.expiresAt > :now")
     Optional<RefreshTokenEntity> findActiveByIdAndUsername(
         @Param("id") Long id, @Param("username") String username, @Param("now") Instant now);
+
+    @Query("SELECT COUNT(r) FROM RefreshTokenEntity r WHERE r.revoked = false AND r.expiresAt > :now")
+    long countAllActive(@Param("now") Instant now);
 }
