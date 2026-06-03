@@ -8,6 +8,7 @@ import com.securityspring.core.domain.model.rbac.Role;
 import com.securityspring.core.ports.in.RoleUseCase;
 import com.securityspring.core.ports.out.role.PermissionRepository;
 import com.securityspring.core.ports.out.role.RoleRepository;
+import org.springframework.transaction.annotation.Transactional;
 
 public class RoleService implements RoleUseCase {
 
@@ -20,6 +21,7 @@ public class RoleService implements RoleUseCase {
     }
 
     @Override
+    @Transactional
     public Role createRole(String name) {
         roleRepository.findByName(name).ifPresent(r -> {
             throw new RoleAlreadyExistsException(name);
@@ -29,17 +31,20 @@ public class RoleService implements RoleUseCase {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public PageResult<Role> listAll(int page, int size) {
         return roleRepository.findAll(page, size);
     }
 
     @Override
+    @Transactional(readOnly = true)
     public Role findByName(String name) {
         return roleRepository.findByName(name)
                 .orElseThrow(() -> new RoleNotFoundException(name));
     }
 
     @Override
+    @Transactional
     public void deleteRole(String name) {
         roleRepository.findByName(name)
                 .orElseThrow(() -> new RoleNotFoundException(name));
@@ -47,6 +52,7 @@ public class RoleService implements RoleUseCase {
     }
 
     @Override
+    @Transactional
     public void assignPermission(String roleName, String permissionName) {
         roleRepository.findByName(roleName)
                 .orElseThrow(() -> new RoleNotFoundException(roleName));
@@ -56,6 +62,7 @@ public class RoleService implements RoleUseCase {
     }
 
     @Override
+    @Transactional
     public void removePermission(String roleName, String permissionName) {
         roleRepository.findByName(roleName)
                 .orElseThrow(() -> new RoleNotFoundException(roleName));
@@ -63,6 +70,7 @@ public class RoleService implements RoleUseCase {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public PageResult<Role> findByNameContaining(String search, int page, int size) {
         return roleRepository.findByNameContaining(search, page, size);
     }
