@@ -6,6 +6,7 @@ import com.securityspring.adapter.in.dtos.request.VerifyEmailRequest;
 import com.securityspring.core.domain.event.AuditEvent;
 import com.securityspring.core.domain.event.AuditEvent.EventType;
 import com.securityspring.core.domain.model.auth.User;
+import com.securityspring.core.ports.in.SystemConfigUseCase;
 import com.securityspring.core.ports.in.UserUseCase;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -20,6 +21,7 @@ import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -29,13 +31,16 @@ public class RegistrationController {
 
         private final UserUseCase userUseCase;
         private final ApplicationEventPublisher publisher;
+        private final SystemConfigUseCase systemConfig;
         private final List<String> defaultRoles;
 
         public RegistrationController(UserUseCase userUseCase,
                         ApplicationEventPublisher publisher,
+                        SystemConfigUseCase systemConfig,
                         @Value("${auth.registration.default-roles:}") String defaultRolesProperty) {
                 this.userUseCase = userUseCase;
                 this.publisher = publisher;
+                this.systemConfig = systemConfig;
                 // Property: auth.registration.default-roles=ROLE_USER,ROLE_ANOTHER
                 // Vazio por padrão — sem role automática no auto-registro (princípio do mínimo
                 // privilégio).
@@ -50,10 +55,14 @@ public class RegistrationController {
         @Operation(summary = "Autoregistro de usuário — cria conta desabilitada e envia código de verificação")
         @ApiResponses(value = {
                         @ApiResponse(responseCode = "201", description = "Conta criada — verifique o email"),
-                        @ApiResponse(responseCode = "409", description = "Username ou email já existe", content = @Content)
+                        @ApiResponse(responseCode = "409", description = "Username ou email já existe", content = @Content),
+                        @ApiResponse(responseCode = "503", description = "Registro desabilitado", content = @Content)
         })
         @PostMapping("/register")
         ResponseEntity<Void> register(@Valid @RequestBody RegisterRequest request) {
+                if (!systemConfig.getBoolean("auth.registration.enabled", true)) {
+                        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).build();
+                }
                 User registered = userUseCase.registerUser(request.getUsername(), request.getPassword(),
                                 request.getEmail(), defaultRoles);
                 publisher.publishEvent(AuditEvent.of(EventType.USER_REGISTERED, registered.getUsername()));

@@ -4,6 +4,7 @@ import com.securityspring.core.domain.exception.email.EmailVerificationCodeNotFo
 import com.securityspring.core.domain.exception.user.EmailAlreadyExistsException;
 import com.securityspring.core.domain.exception.user.UsernameAlreadyExistsException;
 import com.securityspring.core.domain.model.auth.User;
+import com.securityspring.core.ports.in.SystemConfigUseCase;
 import com.securityspring.core.ports.in.UserUseCase;
 import com.securityspring.infra.handler.GlobalExceptionHandler;
 import org.junit.jupiter.api.BeforeEach;
@@ -34,11 +35,13 @@ class RegistrationControllerTest {
     void setup() {
         useCase = mock(UserUseCase.class);
         ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
+        SystemConfigUseCase systemConfig = mock(SystemConfigUseCase.class);
+        when(systemConfig.getBoolean(anyString(), anyBoolean())).thenAnswer(inv -> inv.getArgument(1));
         GlobalExceptionHandler exceptionHandler = new GlobalExceptionHandler();
         ReflectionTestUtils.setField(exceptionHandler, "lockoutDurationMinutes", 15L);
 
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new RegistrationController(useCase, publisher, ""))
+                .standaloneSetup(new RegistrationController(useCase, publisher, systemConfig, ""))
                 .setControllerAdvice(exceptionHandler)
                 .build();
     }

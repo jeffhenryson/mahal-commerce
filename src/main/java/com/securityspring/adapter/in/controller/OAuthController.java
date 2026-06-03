@@ -7,6 +7,7 @@ import com.securityspring.core.domain.event.AuditEvent.EventType;
 import com.securityspring.core.domain.model.auth.OAuthLoginResult;
 import com.securityspring.core.domain.model.auth.TokenPair;
 import com.securityspring.core.ports.in.OAuthLoginUseCase;
+import com.securityspring.core.ports.in.SystemConfigUseCase;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -32,17 +33,20 @@ public class OAuthController {
 
     private final OAuthLoginUseCase oAuthLoginUseCase;
     private final ApplicationEventPublisher publisher;
+    private final SystemConfigUseCase systemConfig;
     private final long accessTtlSeconds;
     private final long refreshTtlSeconds;
     private final boolean cookieSecure;
 
     public OAuthController(OAuthLoginUseCase oAuthLoginUseCase,
                            ApplicationEventPublisher publisher,
+                           SystemConfigUseCase systemConfig,
                            @Value("${jwt.access-ttl-minutes:15}") long accessTtlMinutes,
                            @Value("${jwt.refresh-ttl-days:7}") long refreshTtlDays,
                            @Value("${cookie.secure:true}") boolean cookieSecure) {
         this.oAuthLoginUseCase = oAuthLoginUseCase;
         this.publisher = publisher;
+        this.systemConfig = systemConfig;
         this.accessTtlSeconds = accessTtlMinutes * 60;
         this.refreshTtlSeconds = refreshTtlDays * 86400;
         this.cookieSecure = cookieSecure;
@@ -58,6 +62,9 @@ public class OAuthController {
     ResponseEntity<TokenPairResponseDTO> loginWithGoogle(
             @Valid @RequestBody GoogleLoginRequest request,
             HttpServletResponse response) {
+        if (!systemConfig.getBoolean("auth.google.enabled", true)) {
+            return ResponseEntity.status(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE).build();
+        }
         OAuthLoginResult result = oAuthLoginUseCase.loginWithGoogle(request.idToken());
         TokenPair pair = result.tokenPair();
         publisher.publishEvent(AuditEvent.of(EventType.OAUTH_GOOGLE_LOGIN, result.username()));

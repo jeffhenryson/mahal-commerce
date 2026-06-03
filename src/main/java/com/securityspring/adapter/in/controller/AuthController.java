@@ -15,6 +15,7 @@ import com.securityspring.core.domain.exception.auth.RefreshTokenAlreadyUsedExce
 import com.securityspring.core.domain.model.auth.LoginResponse;
 import com.securityspring.core.domain.model.auth.TokenPair;
 import com.securityspring.core.ports.in.AuthUseCase;
+import com.securityspring.core.ports.in.SystemConfigUseCase;
 import com.securityspring.core.ports.in.UserUseCase;
 import com.securityspring.core.domain.event.AuditEvent;
 import com.securityspring.core.domain.event.AuditEvent.EventType;
@@ -47,6 +48,7 @@ public class AuthController {
     private final AuthUseCase authUseCase;
     private final UserUseCase userUseCase;
     private final ApplicationEventPublisher publisher;
+    private final SystemConfigUseCase systemConfig;
     private final long accessTtlSeconds;
     private final long refreshTtlSeconds;
     private final boolean cookieSecure;
@@ -54,12 +56,14 @@ public class AuthController {
     public AuthController(AuthUseCase authUseCase,
             UserUseCase userUseCase,
             ApplicationEventPublisher publisher,
+            SystemConfigUseCase systemConfig,
             @Value("${jwt.access-ttl-minutes:15}") long accessTtlMinutes,
             @Value("${jwt.refresh-ttl-days:7}") long refreshTtlDays,
             @Value("${cookie.secure:true}") boolean cookieSecure) {
         this.authUseCase = authUseCase;
         this.userUseCase = userUseCase;
         this.publisher = publisher;
+        this.systemConfig = systemConfig;
         this.accessTtlSeconds = accessTtlMinutes * 60;
         this.refreshTtlSeconds = refreshTtlDays * 86400;
         this.cookieSecure = cookieSecure;
@@ -195,6 +199,9 @@ public class AuthController {
     })
     @PostMapping("/forgot-password")
     ResponseEntity<Void> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
+        if (!systemConfig.getBoolean("auth.forgot-password.enabled", true)) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).build();
+        }
         userUseCase.requestPasswordReset(request.getEmail());
         publisher.publishEvent(AuditEvent.of(EventType.PASSWORD_RESET_REQUESTED, request.getEmail()));
         return ResponseEntity.noContent().build();

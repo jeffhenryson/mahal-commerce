@@ -15,7 +15,10 @@ import com.securityspring.core.domain.model.auth.LoginResponse;
 import com.securityspring.core.domain.model.auth.SessionInfo;
 import com.securityspring.core.domain.model.auth.TokenPair;
 import com.securityspring.core.ports.in.AuthUseCase;
+import com.securityspring.core.ports.in.SystemConfigUseCase;
 import com.securityspring.core.ports.in.UserUseCase;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyString;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -44,7 +47,9 @@ public class AuthControllerTest {
         authUseCase = mock(AuthUseCase.class);
         userUseCase = mock(UserUseCase.class);
         ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
-        AuthController controller = new AuthController(authUseCase, userUseCase, publisher, 15, 7L, false);
+        SystemConfigUseCase systemConfig = mock(SystemConfigUseCase.class);
+        when(systemConfig.getBoolean(anyString(), anyBoolean())).thenAnswer(inv -> inv.getArgument(1));
+        AuthController controller = new AuthController(authUseCase, userUseCase, publisher, systemConfig, 15, 7L, false);
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new com.securityspring.infra.handler.GlobalExceptionHandler())
                 .build();

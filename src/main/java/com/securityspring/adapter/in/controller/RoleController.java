@@ -23,11 +23,14 @@ import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
 import java.util.Map;
+import java.util.Set;
 
 @RestController
 @RequestMapping("/roles")
 @SecurityRequirement(name = "bearerAuth")
 public class RoleController {
+
+    private static final Set<String> DEV_ONLY_PERMISSIONS = Set.of("DEV_ROLE_MANAGE", "DEV_PERMISSION_MANAGE");
 
     private final RoleUseCase roleUseCase;
     private final RoleDTOConverter converter;
@@ -49,13 +52,17 @@ public class RoleController {
     public ResponseEntity<PageResult<RoleResponseDTO>> list(
             @RequestParam(required = false) String search,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "20") int size,
+            Authentication authentication) {
         int capped = Math.min(size, 100);
         PageResult<Role> result = (search != null && !search.isBlank())
                 ? roleUseCase.findByNameContaining(search.trim(), page, capped)
                 : roleUseCase.listAll(page, capped);
+        boolean isDevAccess = AuthUtils.isDevAccess(authentication);
         PageResult<RoleResponseDTO> response = new PageResult<>(
-                result.content().stream().map(converter::toResponse).toList(),
+                result.content().stream()
+                        .filter(r -> isDevAccess || !"ROLE_DEV".equals(r.getName()))
+                        .map(converter::toResponse).toList(),
                 result.page(), result.size(), result.totalElements(), result.totalPages());
         return ResponseEntity.ok(response);
     }
@@ -114,6 +121,14 @@ public class RoleController {
     @PreAuthorize("hasAuthority('ROLE_MANAGE_PERMISSIONS')")
     public ResponseEntity<Void> assignPermission(@PathVariable String roleName,
             @PathVariable String permissionName, Authentication authentication) {
+        if (DEV_ONLY_PERMISSIONS.contains(permissionName)) {
+            boolean hasDevElevated = authentication.getAuthorities().stream()
+                    .anyMatch(a -> "DEV_ELEVATED".equals(a.getAuthority()));
+            if (!hasDevElevated) {
+                throw new org.springframework.security.access.AccessDeniedException(
+                        "Atribuição de " + permissionName + " requer token DEV elevado");
+            }
+        }
         roleUseCase.assignPermission(roleName, permissionName);
         publisher.publishEvent(AuditEvent.of(EventType.PERMISSION_ASSIGNED_TO_ROLE,
                 authentication.getName(), Map.of("role", roleName, "permission", permissionName)));
