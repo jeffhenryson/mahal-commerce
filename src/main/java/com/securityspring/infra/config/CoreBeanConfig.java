@@ -124,9 +124,10 @@ class CoreBeanConfig {
             UserAuthoritiesPort userAuthorities,
             TokenBlocklistPort tokenBlocklist,
             LoginAttemptPort loginAttempt,
-            TotpService totpService) {
+            TotpService totpService,
+            SystemConfigPort systemConfigPort) {
         return new AuthService(credentialVerifier, accessToken, refreshToken,
-                userAuthorities, tokenBlocklist, loginAttempt, totpService);
+                userAuthorities, tokenBlocklist, loginAttempt, totpService, systemConfigPort);
     }
 
     @Bean

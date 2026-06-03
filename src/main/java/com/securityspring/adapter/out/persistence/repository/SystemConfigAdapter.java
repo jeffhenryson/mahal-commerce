@@ -3,6 +3,8 @@ package com.securityspring.adapter.out.persistence.repository;
 import com.securityspring.adapter.out.persistence.entity.SystemConfigEntity;
 import com.securityspring.core.domain.model.config.SystemConfig;
 import com.securityspring.core.ports.out.SystemConfigPort;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -14,6 +16,8 @@ import java.util.stream.Collectors;
 @Transactional
 public class SystemConfigAdapter implements SystemConfigPort {
 
+    static final String CACHE_NAME = "systemConfig";
+
     private final SystemConfigJpaRepository jpa;
 
     public SystemConfigAdapter(SystemConfigJpaRepository jpa) {
@@ -22,6 +26,7 @@ public class SystemConfigAdapter implements SystemConfigPort {
 
     @Override
     @Transactional(readOnly = true)
+    @Cacheable(cacheNames = CACHE_NAME, key = "'key:' + #key")
     public Optional<SystemConfig> findByKey(String key) {
         return jpa.findById(key).map(this::toDomain);
     }
@@ -33,6 +38,7 @@ public class SystemConfigAdapter implements SystemConfigPort {
     }
 
     @Override
+    @CacheEvict(cacheNames = CACHE_NAME, allEntries = true)
     public SystemConfig save(SystemConfig config) {
         SystemConfigEntity entity = new SystemConfigEntity();
         entity.setKey(config.key());
@@ -44,6 +50,7 @@ public class SystemConfigAdapter implements SystemConfigPort {
 
     @Override
     @Transactional(readOnly = true)
+    @Cacheable(cacheNames = CACHE_NAME, key = "'bool:' + #key + ':' + #defaultValue")
     public boolean getBoolean(String key, boolean defaultValue) {
         return jpa.findById(key)
             .map(e -> Boolean.parseBoolean(e.getValue()))
