@@ -35,6 +35,8 @@ class LoginRateLimitingFilterTest {
         @PostMapping("/auth/2fa/verify")       public void totpVerify()     {}
         @PostMapping("/auth/2fa/confirm")      public void totpConfirm()    {}
         @PostMapping("/auth/oauth2/google")    public void oauthGoogle()    {}
+        @PostMapping("/auth/dev/first-code")   public void devFirstCode()   {}
+        @PostMapping("/auth/dev/complete")     public void devComplete()    {}
         @GetMapping("/users/me")               public void me()             {}
     }
 
@@ -163,6 +165,46 @@ class LoginRateLimitingFilterTest {
         when(rateLimiter.tryConsume(any())).thenReturn(false);
 
         mockMvc.perform(post("/auth/oauth2/google").contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().exists("Retry-After"))
+                .andExpect(jsonPath("$.errorCode").value("TOO_MANY_REQUESTS"));
+    }
+
+    // ── /auth/dev endpoints rate-limiting ────────────────────────────────────
+
+    @Test
+    void dev_first_code_within_limit_passes_through() throws Exception {
+        when(rateLimiter.tryConsume(any())).thenReturn(true);
+
+        mockMvc.perform(post("/auth/dev/first-code").contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk());
+        verify(rateLimiter).tryConsume(any());
+    }
+
+    @Test
+    void dev_first_code_exceeded_returns_429() throws Exception {
+        when(rateLimiter.tryConsume(any())).thenReturn(false);
+
+        mockMvc.perform(post("/auth/dev/first-code").contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().exists("Retry-After"))
+                .andExpect(jsonPath("$.errorCode").value("TOO_MANY_REQUESTS"));
+    }
+
+    @Test
+    void dev_complete_within_limit_passes_through() throws Exception {
+        when(rateLimiter.tryConsume(any())).thenReturn(true);
+
+        mockMvc.perform(post("/auth/dev/complete").contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk());
+        verify(rateLimiter).tryConsume(any());
+    }
+
+    @Test
+    void dev_complete_exceeded_returns_429() throws Exception {
+        when(rateLimiter.tryConsume(any())).thenReturn(false);
+
+        mockMvc.perform(post("/auth/dev/complete").contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isTooManyRequests())
                 .andExpect(header().exists("Retry-After"))
                 .andExpect(jsonPath("$.errorCode").value("TOO_MANY_REQUESTS"));

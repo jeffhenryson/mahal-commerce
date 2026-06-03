@@ -1,5 +1,6 @@
 package com.securityspring.adapter.in.controller;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -15,11 +16,21 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 
@@ -95,6 +106,56 @@ public class AuthFlowSecurityIT {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"refreshToken\":\"" + refresh + "\"}"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DirtiesContext
+    void concurrent_refresh_with_same_token_succeeds_exactly_once() throws Exception {
+        MvcResult loginResult = mockMvc.perform(post("/auth/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"username\":\"" + SeedCredentials.SEED_ADMIN_USERNAME
+                        + "\",\"password\":\"" + SeedCredentials.SEED_ADMIN_PASSWORD + "\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+        String refresh = om.readTree(loginResult.getResponse().getContentAsString())
+                .get("refreshToken").asText();
+
+        int threads = 2;
+        CountDownLatch ready = new CountDownLatch(threads);
+        CountDownLatch start = new CountDownLatch(1);
+        AtomicInteger successes = new AtomicInteger(0);
+        AtomicInteger failures  = new AtomicInteger(0);
+        String body = "{\"refreshToken\":\"" + refresh + "\"}";
+
+        ExecutorService executor = Executors.newFixedThreadPool(threads);
+        List<Future<?>> futures = new ArrayList<>();
+
+        for (int i = 0; i < threads; i++) {
+            futures.add(executor.submit(() -> {
+                try {
+                    ready.countDown();
+                    start.await();
+                    MvcResult result = mockMvc.perform(post("/auth/refresh")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body))
+                            .andReturn();
+                    if (result.getResponse().getStatus() == 200) successes.incrementAndGet();
+                    else failures.incrementAndGet();
+                } catch (Exception e) {
+                    failures.incrementAndGet();
+                }
+                return null;
+            }));
+        }
+
+        ready.await();
+        start.countDown();
+        executor.shutdown();
+        executor.awaitTermination(10, TimeUnit.SECONDS);
+        for (Future<?> f : futures) f.get(); // propagate exceptions
+
+        assertThat(successes.get()).isEqualTo(1);
+        assertThat(failures.get()).isEqualTo(1);
     }
 
     private static String sha256(String value) {
