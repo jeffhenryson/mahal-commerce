@@ -43,6 +43,12 @@ public class LoginRateLimitingFilter extends OncePerRequestFilter {
         // Subtract context-path so the check works with or without server.servlet.context-path.
         String path = request.getRequestURI().substring(request.getContextPath().length());
         String method = request.getMethod();
+
+        // DELETE /auth/2fa accepts password + TOTP code — protect against brute-force.
+        if ("DELETE".equalsIgnoreCase(method)) {
+            return !"/auth/2fa".equals(path);
+        }
+
         if (!"POST".equalsIgnoreCase(method)) return true;
         return !"/auth/login".equals(path)
                 && !"/auth/register".equals(path)
@@ -53,6 +59,7 @@ public class LoginRateLimitingFilter extends OncePerRequestFilter {
                 && !"/auth/reset-password".equals(path)
                 && !"/auth/2fa/verify".equals(path)
                 && !"/auth/2fa/confirm".equals(path)
+                && !"/auth/2fa/replace".equals(path)
                 && !"/auth/oauth2/google".equals(path)
                 && !"/auth/dev/first-code".equals(path)
                 && !"/auth/dev/complete".equals(path);

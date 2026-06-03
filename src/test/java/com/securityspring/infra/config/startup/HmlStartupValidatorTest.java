@@ -23,7 +23,7 @@ class HmlStartupValidatorTest {
         ReflectionTestUtils.setField(v, "resendFrom", resendFrom);
         ReflectionTestUtils.setField(v, "corsAllowedOrigins", corsOrigins);
         ReflectionTestUtils.setField(v, "googleClientId", "123456789-abc.apps.googleusercontent.com");
-        ReflectionTestUtils.setField(v, "totpEncryptionKey", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
+        ReflectionTestUtils.setField(v, "totpEncryptionKey", "c2VjcmV0LXRlc3Qta2V5LXNlZ3VyYS1obWwtMzI=");
         return v;
     }
 
@@ -144,6 +144,15 @@ class HmlStartupValidatorTest {
     void deve_rejeitar_totp_encryption_key_curta_demais() {
         HmlStartupValidator v = validadorValido();
         ReflectionTestUtils.setField(v, "totpEncryptionKey", "chave-curta");
+        assertThatThrownBy(v::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("totp.encryption.key");
+    }
+
+    @Test
+    void deve_rejeitar_totp_encryption_key_com_valor_inseguro_de_zeros() {
+        HmlStartupValidator v = validadorValido();
+        ReflectionTestUtils.setField(v, "totpEncryptionKey", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
         assertThatThrownBy(v::validate)
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("totp.encryption.key");

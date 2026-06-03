@@ -65,8 +65,8 @@ public class HmlStartupValidator {
         if (isBlankOrPlaceholder(googleClientId)) {
             errors.add("oauth2.google.client-id (GOOGLE_CLIENT_ID) está ausente — autenticação OAuth2 Google pode ser bypassada com qualquer token");
         }
-        if (isBlankOrPlaceholder(totpEncryptionKey)) {
-            errors.add("totp.encryption.key (TOTP_ENCRYPTION_KEY) está ausente — secrets TOTP serão criptografados com chave de zeros (inseguro)");
+        if (isBlankOrPlaceholder(totpEncryptionKey, "AAAAAAAAAA")) {
+            errors.add("totp.encryption.key está ausente ou usa o valor inseguro de desenvolvimento (base64 de zeros) — gere uma chave real com: openssl rand -base64 32");
         } else if (totpEncryptionKey.length() < 32) {
             errors.add("totp.encryption.key parece curto demais — use ao menos 32 caracteres (Base64 de 256 bits)");
         }

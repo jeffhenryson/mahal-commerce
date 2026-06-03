@@ -1,5 +1,6 @@
 package com.securityspring.infra.security;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -60,7 +61,23 @@ public class AuthRateLimitingTest {
                 .andExpect(status().isTooManyRequests());
     }
 
-    // /auth/refresh is excluded from IP rate limiting: the opaque refresh token already has
-    // reuse detection (rotation invalidates all sessions on reuse). Adding shared-IP rate limits
-    // creates NAT false positives without meaningful security benefit.
+    @Test
+    void returns_429_after_exceeding_totp_replace_attempts() throws Exception {
+        String body = "{\"currentTotpCode\":\"000000\"}";
+        for (int i = 0; i < 3; i++) {
+            mockMvc.perform(post("/auth/2fa/replace").contentType(MediaType.APPLICATION_JSON).content(body));
+        }
+        mockMvc.perform(post("/auth/2fa/replace").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isTooManyRequests());
+    }
+
+    @Test
+    void returns_429_after_exceeding_totp_disable_attempts() throws Exception {
+        String body = "{\"currentPassword\":\"Pwd@1234\",\"code\":\"000000\"}";
+        for (int i = 0; i < 3; i++) {
+            mockMvc.perform(delete("/auth/2fa").contentType(MediaType.APPLICATION_JSON).content(body));
+        }
+        mockMvc.perform(delete("/auth/2fa").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isTooManyRequests());
+    }
 }
