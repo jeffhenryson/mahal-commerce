@@ -14,7 +14,9 @@ import com.securityspring.core.ports.in.OAuthLoginUseCase;
 import com.securityspring.core.ports.in.PermissionUseCase;
 import com.securityspring.core.ports.in.RoleUseCase;
 import com.securityspring.core.ports.in.StatsUseCase;
+import com.securityspring.core.ports.in.SystemConfigUseCase;
 import com.securityspring.core.ports.in.UserUseCase;
+import com.securityspring.core.ports.out.SystemConfigPort;
 import com.securityspring.core.ports.out.token.AccessTokenPort;
 import com.securityspring.core.ports.out.credential.CredentialVerifierPort;
 import com.securityspring.core.ports.out.notification.EmailPort;
@@ -48,6 +50,7 @@ import com.securityspring.core.service.OAuthLoginService;
 import com.securityspring.core.service.PermissionService;
 import com.securityspring.core.service.RoleService;
 import com.securityspring.core.service.StatsService;
+import com.securityspring.core.service.SystemConfigService;
 import com.securityspring.core.service.TotpService;
 import com.securityspring.core.service.UserService;
 
@@ -164,6 +167,11 @@ class CoreBeanConfig {
     @ConditionalOnProperty(name = "avatar.storage.type", havingValue = "local", matchIfMissing = true)
     AvatarStoragePort avatarStoragePort(AvatarProperties avatarProps) {
         return new LocalAvatarStorageAdapter(Path.of(avatarProps.getStorageDir()));
+    }
+
+    @Bean
+    SystemConfigUseCase systemConfigUseCase(SystemConfigPort configPort) {
+        return new SystemConfigService(configPort);
     }
 
     @Bean
