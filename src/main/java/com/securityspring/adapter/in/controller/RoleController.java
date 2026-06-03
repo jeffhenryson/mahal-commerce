@@ -7,7 +7,9 @@ import com.securityspring.core.domain.event.AuditEvent;
 import com.securityspring.core.domain.event.AuditEvent.EventType;
 import com.securityspring.core.domain.model.PageResult;
 import com.securityspring.core.domain.model.rbac.Role;
+import com.securityspring.core.domain.exception.ModuleDisabledException;
 import com.securityspring.core.ports.in.RoleUseCase;
+import com.securityspring.core.ports.in.SystemConfigUseCase;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -35,11 +37,20 @@ public class RoleController {
     private final RoleUseCase roleUseCase;
     private final RoleDTOConverter converter;
     private final ApplicationEventPublisher publisher;
+    private final SystemConfigUseCase systemConfig;
 
-    public RoleController(RoleUseCase roleUseCase, RoleDTOConverter converter, ApplicationEventPublisher publisher) {
+    public RoleController(RoleUseCase roleUseCase, RoleDTOConverter converter, ApplicationEventPublisher publisher,
+            SystemConfigUseCase systemConfig) {
         this.roleUseCase = roleUseCase;
         this.converter = converter;
         this.publisher = publisher;
+        this.systemConfig = systemConfig;
+    }
+
+    private void checkModuleEnabled() {
+        if (!systemConfig.getBoolean("module.roles.enabled", true)) {
+            throw new ModuleDisabledException("roles");
+        }
     }
 
     @Operation(summary = "Lista roles paginadas com filtro opcional por nome")
@@ -54,6 +65,7 @@ public class RoleController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             Authentication authentication) {
+        checkModuleEnabled();
         int capped = Math.min(size, 100);
         PageResult<Role> result = (search != null && !search.isBlank())
                 ? roleUseCase.findByNameContaining(search.trim(), page, capped)
@@ -76,6 +88,7 @@ public class RoleController {
     @GetMapping("/{name}")
     @PreAuthorize("hasAuthority('ROLE_READ')")
     public ResponseEntity<RoleResponseDTO> getByName(@PathVariable String name) {
+        checkModuleEnabled();
         return ResponseEntity.ok(converter.toResponse(roleUseCase.findByName(name)));
     }
 
@@ -89,6 +102,7 @@ public class RoleController {
     @PreAuthorize("hasAuthority('DEV_ROLE_MANAGE')")
     public ResponseEntity<RoleResponseDTO> create(@Valid @RequestBody RoleRequest request,
             Authentication authentication) {
+        checkModuleEnabled();
         Role created = roleUseCase.createRole(request.getName());
         publisher.publishEvent(AuditEvent.of(EventType.ROLE_CREATED,
                 authentication.getName(), Map.of("role", created.getName())));
@@ -105,6 +119,7 @@ public class RoleController {
     @DeleteMapping("/{name}")
     @PreAuthorize("hasAuthority('DEV_ROLE_MANAGE')")
     public ResponseEntity<Void> delete(@PathVariable String name, Authentication authentication) {
+        checkModuleEnabled();
         roleUseCase.deleteRole(name);
         publisher.publishEvent(AuditEvent.of(EventType.ROLE_DELETED,
                 authentication.getName(), Map.of("role", name)));
@@ -121,6 +136,7 @@ public class RoleController {
     @PreAuthorize("hasAuthority('ROLE_MANAGE_PERMISSIONS')")
     public ResponseEntity<Void> assignPermission(@PathVariable String roleName,
             @PathVariable String permissionName, Authentication authentication) {
+        checkModuleEnabled();
         if (DEV_ONLY_PERMISSIONS.contains(permissionName)) {
             boolean hasDevElevated = authentication.getAuthorities().stream()
                     .anyMatch(a -> "DEV_ELEVATED".equals(a.getAuthority()));
@@ -145,6 +161,7 @@ public class RoleController {
     @PreAuthorize("hasAuthority('ROLE_MANAGE_PERMISSIONS')")
     public ResponseEntity<Void> removePermission(@PathVariable String roleName,
             @PathVariable String permissionName, Authentication authentication) {
+        checkModuleEnabled();
         roleUseCase.removePermission(roleName, permissionName);
         publisher.publishEvent(AuditEvent.of(EventType.PERMISSION_REMOVED_FROM_ROLE,
                 authentication.getName(), Map.of("role", roleName, "permission", permissionName)));

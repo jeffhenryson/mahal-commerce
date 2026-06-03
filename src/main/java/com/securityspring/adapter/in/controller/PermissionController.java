@@ -7,7 +7,9 @@ import com.securityspring.core.domain.event.AuditEvent;
 import com.securityspring.core.domain.event.AuditEvent.EventType;
 import com.securityspring.core.domain.model.PageResult;
 import com.securityspring.core.domain.model.rbac.Permission;
+import com.securityspring.core.domain.exception.ModuleDisabledException;
 import com.securityspring.core.ports.in.PermissionUseCase;
+import com.securityspring.core.ports.in.SystemConfigUseCase;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -32,12 +34,20 @@ public class PermissionController {
     private final PermissionUseCase permissionUseCase;
     private final PermissionDTOConverter converter;
     private final ApplicationEventPublisher publisher;
+    private final SystemConfigUseCase systemConfig;
 
     public PermissionController(PermissionUseCase permissionUseCase, PermissionDTOConverter converter,
-            ApplicationEventPublisher publisher) {
+            ApplicationEventPublisher publisher, SystemConfigUseCase systemConfig) {
         this.permissionUseCase = permissionUseCase;
         this.converter = converter;
         this.publisher = publisher;
+        this.systemConfig = systemConfig;
+    }
+
+    private void checkModuleEnabled() {
+        if (!systemConfig.getBoolean("module.roles.enabled", true)) {
+            throw new ModuleDisabledException("roles");
+        }
     }
 
     @Operation(summary = "Lista permissions paginadas")
@@ -50,6 +60,7 @@ public class PermissionController {
     public ResponseEntity<PageResult<PermissionResponseDTO>> list(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
+        checkModuleEnabled();
         PageResult<Permission> result = permissionUseCase.listAll(page, Math.min(size, 100));
         PageResult<PermissionResponseDTO> response = new PageResult<>(
                 result.content().stream().map(converter::toResponse).toList(),
@@ -66,6 +77,7 @@ public class PermissionController {
     @GetMapping("/{name}")
     @PreAuthorize("hasAuthority('PERMISSION_READ')")
     public ResponseEntity<PermissionResponseDTO> getByName(@PathVariable String name) {
+        checkModuleEnabled();
         return ResponseEntity.ok(converter.toResponse(permissionUseCase.findByName(name)));
     }
 
@@ -79,6 +91,7 @@ public class PermissionController {
     @PreAuthorize("hasAuthority('DEV_PERMISSION_MANAGE')")
     public ResponseEntity<PermissionResponseDTO> create(@Valid @RequestBody PermissionRequest request,
             Authentication authentication) {
+        checkModuleEnabled();
         Permission created = permissionUseCase.createPermission(request.getName());
         publisher.publishEvent(AuditEvent.of(EventType.PERMISSION_CREATED,
                 authentication.getName(), Map.of("permission", created.getName())));
@@ -95,6 +108,7 @@ public class PermissionController {
     @DeleteMapping("/{name}")
     @PreAuthorize("hasAuthority('DEV_PERMISSION_MANAGE')")
     public ResponseEntity<Void> delete(@PathVariable String name, Authentication authentication) {
+        checkModuleEnabled();
         permissionUseCase.deletePermission(name);
         publisher.publishEvent(AuditEvent.of(EventType.PERMISSION_DELETED,
                 authentication.getName(), Map.of("permission", name)));

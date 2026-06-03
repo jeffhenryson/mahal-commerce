@@ -15,6 +15,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
+import com.securityspring.infra.security.MaintenanceModeFilter;
 import com.securityspring.infra.security.RestAccessDeniedHandler;
 import com.securityspring.infra.security.RestAuthenticationEntryPoint;
 import com.securityspring.infra.security.TraceIdFilter;
@@ -45,6 +46,7 @@ public class SecurityConfig {
     public SecurityFilterChain filterChain(HttpSecurity http, JwtAuthenticationFilter jwtAuthenticationFilter,
                                            RestAuthenticationEntryPoint entryPoint, RestAccessDeniedHandler deniedHandler,
                                            LoginRateLimitingFilter loginRateLimitingFilter,
+                                           MaintenanceModeFilter maintenanceModeFilter,
                                            TraceIdFilter traceIdFilter,
                                            @org.springframework.beans.factory.annotation.Value("${security.content-security-policy:}") String cspDirective,
                                            @org.springframework.beans.factory.annotation.Value("${springdoc.swagger-ui.enabled:true}") boolean swaggerEnabled) throws Exception {
@@ -113,6 +115,7 @@ public class SecurityConfig {
             .httpBasic(b -> b.disable())
             .exceptionHandling(e -> e.authenticationEntryPoint(entryPoint).accessDeniedHandler(deniedHandler))
             .addFilterBefore(traceIdFilter, UsernamePasswordAuthenticationFilter.class)
+            .addFilterAfter(maintenanceModeFilter, TraceIdFilter.class)
             .addFilterBefore(loginRateLimitingFilter, UsernamePasswordAuthenticationFilter.class)
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
             .cors(Customizer.withDefaults());
