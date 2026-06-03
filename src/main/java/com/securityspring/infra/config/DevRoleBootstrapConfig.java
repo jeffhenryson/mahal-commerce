@@ -33,8 +33,6 @@ public class DevRoleBootstrapConfig {
     };
 
     private static final String[] DEV_ONLY_PERMISSIONS = {
-        "ROLE_CREATE", "ROLE_DELETE",
-        "PERMISSION_CREATE", "PERMISSION_DELETE",
         "DEV_ROLE_MANAGE",
         "DEV_PERMISSION_MANAGE"
     };
