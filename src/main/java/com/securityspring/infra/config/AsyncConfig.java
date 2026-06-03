@@ -19,7 +19,7 @@ class AsyncConfig implements AsyncConfigurer {
     Executor emailTaskExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         executor.setCorePoolSize(2);
-        executor.setMaxPoolSize(10);
+        executor.setMaxPoolSize(5);
         executor.setQueueCapacity(100);
         executor.setThreadNamePrefix("email-");
         executor.setWaitForTasksToCompleteOnShutdown(true);

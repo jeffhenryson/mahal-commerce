@@ -118,6 +118,15 @@ class HexagonalArchitectureTest {
     }
 
     @Test
+    void adapter_dtos_must_not_enter_core_service() {
+        noClasses()
+                .that().resideInAPackage("..core.service..")
+                .should().dependOnClassesThat()
+                .resideInAPackage("..adapter.in.dtos..")
+                .check(classes);
+    }
+
+    @Test
     void services_must_only_implement_use_case_ports() {
         ArchRule rule = classes()
                 .that().resideInAPackage("..core.service..")
