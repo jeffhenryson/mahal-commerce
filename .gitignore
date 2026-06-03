@@ -48,6 +48,11 @@ terraform/.terraform.lock.hcl
 terraform/terraform.tfvars
 terraform/terraform.tfstate
 terraform/terraform.tfstate.backup
+terraform-lite/.terraform/
+terraform-lite/.terraform.lock.hcl
+terraform-lite/terraform.tfvars
+terraform-lite/terraform.tfstate
+terraform-lite/terraform.tfstate.backup
 
 .claude
 # Uploads

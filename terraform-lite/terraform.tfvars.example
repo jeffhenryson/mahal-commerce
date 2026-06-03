@@ -1,0 +1,44 @@
+# Copy to terraform.tfvars and fill in the values.
+# terraform.tfvars is gitignored — never commit real values.
+
+aws_region  = "us-east-1"
+environment = "dev"
+app_name    = "security-spring"
+
+availability_zones = ["us-east-1a", "us-east-1b"]
+
+# ── EC2 ───────────────────────────────────────────────────────────────────────
+ec2_instance_type = "t2.micro"
+
+# Your public key: cat ~/.ssh/id_rsa.pub
+ssh_public_key = "ssh-rsa AAAA..."
+
+# Restrict SSH to your IP only: curl ifconfig.me
+allowed_ssh_cidr = "YOUR_IP/32"
+
+# ── ECR / App ─────────────────────────────────────────────────────────────────
+ecr_image_tag = "latest"
+
+# ── RDS (free tier: db.t3.micro, 20 GB gp2) ──────────────────────────────────
+db_instance_class        = "db.t3.micro"
+db_name                  = "security"
+db_username              = "appuser"
+db_backup_retention_days = 1
+
+# ── Secrets — keep in tfvars, never commit ────────────────────────────────────
+
+# Generate with: openssl rand -hex 32
+jwt_secret = "YOUR_256_BIT_SECRET"
+
+# Generate with: openssl rand -hex 16
+totp_encryption_key = "YOUR_32_BYTE_HEX_KEY"
+
+# From https://resend.com/api-keys (or leave as CHANGE_ME if not using email)
+resend_api_key = "re_YOUR_KEY"
+
+# ── App config ────────────────────────────────────────────────────────────────
+jwt_issuer                  = "security-spring"
+jwt_audience                = "security-spring-users"
+resend_from                 = "noreply@yourdomain.com"
+cors_allowed_origins        = "http://localhost:4200"
+password_reset_frontend_url = "http://localhost:4200/reset-password"
