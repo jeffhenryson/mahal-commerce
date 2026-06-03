@@ -86,6 +86,7 @@ public class SecurityConfig {
                 .requestMatchers(org.springframework.http.HttpMethod.DELETE, "/auth/sessions/*").authenticated()
                 .requestMatchers(org.springframework.http.HttpMethod.GET, "/auth/sessions").authenticated()
                 .requestMatchers("/system/config/public").permitAll()
+                .requestMatchers("/system/info").authenticated()
                 .requestMatchers("/auth/verify-email", "/auth/resend-verification").permitAll()
                 .requestMatchers("/auth/2fa/verify").permitAll()
                 .requestMatchers("/auth/2fa/setup", "/auth/2fa/confirm", "/auth/2fa/replace").authenticated()
