@@ -24,6 +24,8 @@ class HmlStartupValidatorTest {
         ReflectionTestUtils.setField(v, "corsAllowedOrigins", corsOrigins);
         ReflectionTestUtils.setField(v, "googleClientId", "123456789-abc.apps.googleusercontent.com");
         ReflectionTestUtils.setField(v, "totpEncryptionKey", "c2VjcmV0LXRlc3Qta2V5LXNlZ3VyYS1obWwtMzI=");
+        ReflectionTestUtils.setField(v, "jwtIssuer", "meu-servico-hml");
+        ReflectionTestUtils.setField(v, "jwtAudience", "meu-servico-api");
         return v;
     }
 
@@ -98,6 +100,15 @@ class HmlStartupValidatorTest {
                 .hasMessageContaining("resend.from");
     }
 
+    @Test
+    void deve_rejeitar_resend_from_sem_arroba() {
+        HmlStartupValidator v = validadorValido();
+        ReflectionTestUtils.setField(v, "resendFrom", "cernedsgn.xyz");
+        assertThatThrownBy(v::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("resend.from");
+    }
+
     // ── cors ─────────────────────────────────────────────────────────────────
 
     @Test
@@ -158,6 +169,26 @@ class HmlStartupValidatorTest {
                 .hasMessageContaining("totp.encryption.key");
     }
 
+    // ── jwt.issuer / jwt.audience ─────────────────────────────────────────────
+
+    @Test
+    void deve_rejeitar_jwt_issuer_padrao() {
+        HmlStartupValidator v = validadorValido();
+        ReflectionTestUtils.setField(v, "jwtIssuer", "security-spring");
+        assertThatThrownBy(v::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("jwt.issuer");
+    }
+
+    @Test
+    void deve_rejeitar_jwt_audience_padrao() {
+        HmlStartupValidator v = validadorValido();
+        ReflectionTestUtils.setField(v, "jwtAudience", "api");
+        assertThatThrownBy(v::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("jwt.audience");
+    }
+
     // ── múltiplos erros ───────────────────────────────────────────────────────
 
     @Test
@@ -172,6 +203,8 @@ class HmlStartupValidatorTest {
         );
         ReflectionTestUtils.setField(v, "googleClientId", "");
         ReflectionTestUtils.setField(v, "totpEncryptionKey", "");
+        ReflectionTestUtils.setField(v, "jwtIssuer", "meu-servico-hml");
+        ReflectionTestUtils.setField(v, "jwtAudience", "meu-servico-api");
         assertThatThrownBy(v::validate)
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContainingAll(

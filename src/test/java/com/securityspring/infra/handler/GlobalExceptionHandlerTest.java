@@ -2,8 +2,17 @@ package com.securityspring.infra.handler;
 
 import com.securityspring.core.domain.event.AuditEvent;
 import com.securityspring.core.domain.exception.*;
+import com.securityspring.core.domain.exception.auth.AccountDisabledException;
 import com.securityspring.core.domain.exception.auth.AccountLockedException;
+import com.securityspring.core.domain.exception.auth.DevChallengeExpiredException;
 import com.securityspring.core.domain.exception.auth.InvalidPasswordException;
+import com.securityspring.core.domain.exception.auth.OAuthTokenInvalidException;
+import com.securityspring.core.domain.exception.auth.TotpCodeRequiredException;
+import com.securityspring.core.domain.exception.auth.TotpNotConsecutiveException;
+import com.securityspring.core.domain.exception.auth.TotpSetupRequiredException;
+import com.securityspring.core.domain.exception.avatar.AvatarTooLargeException;
+import com.securityspring.core.domain.exception.avatar.InvalidAvatarFormatException;
+import com.securityspring.core.domain.exception.ModuleDisabledException;
 import com.securityspring.core.domain.exception.auth.InvalidRefreshTokenException;
 import com.securityspring.core.domain.exception.auth.InvalidTotpCodeException;
 import com.securityspring.core.domain.exception.auth.PasswordResetTokenExpiredException;
@@ -337,6 +346,84 @@ class GlobalExceptionHandlerTest {
                 new HttpMessageNotReadableException("bad body", new MockHttpInputMessage(new byte[0])), req);
         assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(resp.getBody().errorCode()).isEqualTo("UNREADABLE_BODY");
+    }
+
+    // ── 401 Unauthorized — account disabled ──────────────────────────────────
+
+    @Test
+    void accountDisabled_returns401_withoutAccountDisclosure() {
+        ResponseEntity<ApiError> resp = handler.handleAccountDisabled(new AccountDisabledException("alice"), req);
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(resp.getBody().errorCode()).isEqualTo("INVALID_CREDENTIALS");
+        assertThat(resp.getBody().message()).isEqualTo("Credenciais inválidas");
+    }
+
+    // ── 403 Forbidden — TOTP setup required ──────────────────────────────────
+
+    @Test
+    void totpSetupRequired_returns403_withCode() {
+        ResponseEntity<ApiError> resp = handler.handleTotpSetupRequired(new TotpSetupRequiredException(), req);
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(resp.getBody().errorCode()).isEqualTo("TOTP_SETUP_REQUIRED");
+    }
+
+    // ── 503 Service Unavailable — module disabled ─────────────────────────────
+
+    @Test
+    void moduleDisabled_returns503_withCode() {
+        ResponseEntity<ApiError> resp = handler.handleModuleDisabled(new ModuleDisabledException("roles"), req);
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(resp.getBody().errorCode()).isEqualTo("MODULE_DISABLED");
+    }
+
+    // ── 400 Bad Request — TOTP DEV ────────────────────────────────────────────
+
+    @Test
+    void totpCodeRequired_returns400_withCode() {
+        ResponseEntity<ApiError> resp = handler.handleTotpCodeRequired(new TotpCodeRequiredException(), req);
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(resp.getBody().errorCode()).isEqualTo("TOTP_CODE_REQUIRED");
+    }
+
+    @Test
+    void totpNotConsecutive_returns400_withCode() {
+        ResponseEntity<ApiError> resp = handler.handleTotpNotConsecutive(new TotpNotConsecutiveException(), req);
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(resp.getBody().errorCode()).isEqualTo("TOTP_NOT_CONSECUTIVE");
+    }
+
+    // ── 410 Gone — dev challenge expired ─────────────────────────────────────
+
+    @Test
+    void devChallengeExpired_returns410_withCode() {
+        ResponseEntity<ApiError> resp = handler.handleDevChallengeExpired(new DevChallengeExpiredException(), req);
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.GONE);
+        assertThat(resp.getBody().errorCode()).isEqualTo("DEV_CHALLENGE_EXPIRED");
+    }
+
+    // ── 401 Unauthorized — OAuth ──────────────────────────────────────────────
+
+    @Test
+    void oauthTokenInvalid_returns401_withCode() {
+        ResponseEntity<ApiError> resp = handler.handleOAuthTokenInvalid(new OAuthTokenInvalidException("bad token"), req);
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(resp.getBody().errorCode()).isEqualTo("OAUTH_TOKEN_INVALID");
+    }
+
+    // ── 400 Bad Request — avatar ──────────────────────────────────────────────
+
+    @Test
+    void avatarTooLarge_returns400_withCode() {
+        ResponseEntity<ApiError> resp = handler.handleAvatarTooLarge(new AvatarTooLargeException(2_097_152L), req);
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(resp.getBody().errorCode()).isEqualTo("AVATAR_TOO_LARGE");
+    }
+
+    @Test
+    void invalidAvatarFormat_returns400_withCode() {
+        ResponseEntity<ApiError> resp = handler.handleInvalidAvatarFormat(new InvalidAvatarFormatException(), req);
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(resp.getBody().errorCode()).isEqualTo("INVALID_AVATAR_FORMAT");
     }
 
     // ── path e timestamp na resposta ─────────────────────────────────────────

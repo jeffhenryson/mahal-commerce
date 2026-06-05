@@ -127,6 +127,15 @@ class HexagonalArchitectureTest {
     }
 
     @Test
+    void adapter_must_not_access_core_service_directly() {
+        noClasses()
+                .that().resideInAPackage("..adapter..")
+                .should().dependOnClassesThat()
+                .resideInAPackage("..core.service..")
+                .check(classes);
+    }
+
+    @Test
     void services_must_only_implement_use_case_ports() {
         ArchRule rule = classes()
                 .that().resideInAPackage("..core.service..")
