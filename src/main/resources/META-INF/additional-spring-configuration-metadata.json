@@ -161,6 +161,12 @@
       "defaultValue": "Código de confirmação de cadastro"
     },
     {
+      "name": "email.verification.frontend-url",
+      "type": "java.lang.String",
+      "description": "URL base do frontend para o link de verificação de email. O code é anexado como query param ?code=. Ex: https://hml.seudominio.com/auth/verify-email",
+      "defaultValue": "http://localhost:4200/auth/verify-email"
+    },
+    {
       "name": "auth.registration.default-roles",
       "type": "java.lang.String",
       "description": "Roles atribuídas automaticamente em auto-registros via POST /auth/register, separadas por vírgula. Vazio = sem role automática (princípio do mínimo privilégio). Exemplo: ROLE_USER",
