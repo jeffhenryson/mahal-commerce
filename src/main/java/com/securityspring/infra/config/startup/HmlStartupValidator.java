@@ -40,6 +40,12 @@ public class HmlStartupValidator {
     @Value("${totp.encryption.key:}")
     private String totpEncryptionKey;
 
+    @Value("${jwt.issuer:security-spring}")
+    private String jwtIssuer;
+
+    @Value("${jwt.audience:api}")
+    private String jwtAudience;
+
     @PostConstruct
     public void validate() {
         List<String> errors = new ArrayList<>();
@@ -58,6 +64,8 @@ public class HmlStartupValidator {
         }
         if (isBlankOrPlaceholder(resendFrom, "example.com")) {
             errors.add("resend.from (RESEND_FROM) está ausente ou usa domínio reservado — emails serão rejeitados");
+        } else if (!resendFrom.contains("@")) {
+            errors.add("resend.from (RESEND_FROM) não é um endereço de email válido — use noreply@seudominio.com ou Nome <noreply@seudominio.com>");
         }
         if (isBlankOrPlaceholder(corsAllowedOrigins, "*")) {
             errors.add("cors.allowed-origins não pode ser '*' em hml — defina CORS_ALLOWED_ORIGINS com a origem do ambiente de staging");
@@ -69,6 +77,12 @@ public class HmlStartupValidator {
             errors.add("totp.encryption.key está ausente ou usa o valor inseguro de desenvolvimento (base64 de zeros) — gere uma chave real com: openssl rand -base64 32");
         } else if (totpEncryptionKey.length() < 32) {
             errors.add("totp.encryption.key parece curto demais — use ao menos 32 caracteres (Base64 de 256 bits)");
+        }
+        if ("security-spring".equalsIgnoreCase(jwtIssuer)) {
+            errors.add("jwt.issuer está com o valor padrão 'security-spring' — defina JWT_ISSUER com o nome do seu serviço");
+        }
+        if ("api".equalsIgnoreCase(jwtAudience)) {
+            errors.add("jwt.audience está com o valor padrão 'api' — defina JWT_AUDIENCE com um identificador único para este serviço");
         }
 
         if (!errors.isEmpty()) {

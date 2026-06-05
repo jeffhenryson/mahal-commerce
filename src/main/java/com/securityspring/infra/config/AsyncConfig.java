@@ -11,12 +11,12 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import java.util.concurrent.Executor;
 
 @Configuration
-class AsyncConfig implements AsyncConfigurer {
+public class AsyncConfig implements AsyncConfigurer {
 
     private static final Logger log = LoggerFactory.getLogger(AsyncConfig.class);
 
     @Bean(name = "emailTaskExecutor")
-    Executor emailTaskExecutor() {
+    public Executor emailTaskExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         executor.setCorePoolSize(2);
         executor.setMaxPoolSize(5);
@@ -28,9 +28,23 @@ class AsyncConfig implements AsyncConfigurer {
         return executor;
     }
 
+    @Bean(name = "taskExecutor")
+    @Override
+    public Executor getAsyncExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(10);
+        executor.setQueueCapacity(200);
+        executor.setThreadNamePrefix("async-");
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(30);
+        executor.initialize();
+        return executor;
+    }
+
     @Override
     public AsyncUncaughtExceptionHandler getAsyncUncaughtExceptionHandler() {
         return (ex, method, params) ->
-            log.error("async.email.error method={} error={}", method.getName(), ex.getMessage(), ex);
+            log.error("async.error method={} error={}", method.getName(), ex.getMessage(), ex);
     }
 }

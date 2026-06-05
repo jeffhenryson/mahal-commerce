@@ -288,6 +288,11 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.BAD_REQUEST, "Corpo da requisição inválido ou ausente", "UNREADABLE_BODY", req);
     }
 
+    @ExceptionHandler(org.springframework.web.servlet.resource.NoResourceFoundException.class)
+    public ResponseEntity<ApiError> handleNoResource(HttpServletRequest req) {
+        return error(HttpStatus.NOT_FOUND, "Recurso não encontrado", "NOT_FOUND", req);
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiError> handleUnexpected(Exception ex, HttpServletRequest req) {
         log.error("Unhandled exception", ex);

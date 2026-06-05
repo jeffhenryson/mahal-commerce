@@ -18,7 +18,8 @@ import java.io.IOException;
 @Component
 public class MaintenanceModeFilter extends OncePerRequestFilter {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = new ObjectMapper()
+            .registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
 
     private static final String[] ALLOWED_PATHS = {
         "/actuator/health",
@@ -27,7 +28,7 @@ public class MaintenanceModeFilter extends OncePerRequestFilter {
     };
 
     private final SystemConfigPort systemConfig;
-    private final AntPathMatcher matcher = new AntPathMatcher();
+    private final AntPathMatcher pathMatcher = new AntPathMatcher();
 
     public MaintenanceModeFilter(SystemConfigPort systemConfig) {
         this.systemConfig = systemConfig;
@@ -37,7 +38,7 @@ public class MaintenanceModeFilter extends OncePerRequestFilter {
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getRequestURI().substring(request.getContextPath().length());
         for (String allowed : ALLOWED_PATHS) {
-            if (matcher.match(allowed, path)) return true;
+            if (pathMatcher.match(allowed, path)) return true;
         }
         return false;
     }
