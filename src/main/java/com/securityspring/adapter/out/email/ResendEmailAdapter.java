@@ -20,16 +20,19 @@ public class ResendEmailAdapter implements EmailPort {
     private final long ttlMinutes;
 
     private final String emailSubject;
+    private final String verificationFrontendUrl;
 
     public ResendEmailAdapter(
             @Value("${resend.api-key}") String apiKey,
             @Value("${resend.from:noreply@example.com}") String fromAddress,
             @Value("${resend.api-url:https://api.resend.com/emails}") String apiUrl,
             @Value("${email.verification.ttl-minutes:15}") long ttlMinutes,
-            @Value("${email.verification.subject:Código de confirmação de cadastro}") String emailSubject) {
+            @Value("${email.verification.subject:Código de confirmação de cadastro}") String emailSubject,
+            @Value("${email.verification.frontend-url:http://localhost:4200/auth/verify-email}") String verificationFrontendUrl) {
         this.fromAddress = fromAddress;
         this.ttlMinutes = ttlMinutes;
         this.emailSubject = emailSubject;
+        this.verificationFrontendUrl = verificationFrontendUrl;
         this.restClient = RestClient.builder()
                 .baseUrl(apiUrl)
                 .defaultHeader("Authorization", "Bearer " + apiKey)
@@ -122,19 +125,33 @@ public class ResendEmailAdapter implements EmailPort {
     }
 
     private String buildVerificationEmailHtml(String username, String code) {
+        String verifyUrl = escapeHtml(verificationFrontendUrl + "?code=" + code);
         return """
                 <div style="font-family:sans-serif;max-width:480px;margin:0 auto">
                   <h2>Confirmação de cadastro</h2>
                   <p>Olá, <strong>%s</strong>!</p>
-                  <p>Use o código abaixo para ativar sua conta:</p>
-                  <div style="font-size:2rem;font-weight:bold;letter-spacing:.3rem;
-                              background:#f4f4f4;padding:16px;text-align:center;border-radius:8px">
+                  <p>Clique no botão abaixo para confirmar seu email e ativar sua conta:</p>
+                  <p style="text-align:center;margin:24px 0">
+                    <a href="%s"
+                       style="display:inline-block;background:#0070f3;color:#fff;padding:12px 28px;
+                              border-radius:6px;text-decoration:none;font-weight:bold;font-size:1rem">
+                      Confirmar email
+                    </a>
+                  </p>
+                  <p style="color:#666;font-size:.85rem;text-align:center">
+                    Ou insira o código manualmente na página de verificação:
+                  </p>
+                  <div style="font-size:1.8rem;font-weight:bold;letter-spacing:.3rem;
+                              background:#f4f4f4;padding:16px;text-align:center;border-radius:8px;
+                              margin:8px 0">
                     %s
                   </div>
-                  <p style="color:#666;font-size:.85rem">Este código expira em %d minutos.<br>
-                  Se você não solicitou este cadastro, ignore este email.</p>
+                  <p style="color:#666;font-size:.8rem;margin-top:16px">
+                    Este código expira em %d minutos.<br>
+                    Se você não solicitou este cadastro, ignore este email.
+                  </p>
                 </div>
-                """.formatted(escapeHtml(username), escapeHtml(code), ttlMinutes);
+                """.formatted(escapeHtml(username), verifyUrl, escapeHtml(code), ttlMinutes);
     }
 
     private String buildPasswordResetEmailHtml(String username, String resetLink) {

@@ -19,7 +19,7 @@ public class LocalAvatarStorageAdapter implements AvatarStoragePort {
     private final Path storageDir;
 
     public LocalAvatarStorageAdapter(Path storageDir) {
-        this.storageDir = storageDir;
+        this.storageDir = storageDir.toAbsolutePath().normalize();
     }
 
     @PostConstruct

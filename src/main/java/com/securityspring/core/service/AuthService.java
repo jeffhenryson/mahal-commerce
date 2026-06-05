@@ -17,6 +17,8 @@ import com.securityspring.core.ports.out.token.TokenBlocklistPort;
 import com.securityspring.core.ports.out.twofa.TwoFactorAuthPort;
 import com.securityspring.core.ports.out.user.UserAuthoritiesPort;
 
+import org.springframework.transaction.annotation.Transactional;
+
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
@@ -117,6 +119,7 @@ public class AuthService implements AuthUseCase {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public List<SessionInfo> listActiveSessions(String username) {
         return refreshToken.findActiveSessions(username);
     }
