@@ -187,4 +187,35 @@ class AuthServiceTest {
         verify(refreshToken).revokeAll("alice");
         verify(tokenBlocklist).blockAllBefore(eq("alice"), any());
     }
+
+    @Test
+    void login_com_2fa_obrigatorio_e_usuario_sem_totp_lanca_TotpSetupRequiredException() {
+        when(loginAttempt.isLocked("alice")).thenReturn(false);
+        when(credentialVerifier.verify("alice", "pass"))
+                .thenReturn(new CredentialVerifierPort.VerifiedUser("alice", Set.of("ROLE_USER")));
+        when(systemConfig.getBoolean("security.2fa.required", false)).thenReturn(true);
+        when(twoFactorAuth.isEnabled("alice")).thenReturn(false);
+
+        assertThatThrownBy(() -> authService.login("alice", "pass"))
+                .isInstanceOf(com.securityspring.core.domain.exception.auth.TotpSetupRequiredException.class);
+
+        verify(loginAttempt).recordSuccess("alice");
+        verifyNoInteractions(accessToken, refreshToken);
+    }
+
+    @Test
+    void login_com_2fa_obrigatorio_e_usuario_com_totp_prossegue_para_challenge() {
+        when(loginAttempt.isLocked("alice")).thenReturn(false);
+        when(credentialVerifier.verify("alice", "pass"))
+                .thenReturn(new CredentialVerifierPort.VerifiedUser("alice", Set.of("ROLE_USER")));
+        when(systemConfig.getBoolean("security.2fa.required", false)).thenReturn(true);
+        when(twoFactorAuth.isEnabled("alice")).thenReturn(true);
+        when(twoFactorAuth.issueChallengeToken("alice")).thenReturn("challenge-xyz");
+
+        LoginResponse response = authService.login("alice", "pass");
+
+        assertThat(response.twoFactorRequired()).isTrue();
+        assertThat(response.challengeToken()).isEqualTo("challenge-xyz");
+        verifyNoInteractions(accessToken, refreshToken);
+    }
 }
