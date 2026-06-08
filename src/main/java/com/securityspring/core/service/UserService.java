@@ -166,20 +166,21 @@ public class UserService implements UserUseCase {
             throw new EmailVerificationCodeExpiredException();
         }
 
+        User user = userRepository.findByUsername(record.username())
+                .orElseThrow(() -> new UserNotFoundException(record.username()));
+
+        // Verificado anteriormente: retorna 409 para que o frontend distinga
+        // "reload após verificação bem-sucedida" de "código inválido" (400).
+        if (user.isEmailVerified()) throw new EmailAlreadyVerifiedException();
+
         // CAS atômico: previne que duas requisições concorrentes ativem a mesma conta.
         // Se markAsUsed retornar false, outra requisição já reclamou o código.
         if (!verificationCodeRepository.markAsUsed(code)) {
             throw new EmailVerificationCodeExpiredException();
         }
 
-        User user = userRepository.findByUsername(record.username())
-                .orElseThrow(() -> new UserNotFoundException(record.username()));
-
-        if (user.isEmailVerified()) throw new EmailAlreadyVerifiedException();
-
         user.confirmEmail();
         userRepository.save(user);
-        verificationCodeRepository.deleteByUsername(record.username());
         userCachePort.evict(record.username());
         return user.getUsername();
     }

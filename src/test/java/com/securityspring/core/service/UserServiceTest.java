@@ -317,7 +317,9 @@ class UserServiceTest {
     void verifyEmail_throwsWhenCASFails() {
         EmailVerificationCode code = new EmailVerificationCode(
                 1L, "alice", "HASH", Instant.now().plusSeconds(900), Instant.now(), false);
+        User user = User.ofPendingVerification("alice", "hashed", "alice@test.com", null);
         when(verificationCodeRepository.findByCode("ABC123")).thenReturn(Optional.of(code));
+        when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user));
         when(verificationCodeRepository.markAsUsed("ABC123")).thenReturn(false);
 
         assertThatThrownBy(() -> userService.verifyEmail("ABC123"))
