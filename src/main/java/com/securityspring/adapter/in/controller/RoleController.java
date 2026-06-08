@@ -162,6 +162,14 @@ public class RoleController {
     public ResponseEntity<Void> removePermission(@PathVariable String roleName,
             @PathVariable String permissionName, Authentication authentication) {
         checkModuleEnabled();
+        if (DEV_ONLY_PERMISSIONS.contains(permissionName)) {
+            boolean hasDevElevated = authentication.getAuthorities().stream()
+                    .anyMatch(a -> "DEV_ELEVATED".equals(a.getAuthority()));
+            if (!hasDevElevated) {
+                throw new org.springframework.security.access.AccessDeniedException(
+                        "Remoção de " + permissionName + " requer token DEV elevado");
+            }
+        }
         roleUseCase.removePermission(roleName, permissionName);
         publisher.publishEvent(AuditEvent.of(EventType.PERMISSION_REMOVED_FROM_ROLE,
                 authentication.getName(), Map.of("role", roleName, "permission", permissionName)));
