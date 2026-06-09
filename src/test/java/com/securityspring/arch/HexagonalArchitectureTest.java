@@ -136,6 +136,24 @@ class HexagonalArchitectureTest {
     }
 
     @Test
+    void infra_must_not_depend_on_adapter_in_dtos() {
+        noClasses()
+                .that().resideInAPackage("..infra..")
+                .should().dependOnClassesThat()
+                .resideInAPackage("..adapter.in.dtos..")
+                .check(classes);
+    }
+
+    @Test
+    void adapter_in_must_not_depend_on_infra() {
+        noClasses()
+                .that().resideInAPackage("..adapter.in..")
+                .should().dependOnClassesThat()
+                .resideInAPackage("..infra..")
+                .check(classes);
+    }
+
+    @Test
     void services_must_only_implement_use_case_ports() {
         ArchRule rule = classes()
                 .that().resideInAPackage("..core.service..")

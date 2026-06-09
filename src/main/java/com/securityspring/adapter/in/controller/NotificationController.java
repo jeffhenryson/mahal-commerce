@@ -4,7 +4,7 @@ import com.securityspring.adapter.in.dtos.response.NotificationResponseDTO;
 import com.securityspring.core.domain.model.PageResult;
 import com.securityspring.core.domain.model.notification.Notification;
 import com.securityspring.core.ports.in.NotificationUseCase;
-import com.securityspring.infra.notification.SseEmitterRegistry;
+import com.securityspring.adapter.in.sse.SseEmitterRegistry;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.constraints.Max;

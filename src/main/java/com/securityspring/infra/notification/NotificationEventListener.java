@@ -1,6 +1,5 @@
 package com.securityspring.infra.notification;
 
-import com.securityspring.adapter.in.dtos.response.NotificationResponseDTO;
 import com.securityspring.core.domain.event.AuditEvent;
 import com.securityspring.core.domain.model.notification.Notification;
 import com.securityspring.core.domain.model.notification.NotificationPreference;
@@ -8,6 +7,7 @@ import com.securityspring.core.domain.model.notification.NotificationType;
 import com.securityspring.core.ports.in.NotificationPreferenceUseCase;
 import com.securityspring.core.ports.in.NotificationUseCase;
 import com.securityspring.core.ports.out.notification.EmailPort;
+import com.securityspring.core.ports.out.notification.NotificationSsePort;
 import com.securityspring.core.ports.out.user.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,18 +27,18 @@ public class NotificationEventListener {
     private final NotificationPreferenceUseCase preferenceUseCase;
     private final UserRepository userRepository;
     private final EmailPort emailPort;
-    private final SseEmitterRegistry sseRegistry;
+    private final NotificationSsePort ssePort;
 
     public NotificationEventListener(NotificationUseCase notificationUseCase,
                                      NotificationPreferenceUseCase preferenceUseCase,
                                      UserRepository userRepository,
                                      EmailPort emailPort,
-                                     SseEmitterRegistry sseRegistry) {
+                                     NotificationSsePort ssePort) {
         this.notificationUseCase = notificationUseCase;
         this.preferenceUseCase = preferenceUseCase;
         this.userRepository = userRepository;
         this.emailPort = emailPort;
-        this.sseRegistry = sseRegistry;
+        this.ssePort = ssePort;
     }
 
     @EventListener
@@ -119,7 +119,7 @@ public class NotificationEventListener {
     private void persist(String username, NotificationType type, String title, String body) {
         try {
             Notification saved = notificationUseCase.notify(username, type, title, body);
-            sseRegistry.send(username, NotificationResponseDTO.from(saved));
+            ssePort.send(username, saved);
         } catch (Exception ex) {
             log.error("notification.persist.failed username={} type={} error={}", username, type, ex.getMessage());
         }

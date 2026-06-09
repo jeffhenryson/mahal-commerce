@@ -1,7 +1,11 @@
-package com.securityspring.infra.notification;
+package com.securityspring.adapter.in.sse;
 
+import com.securityspring.core.domain.model.notification.Notification;
+import com.securityspring.core.domain.model.notification.NotificationType;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+
+import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -9,26 +13,41 @@ class SseEmitterRegistryTest {
 
     private final SseEmitterRegistry registry = new SseEmitterRegistry();
 
+    private static final Notification NOTIFICATION = new Notification(
+            1L, "alice", NotificationType.PASSWORD_CHANGED, "Título", "Corpo", null, Instant.now());
+
     @Test
     void register_adiciona_emitter_para_usuario() {
-        SseEmitter emitter = new SseEmitter(1000L);
-        registry.register("alice", emitter);
+        registry.register("alice", new SseEmitter(1000L));
 
         assertThat(registry.activeConnections("alice")).isEqualTo(1);
     }
 
     @Test
-    void register_aceita_multiplos_emitters_por_usuario() {
-        registry.register("alice", new SseEmitter(1000L));
-        registry.register("alice", new SseEmitter(1000L));
+    void register_aceita_multiplos_emitters_por_usuario_ate_o_limite() {
+        for (int i = 0; i < 5; i++) {
+            registry.register("alice", new SseEmitter(1000L));
+        }
 
-        assertThat(registry.activeConnections("alice")).isEqualTo(2);
+        assertThat(registry.activeConnections("alice")).isEqualTo(5);
+    }
+
+    @Test
+    void register_recusa_conexao_alem_do_limite() {
+        for (int i = 0; i < 5; i++) {
+            registry.register("alice", new SseEmitter(1000L));
+        }
+
+        SseEmitter extra = new SseEmitter(1000L);
+        registry.register("alice", extra);
+
+        assertThat(registry.activeConnections("alice")).isEqualTo(5);
     }
 
     @Test
     void send_para_usuario_sem_emitters_nao_lanca_excecao() {
         assertThat(registry.activeConnections("nobody")).isZero();
-        registry.send("nobody", "payload");
+        registry.send("nobody", NOTIFICATION);
     }
 
     @Test

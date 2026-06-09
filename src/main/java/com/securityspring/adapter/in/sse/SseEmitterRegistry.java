@@ -1,37 +1,53 @@
-package com.securityspring.infra.notification;
+package com.securityspring.adapter.in.sse;
 
+import com.securityspring.adapter.in.dtos.response.NotificationResponseDTO;
+import com.securityspring.core.domain.model.notification.Notification;
+import com.securityspring.core.ports.out.notification.NotificationSsePort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 @Component
-public class SseEmitterRegistry {
+public class SseEmitterRegistry implements NotificationSsePort {
 
     private static final Logger log = LoggerFactory.getLogger(SseEmitterRegistry.class);
+
+    @Value("${notification.sse.max-connections-per-user:5}")
+    private int maxConnectionsPerUser = 5;
 
     private final ConcurrentHashMap<String, CopyOnWriteArrayList<SseEmitter>> emitters = new ConcurrentHashMap<>();
 
     public void register(String username, SseEmitter emitter) {
-        emitters.computeIfAbsent(username, k -> new CopyOnWriteArrayList<>()).add(emitter);
+        CopyOnWriteArrayList<SseEmitter> list = emitters.computeIfAbsent(username, k -> new CopyOnWriteArrayList<>());
+        if (list.size() >= maxConnectionsPerUser) {
+            log.warn("sse.connection_limit_exceeded username={} limit={}", username, maxConnectionsPerUser);
+            emitter.completeWithError(new IllegalStateException("SSE connection limit exceeded"));
+            return;
+        }
+        list.add(emitter);
         emitter.onCompletion(() -> remove(username, emitter));
         emitter.onTimeout(() -> remove(username, emitter));
         emitter.onError(ex -> remove(username, emitter));
     }
 
-    public void send(String username, Object data) {
+    @Override
+    public void send(String username, Notification notification) {
         List<SseEmitter> userEmitters = emitters.get(username);
         if (userEmitters == null || userEmitters.isEmpty()) return;
 
-        List<SseEmitter> dead = new java.util.ArrayList<>();
+        NotificationResponseDTO payload = NotificationResponseDTO.from(notification);
+        List<SseEmitter> dead = new ArrayList<>();
         for (SseEmitter emitter : userEmitters) {
             try {
-                emitter.send(SseEmitter.event().name("notification").data(data));
+                emitter.send(SseEmitter.event().name("notification").data(payload));
             } catch (IOException ex) {
                 dead.add(emitter);
             }
@@ -49,6 +65,7 @@ public class SseEmitterRegistry {
         }
     }
 
+    @Override
     public int activeConnections(String username) {
         List<SseEmitter> userEmitters = emitters.get(username);
         return userEmitters == null ? 0 : userEmitters.size();
