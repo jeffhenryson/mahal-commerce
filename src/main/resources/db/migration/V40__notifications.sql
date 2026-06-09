@@ -1,12 +1,11 @@
 CREATE TABLE notifications (
-    id         BIGINT       NOT NULL AUTO_INCREMENT,
+    id         BIGSERIAL    PRIMARY KEY,
     username   VARCHAR(80)  NOT NULL,
     type       VARCHAR(50)  NOT NULL,
     title      VARCHAR(255) NOT NULL,
     body       TEXT,
-    read_at    DATETIME(6),
-    created_at DATETIME(6)  NOT NULL,
-    PRIMARY KEY (id)
+    read_at    TIMESTAMPTZ,
+    created_at TIMESTAMPTZ  NOT NULL
 );
 
 CREATE INDEX idx_notifications_username         ON notifications (username);
