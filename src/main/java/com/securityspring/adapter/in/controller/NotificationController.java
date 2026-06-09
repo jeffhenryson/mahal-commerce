@@ -4,15 +4,19 @@ import com.securityspring.adapter.in.dtos.response.NotificationResponseDTO;
 import com.securityspring.core.domain.model.PageResult;
 import com.securityspring.core.domain.model.notification.Notification;
 import com.securityspring.core.ports.in.NotificationUseCase;
+import com.securityspring.infra.notification.SseEmitterRegistry;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.time.Duration;
 import java.util.Map;
 
 @RestController
@@ -22,9 +26,11 @@ import java.util.Map;
 public class NotificationController {
 
     private final NotificationUseCase useCase;
+    private final SseEmitterRegistry sseRegistry;
 
-    public NotificationController(NotificationUseCase useCase) {
+    public NotificationController(NotificationUseCase useCase, SseEmitterRegistry sseRegistry) {
         this.useCase = useCase;
+        this.sseRegistry = sseRegistry;
     }
 
     @Operation(summary = "Lista notificações do usuário autenticado")
@@ -67,5 +73,13 @@ public class NotificationController {
     public ResponseEntity<Void> delete(@PathVariable Long id, Authentication auth) {
         useCase.delete(auth.getName(), id);
         return ResponseEntity.noContent().build();
+    }
+
+    @Operation(summary = "Stream SSE de notificações em tempo real")
+    @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter stream(Authentication auth) {
+        SseEmitter emitter = new SseEmitter(Duration.ofMinutes(30).toMillis());
+        sseRegistry.register(auth.getName(), emitter);
+        return emitter;
     }
 }

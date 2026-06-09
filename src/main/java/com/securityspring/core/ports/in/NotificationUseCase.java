@@ -6,7 +6,7 @@ import com.securityspring.core.domain.model.notification.NotificationType;
 
 public interface NotificationUseCase {
 
-    void notify(String username, NotificationType type, String title, String body);
+    Notification notify(String username, NotificationType type, String title, String body);
 
     PageResult<Notification> getNotifications(String username, boolean unreadOnly, int page, int size);
 

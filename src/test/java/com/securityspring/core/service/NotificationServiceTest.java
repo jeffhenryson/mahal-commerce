@@ -33,7 +33,7 @@ class NotificationServiceTest {
         ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
         when(repository.save(any())).thenAnswer(i -> i.getArgument(0));
 
-        service.notify("alice", NotificationType.PASSWORD_CHANGED, "Senha alterada", "Detalhes aqui.");
+        Notification result = service.notify("alice", NotificationType.PASSWORD_CHANGED, "Senha alterada", "Detalhes aqui.");
 
         verify(repository).save(captor.capture());
         Notification saved = captor.getValue();
@@ -44,6 +44,7 @@ class NotificationServiceTest {
         assertThat(saved.body()).isEqualTo("Detalhes aqui.");
         assertThat(saved.readAt()).isNull();
         assertThat(saved.createdAt()).isNotNull();
+        assertThat(result).isNotNull();
     }
 
     @Test
