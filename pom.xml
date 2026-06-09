@@ -141,6 +141,12 @@
 			<artifactId>spring-boot-starter-webmvc</artifactId>
 		</dependency>
 
+		<!-- Thymeleaf — usado exclusivamente para renderizar templates de email -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-thymeleaf</artifactId>
+		</dependency>
+
 		<!-- DevTools -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>

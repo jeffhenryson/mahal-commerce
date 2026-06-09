@@ -28,8 +28,9 @@ class EmailAdapterConfig {
             @Value("${resend.api-url:https://api.resend.com/emails}") String apiUrl,
             @Value("${email.verification.ttl-minutes:15}") long ttlMinutes,
             @Value("${email.verification.subject:Código de confirmação de cadastro}") String emailSubject,
-            @Value("${email.verification.frontend-url:http://localhost:4200/auth/verify-email}") String verificationFrontendUrl) {
-        return new ResendEmailAdapter(apiKey, fromAddress, apiUrl, ttlMinutes, emailSubject, verificationFrontendUrl);
+            @Value("${email.verification.frontend-url:http://localhost:4200/auth/verify-email}") String verificationFrontendUrl,
+            ThymeleafEmailRenderer renderer) {
+        return new ResendEmailAdapter(apiKey, fromAddress, apiUrl, ttlMinutes, emailSubject, verificationFrontendUrl, renderer);
     }
 
     @Bean

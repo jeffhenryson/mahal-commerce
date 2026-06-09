@@ -18,9 +18,9 @@ public class ResendEmailAdapter implements EmailPort {
     private final RestClient restClient;
     private final String fromAddress;
     private final long ttlMinutes;
-
     private final String emailSubject;
     private final String verificationFrontendUrl;
+    private final ThymeleafEmailRenderer renderer;
 
     public ResendEmailAdapter(
             @Value("${resend.api-key}") String apiKey,
@@ -28,11 +28,13 @@ public class ResendEmailAdapter implements EmailPort {
             @Value("${resend.api-url:https://api.resend.com/emails}") String apiUrl,
             @Value("${email.verification.ttl-minutes:15}") long ttlMinutes,
             @Value("${email.verification.subject:Código de confirmação de cadastro}") String emailSubject,
-            @Value("${email.verification.frontend-url:http://localhost:4200/auth/verify-email}") String verificationFrontendUrl) {
+            @Value("${email.verification.frontend-url:http://localhost:4200/auth/verify-email}") String verificationFrontendUrl,
+            ThymeleafEmailRenderer renderer) {
         this.fromAddress = fromAddress;
         this.ttlMinutes = ttlMinutes;
         this.emailSubject = emailSubject;
         this.verificationFrontendUrl = verificationFrontendUrl;
+        this.renderer = renderer;
         this.restClient = RestClient.builder()
                 .baseUrl(apiUrl)
                 .defaultHeader("Authorization", "Bearer " + apiKey)
@@ -42,41 +44,52 @@ public class ResendEmailAdapter implements EmailPort {
     @Async("emailTaskExecutor")
     @Override
     public void sendVerificationCode(String to, String username, String code) {
-        String html = buildVerificationEmailHtml(username, code);
+        String verifyUrl = verificationFrontendUrl + "?code=" + code;
+        String html = renderer.render("verification-code", Map.of(
+                "username", username,
+                "code", code,
+                "verifyUrl", verifyUrl,
+                "ttlMinutes", ttlMinutes));
         send(to, emailSubject, html, "email.verification");
     }
 
     @Async("emailTaskExecutor")
     @Override
     public void sendPasswordResetLink(String to, String username, String resetLink) {
-        String html = buildPasswordResetEmailHtml(username, resetLink);
+        String html = renderer.render("password-reset", Map.of(
+                "username", username,
+                "resetLink", resetLink));
         send(to, "Recuperação de senha", html, "email.password-reset");
     }
 
     @Async("emailTaskExecutor")
     @Override
     public void sendEmailChangeNotification(String oldEmail, String username, String newEmail) {
-        String html = buildEmailChangeNotificationHtml(username, newEmail);
+        String html = renderer.render("email-change", Map.of(
+                "username", username,
+                "newEmail", newEmail));
         send(oldEmail, "Seu email foi alterado", html, "email.email-change-notification");
     }
 
     @Async("emailTaskExecutor")
     @Override
     public void sendPasswordChangedAlert(String to, String username) {
-        String html = buildSecurityAlertHtml(username,
-                "Sua senha foi alterada",
-                "A senha da sua conta foi alterada agora.",
-                "Se não foi você, entre em contato com o suporte imediatamente e revogue suas sessões.");
+        String html = renderer.render("security-alert", Map.of(
+                "username", username,
+                "title", "Sua senha foi alterada",
+                "message", "A senha da sua conta foi alterada agora.",
+                "footerMessage", "Se não foi você, entre em contato com o suporte imediatamente e revogue suas sessões."));
         send(to, "Alerta de segurança: senha alterada", html, "email.security-alert.password-changed");
     }
 
     @Async("emailTaskExecutor")
     @Override
     public void sendAccountLockedAlert(String to, String username) {
-        String html = buildSecurityAlertHtml(username,
-                "Conta temporariamente bloqueada",
-                "Sua conta foi bloqueada temporariamente devido a múltiplas tentativas de login malsucedidas.",
-                "Aguarde alguns minutos e tente novamente. Se não foi você, sua senha pode estar comprometida.");
+        String html = renderer.render("security-alert", Map.of(
+                "username", username,
+                "title", "Conta temporariamente bloqueada",
+                "message", "Sua conta foi bloqueada temporariamente devido a múltiplas tentativas de login malsucedidas.",
+                "footerMessage", "Aguarde alguns minutos e tente novamente. Se não foi você, sua senha pode estar comprometida."));
         send(to, "Alerta de segurança: conta bloqueada", html, "email.security-alert.account-locked");
     }
 
@@ -87,20 +100,22 @@ public class ResendEmailAdapter implements EmailPort {
         String detail = enabled
                 ? "A autenticação em dois fatores foi ativada na sua conta."
                 : "A autenticação em dois fatores foi desativada na sua conta.";
-        String html = buildSecurityAlertHtml(username,
-                "Autenticação em dois fatores " + action,
-                detail,
-                "Se não foi você, acesse sua conta e revogue todas as sessões ativas imediatamente.");
+        String html = renderer.render("security-alert", Map.of(
+                "username", username,
+                "title", "Autenticação em dois fatores " + action,
+                "message", detail,
+                "footerMessage", "Se não foi você, acesse sua conta e revogue todas as sessões ativas imediatamente."));
         send(to, "Alerta de segurança: 2FA " + action, html, "email.security-alert.totp-" + (enabled ? "enabled" : "disabled"));
     }
 
     @Async("emailTaskExecutor")
     @Override
     public void sendTokenTheftAlert(String to, String username) {
-        String html = buildSecurityAlertHtml(username,
-                "Acesso suspeito detectado",
-                "Detectamos o reuso de uma credencial de sessão já utilizada — todas as sessões da sua conta foram encerradas automaticamente.",
-                "Se não foi você, sua conta pode estar comprometida. Troque sua senha imediatamente.");
+        String html = renderer.render("security-alert", Map.of(
+                "username", username,
+                "title", "Acesso suspeito detectado",
+                "message", "Detectamos o reuso de uma credencial de sessão já utilizada — todas as sessões da sua conta foram encerradas automaticamente.",
+                "footerMessage", "Se não foi você, sua conta pode estar comprometida. Troque sua senha imediatamente."));
         send(to, "Alerta de segurança: acesso suspeito", html, "email.security-alert.token-theft");
     }
 
@@ -122,90 +137,5 @@ public class ResendEmailAdapter implements EmailPort {
             log.error("{}.failed to={} error={}", logPrefix, to, ex.getMessage());
             throw new EmailDeliveryException(ex.getMessage());
         }
-    }
-
-    private String buildVerificationEmailHtml(String username, String code) {
-        String verifyUrl = escapeHtml(verificationFrontendUrl + "?code=" + code);
-        return """
-                <div style="font-family:sans-serif;max-width:480px;margin:0 auto">
-                  <h2>Confirmação de cadastro</h2>
-                  <p>Olá, <strong>%s</strong>!</p>
-                  <p>Clique no botão abaixo para confirmar seu email e ativar sua conta:</p>
-                  <p style="text-align:center;margin:24px 0">
-                    <a href="%s"
-                       style="display:inline-block;background:#0070f3;color:#fff;padding:12px 28px;
-                              border-radius:6px;text-decoration:none;font-weight:bold;font-size:1rem">
-                      Confirmar email
-                    </a>
-                  </p>
-                  <p style="color:#666;font-size:.85rem;text-align:center">
-                    Ou insira o código manualmente na página de verificação:
-                  </p>
-                  <div style="font-size:1.8rem;font-weight:bold;letter-spacing:.3rem;
-                              background:#f4f4f4;padding:16px;text-align:center;border-radius:8px;
-                              margin:8px 0">
-                    %s
-                  </div>
-                  <p style="color:#666;font-size:.8rem;margin-top:16px">
-                    Este código expira em %d minutos.<br>
-                    Se você não solicitou este cadastro, ignore este email.
-                  </p>
-                </div>
-                """.formatted(escapeHtml(username), verifyUrl, escapeHtml(code), ttlMinutes);
-    }
-
-    private String buildPasswordResetEmailHtml(String username, String resetLink) {
-        return """
-                <div style="font-family:sans-serif;max-width:480px;margin:0 auto">
-                  <h2>Recuperação de senha</h2>
-                  <p>Olá, <strong>%s</strong>!</p>
-                  <p>Recebemos uma solicitação para redefinir a senha da sua conta.</p>
-                  <p style="text-align:center">
-                    <a href="%s"
-                       style="display:inline-block;background:#0070f3;color:#fff;padding:12px 24px;
-                              border-radius:6px;text-decoration:none;font-weight:bold">
-                      Redefinir senha
-                    </a>
-                  </p>
-                  <p style="color:#666;font-size:.85rem">
-                    Este link expira em 15 minutos.<br>
-                    Se você não solicitou a recuperação de senha, ignore este email — sua senha permanece a mesma.
-                  </p>
-                </div>
-                """.formatted(escapeHtml(username), escapeHtml(resetLink));
-    }
-
-    private String buildEmailChangeNotificationHtml(String username, String newEmail) {
-        return """
-                <div style="font-family:sans-serif;max-width:480px;margin:0 auto">
-                  <h2>Email da conta alterado</h2>
-                  <p>Olá, <strong>%s</strong>!</p>
-                  <p>O email de acesso à sua conta foi alterado para <strong>%s</strong>.</p>
-                  <p style="color:#666;font-size:.85rem">
-                    Se você não realizou esta alteração, entre em contato com o suporte imediatamente.
-                  </p>
-                </div>
-                """.formatted(escapeHtml(username), escapeHtml(newEmail));
-    }
-
-    private String buildSecurityAlertHtml(String username, String title, String message, String footer) {
-        return """
-                <div style="font-family:sans-serif;max-width:480px;margin:0 auto">
-                  <h2 style="color:#c0392b">%s</h2>
-                  <p>Olá, <strong>%s</strong>!</p>
-                  <p>%s</p>
-                  <p style="color:#666;font-size:.85rem">%s</p>
-                </div>
-                """.formatted(escapeHtml(title), escapeHtml(username), escapeHtml(message), escapeHtml(footer));
-    }
-
-    private static String escapeHtml(String value) {
-        if (value == null) return "";
-        return value
-                .replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace("\"", "&quot;")
-                .replace("'", "&#x27;");
     }
 }
