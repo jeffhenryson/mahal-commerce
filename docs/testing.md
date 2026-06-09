@@ -4,12 +4,12 @@
 
 | Categoria | Quantidade | Tecnologia principal |
 |-----------|-----------|----------------------|
-| Unit tests | ~50 | JUnit 5 + Mockito |
-| Integration tests (`*IT`) | 9 | JUnit 5 + Spring Boot Test + MockMvc |
+| Unit tests | ~54 | JUnit 5 + Mockito |
+| Integration tests (`*IT`) | 10 | JUnit 5 + Spring Boot Test + MockMvc |
 | Testcontainers (PostgreSQL real) | 1 | Testcontainers + `@EnabledIfEnvironmentVariable` |
 | ArchUnit (regras arquiteturais) | 1 | ArchUnit |
 
-Total: ~78 arquivos de teste.
+Total: ~82 arquivos de teste.
 
 ---
 
@@ -75,6 +75,7 @@ Testam uma classe isolada com dependências mockadas via Mockito. Não sobem o c
 | `DevChallengeCleanupServiceTest` | Cron de limpeza de dev_challenge_tokens expirados |
 | `NotificationCleanupServiceTest` | Cron passa cutoff correto (90 dias por padrão), respeita retention-days configurável, delega ao repositório |
 | `ThymeleafEmailRendererTest` | Renderiza cada um dos 5 templates com campos esperados; XSS escaping automático via `th:text` em valores maliciosos |
+| `ResendEmailAdapterTest` | `sendVerificationCode` envia POST com from/to/subject/html corretos via `MockRestServiceServer`; `sendPasswordResetLink` verifica template e resetLink; falha HTTP lança `EmailDeliveryException`; `sendPasswordChangedAlert` e `sendTokenTheftAlert` verificam subject e template |
 | `NotificationEventListenerTest` | Dispatch completo (persist + SSE + email) para PASSWORD_CHANGED e ACCOUNT_LOCKED; in-app desabilitado pula persistência e SSE mas envia email; email desabilitado persiste e faz push SSE mas pula email; falha na lookup de preferência faz fallback para defaults (todos habilitados); role_assigned inclui nome do papel no corpo; tipo de evento não mapeado é ignorado |
 | `SseEmitterRegistryTest` | Register adiciona emitter; múltiplos emitters até o limite de 5; conexão além do limite é recusada; send para usuário sem emitters é no-op; remove diminui contagem; remove usuário inexistente é no-op; activeConnections retorna zero para usuário sem emitters |
 | `GoogleTokenVerifierAdapterTest` | Validação de id_token Google (assinatura, issuer, audience) |
@@ -107,6 +108,8 @@ Adapters com contexto Spring parcial (cache/AOP):
 | Arquivo | O que cobre |
 |---------|-------------|
 | `NotificationPreferenceRepositoryImplTest` | Comportamento real de `@Cacheable` (segunda chamada retorna do cache sem tocar o DB) e `@CacheEvict` (upsert invalida o cache, próxima leitura vai ao DB). Usa `ConcurrentMapCacheManager` em contexto minimal via `@ExtendWith(SpringExtension.class)` + `@EnableCaching`. `@BeforeEach` limpa o cache para evitar poluição entre testes no mesmo contexto. |
+| `SystemConfigAdapterTest` | Comportamento real de `@Cacheable` em `findByKey()` e `getBoolean()`; `save()` evicta todo o cache (`allEntries=true`) — próxima leitura vai ao DB; caches são independentes por chave; `getBoolean` retorna `defaultValue` quando chave ausente. Mesmo padrão de contexto minimal que `NotificationPreferenceRepositoryImplTest`. |
+| `S3AvatarStorageAdapterTest` | `save()` envia `PutObjectRequest` com bucket, key (`avatars/{filename}`), `contentType` correto (jpg→image/jpeg, png, webp, default→application/octet-stream) e `cacheControl`; retorna filename com extensão. `load()` retorna `Optional` com stream em caso de sucesso, `empty()` em `NoSuchKeyException` e em `S3Exception` genérica. `delete()` suprime `S3Exception` sem propagar. `save()` lança `IllegalStateException` em falha S3. `getPublicUrl()` monta URL com prefixo `avatars/`. |
 
 ---
 
@@ -125,6 +128,7 @@ Sobem o contexto Spring completo com MockMvc contra H2 in-memory (perfil `dev`),
 | `VerifyEmailConcurrencyIT` | Race condition: duas requisições simultâneas com o mesmo código ativam a conta exatamente uma vez (valida o `markAsUsed()` atômico via CAS) |
 | `TotpFlowIT` | End-to-end do fluxo TOTP: ativar 2FA → login com challenge → completar com código TOTP real → receber tokens |
 | `NotificationFlowIT` | Fluxo completo de notificações: register → verify-email → login → troca de senha (dispara `PASSWORD_CHANGED` async) → GET /notifications → mark-as-read → DELETE. Segundo teste cobre markAllAsRead zerando o unread-count. |
+| `SystemConfigFlowIT` | GET /system/config/public (sem auth → 200); GET /system/config sem auth → 401, com DEV_ELEVATED → 200; PUT chave inválida → 400, sem auth → 401; PUT chave pública persiste e aparece no getPublicConfig; toggle maintenance mode via `SystemConfigPort` direto (bypassa whitelist de PUBLIC_KEYS) evicta `@CacheEvict(allEntries=true)` → `MaintenanceModeFilter` retorna 503 em paths não-allowlistados; `/system/config/public` permanece acessível durante manutenção. |
 
 ---
 

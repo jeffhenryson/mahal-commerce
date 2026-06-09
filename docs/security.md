@@ -133,6 +133,7 @@ Baseado em **IP**, sliding window. O `LoginRateLimitingFilter` cobre:
 - `POST /auth/reset-password`
 - `POST /auth/2fa/verify`
 - `POST /auth/2fa/confirm`
+- `POST /auth/2fa/replace`
 - `POST /auth/2fa/backup-codes/regenerate`
 - `POST /auth/oauth2/google`
 - `POST /auth/dev/first-code`

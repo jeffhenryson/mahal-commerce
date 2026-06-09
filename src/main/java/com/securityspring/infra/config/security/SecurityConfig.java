@@ -72,10 +72,9 @@ public class SecurityConfig {
                         "camera=(), microphone=(), geolocation=(), payment=(), usb=()"));
             })
             .authorizeHttpRequests(auth -> {
-                // Swagger UI e spec são públicos — qualquer um pode ver a documentação.
-                // A segurança real está em cada endpoint individual (@PreAuthorize).
-                // Para fazer chamadas, o usuário precisa clicar em Authorize e inserir o Bearer token.
-                // Em hml/prod springdoc.swagger-ui.enabled=false e essas regras não são registradas.
+                // Swagger UI e spec são públicos em todos os ambientes — a segurança real
+                // está em cada endpoint individual (@PreAuthorize). Para fazer chamadas,
+                // o usuário precisa clicar em Authorize e inserir o Bearer token.
                 if (swaggerEnabled) {
                     auth.requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll();
                 }

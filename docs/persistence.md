@@ -263,8 +263,8 @@ adapter/out/persistence/converter/*EntityConverter  (domínio ↔ entidade)
 | Perfil | Banco | Migrations |
 |--------|-------|-----------|
 | `dev` | H2 in-memory | Schema criado automaticamente pelo JPA (sem Flyway) |
-| `hml` | PostgreSQL | Flyway (`V1__init.sql` … `V42__`) |
-| `prod` | PostgreSQL | Flyway (`V1__init.sql` … `V42__`) |
+| `hml` | PostgreSQL | Flyway (`V1__init.sql` … `V43__`) |
+| `prod` | PostgreSQL | Flyway (`V1__init.sql` … `V43__`) |
 
 Em hml/prod não há seed automático — usuário admin deve ser criado via CLI (`create-admin`).
 
@@ -321,6 +321,7 @@ Em hml/prod não há seed automático — usuário admin deve ser criado via CLI
 | `V40__notifications.sql` | Cria a tabela `notifications` (módulo de notificações in-app). Campos: `id BIGSERIAL`, `username VARCHAR(80)`, `type VARCHAR(50)`, `title VARCHAR(255)`, `body TEXT`, `read_at TIMESTAMPTZ` (nullable — `NULL` = não lida), `created_at TIMESTAMPTZ`. Três índices: por `username` (listagem por usuário), por `(username, read_at)` (contagem de não-lidas e markAllAsRead), por `created_at` (cleanup por TTL via `NotificationCleanupService`). |
 | `V41__notification_preferences.sql` | Cria a tabela `notification_preferences` com PK composta `(username, type)` e flags `in_app_enabled`/`email_enabled` (ambas `DEFAULT TRUE`). Linha ausente = preferências padrão (ambas ativas). Permite desativar notificação in-app e/ou email por tipo individualmente via `PUT /notifications/preferences/{type}`. |
 | `V42__notification_indexes_and_fk.sql` | Adiciona índice `idx_notification_preferences_username ON notification_preferences(username)` — evita full table scan em `findByUsername`. Adiciona FK `fk_notifications_username → users(username) ON DELETE CASCADE` e `fk_notification_prefs_username → users(username) ON DELETE CASCADE` — garante integridade referencial e limpeza automática de notificações ao deletar usuário. |
+| `V43__add_notification_read_at_index.sql` | Índice parcial `idx_notifications_read_at ON notifications(read_at) WHERE read_at IS NOT NULL` — melhora o DELETE do `NotificationCleanupService`, que filtra por `read_at IS NOT NULL AND read_at < :cutoff`. Sem este índice a query faz full scan conforme a tabela cresce. |
 
 ---
 

@@ -1023,6 +1023,82 @@ Atualiza a preferência de notificação para um tipo específico. O path `{type
 
 ---
 
+## System Config — `/system/config`
+
+Gerenciamento de feature flags em runtime. Apenas flags da whitelist `PUBLIC_KEYS` podem ser alteradas via API (`auth.google.enabled`, `auth.google.register.enabled`, `auth.registration.enabled`, `auth.forgot-password.enabled`). Flags de sistema como `security.maintenance.enabled` e `security.2fa.required` só podem ser alteradas diretamente no banco.
+
+### GET /system/config/public — Público
+
+Retorna as feature flags públicas (sem autenticação). Inclui apenas as chaves da whitelist que existem no banco.
+
+```json
+// Response 200
+{
+  "auth.google.enabled": "true",
+  "auth.google.register.enabled": "true",
+  "auth.registration.enabled": "true",
+  "auth.forgot-password.enabled": "true"
+}
+```
+
+### GET /system/config — Autoridade: DEV_ELEVATED
+
+Retorna todas as feature flags do banco.
+
+```json
+// Response 200
+{
+  "auth.google.enabled": "true",
+  "auth.registration.enabled": "true",
+  "security.maintenance.enabled": "false",
+  "security.2fa.required": "false",
+  "module.audit-logs.enabled": "true",
+  "module.roles.enabled": "true"
+}
+```
+
+**Erros:** `401` sem autenticação, `403` sem `DEV_ELEVATED`.
+
+### PUT /system/config/{key} — Autoridade: DEV_ELEVATED
+
+Atualiza uma flag da whitelist pública.
+
+```json
+// Request body
+{ "value": "false" }
+```
+
+| Campo | Tipo | Validação |
+|-------|------|-----------|
+| `value` | string | `@NotNull`, máximo 255 caracteres |
+
+**Responses:**
+- `204 No Content` — atualizado com sucesso (evicta cache imediatamente)
+- `400 INVALID_ARGUMENT` — chave não está na whitelist ou body inválido
+- `401` — sem autenticação
+- `403` — sem `DEV_ELEVATED`
+
+---
+
+## System Info — `/system/info`
+
+### GET /system/info — Autoridade: DEV_ELEVATED
+
+Retorna informações do ambiente ativo. Útil para diagnosticar qual perfil está rodando.
+
+```json
+// Response 200
+{
+  "status": "UP",
+  "profile": "dev",
+  "profiles": ["dev"]
+}
+```
+
+**Erros:** `401` sem autenticação, `403` sem `DEV_ELEVATED`.
+
+---
+
 ## Tipos TypeScript
 
 ```typescript

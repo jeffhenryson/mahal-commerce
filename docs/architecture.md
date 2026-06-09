@@ -306,6 +306,16 @@ O `SseEmitterRegistry` foi colocado em `adapter/in/sse/` em vez de `infra/notifi
 
 Configuração do cache segue o mesmo padrão dos outros adapters: Caffeine em dev (`maximumSize=500, expireAfterWrite=60s`), Redis em hml/prod.
 
+### SystemConfig: whitelist de chaves mutáveis via API
+
+`SystemConfigService.set()` aceita apenas chaves presentes no conjunto `PUBLIC_KEYS` (`auth.google.enabled`, `auth.google.register.enabled`, `auth.registration.enabled`, `auth.forgot-password.enabled`). Qualquer outra chave lança `IllegalArgumentException` → 400.
+
+Flags de sistema com alto impacto (`security.maintenance.enabled`, `security.2fa.required`, `module.*`) **não fazem parte dessa whitelist**. Para alterá-las é necessário um `UPDATE` direto no banco ou uma migration Flyway.
+
+**Por quê:** Evitar que uma chamada acidental à API (ou um token DEV comprometido) possa ativar manutenção global ou forçar 2FA para todos os usuários. A mudança de flags de sistema é intencional e requer acesso ao banco.
+
+**Consequência:** Em testes de integração, `security.maintenance.enabled` deve ser configurado via `SystemConfigPort` diretamente (injetado por `@Autowired`), não pelo endpoint HTTP.
+
 ### HTTP Security Headers
 
 Além dos defaults do Spring Security (X-Content-Type-Options, X-Frame-Options, HSTS em HTTPS), a aplicação configura:
