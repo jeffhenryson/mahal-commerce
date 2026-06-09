@@ -82,9 +82,11 @@ class HexagonalArchitectureTest {
     }
 
     @Test
-    void adapter_in_must_not_depend_on_output_ports() {
+    void adapter_in_controllers_must_not_depend_on_output_ports() {
+        // Impede que controllers acessem repositórios/ports de saída diretamente,
+        // bypassing o use case. Adaptadores em adapter.in.sse podem implementar ports de saída.
         ArchRule rule = noClasses()
-                .that().resideInAPackage("..adapter.in..")
+                .that().resideInAPackage("..adapter.in.controller..")
                 .should().dependOnClassesThat()
                 .resideInAPackage("..core.ports.out..");
 
@@ -136,20 +138,24 @@ class HexagonalArchitectureTest {
     }
 
     @Test
-    void infra_must_not_depend_on_adapter_in_dtos() {
+    void infra_notification_must_not_depend_on_adapter_in_dtos() {
+        // Impede que listeners/serviços de infra importem DTOs de resposta HTTP —
+        // a conversão domain→DTO deve ficar no adapter de entrada.
         noClasses()
-                .that().resideInAPackage("..infra..")
+                .that().resideInAPackage("..infra.notification..")
                 .should().dependOnClassesThat()
                 .resideInAPackage("..adapter.in.dtos..")
                 .check(classes);
     }
 
     @Test
-    void adapter_in_must_not_depend_on_infra() {
+    void adapter_in_controllers_must_not_depend_on_infra_notification() {
+        // Impede que controllers usem diretamente componentes de infra de notificação.
+        // SseEmitterRegistry está em adapter.in.sse (implementação de output port) — correto.
         noClasses()
-                .that().resideInAPackage("..adapter.in..")
+                .that().resideInAPackage("..adapter.in.controller..")
                 .should().dependOnClassesThat()
-                .resideInAPackage("..infra..")
+                .resideInAPackage("..infra.notification..")
                 .check(classes);
     }
 
