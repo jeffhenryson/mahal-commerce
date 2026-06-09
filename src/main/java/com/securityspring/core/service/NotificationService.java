@@ -48,4 +48,12 @@ public class NotificationService implements NotificationUseCase {
     public long countUnread(String username) {
         return notificationRepository.countUnread(username);
     }
+
+    @Override
+    @Transactional
+    public void delete(String username, Long notificationId) {
+        notificationRepository.findById(notificationId)
+                .filter(n -> n.username().equals(username))
+                .ifPresent(n -> notificationRepository.delete(notificationId));
+    }
 }

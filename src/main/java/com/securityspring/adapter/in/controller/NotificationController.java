@@ -61,4 +61,11 @@ public class NotificationController {
         useCase.markAllAsRead(auth.getName());
         return ResponseEntity.noContent().build();
     }
+
+    @Operation(summary = "Remove uma notificação do usuário autenticado")
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> delete(@PathVariable Long id, Authentication auth) {
+        useCase.delete(auth.getName(), id);
+        return ResponseEntity.noContent().build();
+    }
 }

@@ -18,4 +18,6 @@ public interface NotificationRepository {
     void markAllAsRead(String username);
 
     long countUnread(String username);
+
+    void delete(Long id);
 }

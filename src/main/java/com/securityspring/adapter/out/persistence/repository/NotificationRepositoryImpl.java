@@ -66,6 +66,12 @@ public class NotificationRepositoryImpl implements NotificationRepository {
         return jpaRepo.countByUsernameAndReadAtIsNull(username);
     }
 
+    @Override
+    @Transactional
+    public void delete(Long id) {
+        jpaRepo.deleteById(id);
+    }
+
     private NotificationEntity toEntity(Notification n) {
         NotificationEntity e = new NotificationEntity();
         e.setId(n.id());

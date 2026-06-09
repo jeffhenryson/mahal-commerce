@@ -15,4 +15,6 @@ public interface NotificationUseCase {
     void markAllAsRead(String username);
 
     long countUnread(String username);
+
+    void delete(String username, Long notificationId);
 }

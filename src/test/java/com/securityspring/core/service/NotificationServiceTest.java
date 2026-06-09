@@ -112,4 +112,33 @@ class NotificationServiceTest {
 
         assertThat(count).isEqualTo(7L);
     }
+
+    @Test
+    void delete_remove_quando_notificacao_pertence_ao_usuario() {
+        Notification n = new Notification(42L, "alice", NotificationType.SYSTEM, "t", "b", null, Instant.now());
+        when(repository.findById(42L)).thenReturn(Optional.of(n));
+
+        service.delete("alice", 42L);
+
+        verify(repository).delete(42L);
+    }
+
+    @Test
+    void delete_nao_remove_quando_notificacao_pertence_a_outro_usuario() {
+        Notification n = new Notification(42L, "bob", NotificationType.SYSTEM, "t", "b", null, Instant.now());
+        when(repository.findById(42L)).thenReturn(Optional.of(n));
+
+        service.delete("alice", 42L);
+
+        verify(repository, never()).delete(any());
+    }
+
+    @Test
+    void delete_nao_remove_quando_notificacao_nao_existe() {
+        when(repository.findById(99L)).thenReturn(Optional.empty());
+
+        service.delete("alice", 99L);
+
+        verify(repository, never()).delete(any());
+    }
 }
