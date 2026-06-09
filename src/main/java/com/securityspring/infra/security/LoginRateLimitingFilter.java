@@ -54,6 +54,11 @@ public class LoginRateLimitingFilter extends OncePerRequestFilter {
             return !path.startsWith("/notifications/preferences/");
         }
 
+        // GET /notifications/stream opens a persistent SSE connection — guard against flood.
+        if ("GET".equalsIgnoreCase(method)) {
+            return !"/notifications/stream".equals(path);
+        }
+
         if (!"POST".equalsIgnoreCase(method)) return true;
         return !"/auth/login".equals(path)
                 && !"/auth/register".equals(path)

@@ -42,6 +42,7 @@ class LoginRateLimitingFilterTest {
         @PostMapping("/auth/dev/first-code")   public void devFirstCode()   {}
         @PostMapping("/auth/dev/complete")     public void devComplete()    {}
         @GetMapping("/users/me")               public void me()             {}
+        @GetMapping("/notifications/stream")   public void sseStream()      {}
         @PutMapping("/notifications/preferences/PASSWORD_CHANGED") public void updatePref() {}
         @PutMapping("/users/me")               public void updateMe()       {}
         @DeleteMapping("/auth/2fa")            public void disable2fa()     {}
@@ -66,6 +67,27 @@ class LoginRateLimitingFilterTest {
         mockMvc.perform(get("/users/me"))
                 .andExpect(status().isOk());
         verifyNoInteractions(rateLimiter);
+    }
+
+    // ── GET /notifications/stream rate-limiting ───────────────────────────────
+
+    @Test
+    void get_to_sse_stream_within_limit_passes_through() throws Exception {
+        when(rateLimiter.tryConsume(any())).thenReturn(true);
+
+        mockMvc.perform(get("/notifications/stream"))
+                .andExpect(status().isOk());
+        verify(rateLimiter).tryConsume(any());
+    }
+
+    @Test
+    void get_to_sse_stream_exceeded_returns_429() throws Exception {
+        when(rateLimiter.tryConsume(any())).thenReturn(false);
+
+        mockMvc.perform(get("/notifications/stream"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().exists("Retry-After"))
+                .andExpect(jsonPath("$.errorCode").value("TOO_MANY_REQUESTS"));
     }
 
     @Test
