@@ -31,15 +31,8 @@ public class NotificationPreferenceRepositoryImpl implements NotificationPrefere
     @Override
     @Transactional
     public void upsert(NotificationPreference preference) {
-        NotificationPreferenceEntity.PreferenceId id =
-                new NotificationPreferenceEntity.PreferenceId(preference.username(), preference.type().name());
-        NotificationPreferenceEntity entity = jpaRepo.findById(id)
-                .orElseGet(NotificationPreferenceEntity::new);
-        entity.setUsername(preference.username());
-        entity.setType(preference.type().name());
-        entity.setInAppEnabled(preference.inAppEnabled());
-        entity.setEmailEnabled(preference.emailEnabled());
-        jpaRepo.save(entity);
+        jpaRepo.upsert(preference.username(), preference.type().name(),
+                preference.inAppEnabled(), preference.emailEnabled());
     }
 
     private NotificationPreference toDomain(NotificationPreferenceEntity e) {
