@@ -46,8 +46,11 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.validation.BindingResult;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import org.springframework.context.ApplicationEventPublisher;
+
+import com.securityspring.core.domain.model.notification.NotificationType;
 
 import java.util.List;
 import java.util.Set;
@@ -424,6 +427,37 @@ class GlobalExceptionHandlerTest {
         ResponseEntity<ApiError> resp = handler.handleInvalidAvatarFormat(new InvalidAvatarFormatException(), req);
         assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(resp.getBody().errorCode()).isEqualTo("INVALID_AVATAR_FORMAT");
+    }
+
+    // ── 400 Bad Request — type mismatch ──────────────────────────────────────
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void typeMismatch_enum_returns400_withValidValues() {
+        MethodArgumentTypeMismatchException ex = mock(MethodArgumentTypeMismatchException.class);
+        when(ex.getName()).thenReturn("type");
+        when(ex.getRequiredType()).thenReturn((Class) NotificationType.class);
+
+        ResponseEntity<ApiError> resp = handler.handleTypeMismatch(ex, req);
+
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(resp.getBody().errorCode()).isEqualTo("INVALID_ENUM_VALUE");
+        assertThat(resp.getBody().message()).contains("type");
+        assertThat(resp.getBody().message()).contains("PASSWORD_CHANGED");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void typeMismatch_non_enum_returns400_withParamName() {
+        MethodArgumentTypeMismatchException ex = mock(MethodArgumentTypeMismatchException.class);
+        when(ex.getName()).thenReturn("id");
+        when(ex.getRequiredType()).thenReturn((Class) Long.class);
+
+        ResponseEntity<ApiError> resp = handler.handleTypeMismatch(ex, req);
+
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(resp.getBody().errorCode()).isEqualTo("INVALID_ENUM_VALUE");
+        assertThat(resp.getBody().message()).contains("id");
     }
 
     // ── path e timestamp na resposta ─────────────────────────────────────────
