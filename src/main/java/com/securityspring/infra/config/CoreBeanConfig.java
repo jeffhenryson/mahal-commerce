@@ -10,6 +10,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 import com.securityspring.core.ports.in.AuditLogsUseCase;
 import com.securityspring.core.ports.in.AuthUseCase;
 import com.securityspring.core.ports.in.AvatarUseCase;
+import com.securityspring.core.ports.in.NotificationPreferenceUseCase;
 import com.securityspring.core.ports.in.NotificationUseCase;
 import com.securityspring.core.ports.in.OAuthLoginUseCase;
 import com.securityspring.core.ports.in.PermissionUseCase;
@@ -41,6 +42,7 @@ import com.securityspring.core.ports.out.user.UserAuthoritiesPort;
 import com.securityspring.core.ports.out.user.UserCachePort;
 import com.securityspring.core.ports.out.user.UserRepository;
 import com.securityspring.core.ports.out.audit.AuditLogRepository;
+import com.securityspring.core.ports.out.notification.NotificationPreferenceRepository;
 import com.securityspring.core.ports.out.notification.NotificationRepository;
 import com.securityspring.adapter.out.storage.LocalAvatarStorageAdapter;
 import com.securityspring.core.ports.out.storage.AvatarStoragePort;
@@ -48,6 +50,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import com.securityspring.core.service.AuditLogsService;
 import com.securityspring.core.service.AuthService;
 import com.securityspring.core.service.AvatarService;
+import com.securityspring.core.service.NotificationPreferenceService;
 import com.securityspring.core.service.NotificationService;
 import com.securityspring.core.service.OAuthLoginService;
 import com.securityspring.core.service.PermissionService;
@@ -170,6 +173,11 @@ class CoreBeanConfig {
     @Bean
     NotificationUseCase notificationUseCase(NotificationRepository notificationRepository) {
         return new NotificationService(notificationRepository);
+    }
+
+    @Bean
+    NotificationPreferenceUseCase notificationPreferenceUseCase(NotificationPreferenceRepository preferenceRepository) {
+        return new NotificationPreferenceService(preferenceRepository);
     }
 
     @Bean
