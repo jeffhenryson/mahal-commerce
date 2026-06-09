@@ -151,6 +151,7 @@ public class RefreshTokenRepositoryImpl implements RefreshTokenPort {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public List<SessionInfo> findActiveSessions(String username) {
         return refreshRepo.findActiveByUsername(username, Instant.now())
                 .stream()
