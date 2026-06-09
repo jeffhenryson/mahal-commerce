@@ -86,6 +86,14 @@ Authorities carregadas:
 
 Anotações nos controllers: `@PreAuthorize("hasAuthority('PERMISSION_NAME')")`
 
+### Endpoints de notificação — `isAuthenticated()` intencional
+
+Os endpoints `/notifications/**` e `/notifications/preferences/**` usam `isAuthenticated()` em vez de uma permissão granular. Toda conta autenticada pode gerenciar suas próprias notificações — não há RBAC fino aqui por design: o controle de acesso é por **ownership** (cada operação filtra pelo `username` do JWT), não por role/permission.
+
+> Isso é uma decisão consciente: adicionar uma permission `NOTIFICATION_READ` seria redundante porque qualquer usuário ativo já tem o direito de ver suas próprias notificações. A granularidade de permissões é reservada para operações administrativas.
+
+---
+
 ### Authority especial: `DEV_ELEVATED`
 
 Adicionada ao JWT apenas após completar o **duplo TOTP DEV** (`POST /auth/dev/complete`). Não é uma permissão persistida no banco — é injetada dinamicamente no access token pelo `AuthService.completeDevElevation()`.
@@ -133,6 +141,9 @@ Baseado em **IP**, sliding window. O `LoginRateLimitingFilter` cobre:
 **DELETE:**
 - `DELETE /auth/2fa` — desativação de 2FA exige senha + TOTP code; protegido contra brute-force
 
+**GET:**
+- `GET /notifications/stream` — protegido contra flood de abertura/fechamento de conexões SSE
+
 **PUT:**
 - `PUT /notifications/preferences/{type}` — protegido contra spam de atualizações
 
@@ -157,7 +168,7 @@ O endpoint `GET /notifications/stream` mantém conexões HTTP de longa duração
 
 Conexões além do limite são recusadas com erro imediato pelo `SseEmitterRegistry.register()`. O log registra `sse.connection_limit_exceeded` com o username e o limite configurado.
 
-O endpoint não é coberto pelo `LoginRateLimitingFilter` (que limitaria a cadência de conexões, não o total ativo) — o controle é feito pelo registry de forma stateful por usuário.
+Além disso, `GET /notifications/stream` está coberto pelo `LoginRateLimitingFilter` — limita a cadência de abertura de novas conexões por IP. O controle de conexões ativas simultâneas (cap por usuário) é feito pelo `SseEmitterRegistry` de forma complementar.
 
 ---
 
