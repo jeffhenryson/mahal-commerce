@@ -12,6 +12,7 @@ import com.securityspring.core.ports.out.user.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.event.EventListener;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -41,6 +42,7 @@ public class NotificationEventListener {
     }
 
     @EventListener
+    @Async("taskExecutor")
     public void onAuditEvent(AuditEvent event) {
         switch (event.type()) {
             case USER_PASSWORD_CHANGED -> {
