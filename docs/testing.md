@@ -5,11 +5,11 @@
 | Categoria | Quantidade | Tecnologia principal |
 |-----------|-----------|----------------------|
 | Unit tests | ~50 | JUnit 5 + Mockito |
-| Integration tests (`*IT`) | 8 | JUnit 5 + Spring Boot Test + MockMvc |
+| Integration tests (`*IT`) | 9 | JUnit 5 + Spring Boot Test + MockMvc |
 | Testcontainers (PostgreSQL real) | 1 | Testcontainers + `@EnabledIfEnvironmentVariable` |
 | ArchUnit (regras arquiteturais) | 1 | ArchUnit |
 
-Total: ~75 arquivos de teste.
+Total: ~78 arquivos de teste.
 
 ---
 
@@ -102,6 +102,12 @@ Controladores (MockMvc com contexto parcial):
 | `NotificationControllerTest` | Lista paginada (+ `unreadOnly`), unread-count, markAsRead, markAllAsRead, delete, SSE stream (verifica registro no `SseEmitterRegistry`) |
 | `NotificationPreferenceControllerTest` | GET preferências (lista completa e vazia), PUT com type válido (verifica delegação ao use case) e com type inválido (→ 400 `INVALID_ENUM_VALUE` com lista de valores) |
 
+Adapters com contexto Spring parcial (cache/AOP):
+
+| Arquivo | O que cobre |
+|---------|-------------|
+| `NotificationPreferenceRepositoryImplTest` | Comportamento real de `@Cacheable` (segunda chamada retorna do cache sem tocar o DB) e `@CacheEvict` (upsert invalida o cache, próxima leitura vai ao DB). Usa `ConcurrentMapCacheManager` em contexto minimal via `@ExtendWith(SpringExtension.class)` + `@EnableCaching`. `@BeforeEach` limpa o cache para evitar poluição entre testes no mesmo contexto. |
+
 ---
 
 ### Integration tests (ITs)
@@ -118,6 +124,7 @@ Sobem o contexto Spring completo com MockMvc contra H2 in-memory (perfil `dev`),
 | `UserProfileAndSessionsTest` | GET /users/me, PATCH /users/me, GET /users/me/sessions, DELETE session |
 | `VerifyEmailConcurrencyIT` | Race condition: duas requisições simultâneas com o mesmo código ativam a conta exatamente uma vez (valida o `markAsUsed()` atômico via CAS) |
 | `TotpFlowIT` | End-to-end do fluxo TOTP: ativar 2FA → login com challenge → completar com código TOTP real → receber tokens |
+| `NotificationFlowIT` | Fluxo completo de notificações: register → verify-email → login → troca de senha (dispara `PASSWORD_CHANGED` async) → GET /notifications → mark-as-read → DELETE. Segundo teste cobre markAllAsRead zerando o unread-count. |
 
 ---
 
