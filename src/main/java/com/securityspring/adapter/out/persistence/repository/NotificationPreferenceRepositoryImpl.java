@@ -4,6 +4,8 @@ import com.securityspring.adapter.out.persistence.entity.NotificationPreferenceE
 import com.securityspring.core.domain.model.notification.NotificationPreference;
 import com.securityspring.core.domain.model.notification.NotificationType;
 import com.securityspring.core.ports.out.notification.NotificationPreferenceRepository;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -13,6 +15,8 @@ import java.util.stream.Collectors;
 @Repository
 public class NotificationPreferenceRepositoryImpl implements NotificationPreferenceRepository {
 
+    static final String CACHE_NAME = "notificationPreferences";
+
     private final NotificationPreferenceJpaRepository jpaRepo;
 
     public NotificationPreferenceRepositoryImpl(NotificationPreferenceJpaRepository jpaRepo) {
@@ -21,6 +25,7 @@ public class NotificationPreferenceRepositoryImpl implements NotificationPrefere
 
     @Override
     @Transactional(readOnly = true)
+    @Cacheable(cacheNames = CACHE_NAME, key = "#username")
     public Map<NotificationType, NotificationPreference> findByUsername(String username) {
         return jpaRepo.findByUsername(username).stream()
                 .collect(Collectors.toMap(
@@ -30,6 +35,7 @@ public class NotificationPreferenceRepositoryImpl implements NotificationPrefere
 
     @Override
     @Transactional
+    @CacheEvict(cacheNames = CACHE_NAME, key = "#preference.username()")
     public void upsert(NotificationPreference preference) {
         jpaRepo.upsert(preference.username(), preference.type().name(),
                 preference.inAppEnabled(), preference.emailEnabled());
