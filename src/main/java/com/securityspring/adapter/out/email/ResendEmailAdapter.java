@@ -4,7 +4,6 @@ import com.securityspring.core.domain.exception.email.EmailDeliveryException;
 import com.securityspring.core.ports.out.notification.EmailPort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.web.client.RestClient;
@@ -23,22 +22,18 @@ public class ResendEmailAdapter implements EmailPort {
     private final ThymeleafEmailRenderer renderer;
 
     public ResendEmailAdapter(
-            @Value("${resend.api-key}") String apiKey,
-            @Value("${resend.from:noreply@example.com}") String fromAddress,
-            @Value("${resend.api-url:https://api.resend.com/emails}") String apiUrl,
-            @Value("${email.verification.ttl-minutes:15}") long ttlMinutes,
-            @Value("${email.verification.subject:Código de confirmação de cadastro}") String emailSubject,
-            @Value("${email.verification.frontend-url:http://localhost:4200/auth/verify-email}") String verificationFrontendUrl,
+            RestClient restClient,
+            String fromAddress,
+            long ttlMinutes,
+            String emailSubject,
+            String verificationFrontendUrl,
             ThymeleafEmailRenderer renderer) {
+        this.restClient = restClient;
         this.fromAddress = fromAddress;
         this.ttlMinutes = ttlMinutes;
         this.emailSubject = emailSubject;
         this.verificationFrontendUrl = verificationFrontendUrl;
         this.renderer = renderer;
-        this.restClient = RestClient.builder()
-                .baseUrl(apiUrl)
-                .defaultHeader("Authorization", "Bearer " + apiKey)
-                .build();
     }
 
     @Async("emailTaskExecutor")

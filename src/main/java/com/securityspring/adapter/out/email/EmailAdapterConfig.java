@@ -6,6 +6,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.web.client.RestClient;
 
 /**
  * Seleciona o adapter de e-mail conforme {@code email.provider}:
@@ -30,7 +31,11 @@ class EmailAdapterConfig {
             @Value("${email.verification.subject:Código de confirmação de cadastro}") String emailSubject,
             @Value("${email.verification.frontend-url:http://localhost:4200/auth/verify-email}") String verificationFrontendUrl,
             ThymeleafEmailRenderer renderer) {
-        return new ResendEmailAdapter(apiKey, fromAddress, apiUrl, ttlMinutes, emailSubject, verificationFrontendUrl, renderer);
+        RestClient restClient = RestClient.builder()
+                .baseUrl(apiUrl)
+                .defaultHeader("Authorization", "Bearer " + apiKey)
+                .build();
+        return new ResendEmailAdapter(restClient, fromAddress, ttlMinutes, emailSubject, verificationFrontendUrl, renderer);
     }
 
     @Bean
