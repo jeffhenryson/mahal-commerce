@@ -72,13 +72,12 @@ public class SecurityConfig {
                         "camera=(), microphone=(), geolocation=(), payment=(), usb=()"));
             })
             .authorizeHttpRequests(auth -> {
-                // Swagger UI é público; o spec (/v3/api-docs/**) exige ROLE_DEV.
-                // Isso força o usuário a inserir o Bearer token via botão Authorize antes
-                // de conseguir carregar a lista de endpoints.
+                // Swagger UI e spec são públicos — qualquer um pode ver a documentação.
+                // A segurança real está em cada endpoint individual (@PreAuthorize).
+                // Para fazer chamadas, o usuário precisa clicar em Authorize e inserir o Bearer token.
                 // Em hml/prod springdoc.swagger-ui.enabled=false e essas regras não são registradas.
                 if (swaggerEnabled) {
-                    auth.requestMatchers("/swagger-ui/**", "/swagger-ui.html").permitAll();
-                    auth.requestMatchers("/v3/api-docs/**").hasAuthority("ROLE_DEV");
+                    auth.requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll();
                 }
                 // Actuator roda em management.server.port=8081 (hml/prod) — sem filtros desta
                 // SecurityFilterChain. Em dev (mesma porta), as regras abaixo se aplicam.
