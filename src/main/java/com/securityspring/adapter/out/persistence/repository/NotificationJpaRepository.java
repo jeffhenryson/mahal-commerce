@@ -20,8 +20,12 @@ public interface NotificationJpaRepository extends JpaRepository<NotificationEnt
     long countByUsernameAndReadAtIsNull(String username);
 
     @Modifying
-    @Query("UPDATE NotificationEntity n SET n.readAt = :now WHERE n.id = :id AND n.readAt IS NULL")
-    void markAsRead(@Param("id") Long id, @Param("now") Instant now);
+    @Query("UPDATE NotificationEntity n SET n.readAt = :now WHERE n.id = :id AND n.username = :username AND n.readAt IS NULL")
+    void markAsRead(@Param("id") Long id, @Param("username") String username, @Param("now") Instant now);
+
+    @Modifying
+    @Query("DELETE FROM NotificationEntity n WHERE n.id = :id AND n.username = :username")
+    void deleteByIdAndUsername(@Param("id") Long id, @Param("username") String username);
 
     @Modifying
     @Query("UPDATE NotificationEntity n SET n.readAt = :now WHERE n.username = :username AND n.readAt IS NULL")

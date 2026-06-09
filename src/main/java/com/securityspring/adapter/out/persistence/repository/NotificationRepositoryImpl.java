@@ -14,7 +14,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 
 @Repository
 public class NotificationRepositoryImpl implements NotificationRepository {
@@ -44,15 +43,9 @@ public class NotificationRepositoryImpl implements NotificationRepository {
     }
 
     @Override
-    @Transactional(readOnly = true)
-    public Optional<Notification> findById(Long id) {
-        return jpaRepo.findById(id).map(this::toDomain);
-    }
-
-    @Override
     @Transactional
-    public void markAsRead(Long id) {
-        jpaRepo.markAsRead(id, Instant.now());
+    public void markAsRead(Long id, String username) {
+        jpaRepo.markAsRead(id, username, Instant.now());
     }
 
     @Override
@@ -69,8 +62,8 @@ public class NotificationRepositoryImpl implements NotificationRepository {
 
     @Override
     @Transactional
-    public void delete(Long id) {
-        jpaRepo.deleteById(id);
+    public void delete(Long id, String username) {
+        jpaRepo.deleteByIdAndUsername(id, username);
     }
 
     @Override

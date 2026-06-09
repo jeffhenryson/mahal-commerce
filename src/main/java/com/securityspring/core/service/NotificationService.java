@@ -32,9 +32,7 @@ public class NotificationService implements NotificationUseCase {
     @Override
     @Transactional
     public void markAsRead(String username, Long notificationId) {
-        notificationRepository.findById(notificationId)
-                .filter(n -> n.username().equals(username))
-                .ifPresent(n -> notificationRepository.markAsRead(notificationId));
+        notificationRepository.markAsRead(notificationId, username);
     }
 
     @Override
@@ -52,8 +50,6 @@ public class NotificationService implements NotificationUseCase {
     @Override
     @Transactional
     public void delete(String username, Long notificationId) {
-        notificationRepository.findById(notificationId)
-                .filter(n -> n.username().equals(username))
-                .ifPresent(n -> notificationRepository.delete(notificationId));
+        notificationRepository.delete(notificationId, username);
     }
 }

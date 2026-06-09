@@ -11,9 +11,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -70,32 +68,10 @@ class NotificationServiceTest {
     }
 
     @Test
-    void markAsRead_marca_quando_notificacao_pertence_ao_usuario() {
-        Notification n = new Notification(42L, "alice", NotificationType.SYSTEM, "t", "b", null, Instant.now());
-        when(repository.findById(42L)).thenReturn(Optional.of(n));
-
+    void markAsRead_delega_para_repositorio_com_username() {
         service.markAsRead("alice", 42L);
 
-        verify(repository).markAsRead(42L);
-    }
-
-    @Test
-    void markAsRead_nao_marca_quando_notificacao_pertence_a_outro_usuario() {
-        Notification n = new Notification(42L, "bob", NotificationType.SYSTEM, "t", "b", null, Instant.now());
-        when(repository.findById(42L)).thenReturn(Optional.of(n));
-
-        service.markAsRead("alice", 42L);
-
-        verify(repository, never()).markAsRead(any());
-    }
-
-    @Test
-    void markAsRead_nao_marca_quando_notificacao_nao_existe() {
-        when(repository.findById(99L)).thenReturn(Optional.empty());
-
-        service.markAsRead("alice", 99L);
-
-        verify(repository, never()).markAsRead(any());
+        verify(repository).markAsRead(42L, "alice");
     }
 
     @Test
@@ -115,31 +91,9 @@ class NotificationServiceTest {
     }
 
     @Test
-    void delete_remove_quando_notificacao_pertence_ao_usuario() {
-        Notification n = new Notification(42L, "alice", NotificationType.SYSTEM, "t", "b", null, Instant.now());
-        when(repository.findById(42L)).thenReturn(Optional.of(n));
-
+    void delete_delega_para_repositorio_com_username() {
         service.delete("alice", 42L);
 
-        verify(repository).delete(42L);
-    }
-
-    @Test
-    void delete_nao_remove_quando_notificacao_pertence_a_outro_usuario() {
-        Notification n = new Notification(42L, "bob", NotificationType.SYSTEM, "t", "b", null, Instant.now());
-        when(repository.findById(42L)).thenReturn(Optional.of(n));
-
-        service.delete("alice", 42L);
-
-        verify(repository, never()).delete(any());
-    }
-
-    @Test
-    void delete_nao_remove_quando_notificacao_nao_existe() {
-        when(repository.findById(99L)).thenReturn(Optional.empty());
-
-        service.delete("alice", 99L);
-
-        verify(repository, never()).delete(any());
+        verify(repository).delete(42L, "alice");
     }
 }
