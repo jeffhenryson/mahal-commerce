@@ -49,6 +49,11 @@ public class LoginRateLimitingFilter extends OncePerRequestFilter {
             return !"/auth/2fa".equals(path);
         }
 
+        // PUT /notifications/preferences/{type} accepts user input — guard against spam.
+        if ("PUT".equalsIgnoreCase(method)) {
+            return !path.startsWith("/notifications/preferences/");
+        }
+
         if (!"POST".equalsIgnoreCase(method)) return true;
         return !"/auth/login".equals(path)
                 && !"/auth/register".equals(path)

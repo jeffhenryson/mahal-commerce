@@ -7,14 +7,18 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 /**
@@ -38,6 +42,9 @@ class LoginRateLimitingFilterTest {
         @PostMapping("/auth/dev/first-code")   public void devFirstCode()   {}
         @PostMapping("/auth/dev/complete")     public void devComplete()    {}
         @GetMapping("/users/me")               public void me()             {}
+        @PutMapping("/notifications/preferences/PASSWORD_CHANGED") public void updatePref() {}
+        @PutMapping("/users/me")               public void updateMe()       {}
+        @DeleteMapping("/auth/2fa")            public void disable2fa()     {}
     }
 
     private LoginRateLimiterPort rateLimiter;
@@ -208,5 +215,35 @@ class LoginRateLimitingFilterTest {
                 .andExpect(status().isTooManyRequests())
                 .andExpect(header().exists("Retry-After"))
                 .andExpect(jsonPath("$.errorCode").value("TOO_MANY_REQUESTS"));
+    }
+
+    // ── /notifications/preferences PUT rate-limiting ─────────────────────────
+
+    @Test
+    void put_to_preferences_within_limit_passes_through() throws Exception {
+        when(rateLimiter.tryConsume(any())).thenReturn(true);
+
+        mockMvc.perform(put("/notifications/preferences/PASSWORD_CHANGED")
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk());
+        verify(rateLimiter).tryConsume(any());
+    }
+
+    @Test
+    void put_to_preferences_exceeded_returns_429() throws Exception {
+        when(rateLimiter.tryConsume(any())).thenReturn(false);
+
+        mockMvc.perform(put("/notifications/preferences/PASSWORD_CHANGED")
+                        .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().exists("Retry-After"))
+                .andExpect(jsonPath("$.errorCode").value("TOO_MANY_REQUESTS"));
+    }
+
+    @Test
+    void put_to_non_preferences_path_bypasses_filter() throws Exception {
+        mockMvc.perform(put("/users/me").contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk());
+        verifyNoInteractions(rateLimiter);
     }
 }
