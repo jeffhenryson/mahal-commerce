@@ -3,6 +3,7 @@ package com.securityspring.core.ports.out.notification;
 import com.securityspring.core.domain.model.PageResult;
 import com.securityspring.core.domain.model.notification.Notification;
 
+import java.time.Instant;
 import java.util.Optional;
 
 public interface NotificationRepository {
@@ -20,4 +21,6 @@ public interface NotificationRepository {
     long countUnread(String username);
 
     void delete(Long id);
+
+    void deleteReadBefore(Instant before);
 }

@@ -12,6 +12,7 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -70,6 +71,12 @@ public class NotificationRepositoryImpl implements NotificationRepository {
     @Transactional
     public void delete(Long id) {
         jpaRepo.deleteById(id);
+    }
+
+    @Override
+    @Transactional
+    public void deleteReadBefore(Instant before) {
+        jpaRepo.deleteReadBefore(before);
     }
 
     private NotificationEntity toEntity(Notification n) {
