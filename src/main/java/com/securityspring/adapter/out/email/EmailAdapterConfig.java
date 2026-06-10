@@ -1,6 +1,7 @@
 package com.securityspring.adapter.out.email;
 
 import com.securityspring.core.ports.out.notification.EmailPort;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -30,12 +31,13 @@ class EmailAdapterConfig {
             @Value("${email.verification.ttl-minutes:15}") long ttlMinutes,
             @Value("${email.verification.subject:Código de confirmação de cadastro}") String emailSubject,
             @Value("${email.verification.frontend-url:http://localhost:4200/auth/verify-email}") String verificationFrontendUrl,
-            ThymeleafEmailRenderer renderer) {
+            ThymeleafEmailRenderer renderer,
+            MeterRegistry meterRegistry) {
         RestClient restClient = RestClient.builder()
                 .baseUrl(apiUrl)
                 .defaultHeader("Authorization", "Bearer " + apiKey)
                 .build();
-        return new ResendEmailAdapter(restClient, fromAddress, ttlMinutes, emailSubject, verificationFrontendUrl, renderer);
+        return new ResendEmailAdapter(restClient, fromAddress, ttlMinutes, emailSubject, verificationFrontendUrl, renderer, meterRegistry);
     }
 
     @Bean

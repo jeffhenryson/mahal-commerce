@@ -2,6 +2,7 @@ package com.securityspring.adapter.out.email;
 
 import com.securityspring.core.domain.exception.email.EmailDeliveryException;
 import com.securityspring.core.ports.out.notification.EmailPort;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
@@ -20,6 +21,7 @@ public class ResendEmailAdapter implements EmailPort {
     private final String emailSubject;
     private final String verificationFrontendUrl;
     private final ThymeleafEmailRenderer renderer;
+    private final MeterRegistry meterRegistry;
 
     public ResendEmailAdapter(
             RestClient restClient,
@@ -27,13 +29,15 @@ public class ResendEmailAdapter implements EmailPort {
             long ttlMinutes,
             String emailSubject,
             String verificationFrontendUrl,
-            ThymeleafEmailRenderer renderer) {
+            ThymeleafEmailRenderer renderer,
+            MeterRegistry meterRegistry) {
         this.restClient = restClient;
         this.fromAddress = fromAddress;
         this.ttlMinutes = ttlMinutes;
         this.emailSubject = emailSubject;
         this.verificationFrontendUrl = verificationFrontendUrl;
         this.renderer = renderer;
+        this.meterRegistry = meterRegistry;
     }
 
     @Async("emailTaskExecutor")
@@ -128,8 +132,10 @@ public class ResendEmailAdapter implements EmailPort {
                     .retrieve()
                     .toBodilessEntity();
             log.info("{}.sent to={}", logPrefix, to);
+            meterRegistry.counter("email.sent.total", "type", logPrefix).increment();
         } catch (Exception ex) {
             log.error("{}.failed to={} error={}", logPrefix, to, ex.getMessage());
+            meterRegistry.counter("email.failed.total", "type", logPrefix).increment();
             throw new EmailDeliveryException(ex.getMessage());
         }
     }

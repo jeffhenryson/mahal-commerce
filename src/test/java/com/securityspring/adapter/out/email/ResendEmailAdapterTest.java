@@ -1,6 +1,7 @@
 package com.securityspring.adapter.out.email;
 
 import com.securityspring.core.domain.exception.email.EmailDeliveryException;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
@@ -34,7 +35,7 @@ class ResendEmailAdapterTest {
                 .defaultHeader("Authorization", "Bearer test-key");
         server = MockRestServiceServer.bindTo(builder).build();
         adapter = new ResendEmailAdapter(builder.build(), FROM, 15, "Confirme seu cadastro",
-                "http://localhost:4200/auth/verify-email", renderer);
+                "http://localhost:4200/auth/verify-email", renderer, new SimpleMeterRegistry());
     }
 
     @Test
