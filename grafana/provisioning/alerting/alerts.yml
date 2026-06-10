@@ -158,3 +158,213 @@ groups:
         labels:
           severity: warning
           team: backend
+
+      - uid: login-failure-ratio
+        title: Alta Taxa de Falhas de Login
+        condition: D
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: sum(rate(auth_login_total{result="failure"}[5m]))
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: sum(rate(auth_login_total[5m]))
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: "-100"
+            model:
+              type: math
+              expression: "$A / $B * 100"
+              refId: C
+          - refId: D
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: "-100"
+            model:
+              type: threshold
+              expression: C
+              conditions:
+                - type: query
+                  evaluator:
+                    params: [30]
+                    type: gt
+        noDataState: OK
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: "Taxa de falha de login: {{ $values.C | printf \"%.1f\" }}% nos últimos 5 minutos"
+          description: "Mais de 30% dos logins estão falhando. Possível ataque de credential stuffing ou brute force em andamento. Verifique os logs de auditoria."
+        labels:
+          severity: warning
+          team: security
+
+      - uid: jvm-heap-high
+        title: Heap JVM Acima de 85%
+        condition: C
+        data:
+          - refId: B
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: sum(jvm_memory_used_bytes{area="heap"}) / sum(jvm_memory_max_bytes{area="heap"}) * 100
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: "-100"
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - type: query
+                  evaluator:
+                    params: [85]
+                    type: gt
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "Heap JVM em {{ $values.B | printf \"%.1f\" }}%"
+          description: "O uso de heap está acima de 85% por mais de 5 minutos. Risco de OOM. Verifique memory leaks, aumente o heap máximo ou investigue objetos retidos."
+        labels:
+          severity: warning
+          team: backend
+
+      - uid: hikari-pool-exhausting
+        title: Pool HikariCP Próximo do Esgotamento
+        condition: C
+        data:
+          - refId: B
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: hikaricp_connections_pending
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: "-100"
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - type: query
+                  evaluator:
+                    params: [5]
+                    type: gt
+        noDataState: OK
+        execErrState: Error
+        for: 1m
+        annotations:
+          summary: "{{ $values.B }} conexões aguardando pool HikariCP"
+          description: "Há mais de 5 threads aguardando uma conexão do pool por mais de 1 minuto. Verifique queries lentas, deadlocks ou considere aumentar o pool size."
+        labels:
+          severity: warning
+          team: backend
+
+      - uid: email-delivery-failures
+        title: Falhas de Entrega de Email
+        condition: C
+        data:
+          - refId: B
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: increase(email_failed_total[10m])
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: "-100"
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - type: query
+                  evaluator:
+                    params: [3]
+                    type: gt
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: "{{ $values.B | printf \"%.0f\" }} falhas de email nos últimos 10 minutos"
+          description: "O serviço de email está falhando repetidamente. Verifique a disponibilidade da API Resend, a validade da API key e os logs de erro do adapter."
+        labels:
+          severity: warning
+          team: backend
+
+      - uid: rate-limit-spike
+        title: Pico de Bloqueios por Rate Limit
+        condition: C
+        data:
+          - refId: B
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: increase(auth_rate_limit_blocked_total[5m])
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+          - refId: C
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: "-100"
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - type: query
+                  evaluator:
+                    params: [10]
+                    type: gt
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: "{{ $values.B | printf \"%.0f\" }} requisições bloqueadas por rate limit nos últimos 5 minutos"
+          description: "Volume alto de bloqueios por rate limit. Possível ataque de força bruta ou scanner automatizado. Verifique os IPs de origem nos logs."
+        labels:
+          severity: warning
+          team: security
