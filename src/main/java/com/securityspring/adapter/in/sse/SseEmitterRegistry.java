@@ -3,6 +3,9 @@ package com.securityspring.adapter.in.sse;
 import com.securityspring.adapter.in.dtos.response.NotificationResponseDTO;
 import com.securityspring.core.domain.model.notification.Notification;
 import com.securityspring.core.ports.out.notification.NotificationSsePort;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -24,11 +27,23 @@ public class SseEmitterRegistry implements NotificationSsePort {
     private int maxConnectionsPerUser = 5;
 
     private final ConcurrentHashMap<String, CopyOnWriteArrayList<SseEmitter>> emitters = new ConcurrentHashMap<>();
+    private final Counter notificationsSentCounter;
+    private final Counter connectionRefusedCounter;
+
+    public SseEmitterRegistry(MeterRegistry registry) {
+        Gauge.builder("sse.active_connections", emitters,
+                        map -> map.values().stream().mapToInt(List::size).sum())
+                .description("Total active SSE connections across all users")
+                .register(registry);
+        this.notificationsSentCounter = registry.counter("sse.notifications.sent.total");
+        this.connectionRefusedCounter = registry.counter("sse.connections.refused.total");
+    }
 
     public void register(String username, SseEmitter emitter) {
         CopyOnWriteArrayList<SseEmitter> list = emitters.computeIfAbsent(username, k -> new CopyOnWriteArrayList<>());
         if (list.size() >= maxConnectionsPerUser) {
             log.warn("sse.connection_limit_exceeded username={} limit={}", username, maxConnectionsPerUser);
+            connectionRefusedCounter.increment();
             emitter.completeWithError(new IllegalStateException("SSE connection limit exceeded"));
             return;
         }
@@ -48,6 +63,7 @@ public class SseEmitterRegistry implements NotificationSsePort {
         for (SseEmitter emitter : userEmitters) {
             try {
                 emitter.send(SseEmitter.event().name("notification").data(payload));
+                notificationsSentCounter.increment();
             } catch (IOException ex) {
                 dead.add(emitter);
             }

@@ -2,6 +2,7 @@ package com.securityspring.adapter.in.sse;
 
 import com.securityspring.core.domain.model.notification.Notification;
 import com.securityspring.core.domain.model.notification.NotificationType;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -11,7 +12,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class SseEmitterRegistryTest {
 
-    private final SseEmitterRegistry registry = new SseEmitterRegistry();
+    private final SseEmitterRegistry registry = new SseEmitterRegistry(new SimpleMeterRegistry());
 
     private static final Notification NOTIFICATION = new Notification(
             1L, "alice", NotificationType.PASSWORD_CHANGED, "Título", "Corpo", null, Instant.now());
