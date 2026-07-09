@@ -34,7 +34,7 @@ jobs:
 
       - name: Build Docker image
         run: |
-          docker build -t security-spring:${{ github.sha }} -t security-spring:latest .
+          docker build -t cerne-commerce:${{ github.sha }} -t cerne-commerce:latest .
 
   deploy-ecr:
     runs-on: ubuntu-latest

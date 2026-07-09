@@ -23,7 +23,7 @@ WORKDIR /app
 RUN addgroup -S spring && adduser -S -G spring spring
 USER spring
 
-COPY --from=build /app/target/security-spring-*-SNAPSHOT.jar /app/app.jar
+COPY --from=build /app/target/cerne-commerce-*-SNAPSHOT.jar /app/app.jar
 
 EXPOSE 8080
 

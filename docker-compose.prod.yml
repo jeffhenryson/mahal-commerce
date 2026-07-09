@@ -38,7 +38,7 @@ services:
       - backend
 
   app:
-    image: security-spring:latest
+    image: cerne-commerce:latest
     container_name: app-prod
     restart: unless-stopped
     depends_on:

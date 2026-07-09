@@ -13,7 +13,7 @@ variable "environment" {
 variable "app_name" {
   description = "Application name — rename when using this as a template"
   type        = string
-  default     = "security-spring"
+  default     = "cerne-commerce"
 }
 
 # ── Networking ────────────────────────────────────────────────────────────────

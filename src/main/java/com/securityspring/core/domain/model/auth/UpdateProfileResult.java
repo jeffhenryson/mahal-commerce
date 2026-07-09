@@ -1,3 +1,0 @@
-package com.securityspring.core.domain.model.auth;
-
-public record UpdateProfileResult(User user, boolean emailChangePending) {}

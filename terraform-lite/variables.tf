@@ -13,7 +13,7 @@ variable "environment" {
 variable "app_name" {
   description = "Application name"
   type        = string
-  default     = "security-spring"
+  default     = "cerne-commerce"
 }
 
 # ── Networking ────────────────────────────────────────────────────────────────
@@ -111,12 +111,12 @@ variable "resend_api_key" {
 
 variable "jwt_issuer" {
   type    = string
-  default = "security-spring"
+  default = "cerne-commerce"
 }
 
 variable "jwt_audience" {
   type    = string
-  default = "security-spring-users"
+  default = "cerne-commerce-users"
 }
 
 variable "resend_from" {

@@ -3,7 +3,7 @@
 
 aws_region  = "us-east-1"
 environment = "dev"
-app_name    = "security-spring"
+app_name    = "cerne-commerce"
 
 availability_zones = ["us-east-1a", "us-east-1b"]
 
@@ -37,8 +37,8 @@ totp_encryption_key = "YOUR_32_BYTE_HEX_KEY"
 resend_api_key = "re_YOUR_KEY"
 
 # ── App config ────────────────────────────────────────────────────────────────
-jwt_issuer                  = "security-spring"
-jwt_audience                = "security-spring-users"
+jwt_issuer                  = "cerne-commerce"
+jwt_audience                = "cerne-commerce-users"
 resend_from                 = "noreply@yourdomain.com"
 cors_allowed_origins        = "http://localhost:4200"
 password_reset_frontend_url = "http://localhost:4200/reset-password"

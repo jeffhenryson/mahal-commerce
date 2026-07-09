@@ -3,7 +3,7 @@ global:
   evaluation_interval: 15s
 
 scrape_configs:
-  - job_name: security-spring
+  - job_name: cerne-commerce
     metrics_path: /actuator/prometheus
     static_configs:
       # host.docker.internal resolve para o host no Docker Desktop (Mac/Windows) e

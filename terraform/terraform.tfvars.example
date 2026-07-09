@@ -3,7 +3,7 @@
 
 aws_region  = "us-east-1"
 environment = "prod"
-app_name    = "security-spring"  # rename to your service name
+app_name    = "cerne-commerce"  # rename to your service name
 
 # Networking
 availability_zones = ["us-east-1a", "us-east-1b"]

@@ -9,12 +9,12 @@
 		<version>4.0.6</version>
 		<relativePath /> <!-- lookup parent from repository -->
 	</parent>
-	<groupId>com.securityspring</groupId>
-	<artifactId>security-spring</artifactId>
+	<groupId>com.cernecommerce</groupId>
+	<artifactId>cerne-commerce</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<name>security-spring</name>
-	<description>Template reutilizável: Spring Boot 4 + arquitetura hexagonal + Spring Security (JWT, RBAC, refresh token, rate limiting, Redis)</description>
-	<url>https://github.com/JeffHenryson/security-spring</url>
+	<name>cerne-commerce</name>
+	<description>API do e-commerce Cerne, em Spring Boot 4 + arquitetura hexagonal, construída sobre uma base de Spring Security (JWT, RBAC, refresh token, rate limiting, Redis)</description>
+	<url>https://github.com/jeffhenryson/cerne-commerce</url>
 	<licenses>
 		<license>
 			<name>MIT License</name>
@@ -29,10 +29,10 @@
 		</developer>
 	</developers>
 	<scm>
-		<connection>scm:git:git://github.com/JeffHenryson/security-spring.git</connection>
-		<developerConnection>scm:git:ssh://github.com/JeffHenryson/security-spring.git</developerConnection>
+		<connection>scm:git:git://github.com/jeffhenryson/cerne-commerce.git</connection>
+		<developerConnection>scm:git:ssh://github.com/jeffhenryson/cerne-commerce.git</developerConnection>
 		<tag>HEAD</tag>
-		<url>https://github.com/JeffHenryson/security-spring</url>
+		<url>https://github.com/jeffhenryson/cerne-commerce</url>
 	</scm>
 	<properties>
 		<java.version>21</java.version>
@@ -283,7 +283,7 @@
 						<exclude>**/adapter/out/persistence/entity/**</exclude>
 						<exclude>**/core/domain/exception/**</exclude>
 						<exclude>**/infra/cli/**</exclude>
-						<exclude>**/SecuritySpringApplication.class</exclude>
+						<exclude>**/CerneCommerceApplication.class</exclude>
 					</excludes>
 				</configuration>
 			</plugin>

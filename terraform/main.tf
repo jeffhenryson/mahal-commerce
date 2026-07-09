@@ -15,7 +15,7 @@ terraform {
   # Uncomment and configure for remote state (recommended for teams)
   # backend "s3" {
   #   bucket         = "my-terraform-state"
-  #   key            = "security-spring/prod/terraform.tfstate"
+  #   key            = "cerne-commerce/prod/terraform.tfstate"
   #   region         = "us-east-1"
   #   encrypt        = true
   #   dynamodb_table = "terraform-locks"

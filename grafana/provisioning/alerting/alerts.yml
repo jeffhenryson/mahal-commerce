@@ -2,7 +2,7 @@ apiVersion: 1
 
 groups:
   - orgId: 1
-    name: security-spring
+    name: cerne-commerce
     folder: Security Alerts
     interval: 1m
     rules:

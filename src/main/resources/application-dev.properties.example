@@ -15,7 +15,7 @@ spring.h2.console.path=/h2-console
 jwt.secret=${JWT_SECRET:dev-secret-please-change-to-256-bit-random-key}
 jwt.access-ttl-minutes=${JWT_ACCESS_TTL_MINUTES:15}
 jwt.refresh-ttl-days=${JWT_REFRESH_TTL_DAYS:7}
-jwt.issuer=${JWT_ISSUER:security-spring}
+jwt.issuer=${JWT_ISSUER:cerne-commerce}
 jwt.audience=${JWT_AUDIENCE:api}
 
 # CORS (dev permissivo - override via env se necessario)
@@ -90,4 +90,4 @@ password-reset.frontend-url=${PASSWORD_RESET_FRONTEND_URL:http://localhost:3000/
 # 2FA / TOTP
 # ATENÇÃO: gere uma chave real com: openssl rand -base64 32 (deve ter 32 bytes = 256 bits)
 totp.encryption.key=${TOTP_ENCRYPTION_KEY:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}
-totp.app-name=${TOTP_APP_NAME:security-spring}
+totp.app-name=${TOTP_APP_NAME:cerne-commerce}
