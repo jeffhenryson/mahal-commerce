@@ -79,6 +79,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    image: cerne-commerce-app:latest
     container_name: app-hml
     restart: unless-stopped
     depends_on:
