@@ -65,9 +65,9 @@ services:
         -XX:+UseG1GC
         -Djava.security.egd=file:/dev/./urandom
     ports:
-      - "8080:8080"
+      - "8082:8082"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health | grep -q UP || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/actuator/health | grep -q UP || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
