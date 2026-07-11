@@ -1,12 +1,12 @@
 version: "3.9"
 
-# Stack de producao — todas as variaveis sensiveis devem estar definidas no ambiente ou num .env nao versionado
+# Stack de producao do Cerne Commerce — API, Admin UI e Market UI
 # Uso: docker compose -f docker-compose.prod.yml up -d
 
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: postgres-prod
+    container_name: postgres-cerne-prod
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${DB_NAME:-security}
@@ -24,7 +24,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: redis-prod
+    container_name: redis-cerne-prod
     restart: unless-stopped
     command: redis-server --requirepass ${REDIS_PASSWORD} --save 60 1 --loglevel warning
     volumes:
@@ -39,7 +39,10 @@ services:
 
   app:
     image: cerne-commerce:latest
-    container_name: app-prod
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: app-cerne-prod
     restart: unless-stopped
     depends_on:
       postgres:
@@ -52,14 +55,23 @@ services:
       DB_USERNAME: ${DB_USERNAME}
       DB_PASSWORD: ${DB_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
+      JWT_ISSUER: ${JWT_ISSUER:-mahaltabacaria-api}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-mahaltabacaria-ui}
+      TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY:-Vx74sQn7CT7IQyr34DOxmhIT3zerUlBbeyOazfudKpU=}
+      AVATAR_BASE_URL: ${AVATAR_BASE_URL:-https://mahaltabacaria.com.br}
+      EMAIL_VERIFICATION_FRONTEND_URL: ${EMAIL_VERIFICATION_FRONTEND_URL:-https://mahaltabacaria.com.br/verify}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_SSL: ${REDIS_SSL:-false}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
       JWT_ACCESS_TTL_MINUTES: ${JWT_ACCESS_TTL_MINUTES:-15}
       JWT_REFRESH_TTL_DAYS: ${JWT_REFRESH_TTL_DAYS:-7}
       LOGIN_RATE_WINDOW_SECONDS: ${LOGIN_RATE_WINDOW_SECONDS:-60}
       LOGIN_RATE_MAX_REQUESTS: ${LOGIN_RATE_MAX_REQUESTS:-5}
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      RESEND_FROM: ${RESEND_FROM}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       JAVA_OPTS: >-
         -XX:MaxRAMPercentage=75.0
         -XX:+UseG1GC
@@ -73,11 +85,64 @@ services:
       retries: 5
       start_period: 60s
     networks:
+      backend:
+        aliases:
+          - backend
+      traefik-public:
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-public"
+      - "traefik.http.routers.cerne-api.rule=Host(`api.cernecommerce.com`)"
+      - "traefik.http.routers.cerne-api.entrypoints=websecure"
+      - "traefik.http.routers.cerne-api.tls.certresolver=myresolver"
+      - "traefik.http.services.cerne-api.loadbalancer.server.port=8082"
+
+  cerne-commerce-ui:
+    build:
+      context: ./cerne-commerce-ui
+      dockerfile: Dockerfile
+    container_name: cerne-commerce-ui
+    restart: unless-stopped
+    ports:
+      - "4201:80"
+    networks:
       - backend
+      - traefik-public
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.cerne-ui.rule=Host(`admin.cernecommerce.com`)"
+      - "traefik.http.routers.cerne-ui.entrypoints=websecure"
+      - "traefik.http.routers.cerne-ui.tls.certresolver=myresolver"
+      - "traefik.http.services.cerne-ui.loadbalancer.server.port=80"
+
+  mahal-commerce-ui-market:
+    build:
+      context: ./mahal-commerce-ui-market
+      dockerfile: Dockerfile
+    container_name: mahalcommerce-marketplace
+    restart: unless-stopped
+    ports:
+      - "4300:4000"
+    environment:
+      PORT: "4000"
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-mahaltabacaria.com.br,www.mahaltabacaria.com.br}
+    networks:
+      - backend
+      - traefik-public
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-public"
+      - "traefik.http.routers.mahal-market.rule=Host(`mahaltabacaria.com.br`) || Host(`www.mahaltabacaria.com.br`)"
+      - "traefik.http.routers.mahal-market.entrypoints=websecure"
+      - "traefik.http.routers.mahal-market.tls.certresolver=myresolver"
+      - "traefik.http.services.mahal-market.loadbalancer.server.port=4000"
 
 networks:
   backend:
     driver: bridge
+  traefik-public:
+    name: traefik-public
+    external: true
 
 volumes:
   pgdata_prod:
