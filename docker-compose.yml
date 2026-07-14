@@ -95,14 +95,14 @@ services:
       REDIS_HOST: redis-hml
       REDIS_PORT: 6379
       REDIS_PASSWORD: hml_redis_2026
-      JWT_SECRET: my-super-secret-key-that-is-at-least-256-bits-long-for-hml
-      TOTP_ENCRYPTION_KEY: dGhpcy1pcy1hLXNlY3VyZS1rZXktZm9yLXRvdHAtaG1sLWtleQ==
-      JWT_ISSUER: cerne-commerce-hml
-      JWT_AUDIENCE: cerne-commerce-client
-      CORS_ALLOWED_ORIGINS: http://localhost:4200
-      RESEND_API_KEY: re_validapikeyhereformypersonaluse
-      RESEND_FROM: noreply@cernecommerce.com
-      GOOGLE_CLIENT_ID: 1234567890-abcdefghijklmnopqrstuvwxyz.apps.googleusercontent.com
+      JWT_SECRET: WsYV6lC353xcMmE/C6buo96jGsm4JQMf4EyV3KZzJlk=
+      TOTP_ENCRYPTION_KEY: IFFvdSZ3K5jEyYAOLGSfWLriOSGBvgpEYGrj24jLTUw=
+      JWT_ISSUER: security-spring-hml
+      JWT_AUDIENCE: security-spring-api
+      CORS_ALLOWED_ORIGINS: http://localhost:4200,http://localhost:4201,http://localhost:4300
+      RESEND_API_KEY: re_cc831ztx_AyBLXdqXoogo2spffzTLHtar
+      RESEND_FROM: noreply@cernedsgn.xyz
+      GOOGLE_CLIENT_ID: 272358372118-v3nf24o331kfpg0n3gqm0497o1fd9faf.apps.googleusercontent.com
     ports:
       - "8082:8082"
     healthcheck:
@@ -114,5 +114,16 @@ services:
 
 volumes:
   pgdata_hml:
+    external: true
+    name: security-spring_pgdata_hml
   prometheusdata_hml:
+    external: true
+    name: security-spring_prometheusdata_hml
   grafanadata_hml:
+    external: true
+    name: security-spring_grafanadata_hml
+
+networks:
+  default:
+    name: cerne-commerce_default
+

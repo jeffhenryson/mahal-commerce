@@ -79,7 +79,7 @@ public class DevRoleBootstrapConfig {
         if (devEmail.isBlank()) return;
         String devUsername = devEmail.contains("@") ? devEmail.split("@")[0] : devEmail;
         if (userUseCase.findByUsername(devUsername).isEmpty()) {
-            userUseCase.createUser(devUsername, devPassword, List.of("ROLE_DEV"));
+            userUseCase.createUser(devUsername, devPassword, devEmail, List.of("ROLE_DEV"));
             log.info("dev-bootstrap.user.created username={} env={}", devUsername,
                     System.getProperty("spring.profiles.active", "unknown"));
         }
