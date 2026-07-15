@@ -41,6 +41,22 @@ class EmailAdapterConfig {
     }
 
     @Bean
+    @ConditionalOnProperty(name = "email.provider", havingValue = "mailpit")
+    MailpitEmailAdapter mailpitEmailAdapter(
+            @Value("${mailpit.from:noreply@cernedsgn.xyz}") String fromAddress,
+            @Value("${mailpit.api-url:http://mailpit-mahal:8025/api/v1/send}") String apiUrl,
+            @Value("${email.verification.ttl-minutes:15}") long ttlMinutes,
+            @Value("${email.verification.subject:Código de confirmação de cadastro}") String emailSubject,
+            @Value("${email.verification.frontend-url:http://localhost:4201/auth/verify-email}") String verificationFrontendUrl,
+            ThymeleafEmailRenderer renderer,
+            MeterRegistry meterRegistry) {
+        RestClient restClient = RestClient.builder()
+                .baseUrl(apiUrl)
+                .build();
+        return new MailpitEmailAdapter(restClient, fromAddress, ttlMinutes, emailSubject, verificationFrontendUrl, renderer, meterRegistry);
+    }
+
+    @Bean
     @ConditionalOnMissingBean(EmailPort.class)
     LoggingEmailAdapter loggingEmailAdapter() {
         return new LoggingEmailAdapter();
