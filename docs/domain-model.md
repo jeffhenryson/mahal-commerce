@@ -330,6 +330,43 @@ record NotificationPreference(
 }
 ```
 
+### Product (record) — domínio `estoque`
+
+SKU pai da grade de produtos. Agrega as variações (SKU filhos).
+
+```java
+record Product(
+    Long id,
+    String sku,
+    String name,
+    String category,
+    boolean active,
+    List<ProductVariant> variants
+) {
+    static Product create(sku, name, category, variants)               // criação (id=null, active=true)
+    static Product of(id, sku, name, category, active, variants)       // reconstituição a partir de persistência
+}
+```
+
+### ProductVariant (record) — domínio `estoque`
+
+SKU filho, distinguido por seus `ProductAttribute` (sabor, tamanho, cor).
+
+```java
+record ProductVariant(Long id, String sku, List<ProductAttribute> attributes, boolean active) {
+    static ProductVariant create(sku, attributes)               // criação (id=null, active=true)
+    static ProductVariant of(id, sku, attributes, active)       // reconstituição a partir de persistência
+}
+```
+
+### ProductAttribute (record) — domínio `estoque`
+
+Valor sem identidade própria — sempre filho de um `ProductVariant`.
+
+```java
+record ProductAttribute(String type, String value)
+```
+
 ---
 
 ## Ports IN — contratos de use case
@@ -452,6 +489,13 @@ record NotificationPreference(
 | `List<NotificationPreference> getPreferences(username)` | Retorna preferências para todos os `NotificationType`. Tipos sem registro retornam com `inAppEnabled=true, emailEnabled=true` (default) |
 | `void updatePreference(username, type, inAppEnabled, emailEnabled)` | Persiste (upsert) a preferência para o tipo especificado |
 
+### EstoqueUseCase
+
+| Método | Descrição |
+|--------|-----------|
+| `Product createProduct(sku, name, category, variants)` | Cria produto (SKU pai) com variações; lança `DuplicateSkuException` se o SKU já existir |
+| `PageResult<Product> listProducts(page, size)` | Lista produtos paginados |
+
 ---
 
 ## Ports OUT — contratos de infraestrutura
@@ -548,6 +592,15 @@ void send(String username, Notification notification)   // push SSE para todos o
 int activeConnections(String username)                  // número de conexões SSE abertas
 ```
 Implementado por `SseEmitterRegistry` em `adapter/in/sse/`. Injetado em `NotificationEventListener` para desacoplar infra de componentes de adapter HTTP.
+
+### estoque/
+
+**ProductRepository**
+```
+PageResult<Product> findAll(page, size)
+Optional<Product> findBySku(String sku)
+Product save(Product product)
+```
 
 **EmailPort**
 ```

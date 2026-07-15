@@ -29,7 +29,8 @@ public class DevRoleBootstrapConfig {
         "USER_CREATE", "USER_READ", "USER_UPDATE", "USER_DELETE", "USER_ROLE_ASSIGN", "USER_STATUS",
         "ROLE_READ", "ROLE_MANAGE_PERMISSIONS",
         "PERMISSION_READ",
-        "AUDIT_READ"
+        "AUDIT_READ",
+        "ESTOQUE_PRODUCT_READ", "ESTOQUE_PRODUCT_MANAGE"
     };
 
     private static final String[] DEV_ONLY_PERMISSIONS = {

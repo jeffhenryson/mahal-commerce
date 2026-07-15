@@ -45,6 +45,7 @@ Testam uma classe isolada com dependências mockadas via Mockito. Não sobem o c
 | `AvatarServiceTest` | Upload, delete, serve (local e S3) |
 | `RoleServiceTest` | CRUD de roles, atribuição/remoção de permissions |
 | `PermissionServiceTest` | CRUD de permissions |
+| `EstoqueServiceTest` | `createProduct` salva e retorna, lança `DuplicateSkuException` em SKU duplicado, permite produto sem variações; `listProducts` delega ao repositório |
 | `StatsServiceTest` | Totais do dashboard |
 | `AuditLogsServiceTest` | Delegação com filtros, sem filtros, página com entradas, página além do total |
 | `SystemConfigServiceTest` | Leitura de feature flags, atualização, chave inexistente |
@@ -95,6 +96,7 @@ Controladores (MockMvc com contexto parcial):
 | `UserControllerTest` | CRUD de usuários, atribuição de roles |
 | `RoleControllerTest` | CRUD de roles |
 | `PermissionControllerTest` | CRUD de permissions |
+| `EstoqueControllerTest` | Lista produtos paginados, cria produto (201), validação de campo obrigatório (400), SKU duplicado (409 `SKU_ALREADY_EXISTS`), criação sem variações |
 | `AuditLogControllerTest` | Listagem filtrada de audit logs |
 | `StatsControllerTest` | Endpoint de stats |
 | `AvatarControllerTest` | Upload, delete, serve de avatar |
@@ -156,6 +158,7 @@ Testes que validam comportamento de autorização independentemente do fluxo de 
 | Arquivo | O que cobre |
 |---------|-------------|
 | `PermissionControllerSecurityTest` | 401 sem auth, 403 com role insuficiente, 200/201 com permission correta |
+| `EstoqueControllerSecurityTest` | 401 sem auth, 403 com `ROLE_USER` sem permissão, 403 sem `ESTOQUE_PRODUCT_MANAGE` no POST, 200/201 com `ESTOQUE_PRODUCT_READ`/`ESTOQUE_PRODUCT_MANAGE` |
 | `RoleControllerSecurityTest` | 401 sem auth, 403 sem permissão, guard DEV_ELEVATED em assign/removePermission para `DEV_ROLE_MANAGE`/`DEV_PERMISSION_MANAGE` |
 | `AuditLogControllerSecurityTest` | 401 sem auth, 403 sem `AUDIT_READ`, 200 com permissão correta |
 | `StatsControllerSecurityTest` | 401 sem auth, 403 com apenas uma das permissões exigidas (`USER_READ` + `ROLE_READ`), 200 com ambas |

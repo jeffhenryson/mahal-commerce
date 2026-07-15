@@ -5,6 +5,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import com.cernecommerce.adapter.in.converter.PermissionDTOConverter;
+import com.cernecommerce.adapter.in.converter.ProductDTOConverter;
 import com.cernecommerce.adapter.in.converter.RoleDTOConverter;
 import com.cernecommerce.adapter.in.converter.UserDTOConverter;
 import com.cernecommerce.adapter.out.persistence.converter.UserEntityConverter;
@@ -30,5 +31,10 @@ class ConverterBeanConfig {
     @Bean
     PermissionDTOConverter permissionDTOConverter() {
         return new PermissionDTOConverter();
+    }
+
+    @Bean
+    ProductDTOConverter productDTOConverter() {
+        return new ProductDTOConverter();
     }
 }

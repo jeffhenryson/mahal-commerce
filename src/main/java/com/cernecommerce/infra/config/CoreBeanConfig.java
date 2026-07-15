@@ -63,6 +63,7 @@ import com.cernecommerce.core.service.UserService;
 // Domínios de negócio (esqueletos — sem dependências de port out ainda)
 import com.cernecommerce.core.ports.in.PdvUseCase;
 import com.cernecommerce.core.ports.in.EstoqueUseCase;
+import com.cernecommerce.core.ports.out.estoque.ProductRepository;
 import com.cernecommerce.core.ports.in.ComprasUseCase;
 import com.cernecommerce.core.ports.in.FinanceiroUseCase;
 import com.cernecommerce.core.ports.in.EcommerceUseCase;
@@ -177,8 +178,8 @@ class CoreBeanConfig {
     }
 
     @Bean
-    EstoqueUseCase estoqueUseCase() {
-        return new EstoqueService();
+    EstoqueUseCase estoqueUseCase(ProductRepository productRepository) {
+        return new EstoqueService(productRepository);
     }
 
     @Bean

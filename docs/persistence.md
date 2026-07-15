@@ -237,6 +237,47 @@ As chaves listadas acima são **públicas** (acessíveis via `GET /system/config
 
 ---
 
+### ProductEntity — tabela `product`
+
+| Coluna | Tipo | Constraint |
+|--------|------|-----------|
+| id | BIGINT | PK, auto-increment |
+| sku | VARCHAR(50) | UNIQUE NOT NULL |
+| name | VARCHAR(255) | NOT NULL |
+| category | VARCHAR(100) | nullable |
+| active | BOOLEAN | NOT NULL |
+
+Relacionamento: 1:N com `ProductVariantEntity` (`cascade = ALL`, `orphanRemoval = true`) — variações são apagadas junto do produto pai.
+
+---
+
+### ProductVariantEntity — tabela `product_variant`
+
+| Coluna | Tipo | Constraint |
+|--------|------|-----------|
+| id | BIGINT | PK, auto-increment |
+| product_id | BIGINT | FK → product(id) ON DELETE CASCADE |
+| sku | VARCHAR(50) | UNIQUE NOT NULL |
+| active | BOOLEAN | NOT NULL |
+
+Relacionamento: `@ElementCollection` de `ProductAttributeEmbeddable` (tabela `product_attribute`) — atributos não têm identidade própria, são sempre carregados/apagados junto da variação.
+
+Índice: `idx_product_variant_product_id (product_id)`.
+
+---
+
+### product_attribute (`@ElementCollection`, sem entidade própria)
+
+| Coluna | Tipo | Constraint |
+|--------|------|-----------|
+| variant_id | BIGINT | FK → product_variant(id) ON DELETE CASCADE |
+| attr_type | VARCHAR(50) | NOT NULL |
+| attr_value | VARCHAR(100) | NOT NULL |
+
+Índice: `idx_product_attribute_variant_id (variant_id)`.
+
+---
+
 ## Repositórios
 
 Cada port OUT tem uma implementação `*RepositoryImpl` que:
@@ -322,6 +363,8 @@ Em hml/prod não há seed automático — usuário admin deve ser criado via CLI
 | `V41__notification_preferences.sql` | Cria a tabela `notification_preferences` com PK composta `(username, type)` e flags `in_app_enabled`/`email_enabled` (ambas `DEFAULT TRUE`). Linha ausente = preferências padrão (ambas ativas). Permite desativar notificação in-app e/ou email por tipo individualmente via `PUT /notifications/preferences/{type}`. |
 | `V42__notification_indexes_and_fk.sql` | Adiciona índice `idx_notification_preferences_username ON notification_preferences(username)` — evita full table scan em `findByUsername`. Adiciona FK `fk_notifications_username → users(username) ON DELETE CASCADE` e `fk_notification_prefs_username → users(username) ON DELETE CASCADE` — garante integridade referencial e limpeza automática de notificações ao deletar usuário. |
 | `V43__add_notification_read_at_index.sql` | Índice parcial `idx_notifications_read_at ON notifications(read_at) WHERE read_at IS NOT NULL` — melhora o DELETE do `NotificationCleanupService`, que filtra por `read_at IS NOT NULL AND read_at < :cutoff`. Sem este índice a query faz full scan conforme a tabela cresce. |
+| `V44__estoque_product.sql` | Cria `product` (SKU pai), `product_variant` (SKU filho, FK → product ON DELETE CASCADE) e `product_attribute` (sem PK própria — `@ElementCollection`, FK → product_variant ON DELETE CASCADE). Índices em `product_variant(product_id)` e `product_attribute(variant_id)`. |
+| `V45__estoque_product_permissions.sql` | Insere `ESTOQUE_PRODUCT_READ` e `ESTOQUE_PRODUCT_MANAGE`, atribuídas ao `ROLE_ADMIN`. Também adicionadas ao array `ADMIN_PERMISSIONS` do `DevRoleBootstrapConfig` para que `ROLE_DEV` as herde. |
 
 ---
 
@@ -371,6 +414,7 @@ Um único `JOIN FETCH` traz usuários, roles e permissões em uma só query. O `
 | `UserRepositoryImpl.findFiltered()` | `findFilteredIds()` (Criteria API) → `findAllWithRolesByIdIn()` |
 | `RoleRepositoryImpl.findAll()` | `findAllIds()` → `findAllWithPermissionsByIdIn()` |
 | `RoleRepositoryImpl.findByNameContaining()` | `findIdsByNameContaining()` → `findAllWithPermissionsByIdIn()` |
+| `ProductRepositoryImpl.findAll()` | `findAllIds()` → `findAllByIdsWithVariants()` (JOIN FETCH em `variants` e `variants.attributes`) |
 
 ### `findFiltered` e a Criteria API
 

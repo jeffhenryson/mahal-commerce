@@ -53,6 +53,7 @@ Todos os erros retornam `ApiError`:
 | `SESSION_NOT_FOUND` | 404 | Sessão não encontrada |
 | `ROLE_ALREADY_EXISTS` | 409 | Role já existe |
 | `PERMISSION_ALREADY_EXISTS` | 409 | Permissão já existe |
+| `SKU_ALREADY_EXISTS` | 409 | SKU de produto já cadastrado |
 | `OAUTH_TOKEN_INVALID` | 401 | Token Google inválido, expirado ou audience incorreto |
 | `AVATAR_TOO_LARGE` | 400 | Arquivo de avatar excede 2 MB |
 | `INVALID_AVATAR_FORMAT` | 400 | Formato não suportado — aceito JPEG, PNG, WebP |
@@ -796,6 +797,52 @@ Query: page, size
 
 ---
 
+## Estoque — `/estoque`
+
+### GET /estoque/products — Permissão: ESTOQUE_PRODUCT_READ
+
+```
+Query: page, size (máx. 100)
+// Response 200 → PageResult<ProductResponse>
+```
+
+---
+
+### POST /estoque/products — Permissão: ESTOQUE_PRODUCT_MANAGE
+
+```json
+{
+  "sku": "NARG-001",        // 3–50 chars, obrigatório
+  "name": "Narguile Aladin", // obrigatório
+  "category": "narguile",    // opcional
+  "variants": [               // opcional — produto pode não ter variações
+    {
+      "sku": "NARG-001-M",   // 3–50 chars, obrigatório
+      "attributes": [
+        { "type": "sabor", "value": "menta" }
+      ]
+    }
+  ]
+}
+// Response 201 + Location → ProductResponse / 409 SKU_ALREADY_EXISTS / 400 VALIDATION_ERROR
+```
+
+```json
+// ProductResponse
+{
+  "id": 1,
+  "sku": "NARG-001",
+  "name": "Narguile Aladin",
+  "category": "narguile",
+  "active": true,
+  "variants": [
+    { "id": 1, "sku": "NARG-001-M", "active": true, "attributes": [{ "type": "sabor", "value": "menta" }] }
+  ]
+}
+```
+
+---
+
 ## Audit Logs — `/audit-logs`
 
 ### GET /audit-logs — Permissão: AUDIT_READ
@@ -1253,6 +1300,8 @@ interface TotpConfirmResponse {
 | `PERMISSION_READ` | Listar permissões |
 | `PERMISSION_DELETE` | Deletar permissão |
 | `AUDIT_READ` | Ver audit logs |
+| `ESTOQUE_PRODUCT_READ` | Listar produtos do estoque |
+| `ESTOQUE_PRODUCT_MANAGE` | Criar/gerenciar produtos do estoque |
 
 ---
 

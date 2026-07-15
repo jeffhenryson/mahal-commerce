@@ -35,7 +35,9 @@ public record AuditEvent(EventType type, String username, Instant timestamp, Map
         // DEV elevation
         DEV_ELEVATION_COMPLETED,
         // OAuth
-        OAUTH_GOOGLE_LOGIN
+        OAUTH_GOOGLE_LOGIN,
+        // Estoque
+        PRODUCT_CREATED
     }
 
     public static AuditEvent of(EventType type, String username) {
