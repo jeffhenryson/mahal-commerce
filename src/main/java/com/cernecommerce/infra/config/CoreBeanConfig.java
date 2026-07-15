@@ -60,6 +60,20 @@ import com.cernecommerce.core.service.SystemConfigService;
 import com.cernecommerce.core.service.TotpService;
 import com.cernecommerce.core.service.UserService;
 
+// Domínios de negócio (esqueletos — sem dependências de port out ainda)
+import com.cernecommerce.core.ports.in.PdvUseCase;
+import com.cernecommerce.core.ports.in.EstoqueUseCase;
+import com.cernecommerce.core.ports.in.ComprasUseCase;
+import com.cernecommerce.core.ports.in.FinanceiroUseCase;
+import com.cernecommerce.core.ports.in.EcommerceUseCase;
+import com.cernecommerce.core.ports.in.LogisticaUseCase;
+import com.cernecommerce.core.service.PdvService;
+import com.cernecommerce.core.service.EstoqueService;
+import com.cernecommerce.core.service.ComprasService;
+import com.cernecommerce.core.service.FinanceiroService;
+import com.cernecommerce.core.service.EcommerceService;
+import com.cernecommerce.core.service.LogisticaService;
+
 import java.nio.file.Path;
 
 import dev.samstevens.totp.code.CodeVerifier;
@@ -151,6 +165,40 @@ class CoreBeanConfig {
             RoleRepository roleRepository,
             PermissionRepository permissionRepository) {
         return new StatsService(userRepository, roleRepository, permissionRepository);
+    }
+
+    // ── Domínios de negócio (esqueletos) ────────────────────────────────────────
+    // Wiring sem dependências enquanto os adapters de saída (ports/out) não existem.
+    // Ao implementar cada domínio, injetar aqui o(s) repository/port correspondente.
+
+    @Bean
+    PdvUseCase pdvUseCase() {
+        return new PdvService();
+    }
+
+    @Bean
+    EstoqueUseCase estoqueUseCase() {
+        return new EstoqueService();
+    }
+
+    @Bean
+    ComprasUseCase comprasUseCase() {
+        return new ComprasService();
+    }
+
+    @Bean
+    FinanceiroUseCase financeiroUseCase() {
+        return new FinanceiroService();
+    }
+
+    @Bean
+    EcommerceUseCase ecommerceUseCase() {
+        return new EcommerceService();
+    }
+
+    @Bean
+    LogisticaUseCase logisticaUseCase() {
+        return new LogisticaService();
     }
 
     @Bean
