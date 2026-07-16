@@ -59,3 +59,7 @@ terraform-lite/terraform.tfstate.backup
 uploads/
 
 scripts/
+
+# Test logs
+log_teste.txt
+
