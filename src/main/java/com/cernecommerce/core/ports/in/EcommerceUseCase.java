@@ -1,8 +1,7 @@
 package com.cernecommerce.core.ports.in;
 
+import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.ecommerce.Cart;
-
-import java.util.List;
 
 /**
  * Port de entrada do domínio <b>ecommerce</b>.
@@ -13,6 +12,6 @@ import java.util.List;
  */
 public interface EcommerceUseCase {
 
-    /** Lista os carrinhos. Stub: retorna lista vazia até a implementação. */
-    List<Cart> listCarts();
+    /** Lista os carrinhos paginados. Stub: retorna página vazia até a implementação. */
+    PageResult<Cart> listCarts(int page, int size);
 }

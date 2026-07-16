@@ -1,8 +1,8 @@
 package com.cernecommerce.core.ports.out.compras;
 
+import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.compras.Supplier;
 
-import java.util.List;
 import java.util.Optional;
 
 /**
@@ -12,7 +12,7 @@ import java.util.Optional;
  */
 public interface SupplierRepository {
 
-    List<Supplier> findAll();
+    PageResult<Supplier> findAll(int page, int size);
 
     Optional<Supplier> findByTaxId(String taxId);
 

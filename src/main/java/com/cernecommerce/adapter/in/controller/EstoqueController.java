@@ -1,13 +1,19 @@
 package com.cernecommerce.adapter.in.controller;
 
 import com.cernecommerce.adapter.in.converter.ProductDTOConverter;
+import com.cernecommerce.adapter.in.converter.WarehouseDTOConverter;
 import com.cernecommerce.adapter.in.dtos.request.ProductRequest;
+import com.cernecommerce.adapter.in.dtos.request.WarehouseRequest;
 import com.cernecommerce.adapter.in.dtos.response.ProductResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.StockBalanceResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.WarehouseResponseDTO;
 import com.cernecommerce.core.domain.event.AuditEvent;
 import com.cernecommerce.core.domain.event.AuditEvent.EventType;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
+import com.cernecommerce.core.domain.model.estoque.StockBalance;
+import com.cernecommerce.core.domain.model.estoque.Warehouse;
 import com.cernecommerce.core.ports.in.EstoqueUseCase;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -28,8 +34,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Grade de produtos do domínio <b>estoque</b>: cadastro de SKU pai com variações
- * (sabor/tamanho/cor) e listagem paginada.
+ * Grade de produtos e controle de saldo multi-depósito do domínio <b>estoque</b>: cadastro de
+ * SKU pai com variações (sabor/tamanho/cor), depósitos (loja física/e-commerce) e consulta de saldo.
  */
 @RestController
 @RequestMapping("/estoque")
@@ -39,12 +45,14 @@ public class EstoqueController {
 
     private final EstoqueUseCase estoqueUseCase;
     private final ProductDTOConverter converter;
+    private final WarehouseDTOConverter warehouseConverter;
     private final ApplicationEventPublisher publisher;
 
     public EstoqueController(EstoqueUseCase estoqueUseCase, ProductDTOConverter converter,
-            ApplicationEventPublisher publisher) {
+            WarehouseDTOConverter warehouseConverter, ApplicationEventPublisher publisher) {
         this.estoqueUseCase = estoqueUseCase;
         this.converter = converter;
+        this.warehouseConverter = warehouseConverter;
         this.publisher = publisher;
     }
 
@@ -81,5 +89,50 @@ public class EstoqueController {
                 authentication.getName(), Map.of("sku", created.sku())));
         return ResponseEntity.created(URI.create("/estoque/products/" + created.sku()))
                 .body(converter.toResponse(created));
+    }
+
+    @Operation(summary = "Cria um depósito (loja física ou e-commerce)")
+    @ApiResponses({
+            @ApiResponse(responseCode = "201", description = "Criado", content = @Content(schema = @Schema(implementation = WarehouseResponseDTO.class))),
+            @ApiResponse(responseCode = "409", description = "Código já cadastrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PostMapping("/warehouses")
+    @PreAuthorize("hasAuthority('ESTOQUE_WAREHOUSE_MANAGE')")
+    public ResponseEntity<WarehouseResponseDTO> createWarehouse(@Valid @RequestBody WarehouseRequest request,
+            Authentication authentication) {
+        Warehouse created = estoqueUseCase.createWarehouse(request.getCode(), request.getName(),
+                warehouseConverter.toType(request.getType()));
+        publisher.publishEvent(AuditEvent.of(EventType.WAREHOUSE_CREATED,
+                authentication.getName(), Map.of("code", created.code())));
+        return ResponseEntity.created(URI.create("/estoque/warehouses/" + created.code()))
+                .body(warehouseConverter.toResponse(created));
+    }
+
+    @Operation(summary = "Lista todos os depósitos cadastrados")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/warehouses")
+    @PreAuthorize("hasAuthority('ESTOQUE_WAREHOUSE_READ')")
+    public ResponseEntity<List<WarehouseResponseDTO>> listWarehouses() {
+        List<WarehouseResponseDTO> response = estoqueUseCase.listWarehouses().stream()
+                .map(warehouseConverter::toResponse).toList();
+        return ResponseEntity.ok(response);
+    }
+
+    @Operation(summary = "Consulta o saldo de um SKU em um depósito")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "404", description = "Depósito não encontrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/stock-balance")
+    @PreAuthorize("hasAuthority('ESTOQUE_WAREHOUSE_READ')")
+    public ResponseEntity<StockBalanceResponseDTO> getStockBalance(@RequestParam String sku,
+            @RequestParam String warehouseCode) {
+        StockBalance balance = estoqueUseCase.getStockBalance(sku, warehouseCode);
+        return ResponseEntity.ok(warehouseConverter.toResponse(balance, warehouseCode));
     }
 }

@@ -843,6 +843,56 @@ Query: page, size (máx. 100)
 
 ---
 
+### POST /estoque/warehouses — Permissão: ESTOQUE_WAREHOUSE_MANAGE
+
+```json
+{
+  "code": "LOJA-01",         // 2–50 chars, obrigatório, único
+  "name": "Loja Centro",      // obrigatório
+  "type": "LOJA_FISICA"       // obrigatório — LOJA_FISICA | ECOMMERCE
+}
+// Response 201 + Location → WarehouseResponse / 409 WAREHOUSE_CODE_ALREADY_EXISTS / 400 VALIDATION_ERROR
+```
+
+```json
+// WarehouseResponse
+{
+  "id": 1,
+  "code": "LOJA-01",
+  "name": "Loja Centro",
+  "type": "LOJA_FISICA",
+  "active": true
+}
+```
+
+---
+
+### GET /estoque/warehouses — Permissão: ESTOQUE_WAREHOUSE_READ
+
+```
+// Response 200 → WarehouseResponse[]
+```
+
+---
+
+### GET /estoque/stock-balance — Permissão: ESTOQUE_WAREHOUSE_READ
+
+```
+Query: sku (obrigatório), warehouseCode (obrigatório)
+// Response 200 → StockBalanceResponse / 404 WAREHOUSE_NOT_FOUND
+```
+
+```json
+// StockBalanceResponse — quantity é 0 se ainda não houve nenhuma movimentação (F003) para o par sku/depósito
+{
+  "sku": "NARG-001",
+  "warehouseCode": "LOJA-01",
+  "quantity": 0
+}
+```
+
+---
+
 ## Audit Logs — `/audit-logs`
 
 ### GET /audit-logs — Permissão: AUDIT_READ
@@ -1421,7 +1471,7 @@ GOOGLE_CLIENT_ID=<seu-client-id>.apps.googleusercontent.com   # obrigatório par
 
 Iniciar a stack:
 ```bash
-docker compose up -d        # sobe PostgreSQL (5433) + Redis (6380)
+docker compose up -d        # sobe PostgreSQL (5435) + Redis (6382)
 ./mvnw spring-boot:run      # sobe o Spring Boot em HML
 ```
 

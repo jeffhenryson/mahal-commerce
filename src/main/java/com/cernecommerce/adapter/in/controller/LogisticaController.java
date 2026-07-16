@@ -1,16 +1,19 @@
 package com.cernecommerce.adapter.in.controller;
 
+import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.logistica.Shipment;
 import com.cernecommerce.core.ports.in.LogisticaUseCase;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.util.List;
 
 /**
  * Controller stub do domínio <b>logistica</b>.
@@ -23,6 +26,7 @@ import java.util.List;
 @RequestMapping("/logistica")
 @Tag(name = "Logística", description = "Expedição, clique e retire e rotas — esqueleto, implementação pendente")
 @SecurityRequirement(name = "bearerAuth")
+@Validated
 public class LogisticaController {
 
     private final LogisticaUseCase logisticaUseCase;
@@ -32,9 +36,11 @@ public class LogisticaController {
     }
 
     // TODO: @PreAuthorize com permissão RBAC do domínio logistica.
-    @Operation(summary = "Lista expedições (stub — retorna vazio)")
+    @Operation(summary = "Lista expedições (stub — retorna página vazia)")
     @GetMapping("/shipments")
-    public ResponseEntity<List<Shipment>> listShipments() {
-        return ResponseEntity.ok(logisticaUseCase.listShipments());
+    public ResponseEntity<PageResult<Shipment>> listShipments(
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+        return ResponseEntity.ok(logisticaUseCase.listShipments(page, size));
     }
 }

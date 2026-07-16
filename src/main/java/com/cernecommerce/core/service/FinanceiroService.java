@@ -1,5 +1,6 @@
 package com.cernecommerce.core.service;
 
+import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.financeiro.CashFlowEntry;
 import com.cernecommerce.core.ports.in.FinanceiroUseCase;
 
@@ -17,8 +18,8 @@ public class FinanceiroService implements FinanceiroUseCase {
     // TODO: injetar LedgerRepository (core.ports.out.financeiro) quando o adapter existir.
 
     @Override
-    public List<CashFlowEntry> listCashFlow() {
-        // TODO: delegar ao LedgerRepository.findAll().
-        return List.of();
+    public PageResult<CashFlowEntry> listCashFlow(int page, int size) {
+        // TODO: delegar ao LedgerRepository.findAll(page, size).
+        return new PageResult<>(List.of(), page, size, 0, 0);
     }
 }

@@ -1,8 +1,7 @@
 package com.cernecommerce.core.ports.in;
 
+import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.logistica.Shipment;
-
-import java.util.List;
 
 /**
  * Port de entrada do domínio <b>logistica</b>.
@@ -13,6 +12,6 @@ import java.util.List;
  */
 public interface LogisticaUseCase {
 
-    /** Lista as expedições. Stub: retorna lista vazia até a implementação. */
-    List<Shipment> listShipments();
+    /** Lista as expedições paginadas. Stub: retorna página vazia até a implementação. */
+    PageResult<Shipment> listShipments(int page, int size);
 }

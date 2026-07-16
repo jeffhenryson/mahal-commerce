@@ -1,5 +1,6 @@
 package com.cernecommerce.core.ports.out.financeiro;
 
+import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.financeiro.CashFlowEntry;
 
 import java.time.LocalDate;
@@ -12,7 +13,7 @@ import java.util.List;
  */
 public interface LedgerRepository {
 
-    List<CashFlowEntry> findAll();
+    PageResult<CashFlowEntry> findAll(int page, int size);
 
     List<CashFlowEntry> findByPeriod(LocalDate from, LocalDate to);
 

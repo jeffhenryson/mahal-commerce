@@ -1,16 +1,19 @@
 package com.cernecommerce.adapter.in.controller;
 
+import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.ecommerce.Cart;
 import com.cernecommerce.core.ports.in.EcommerceUseCase;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.util.List;
 
 /**
  * Controller stub do domínio <b>ecommerce</b>.
@@ -23,6 +26,7 @@ import java.util.List;
 @RequestMapping("/ecommerce")
 @Tag(name = "E-commerce", description = "Carrinho, cupons e promoções — esqueleto, implementação pendente")
 @SecurityRequirement(name = "bearerAuth")
+@Validated
 public class EcommerceController {
 
     private final EcommerceUseCase ecommerceUseCase;
@@ -32,9 +36,11 @@ public class EcommerceController {
     }
 
     // TODO: @PreAuthorize com permissão RBAC do domínio ecommerce.
-    @Operation(summary = "Lista carrinhos (stub — retorna vazio)")
+    @Operation(summary = "Lista carrinhos (stub — retorna página vazia)")
     @GetMapping("/carts")
-    public ResponseEntity<List<Cart>> listCarts() {
-        return ResponseEntity.ok(ecommerceUseCase.listCarts());
+    public ResponseEntity<PageResult<Cart>> listCarts(
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+        return ResponseEntity.ok(ecommerceUseCase.listCarts(page, size));
     }
 }

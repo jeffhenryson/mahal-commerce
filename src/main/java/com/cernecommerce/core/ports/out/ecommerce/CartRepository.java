@@ -1,8 +1,8 @@
 package com.cernecommerce.core.ports.out.ecommerce;
 
+import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.ecommerce.Cart;
 
-import java.util.List;
 import java.util.Optional;
 
 /**
@@ -12,7 +12,7 @@ import java.util.Optional;
  */
 public interface CartRepository {
 
-    List<Cart> findAll();
+    PageResult<Cart> findAll(int page, int size);
 
     Optional<Cart> findByCustomerRef(String customerRef);
 

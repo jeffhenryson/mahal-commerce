@@ -1,8 +1,8 @@
 package com.cernecommerce.core.ports.out.pdv;
 
+import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.pdv.CashRegisterSession;
 
-import java.util.List;
 import java.util.Optional;
 
 /**
@@ -12,7 +12,7 @@ import java.util.Optional;
  */
 public interface CashRegisterRepository {
 
-    List<CashRegisterSession> findAll();
+    PageResult<CashRegisterSession> findAll(int page, int size);
 
     Optional<CashRegisterSession> findOpenByOperator(String operator);
 

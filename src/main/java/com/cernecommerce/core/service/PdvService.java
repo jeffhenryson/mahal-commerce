@@ -1,5 +1,6 @@
 package com.cernecommerce.core.service;
 
+import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.pdv.CashRegisterSession;
 import com.cernecommerce.core.ports.in.PdvUseCase;
 
@@ -18,8 +19,8 @@ public class PdvService implements PdvUseCase {
     // TODO: injetar CashRegisterRepository (core.ports.out.pdv) quando o adapter existir.
 
     @Override
-    public List<CashRegisterSession> listSessions() {
-        // TODO: delegar ao CashRegisterRepository.findAll().
-        return List.of();
+    public PageResult<CashRegisterSession> listSessions(int page, int size) {
+        // TODO: delegar ao CashRegisterRepository.findAll(page, size).
+        return new PageResult<>(List.of(), page, size, 0, 0);
     }
 }

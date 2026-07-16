@@ -3,6 +3,9 @@ package com.cernecommerce.core.ports.in;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
+import com.cernecommerce.core.domain.model.estoque.StockBalance;
+import com.cernecommerce.core.domain.model.estoque.Warehouse;
+import com.cernecommerce.core.domain.model.estoque.WarehouseType;
 
 import java.util.List;
 
@@ -20,4 +23,22 @@ public interface EstoqueUseCase {
 
     /** Lista produtos paginados. */
     PageResult<Product> listProducts(int page, int size);
+
+    /**
+     * Cria um depósito (loja física ou e-commerce). Lança
+     * {@link com.cernecommerce.core.domain.exception.estoque.DuplicateWarehouseCodeException}
+     * se o código já existir.
+     */
+    Warehouse createWarehouse(String code, String name, WarehouseType type);
+
+    /** Lista todos os depósitos cadastrados. */
+    List<Warehouse> listWarehouses();
+
+    /**
+     * Consulta o saldo de um SKU em um depósito. Retorna saldo zero se ainda não houve
+     * nenhuma movimentação para o par SKU/depósito. Lança
+     * {@link com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException}
+     * se o código do depósito não existir.
+     */
+    StockBalance getStockBalance(String sku, String warehouseCode);
 }

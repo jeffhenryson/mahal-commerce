@@ -5,11 +5,17 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 import com.cernecommerce.adapter.in.converter.ProductDTOConverter;
+import com.cernecommerce.adapter.in.converter.WarehouseDTOConverter;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateSkuException;
+import com.cernecommerce.core.domain.exception.estoque.DuplicateWarehouseCodeException;
+import com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
+import com.cernecommerce.core.domain.model.estoque.StockBalance;
+import com.cernecommerce.core.domain.model.estoque.Warehouse;
+import com.cernecommerce.core.domain.model.estoque.WarehouseType;
 import com.cernecommerce.core.ports.in.EstoqueUseCase;
 import com.cernecommerce.infra.handler.GlobalExceptionHandler;
 
@@ -21,6 +27,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 public class EstoqueControllerTest {
@@ -36,7 +43,8 @@ public class EstoqueControllerTest {
         estoqueUseCase = mock(EstoqueUseCase.class);
         ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new EstoqueController(estoqueUseCase, new ProductDTOConverter(), publisher))
+                .standaloneSetup(new EstoqueController(estoqueUseCase, new ProductDTOConverter(),
+                        new WarehouseDTOConverter(), publisher))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }
@@ -110,5 +118,82 @@ public class EstoqueControllerTest {
                         .content("{\"sku\":\"CARV-001\",\"name\":\"Carvão Coco\",\"category\":\"carvao\"}"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.variants").isEmpty());
+    }
+
+    @Test
+    void createWarehouse_returns_201() throws Exception {
+        Warehouse created = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        when(estoqueUseCase.createWarehouse("LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA)).thenReturn(created);
+
+        mockMvc.perform(post("/estoque/warehouses")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"code\":\"LOJA-01\",\"name\":\"Loja Centro\",\"type\":\"LOJA_FISICA\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.code").value("LOJA-01"))
+                .andExpect(jsonPath("$.type").value("LOJA_FISICA"));
+    }
+
+    @Test
+    void createWarehouse_duplicateCode_returns_409() throws Exception {
+        when(estoqueUseCase.createWarehouse(eq("LOJA-01"), any(), any()))
+                .thenThrow(new DuplicateWarehouseCodeException("LOJA-01"));
+
+        mockMvc.perform(post("/estoque/warehouses")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"code\":\"LOJA-01\",\"name\":\"Loja Centro\",\"type\":\"LOJA_FISICA\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.errorCode").value("WAREHOUSE_CODE_ALREADY_EXISTS"));
+    }
+
+    @Test
+    void createWarehouse_withoutCode_returns_400() throws Exception {
+        mockMvc.perform(post("/estoque/warehouses")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Loja Centro\",\"type\":\"LOJA_FISICA\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void createWarehouse_withInvalidType_returns_400() throws Exception {
+        mockMvc.perform(post("/estoque/warehouses")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"code\":\"LOJA-01\",\"name\":\"Loja Centro\",\"type\":\"INEXISTENTE\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void listWarehouses_returns_200() throws Exception {
+        when(estoqueUseCase.listWarehouses()).thenReturn(
+                List.of(Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true)));
+
+        mockMvc.perform(get("/estoque/warehouses"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].code").value("LOJA-01"));
+    }
+
+    @Test
+    void getStockBalance_returns_200() throws Exception {
+        when(estoqueUseCase.getStockBalance("NARG-001", "LOJA-01"))
+                .thenReturn(StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("3.000"), 1L));
+
+        mockMvc.perform(get("/estoque/stock-balance").param("sku", "NARG-001").param("warehouseCode", "LOJA-01"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sku").value("NARG-001"))
+                .andExpect(jsonPath("$.warehouseCode").value("LOJA-01"))
+                .andExpect(jsonPath("$.quantity").value(3.0));
+    }
+
+    @Test
+    void getStockBalance_warehouseNotFound_returns_404() throws Exception {
+        when(estoqueUseCase.getStockBalance("NARG-001", "INEXISTENTE"))
+                .thenThrow(new WarehouseNotFoundException("INEXISTENTE"));
+
+        mockMvc.perform(get("/estoque/stock-balance").param("sku", "NARG-001").param("warehouseCode", "INEXISTENTE"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.errorCode").value("WAREHOUSE_NOT_FOUND"));
     }
 }

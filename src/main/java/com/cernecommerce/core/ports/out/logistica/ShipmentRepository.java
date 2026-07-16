@@ -1,8 +1,8 @@
 package com.cernecommerce.core.ports.out.logistica;
 
+import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.logistica.Shipment;
 
-import java.util.List;
 import java.util.Optional;
 
 /**
@@ -12,7 +12,7 @@ import java.util.Optional;
  */
 public interface ShipmentRepository {
 
-    List<Shipment> findAll();
+    PageResult<Shipment> findAll(int page, int size);
 
     Optional<Shipment> findByOrderRef(String orderRef);
 

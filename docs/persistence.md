@@ -278,6 +278,35 @@ Relacionamento: `@ElementCollection` de `ProductAttributeEmbeddable` (tabela `pr
 
 ---
 
+### WarehouseEntity — tabela `warehouse`
+
+| Coluna | Tipo | Constraint |
+|--------|------|-----------|
+| id | BIGINT | PK, auto-increment |
+| code | VARCHAR(50) | UNIQUE NOT NULL |
+| name | VARCHAR(255) | NOT NULL |
+| type | VARCHAR(20) | NOT NULL — `LOJA_FISICA` \| `ECOMMERCE` (`@Enumerated(STRING)`) |
+| active | BOOLEAN | NOT NULL |
+
+---
+
+### StockBalanceEntity — tabela `stock_balance`
+
+| Coluna | Tipo | Constraint |
+|--------|------|-----------|
+| id | BIGINT | PK, auto-increment |
+| sku | VARCHAR(50) | NOT NULL |
+| warehouse_id | BIGINT | FK → warehouse(id) ON DELETE CASCADE |
+| quantity | NUMERIC(14,3) | NOT NULL DEFAULT 0 |
+| version | BIGINT | NOT NULL DEFAULT 0 — `@Version`, locking otimista para as escritas concorrentes da movimentação de estoque (F003) |
+
+Constraint única: `uk_stock_balance_sku_warehouse (sku, warehouse_id)` — um único registro de saldo por par SKU/depósito.
+Índice: `idx_stock_balance_warehouse_id (warehouse_id)`.
+
+`getStockBalance(sku, warehouseCode)` retorna saldo zero (sem persistir linha) quando ainda não existe registro para o par — inventário sem nenhuma movimentação começa em zero. O primeiro `save()` de fato só ocorrerá quando F003 (`movimentacao-manual`) escrever a primeira movimentação.
+
+---
+
 ## Repositórios
 
 Cada port OUT tem uma implementação `*RepositoryImpl` que:
@@ -365,6 +394,8 @@ Em hml/prod não há seed automático — usuário admin deve ser criado via CLI
 | `V43__add_notification_read_at_index.sql` | Índice parcial `idx_notifications_read_at ON notifications(read_at) WHERE read_at IS NOT NULL` — melhora o DELETE do `NotificationCleanupService`, que filtra por `read_at IS NOT NULL AND read_at < :cutoff`. Sem este índice a query faz full scan conforme a tabela cresce. |
 | `V44__estoque_product.sql` | Cria `product` (SKU pai), `product_variant` (SKU filho, FK → product ON DELETE CASCADE) e `product_attribute` (sem PK própria — `@ElementCollection`, FK → product_variant ON DELETE CASCADE). Índices em `product_variant(product_id)` e `product_attribute(variant_id)`. |
 | `V45__estoque_product_permissions.sql` | Insere `ESTOQUE_PRODUCT_READ` e `ESTOQUE_PRODUCT_MANAGE`, atribuídas ao `ROLE_ADMIN`. Também adicionadas ao array `ADMIN_PERMISSIONS` do `DevRoleBootstrapConfig` para que `ROLE_DEV` as herde. |
+| `V46__estoque_warehouse_stock_balance.sql` | Cria `warehouse` (código único, tipo `LOJA_FISICA`/`ECOMMERCE`) e `stock_balance` (saldo por SKU/depósito, FK → warehouse ON DELETE CASCADE, coluna `version` para locking otimista). Constraint única `(sku, warehouse_id)` — um único registro de saldo por par SKU/depósito. Índice em `stock_balance(warehouse_id)`. |
+| `V47__estoque_warehouse_permissions.sql` | Insere `ESTOQUE_WAREHOUSE_READ` e `ESTOQUE_WAREHOUSE_MANAGE`, atribuídas ao `ROLE_ADMIN`. Também adicionadas ao array `ADMIN_PERMISSIONS` do `DevRoleBootstrapConfig` para que `ROLE_DEV` as herde. |
 
 ---
 
@@ -429,6 +460,14 @@ id | username | email | enabled | createdAt
 ```
 
 Qualquer valor fora da lista faz o sort cair para `id ASC` (default seguro).
+
+### Contratos de paginação nos domínios stub
+
+Os ports de saída `SupplierRepository` (compras), `CashRegisterRepository` (PDV), `CartRepository` (ecommerce), `LedgerRepository` (financeiro) e `ShipmentRepository` (logística) expõem `PageResult<T> findAll(int page, int size)`, seguindo o mesmo contrato já usado por `ProductRepository`. Os use cases correspondentes (`ComprasUseCase.listSuppliers`, `PdvUseCase.listSessions`, `EcommerceUseCase.listCarts`, `FinanceiroUseCase.listCashFlow`, `LogisticaUseCase.listShipments`) e os controllers já aceitam `page`/`size` (`@Min(0)` e `@Min(1) @Max(100)` respectivamente).
+
+Nenhum desses domínios tem adapter de persistência ainda — os services stub retornam `new PageResult<>(List.of(), page, size, 0, 0)`, ecoando `page`/`size` recebidos com conteúdo vazio. Quando os adapters JPA forem implementados, o contrato de API já paginado se mantém: basta seguir o padrão ID-first (ver acima) na implementação de `findAll`.
+
+`WarehouseRepository.findAll()` é exceção deliberada ao contrato paginado: depósitos formam uma lista pequena e limitada (loja física × e-commerce, eventuais novas lojas) — paginar seria over-engineering. `StockBalanceRepository` não expõe `findAll` — a consulta é sempre pontual por `(sku, warehouseId)`.
 
 ---
 

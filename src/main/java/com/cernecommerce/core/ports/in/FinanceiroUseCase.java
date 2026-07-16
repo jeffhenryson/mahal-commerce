@@ -1,8 +1,7 @@
 package com.cernecommerce.core.ports.in;
 
+import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.financeiro.CashFlowEntry;
-
-import java.util.List;
 
 /**
  * Port de entrada do domínio <b>financeiro</b>.
@@ -13,6 +12,6 @@ import java.util.List;
  */
 public interface FinanceiroUseCase {
 
-    /** Lista os lançamentos de fluxo de caixa. Stub: retorna lista vazia. */
-    List<CashFlowEntry> listCashFlow();
+    /** Lista os lançamentos de fluxo de caixa paginados. Stub: retorna página vazia. */
+    PageResult<CashFlowEntry> listCashFlow(int page, int size);
 }

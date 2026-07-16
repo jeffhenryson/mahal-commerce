@@ -6,16 +6,16 @@ version: "3.9"
 # Prometheus scrapa http://host.docker.internal:8080/actuator/prometheus a cada 15s
 
 services:
-  postgres-hml:
+  postgres-mahal:
     image: postgres:16-alpine
-    container_name: postgres-hml
+    container_name: postgres-mahal
     restart: unless-stopped
     environment:
       POSTGRES_DB: security
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
-      - "5433:5432"
+      - "5435:5432"
     volumes:
       - pgdata_hml:/var/lib/postgresql/data
     healthcheck:
@@ -24,25 +24,25 @@ services:
       timeout: 5s
       retries: 10
 
-  redis-hml:
+  redis-mahal:
     image: redis:7-alpine
-    container_name: redis-hml
+    container_name: redis-mahal
     restart: unless-stopped
     command: redis-server --requirepass hml_redis_2026
     ports:
-      - "6380:6379"
+      - "6382:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "hml_redis_2026", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10
 
-  prometheus-hml:
+  prometheus-mahal:
     image: prom/prometheus:v2.52.0
-    container_name: prometheus-hml
+    container_name: prometheus-mahal
     restart: unless-stopped
     ports:
-      - "9090:9090"
+      - "9092:9090"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheusdata_hml:/prometheus
@@ -53,25 +53,25 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
-  grafana-hml:
+  grafana-mahal:
     image: grafana/grafana:11.0.0
-    container_name: grafana-hml
+    container_name: grafana-mahal
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "3002:3000"
     environment:
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
       GF_SECURITY_ALLOW_EMBEDDING: "true"
       GF_USERS_DEFAULT_THEME: "dark"
-      GF_SERVER_ROOT_URL: "http://localhost:3000"
+      GF_SERVER_ROOT_URL: "http://localhost:3002"
       GF_UNIFIED_ALERTING_ENABLED: "true"
       GF_ALERTING_ENABLED: "false"
     volumes:
       - grafanadata_hml:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
     depends_on:
-      - prometheus-hml
+      - prometheus-mahal
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
@@ -79,20 +79,20 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: cerne-commerce-app:latest
-    container_name: app-hml
+    image: mahal-commerce-backend:latest
+    container_name: mahal-backend
     restart: unless-stopped
     depends_on:
-      postgres-hml:
+      postgres-mahal:
         condition: service_healthy
-      redis-hml:
+      redis-mahal:
         condition: service_healthy
     environment:
       SPRING_PROFILES_ACTIVE: hml
-      DB_URL: jdbc:postgresql://postgres-hml:5432/security
+      DB_URL: jdbc:postgresql://postgres-mahal:5432/security
       DB_USERNAME: postgres
       DB_PASSWORD: postgres
-      REDIS_HOST: redis-hml
+      REDIS_HOST: redis-mahal
       REDIS_PORT: 6379
       REDIS_PASSWORD: hml_redis_2026
       JWT_SECRET: WsYV6lC353xcMmE/C6buo96jGsm4JQMf4EyV3KZzJlk=
@@ -105,6 +105,7 @@ services:
       GOOGLE_CLIENT_ID: 272358372118-v3nf24o331kfpg0n3gqm0497o1fd9faf.apps.googleusercontent.com
     ports:
       - "8082:8082"
+      - "8083:8081"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8081/actuator/health | grep -q UP || exit 1"]
       interval: 10s

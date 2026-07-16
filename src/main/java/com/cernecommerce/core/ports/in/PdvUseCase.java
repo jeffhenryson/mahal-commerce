@@ -1,8 +1,7 @@
 package com.cernecommerce.core.ports.in;
 
+import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.pdv.CashRegisterSession;
-
-import java.util.List;
 
 /**
  * Port de entrada do domínio <b>vendas-balcao (PDV)</b>.
@@ -13,6 +12,6 @@ import java.util.List;
  */
 public interface PdvUseCase {
 
-    /** Lista as sessões de caixa. Stub: retorna lista vazia até a implementação. */
-    List<CashRegisterSession> listSessions();
+    /** Lista as sessões de caixa paginadas. Stub: retorna página vazia até a implementação. */
+    PageResult<CashRegisterSession> listSessions(int page, int size);
 }

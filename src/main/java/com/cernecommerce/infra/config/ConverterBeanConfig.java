@@ -8,6 +8,7 @@ import com.cernecommerce.adapter.in.converter.PermissionDTOConverter;
 import com.cernecommerce.adapter.in.converter.ProductDTOConverter;
 import com.cernecommerce.adapter.in.converter.RoleDTOConverter;
 import com.cernecommerce.adapter.in.converter.UserDTOConverter;
+import com.cernecommerce.adapter.in.converter.WarehouseDTOConverter;
 import com.cernecommerce.adapter.out.persistence.converter.UserEntityConverter;
 
 @Configuration
@@ -36,5 +37,10 @@ class ConverterBeanConfig {
     @Bean
     ProductDTOConverter productDTOConverter() {
         return new ProductDTOConverter();
+    }
+
+    @Bean
+    WarehouseDTOConverter warehouseDTOConverter() {
+        return new WarehouseDTOConverter();
     }
 }

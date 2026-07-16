@@ -1,5 +1,6 @@
 package com.cernecommerce.core.service;
 
+import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.ecommerce.Cart;
 import com.cernecommerce.core.ports.in.EcommerceUseCase;
 
@@ -17,8 +18,8 @@ public class EcommerceService implements EcommerceUseCase {
     // TODO: injetar CartRepository / PaymentGatewayPort (core.ports.out.ecommerce).
 
     @Override
-    public List<Cart> listCarts() {
-        // TODO: delegar ao CartRepository.findAll().
-        return List.of();
+    public PageResult<Cart> listCarts(int page, int size) {
+        // TODO: delegar ao CartRepository.findAll(page, size).
+        return new PageResult<>(List.of(), page, size, 0, 0);
     }
 }

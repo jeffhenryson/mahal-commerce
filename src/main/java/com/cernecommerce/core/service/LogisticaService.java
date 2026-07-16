@@ -1,5 +1,6 @@
 package com.cernecommerce.core.service;
 
+import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.logistica.Shipment;
 import com.cernecommerce.core.ports.in.LogisticaUseCase;
 
@@ -17,8 +18,8 @@ public class LogisticaService implements LogisticaUseCase {
     // TODO: injetar ShipmentRepository / CarrierPort (core.ports.out.logistica).
 
     @Override
-    public List<Shipment> listShipments() {
-        // TODO: delegar ao ShipmentRepository.findAll().
-        return List.of();
+    public PageResult<Shipment> listShipments(int page, int size) {
+        // TODO: delegar ao ShipmentRepository.findAll(page, size).
+        return new PageResult<>(List.of(), page, size, 0, 0);
     }
 }

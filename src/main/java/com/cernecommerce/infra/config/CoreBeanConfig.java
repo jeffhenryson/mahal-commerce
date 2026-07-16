@@ -64,6 +64,8 @@ import com.cernecommerce.core.service.UserService;
 import com.cernecommerce.core.ports.in.PdvUseCase;
 import com.cernecommerce.core.ports.in.EstoqueUseCase;
 import com.cernecommerce.core.ports.out.estoque.ProductRepository;
+import com.cernecommerce.core.ports.out.estoque.StockBalanceRepository;
+import com.cernecommerce.core.ports.out.estoque.WarehouseRepository;
 import com.cernecommerce.core.ports.in.ComprasUseCase;
 import com.cernecommerce.core.ports.in.FinanceiroUseCase;
 import com.cernecommerce.core.ports.in.EcommerceUseCase;
@@ -178,8 +180,9 @@ class CoreBeanConfig {
     }
 
     @Bean
-    EstoqueUseCase estoqueUseCase(ProductRepository productRepository) {
-        return new EstoqueService(productRepository);
+    EstoqueUseCase estoqueUseCase(ProductRepository productRepository, WarehouseRepository warehouseRepository,
+            StockBalanceRepository stockBalanceRepository) {
+        return new EstoqueService(productRepository, warehouseRepository, stockBalanceRepository);
     }
 
     @Bean

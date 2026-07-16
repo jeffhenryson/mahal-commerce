@@ -354,6 +354,7 @@ Todos os eventos publicados via `ApplicationEventPublisher` e persistidos pelo `
 | 2FA | `TOTP_ENABLED`, `TOTP_DISABLED`, `TOTP_BACKUP_CODES_REGENERATED`, `TOTP_REPLACED` |
 | DEV | `DEV_ELEVATION_COMPLETED` |
 | OAuth | `OAUTH_GOOGLE_LOGIN` |
+| Estoque | `PRODUCT_CREATED`, `WAREHOUSE_CREATED` |
 
 **`ACCESS_DENIED`:** publicado por `GlobalExceptionHandler.handleAccessDenied` sempre que uma `AccessDeniedException` for lançada. O evento inclui o `username` do contexto de segurança (ou `"anonymous"`) e o `path` da requisição no campo `details`.
 

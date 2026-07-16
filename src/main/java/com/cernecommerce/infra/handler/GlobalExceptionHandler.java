@@ -30,6 +30,8 @@ import com.cernecommerce.core.domain.exception.email.EmailVerificationCodeExpire
 import com.cernecommerce.core.domain.exception.email.EmailVerificationCodeNotFoundException;
 import com.cernecommerce.core.domain.exception.rbac.RoleNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateSkuException;
+import com.cernecommerce.core.domain.exception.estoque.DuplicateWarehouseCodeException;
+import com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException;
 import com.cernecommerce.core.domain.event.AuditEvent;
 import com.cernecommerce.core.domain.exception.user.EmailAlreadyExistsException;
 import com.cernecommerce.core.domain.exception.user.UserNotFoundException;
@@ -99,6 +101,16 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(DuplicateSkuException.class)
     public ResponseEntity<ApiError> handleDuplicateSku(DuplicateSkuException ex, HttpServletRequest req) {
         return error(HttpStatus.CONFLICT, ex.getMessage(), "SKU_ALREADY_EXISTS", req);
+    }
+
+    @ExceptionHandler(DuplicateWarehouseCodeException.class)
+    public ResponseEntity<ApiError> handleDuplicateWarehouseCode(DuplicateWarehouseCodeException ex, HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "WAREHOUSE_CODE_ALREADY_EXISTS", req);
+    }
+
+    @ExceptionHandler(WarehouseNotFoundException.class)
+    public ResponseEntity<ApiError> handleWarehouseNotFound(WarehouseNotFoundException ex, HttpServletRequest req) {
+        return error(HttpStatus.NOT_FOUND, ex.getMessage(), "WAREHOUSE_NOT_FOUND", req);
     }
 
     @ExceptionHandler(UsernameAlreadyExistsException.class)

@@ -1,8 +1,7 @@
 package com.cernecommerce.core.ports.in;
 
+import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.compras.Supplier;
-
-import java.util.List;
 
 /**
  * Port de entrada do domínio <b>compras</b>.
@@ -13,6 +12,6 @@ import java.util.List;
  */
 public interface ComprasUseCase {
 
-    /** Lista os fornecedores. Stub: retorna lista vazia até a implementação. */
-    List<Supplier> listSuppliers();
+    /** Lista os fornecedores paginados. Stub: retorna página vazia até a implementação. */
+    PageResult<Supplier> listSuppliers(int page, int size);
 }
