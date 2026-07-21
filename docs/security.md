@@ -355,6 +355,7 @@ Todos os eventos publicados via `ApplicationEventPublisher` e persistidos pelo `
 | DEV | `DEV_ELEVATION_COMPLETED` |
 | OAuth | `OAUTH_GOOGLE_LOGIN` |
 | Estoque | `PRODUCT_CREATED`, `WAREHOUSE_CREATED` |
+| CRM | `CUSTOMER_CREATED`, `CUSTOMER_NOTE_ADDED`, `CUSTOMER_STAGE_CHANGED`, `TAG_CREATED`, `TAG_DELETED`, `CUSTOMER_TAG_ADDED`, `CUSTOMER_TAG_REMOVED` |
 
 **`ACCESS_DENIED`:** publicado por `GlobalExceptionHandler.handleAccessDenied` sempre que uma `AccessDeniedException` for lançada. O evento inclui o `username` do contexto de segurança (ou `"anonymous"`) e o `path` da requisição no campo `details`.
 

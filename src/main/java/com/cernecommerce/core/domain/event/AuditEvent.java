@@ -37,7 +37,11 @@ public record AuditEvent(EventType type, String username, Instant timestamp, Map
         // OAuth
         OAUTH_GOOGLE_LOGIN,
         // Estoque
-        PRODUCT_CREATED, WAREHOUSE_CREATED
+        PRODUCT_CREATED, WAREHOUSE_CREATED,
+        // CRM
+        CUSTOMER_CREATED, CUSTOMER_NOTE_ADDED, CUSTOMER_STAGE_CHANGED,
+        TAG_CREATED, TAG_DELETED, CUSTOMER_TAG_ADDED, CUSTOMER_TAG_REMOVED,
+        CAMPAIGN_AUTOMATION_CREATED, CAMPAIGN_AUTOMATION_DELETED, CAMPAIGN_AUTOMATION_DISPATCHED
     }
 
     public static AuditEvent of(EventType type, String username) {

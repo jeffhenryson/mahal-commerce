@@ -893,6 +893,249 @@ Query: sku (obrigatório), warehouseCode (obrigatório)
 
 ---
 
+## CRM — `/crm`
+
+### POST /crm/customers — Permissão: CRM_CUSTOMER_MANAGE
+
+```json
+{
+  "nome": "Maria Silva",           // obrigatório, máx. 255 chars
+  "contato": "11999998888",         // obrigatório, máx. 30 chars
+  "email": "maria@example.com",     // obrigatório, formato de email, máx. 255 chars, único
+  "cpf": "12345678900",             // opcional, exatamente 11 chars
+  "origem": "loja-fisica"           // opcional, máx. 100 chars
+}
+// Response 201 + Location → CustomerResponse / 409 CUSTOMER_EMAIL_ALREADY_EXISTS / 400 VALIDATION_ERROR
+```
+
+```json
+// CustomerResponse — estagio e tags são valores reais (Kanban de atendimento e crm/tags-segmentos).
+// ltv, cashback e segmento seguem como placeholders (0 / "NOVO") até os domínios de pedidos e
+// cashback existirem no backend (ver crm/listagem-clientes-rfm) — não confundir "segmento"
+// (RFM auto-calculado) com "estagio" (Kanban movido manualmente) nem com "tags" (livres, F007).
+// Cliente recém-criado sempre vem com tags: [] (ainda não associado a nenhuma tag).
+{
+  "id": 1,
+  "nome": "Maria Silva",
+  "contato": "11999998888",
+  "email": "maria@example.com",
+  "cpf": "12345678900",
+  "origem": "loja-fisica",
+  "cadastradoEm": "2026-07-20T18:00:00Z",
+  "estagio": "NOVO_LEAD",
+  "ltv": 0,
+  "cashback": 0,
+  "segmento": "NOVO",
+  "tags": []
+}
+```
+
+---
+
+### GET /crm/customers/{id} — Permissão: CRM_CUSTOMER_READ
+
+```
+// Response 200 → CustomerResponse (tags reais do cliente) / 404 CUSTOMER_NOT_FOUND
+```
+
+---
+
+### GET /crm/customers — Permissão: CRM_CUSTOMER_READ
+
+```
+Query: search (opcional — filtra por nome ou contato, case-insensitive), page, size (máx. 100)
+// Response 200 → PageResult<CustomerResponse> — tags sempre [] aqui (evita N+1); use
+// GET /crm/customers/{id} ou GET /crm/customers/{id}/tags para as tags reais
+```
+
+---
+
+### GET /crm/customers/export — Permissão: CRM_CUSTOMER_READ
+
+```
+Query: search (opcional — mesmo filtro de GET /crm/customers, mas sem paginação: exporta todos
+os registros correspondentes, não só uma página)
+// Response 200 → text/csv;charset=UTF-8, Content-Disposition: attachment; filename="clientes.csv"
+```
+
+```
+Colunas (nessa ordem): id,nome,contato,email,cpf,origem,cadastradoEm,estagio
+```
+
+Não inclui `ltv`/`cashback`/`segmento` (placeholder) nem `tags` (exigiria query em lote extra — mesma decisão de evitar N+1 da listagem paginada). Arquivo gerado com quebra de linha `\r\n` (RFC 4180), campos com vírgula/aspas/quebra de linha escapados entre aspas duplas, e prefixo BOM UTF-8 (compatibilidade com Excel para acentos).
+
+---
+
+### POST /crm/customers/{id}/notes — Permissão: CRM_CUSTOMER_MANAGE
+
+```json
+{
+  "texto": "Cliente prefere contato por WhatsApp"   // obrigatório, máx. 2000 chars
+}
+// Response 201 + Location → CustomerNoteResponse / 404 CUSTOMER_NOT_FOUND / 400 VALIDATION_ERROR
+```
+
+```json
+// CustomerNoteResponse — autor é preenchido automaticamente com o username autenticado
+{
+  "id": 10,
+  "customerId": 1,
+  "autor": "gerente",
+  "texto": "Cliente prefere contato por WhatsApp",
+  "criadoEm": "2026-07-20T20:00:00Z"
+}
+```
+
+---
+
+### GET /crm/customers/{id}/notes — Permissão: CRM_CUSTOMER_READ
+
+```
+// Response 200 → CustomerNoteResponse[] (mais recentes primeiro) / 404 CUSTOMER_NOT_FOUND
+```
+
+---
+
+### GET /crm/customers/{id}/orders — Permissão: CRM_CUSTOMER_READ
+
+```
+// Placeholder: sempre retorna [] até o domínio de pedidos existir no backend.
+// Response 200 → [] / 404 CUSTOMER_NOT_FOUND
+```
+
+---
+
+### GET /crm/customers/{id}/cashback — Permissão: CRM_CUSTOMER_READ
+
+```
+// Placeholder: sempre retorna [] até o domínio de cashback existir no backend.
+// Response 200 → [] / 404 CUSTOMER_NOT_FOUND
+```
+
+---
+
+### PATCH /crm/customers/{id}/estagio — Permissão: CRM_CUSTOMER_MANAGE
+
+```json
+{
+  "estagio": "EM_ATENDIMENTO"   // obrigatório — NOVO_LEAD | EM_ATENDIMENTO | QUALIFICADO | CLIENTE_ATIVO | INATIVO
+}
+// Response 200 → CustomerResponse (com o estagio já atualizado) / 404 CUSTOMER_NOT_FOUND
+// 400 VALIDATION_ERROR (estagio ausente/inválido) / 400 BAD_REQUEST (estagio igual ao atual)
+```
+
+Cada transição é registrada com autor (username autenticado, nunca informado no body) e timestamp — ver `GET .../estagio/historico`.
+
+---
+
+### GET /crm/customers/{id}/estagio/historico — Permissão: CRM_CUSTOMER_READ
+
+```
+// Response 200 → StageTransitionResponse[] (mais recentes primeiro) / 404 CUSTOMER_NOT_FOUND
+```
+
+```json
+// StageTransitionResponse
+{
+  "id": 20,
+  "customerId": 1,
+  "de": "NOVO_LEAD",
+  "para": "EM_ATENDIMENTO",
+  "autor": "gerente",
+  "transicionadoEm": "2026-07-20T20:30:00Z"
+}
+```
+
+---
+
+### GET /crm/dashboard/overview — Permissão: CRM_CUSTOMER_READ
+
+```
+// Response 200 → CrmDashboardResponse
+```
+
+```json
+// CrmDashboardResponse — ativo = estagio != INATIVO (decisão de escopo, ver crm/dashboard-overview).
+// ltvMedio, disparosWhatsappMes e porSegmento são placeholders até os domínios de pedidos/cashback
+// e de campanhas existirem. totalClientes, clientesAtivos e porEstagio são dados reais.
+{
+  "totalClientes": 42,
+  "clientesAtivos": 30,
+  "ltvMedio": 0,
+  "disparosWhatsappMes": 0,
+  "porSegmento": { "NOVO": 42 },
+  "porEstagio": { "NOVO_LEAD": 20, "EM_ATENDIMENTO": 10, "QUALIFICADO": 5, "CLIENTE_ATIVO": 5, "INATIVO": 2 }
+}
+```
+
+---
+
+### POST /crm/tags — Permissão: CRM_CUSTOMER_MANAGE
+
+```json
+{
+  "nome": "VIP"   // obrigatório, máx. 50 chars, único
+}
+// Response 201 + Location → TagResponse / 409 TAG_ALREADY_EXISTS / 400 VALIDATION_ERROR
+```
+
+```json
+// TagResponse
+{ "id": 1, "nome": "VIP" }
+```
+
+---
+
+### GET /crm/tags — Permissão: CRM_CUSTOMER_READ
+
+```
+// Response 200 → TagSummaryResponse[]
+```
+
+```json
+// TagSummaryResponse — clientesCount é dado real (contagem de associações)
+{ "id": 1, "nome": "VIP", "clientesCount": 3 }
+```
+
+---
+
+### DELETE /crm/tags/{id} — Permissão: CRM_CUSTOMER_MANAGE
+
+```
+// Remove a tag e todas as suas associações (ON DELETE CASCADE)
+// Response 204 / 404 TAG_NOT_FOUND
+```
+
+---
+
+### POST /crm/customers/{id}/tags — Permissão: CRM_CUSTOMER_MANAGE
+
+```json
+{
+  "tagId": 1   // obrigatório
+}
+// Associa a tag ao cliente (idempotente — associar de novo não duplica)
+// Response 204 / 404 CUSTOMER_NOT_FOUND ou TAG_NOT_FOUND / 400 VALIDATION_ERROR
+```
+
+---
+
+### DELETE /crm/customers/{id}/tags/{tagId} — Permissão: CRM_CUSTOMER_MANAGE
+
+```
+// Response 204 / 404 CUSTOMER_NOT_FOUND ou TAG_NOT_FOUND
+```
+
+---
+
+### GET /crm/customers/{id}/tags — Permissão: CRM_CUSTOMER_READ
+
+```
+// Response 200 → TagResponse[] / 404 CUSTOMER_NOT_FOUND
+```
+
+---
+
 ## Audit Logs — `/audit-logs`
 
 ### GET /audit-logs — Permissão: AUDIT_READ

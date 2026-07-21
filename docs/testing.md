@@ -9,7 +9,7 @@
 | Testcontainers (PostgreSQL real) | 1 | Testcontainers + `@EnabledIfEnvironmentVariable` |
 | ArchUnit (regras arquiteturais) | 1 | ArchUnit |
 
-Total: ~82 arquivos de teste.
+Total: 108 arquivos de teste.
 
 ---
 
@@ -48,6 +48,12 @@ Testam uma classe isolada com dependências mockadas via Mockito. Não sobem o c
 | `WarehouseTest` | Factory `create`/`of`, invariantes de domínio: `code`/`name` obrigatórios, `type` obrigatório |
 | `StockBalanceTest` | Factory `zero`/`of`, invariantes de domínio: `sku` obrigatório, `warehouseId` obrigatório, `quantity` não pode ser negativa |
 | `EstoqueServiceTest` | `createProduct` salva e retorna, lança `DuplicateSkuException` em SKU duplicado, permite produto sem variações; `listProducts` delega ao repositório; `createWarehouse` salva e retorna, lança `DuplicateWarehouseCodeException` em código duplicado; `listWarehouses` delega ao repositório; `getStockBalance` retorna saldo existente, retorna saldo zero quando ainda não há registro, lança `WarehouseNotFoundException` para código de depósito inexistente |
+| `CustomerTest` | Factory `create`/`of`, invariantes de domínio: `nome`/`contato`/`email` obrigatórios, formato de email inválido rejeitado, `cpf`/`origem` opcionais |
+| `CustomerNoteTest` | Factory `create`/`of`, invariantes de domínio: `customerId`/`autor`/`texto` obrigatórios |
+| `StageTransitionTest` | Factory `create`/`of`, invariantes de domínio: `customerId`/`de`/`para`/`autor` obrigatórios, `de` não pode ser igual a `para` |
+| `TagTest` | Factory `create`/`of`, invariante de domínio: `nome` obrigatório |
+| `CustomerCsvConverterTest` | Header row sempre presente (mesmo lista vazia); uma linha por cliente; escapa campos com vírgula entre aspas; escapa aspas internas dobrando-as (RFC 4180); campos opcionais nulos ficam em branco |
+| `CrmServiceTest` | `createCustomer` salva e retorna, lança `DuplicateCustomerEmailException` em email duplicado; `findCustomerById` retorna cliente, lança `CustomerNotFoundException` para id inexistente; `listCustomers` delega ao repositório com e sem `search`; `addNote` salva quando cliente existe e lança `CustomerNotFoundException` quando não existe; `listNotes` retorna notas quando cliente existe e lança `CustomerNotFoundException` quando não existe; `moveStage` atualiza cliente e registra transição, lança `CustomerNotFoundException` quando cliente não existe, lança `IllegalArgumentException` ao mover para o mesmo estágio; `listStageHistory` retorna histórico quando cliente existe e lança `CustomerNotFoundException` quando não existe; `getDashboardOverview` agrega contagens reais do repositório (total, ativos, por estágio) com os placeholders de LTV/WhatsApp/segmento; `createTag` salva e retorna, lança `DuplicateTagNameException` em nome duplicado; `listTags` delega ao repositório; `deleteTag` remove quando existe, lança `TagNotFoundException` quando não existe; `addTagToCustomer`/`removeTagFromCustomer` validam cliente e tag antes de (des)associar, lançam `CustomerNotFoundException`/`TagNotFoundException` conforme o caso; `listCustomerTags` retorna tags quando cliente existe e lança `CustomerNotFoundException` quando não existe; `listCustomersForExport` delega ao repositório (sem paginação) |
 | `StatsServiceTest` | Totais do dashboard |
 | `AuditLogsServiceTest` | Delegação com filtros, sem filtros, página com entradas, página além do total |
 | `SystemConfigServiceTest` | Leitura de feature flags, atualização, chave inexistente |
@@ -99,6 +105,7 @@ Controladores (MockMvc com contexto parcial):
 | `RoleControllerTest` | CRUD de roles |
 | `PermissionControllerTest` | CRUD de permissions |
 | `EstoqueControllerTest` | Lista produtos paginados, cria produto (201), validação de campo obrigatório (400), SKU duplicado (409 `SKU_ALREADY_EXISTS`), criação sem variações; cria depósito (201), código duplicado (409 `WAREHOUSE_CODE_ALREADY_EXISTS`), campo obrigatório ausente (400), `type` inválido (400), lista depósitos, consulta saldo (200), depósito inexistente (404 `WAREHOUSE_NOT_FOUND`) |
+| `CrmControllerTest` | Cria cliente (201, com placeholders `ltv`/`cashback`/`segmento`/`tags`), campo obrigatório ausente (400), email inválido (400), email duplicado (409 `CUSTOMER_EMAIL_ALREADY_EXISTS`); busca por id (200, tags reais do use case), id inexistente (404 `CUSTOMER_NOT_FOUND`); lista paginada (200), filtro `search` repassado ao use case, `size` capado em 100; cria nota (201), sem `texto` (400), cliente inexistente (404); lista notas (200), cliente inexistente (404); histórico de pedidos e extrato de cashback retornam `[]` (200) com cliente existente, 404 com cliente inexistente; move estágio (200), sem `estagio` (400), valor de enum inválido (400), cliente inexistente (404), mesmo estágio (400); lista histórico de transições (200), cliente inexistente (404); dashboard overview retorna totais/ativos/porEstagio reais e placeholders de ltv/whatsapp/segmento (200); cria tag (201), sem `nome` (400), nome duplicado (409 `TAG_ALREADY_EXISTS`); lista tags com contagem (200); remove tag (204), tag inexistente (404 `TAG_NOT_FOUND`); associa/remove tag de cliente (204), sem `tagId` (400), cliente ou tag inexistentes (404); lista tags do cliente (200), cliente inexistente (404); exporta CSV com header `Content-Type: text/csv;charset=UTF-8` e `Content-Disposition: attachment` (200), filtro `search` repassado ao use case |
 | `AuditLogControllerTest` | Listagem filtrada de audit logs |
 | `StatsControllerTest` | Endpoint de stats |
 | `AvatarControllerTest` | Upload, delete, serve de avatar |
@@ -161,6 +168,7 @@ Testes que validam comportamento de autorização independentemente do fluxo de 
 |---------|-------------|
 | `PermissionControllerSecurityTest` | 401 sem auth, 403 com role insuficiente, 200/201 com permission correta |
 | `EstoqueControllerSecurityTest` | 401 sem auth, 403 com `ROLE_USER` sem permissão, 403 sem `ESTOQUE_PRODUCT_MANAGE` no POST, 200/201 com `ESTOQUE_PRODUCT_READ`/`ESTOQUE_PRODUCT_MANAGE`; mesmos casos para `ESTOQUE_WAREHOUSE_READ`/`ESTOQUE_WAREHOUSE_MANAGE` nos endpoints de depósito e saldo |
+| `CrmControllerSecurityTest` | 401 sem auth em POST/GET/PATCH (item, listagem, notas, estágio, dashboard, tags, exportação CSV), 403 sem `CRM_CUSTOMER_MANAGE` no POST/PATCH/DELETE de cliente/nota/estágio/tags, 403 sem `CRM_CUSTOMER_READ` no GET (item, listagem, notas, pedidos, cashback, histórico de estágio, dashboard, tags, exportação CSV), 201 com `CRM_CUSTOMER_MANAGE`, 200/404 com `CRM_CUSTOMER_READ`/`CRM_CUSTOMER_MANAGE` |
 | `RoleControllerSecurityTest` | 401 sem auth, 403 sem permissão, guard DEV_ELEVATED em assign/removePermission para `DEV_ROLE_MANAGE`/`DEV_PERMISSION_MANAGE` |
 | `AuditLogControllerSecurityTest` | 401 sem auth, 403 sem `AUDIT_READ`, 200 com permissão correta |
 | `StatsControllerSecurityTest` | 401 sem auth, 403 com apenas uma das permissões exigidas (`USER_READ` + `ROLE_READ`), 200 com ambas |

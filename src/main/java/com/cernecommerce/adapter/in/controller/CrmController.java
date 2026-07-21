@@ -1,0 +1,464 @@
+package com.cernecommerce.adapter.in.controller;
+
+import com.cernecommerce.adapter.in.converter.CampaignDTOConverter;
+import com.cernecommerce.adapter.in.converter.CustomerCsvConverter;
+import com.cernecommerce.adapter.in.converter.CustomerDTOConverter;
+import com.cernecommerce.adapter.in.converter.CustomerNoteDTOConverter;
+import com.cernecommerce.adapter.in.converter.StageTransitionDTOConverter;
+import com.cernecommerce.adapter.in.converter.TagDTOConverter;
+import com.cernecommerce.adapter.in.dtos.request.AssociateTagRequest;
+import com.cernecommerce.adapter.in.dtos.request.CampaignActiveRequest;
+import com.cernecommerce.adapter.in.dtos.request.CampaignAutomationRequest;
+import com.cernecommerce.adapter.in.dtos.request.CustomerNoteRequest;
+import com.cernecommerce.adapter.in.dtos.request.CustomerRequest;
+import com.cernecommerce.adapter.in.dtos.request.CustomerStageRequest;
+import com.cernecommerce.adapter.in.dtos.request.TagRequest;
+import com.cernecommerce.adapter.in.dtos.response.CampaignAutomationResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.CampaignLogResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.CrmDashboardResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.CustomerNoteResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.CustomerResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.StageTransitionResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.TagResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.TagSummaryResponseDTO;
+import com.cernecommerce.core.domain.event.AuditEvent;
+import com.cernecommerce.core.domain.event.AuditEvent.EventType;
+import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.crm.CampaignAutomation;
+import com.cernecommerce.core.domain.model.crm.CampaignLogEntry;
+import com.cernecommerce.core.domain.model.crm.CrmDashboardOverview;
+import com.cernecommerce.core.domain.model.crm.Customer;
+import com.cernecommerce.core.domain.model.crm.CustomerNote;
+import com.cernecommerce.core.ports.in.CrmUseCase;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import jakarta.validation.Valid;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.*;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Cadastro de clientes do domínio <b>crm</b>. Fundação do módulo CRM.
+ */
+@RestController
+@RequestMapping("/crm")
+@io.swagger.v3.oas.annotations.tags.Tag(name = "CRM", description = "Cadastro e consulta de clientes")
+@SecurityRequirement(name = "bearerAuth")
+public class CrmController {
+
+    private final CrmUseCase crmUseCase;
+    private final CustomerDTOConverter converter;
+    private final CustomerNoteDTOConverter noteConverter;
+    private final StageTransitionDTOConverter stageConverter;
+    private final TagDTOConverter tagConverter;
+    private final CustomerCsvConverter csvConverter;
+    private final CampaignDTOConverter campaignConverter;
+    private final ApplicationEventPublisher publisher;
+
+    public CrmController(CrmUseCase crmUseCase, CustomerDTOConverter converter,
+            CustomerNoteDTOConverter noteConverter, StageTransitionDTOConverter stageConverter,
+            TagDTOConverter tagConverter, CustomerCsvConverter csvConverter,
+            CampaignDTOConverter campaignConverter, ApplicationEventPublisher publisher) {
+        this.crmUseCase = crmUseCase;
+        this.converter = converter;
+        this.noteConverter = noteConverter;
+        this.stageConverter = stageConverter;
+        this.tagConverter = tagConverter;
+        this.csvConverter = csvConverter;
+        this.campaignConverter = campaignConverter;
+        this.publisher = publisher;
+    }
+
+    @Operation(summary = "Cria um cliente")
+    @ApiResponses({
+            @ApiResponse(responseCode = "201", description = "Criado", content = @Content(schema = @Schema(implementation = CustomerResponseDTO.class))),
+            @ApiResponse(responseCode = "409", description = "Email já cadastrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PostMapping("/customers")
+    @PreAuthorize("hasAuthority('CRM_CUSTOMER_MANAGE')")
+    public ResponseEntity<CustomerResponseDTO> createCustomer(@Valid @RequestBody CustomerRequest request,
+            Authentication authentication) {
+        Customer created = crmUseCase.createCustomer(request.getNome(), request.getContato(), request.getEmail(),
+                request.getCpf(), request.getOrigem());
+        publisher.publishEvent(AuditEvent.of(EventType.CUSTOMER_CREATED,
+                authentication.getName(), Map.of("customerId", String.valueOf(created.id()))));
+        return ResponseEntity.created(URI.create("/crm/customers/" + created.id()))
+                .body(converter.toResponse(created));
+    }
+
+    @Operation(summary = "Busca um cliente por id")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "404", description = "Cliente não encontrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/customers/{id}")
+    @PreAuthorize("hasAuthority('CRM_CUSTOMER_READ')")
+    public ResponseEntity<CustomerResponseDTO> getCustomer(@PathVariable Long id) {
+        Customer customer = crmUseCase.findCustomerById(id);
+        List<String> tagNomes = crmUseCase.listCustomerTags(id).stream()
+                .map(com.cernecommerce.core.domain.model.crm.Tag::nome).toList();
+        return ResponseEntity.ok(converter.toResponse(customer, tagNomes));
+    }
+
+    @Operation(summary = "Lista clientes paginados, com filtro opcional por nome ou contato")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/customers")
+    @PreAuthorize("hasAuthority('CRM_CUSTOMER_READ')")
+    public ResponseEntity<PageResult<CustomerResponseDTO>> listCustomers(
+            @RequestParam(required = false) String search,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        PageResult<Customer> result = crmUseCase.listCustomers(search, page, Math.min(size, 100));
+        PageResult<CustomerResponseDTO> response = new PageResult<>(
+                result.content().stream().map(converter::toResponse).toList(),
+                result.page(), result.size(), result.totalElements(), result.totalPages());
+        return ResponseEntity.ok(response);
+    }
+
+    @Operation(summary = "Exporta a listagem de clientes em CSV — não paginado, mesmo filtro de listCustomers")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK", content = @Content(mediaType = "text/csv")),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/customers/export")
+    @PreAuthorize("hasAuthority('CRM_CUSTOMER_READ')")
+    public ResponseEntity<byte[]> exportCustomersCsv(@RequestParam(required = false) String search) {
+        List<Customer> customers = crmUseCase.listCustomersForExport(search);
+        String csv = csvConverter.toCsv(customers);
+        byte[] body = withUtf8Bom(csv);
+        return ResponseEntity.ok()
+                .contentType(new MediaType("text", "csv", StandardCharsets.UTF_8))
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        ContentDisposition.attachment().filename("clientes.csv", StandardCharsets.UTF_8).build().toString())
+                .body(body);
+    }
+
+    /** Prefixo BOM UTF-8 — evita acentos quebrados ao abrir o CSV no Excel. */
+    private byte[] withUtf8Bom(String csv) {
+        try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            out.write(0xEF);
+            out.write(0xBB);
+            out.write(0xBF);
+            out.write(csv.getBytes(StandardCharsets.UTF_8));
+            return out.toByteArray();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    @Operation(summary = "Cria uma nota para o cliente")
+    @ApiResponses({
+            @ApiResponse(responseCode = "201", description = "Criada", content = @Content(schema = @Schema(implementation = CustomerNoteResponseDTO.class))),
+            @ApiResponse(responseCode = "404", description = "Cliente não encontrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PostMapping("/customers/{id}/notes")
+    @PreAuthorize("hasAuthority('CRM_CUSTOMER_MANAGE')")
+    public ResponseEntity<CustomerNoteResponseDTO> addNote(@PathVariable Long id,
+            @Valid @RequestBody CustomerNoteRequest request, Authentication authentication) {
+        CustomerNote created = crmUseCase.addNote(id, authentication.getName(), request.getTexto());
+        publisher.publishEvent(AuditEvent.of(EventType.CUSTOMER_NOTE_ADDED,
+                authentication.getName(), Map.of("customerId", String.valueOf(id))));
+        return ResponseEntity.created(URI.create("/crm/customers/" + id + "/notes/" + created.id()))
+                .body(noteConverter.toResponse(created));
+    }
+
+    @Operation(summary = "Lista as notas de um cliente, mais recentes primeiro")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "404", description = "Cliente não encontrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/customers/{id}/notes")
+    @PreAuthorize("hasAuthority('CRM_CUSTOMER_READ')")
+    public ResponseEntity<List<CustomerNoteResponseDTO>> listNotes(@PathVariable Long id) {
+        List<CustomerNoteResponseDTO> response = crmUseCase.listNotes(id).stream()
+                .map(noteConverter::toResponse).toList();
+        return ResponseEntity.ok(response);
+    }
+
+    @Operation(summary = "Histórico de pedidos do cliente — placeholder até o domínio de pedidos existir")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK — sempre lista vazia por enquanto"),
+            @ApiResponse(responseCode = "404", description = "Cliente não encontrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/customers/{id}/orders")
+    @PreAuthorize("hasAuthority('CRM_CUSTOMER_READ')")
+    public ResponseEntity<List<Object>> listOrders(@PathVariable Long id) {
+        crmUseCase.findCustomerById(id);
+        return ResponseEntity.ok(List.of());
+    }
+
+    @Operation(summary = "Extrato de cashback do cliente — placeholder até o domínio de cashback existir")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK — sempre lista vazia por enquanto"),
+            @ApiResponse(responseCode = "404", description = "Cliente não encontrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/customers/{id}/cashback")
+    @PreAuthorize("hasAuthority('CRM_CUSTOMER_READ')")
+    public ResponseEntity<List<Object>> listCashback(@PathVariable Long id) {
+        crmUseCase.findCustomerById(id);
+        return ResponseEntity.ok(List.of());
+    }
+
+    @Operation(summary = "Move o cliente para um novo estágio no Kanban de atendimento")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = CustomerResponseDTO.class))),
+            @ApiResponse(responseCode = "404", description = "Cliente não encontrado", content = @Content),
+            @ApiResponse(responseCode = "400", description = "Estágio igual ao atual", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PatchMapping("/customers/{id}/estagio")
+    @PreAuthorize("hasAuthority('CRM_CUSTOMER_MANAGE')")
+    public ResponseEntity<CustomerResponseDTO> moveStage(@PathVariable Long id,
+            @Valid @RequestBody CustomerStageRequest request, Authentication authentication) {
+        Customer updated = crmUseCase.moveStage(id, request.getEstagio(), authentication.getName());
+        publisher.publishEvent(AuditEvent.of(EventType.CUSTOMER_STAGE_CHANGED,
+                authentication.getName(),
+                Map.of("customerId", String.valueOf(id), "estagio", request.getEstagio().name())));
+        List<String> tagNomes = crmUseCase.listCustomerTags(id).stream()
+                .map(com.cernecommerce.core.domain.model.crm.Tag::nome).toList();
+        return ResponseEntity.ok(converter.toResponse(updated, tagNomes));
+    }
+
+    @Operation(summary = "Lista a trilha de transições de estágio de um cliente, mais recentes primeiro")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "404", description = "Cliente não encontrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/customers/{id}/estagio/historico")
+    @PreAuthorize("hasAuthority('CRM_CUSTOMER_READ')")
+    public ResponseEntity<List<StageTransitionResponseDTO>> listStageHistory(@PathVariable Long id) {
+        List<StageTransitionResponseDTO> response = crmUseCase.listStageHistory(id).stream()
+                .map(stageConverter::toResponse).toList();
+        return ResponseEntity.ok(response);
+    }
+
+    @Operation(summary = "Agrega métricas do CRM para o dashboard overview")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/dashboard/overview")
+    @PreAuthorize("hasAuthority('CRM_CUSTOMER_READ')")
+    public ResponseEntity<CrmDashboardResponseDTO> getDashboardOverview() {
+        CrmDashboardOverview overview = crmUseCase.getDashboardOverview();
+        CrmDashboardResponseDTO response = new CrmDashboardResponseDTO();
+        response.setTotalClientes(overview.totalClientes());
+        response.setClientesAtivos(overview.clientesAtivos());
+        response.setLtvMedio(overview.ltvMedio());
+        response.setDisparosWhatsappMes(overview.disparosWhatsappMes());
+        response.setPorSegmento(overview.porSegmento());
+        response.setPorEstagio(overview.porEstagio());
+        return ResponseEntity.ok(response);
+    }
+
+    @Operation(summary = "Cria uma tag")
+    @ApiResponses({
+            @ApiResponse(responseCode = "201", description = "Criada", content = @Content(schema = @Schema(implementation = TagResponseDTO.class))),
+            @ApiResponse(responseCode = "409", description = "Nome já cadastrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PostMapping("/tags")
+    @PreAuthorize("hasAuthority('CRM_CUSTOMER_MANAGE')")
+    public ResponseEntity<TagResponseDTO> createTag(@Valid @RequestBody TagRequest request,
+            Authentication authentication) {
+        com.cernecommerce.core.domain.model.crm.Tag created = crmUseCase.createTag(request.getNome());
+        publisher.publishEvent(AuditEvent.of(EventType.TAG_CREATED,
+                authentication.getName(), Map.of("tagId", String.valueOf(created.id()))));
+        return ResponseEntity.created(URI.create("/crm/tags/" + created.id()))
+                .body(tagConverter.toResponse(created));
+    }
+
+    @Operation(summary = "Lista todas as tags com a contagem de clientes associados a cada uma")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/tags")
+    @PreAuthorize("hasAuthority('CRM_CUSTOMER_READ')")
+    public ResponseEntity<List<TagSummaryResponseDTO>> listTags() {
+        List<TagSummaryResponseDTO> response = crmUseCase.listTags().stream()
+                .map(tagConverter::toResponse).toList();
+        return ResponseEntity.ok(response);
+    }
+
+    @Operation(summary = "Remove uma tag e todas as suas associações")
+    @ApiResponses({
+            @ApiResponse(responseCode = "204", description = "Removida"),
+            @ApiResponse(responseCode = "404", description = "Tag não encontrada", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @DeleteMapping("/tags/{id}")
+    @PreAuthorize("hasAuthority('CRM_CUSTOMER_MANAGE')")
+    public ResponseEntity<Void> deleteTag(@PathVariable Long id, Authentication authentication) {
+        crmUseCase.deleteTag(id);
+        publisher.publishEvent(AuditEvent.of(EventType.TAG_DELETED,
+                authentication.getName(), Map.of("tagId", String.valueOf(id))));
+        return ResponseEntity.noContent().build();
+    }
+
+    @Operation(summary = "Associa uma tag a um cliente")
+    @ApiResponses({
+            @ApiResponse(responseCode = "204", description = "Associada"),
+            @ApiResponse(responseCode = "404", description = "Cliente ou tag não encontrados", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PostMapping("/customers/{id}/tags")
+    @PreAuthorize("hasAuthority('CRM_CUSTOMER_MANAGE')")
+    public ResponseEntity<Void> addTagToCustomer(@PathVariable Long id,
+            @Valid @RequestBody AssociateTagRequest request, Authentication authentication) {
+        crmUseCase.addTagToCustomer(id, request.getTagId());
+        publisher.publishEvent(AuditEvent.of(EventType.CUSTOMER_TAG_ADDED,
+                authentication.getName(),
+                Map.of("customerId", String.valueOf(id), "tagId", String.valueOf(request.getTagId()))));
+        return ResponseEntity.noContent().build();
+    }
+
+    @Operation(summary = "Remove a associação entre um cliente e uma tag")
+    @ApiResponses({
+            @ApiResponse(responseCode = "204", description = "Removida"),
+            @ApiResponse(responseCode = "404", description = "Cliente ou tag não encontrados", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @DeleteMapping("/customers/{id}/tags/{tagId}")
+    @PreAuthorize("hasAuthority('CRM_CUSTOMER_MANAGE')")
+    public ResponseEntity<Void> removeTagFromCustomer(@PathVariable Long id, @PathVariable Long tagId,
+            Authentication authentication) {
+        crmUseCase.removeTagFromCustomer(id, tagId);
+        publisher.publishEvent(AuditEvent.of(EventType.CUSTOMER_TAG_REMOVED,
+                authentication.getName(),
+                Map.of("customerId", String.valueOf(id), "tagId", String.valueOf(tagId))));
+        return ResponseEntity.noContent().build();
+    }
+
+    @Operation(summary = "Lista as tags associadas a um cliente")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "404", description = "Cliente não encontrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/customers/{id}/tags")
+    @PreAuthorize("hasAuthority('CRM_CUSTOMER_READ')")
+    public ResponseEntity<List<TagResponseDTO>> listCustomerTags(@PathVariable Long id) {
+        List<TagResponseDTO> response = crmUseCase.listCustomerTags(id).stream()
+                .map(tagConverter::toResponse).toList();
+        return ResponseEntity.ok(response);
+    }
+
+    @Operation(summary = "Cria uma automação de campanha (ativa por padrão)")
+    @ApiResponses({
+            @ApiResponse(responseCode = "201", description = "Criada", content = @Content(schema = @Schema(implementation = CampaignAutomationResponseDTO.class))),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PostMapping("/automacoes")
+    @PreAuthorize("hasAuthority('CRM_CUSTOMER_MANAGE')")
+    public ResponseEntity<CampaignAutomationResponseDTO> createAutomation(
+            @Valid @RequestBody CampaignAutomationRequest request, Authentication authentication) {
+        CampaignAutomation created = crmUseCase.createAutomation(request.getNome(), request.getGatilho(),
+                request.getSegmentoAlvo(), request.getCanal(), request.getTemplate());
+        publisher.publishEvent(AuditEvent.of(EventType.CAMPAIGN_AUTOMATION_CREATED,
+                authentication.getName(), Map.of("automationId", String.valueOf(created.id()))));
+        return ResponseEntity.created(URI.create("/crm/automacoes/" + created.id()))
+                .body(campaignConverter.toResponse(created));
+    }
+
+    @Operation(summary = "Lista todas as automações de campanha")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/automacoes")
+    @PreAuthorize("hasAuthority('CRM_CUSTOMER_READ')")
+    public ResponseEntity<List<CampaignAutomationResponseDTO>> listAutomations() {
+        List<CampaignAutomationResponseDTO> response = crmUseCase.listAutomations().stream()
+                .map(campaignConverter::toResponse).toList();
+        return ResponseEntity.ok(response);
+    }
+
+    @Operation(summary = "Ativa ou desativa uma automação")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "404", description = "Automação não encontrada", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PatchMapping("/automacoes/{id}/ativa")
+    @PreAuthorize("hasAuthority('CRM_CUSTOMER_MANAGE')")
+    public ResponseEntity<CampaignAutomationResponseDTO> setAutomationActive(@PathVariable Long id,
+            @Valid @RequestBody CampaignActiveRequest request) {
+        CampaignAutomation updated = crmUseCase.setAutomationActive(id, request.getAtiva());
+        return ResponseEntity.ok(campaignConverter.toResponse(updated));
+    }
+
+    @Operation(summary = "Remove uma automação e seu log de disparos")
+    @ApiResponses({
+            @ApiResponse(responseCode = "204", description = "Removida"),
+            @ApiResponse(responseCode = "404", description = "Automação não encontrada", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @DeleteMapping("/automacoes/{id}")
+    @PreAuthorize("hasAuthority('CRM_CUSTOMER_MANAGE')")
+    public ResponseEntity<Void> deleteAutomation(@PathVariable Long id, Authentication authentication) {
+        crmUseCase.deleteAutomation(id);
+        publisher.publishEvent(AuditEvent.of(EventType.CAMPAIGN_AUTOMATION_DELETED,
+                authentication.getName(), Map.of("automationId", String.valueOf(id))));
+        return ResponseEntity.noContent().build();
+    }
+
+    @Operation(summary = "Dispara uma automação manualmente — cria log por cliente-alvo, não envia mensagem real (ver F008)")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "404", description = "Automação não encontrada", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PostMapping("/automacoes/{id}/disparar")
+    @PreAuthorize("hasAuthority('CRM_CUSTOMER_MANAGE')")
+    public ResponseEntity<List<CampaignLogResponseDTO>> dispatchAutomation(@PathVariable Long id,
+            Authentication authentication) {
+        List<CampaignLogEntry> entries = crmUseCase.dispatchAutomation(id);
+        publisher.publishEvent(AuditEvent.of(EventType.CAMPAIGN_AUTOMATION_DISPATCHED,
+                authentication.getName(),
+                Map.of("automationId", String.valueOf(id), "clientesAlvo", String.valueOf(entries.size()))));
+        List<CampaignLogResponseDTO> response = entries.stream().map(campaignConverter::toResponse).toList();
+        return ResponseEntity.ok(response);
+    }
+
+    @Operation(summary = "Lista o log de disparos de uma automação, mais recentes primeiro")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "404", description = "Automação não encontrada", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/automacoes/{id}/log")
+    @PreAuthorize("hasAuthority('CRM_CUSTOMER_READ')")
+    public ResponseEntity<List<CampaignLogResponseDTO>> listAutomationLog(@PathVariable Long id) {
+        List<CampaignLogResponseDTO> response = crmUseCase.listAutomationLog(id).stream()
+                .map(campaignConverter::toResponse).toList();
+        return ResponseEntity.ok(response);
+    }
+}

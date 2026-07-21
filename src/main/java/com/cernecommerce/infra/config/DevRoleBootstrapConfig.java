@@ -31,7 +31,8 @@ public class DevRoleBootstrapConfig {
         "PERMISSION_READ",
         "AUDIT_READ",
         "ESTOQUE_PRODUCT_READ", "ESTOQUE_PRODUCT_MANAGE",
-        "ESTOQUE_WAREHOUSE_READ", "ESTOQUE_WAREHOUSE_MANAGE"
+        "ESTOQUE_WAREHOUSE_READ", "ESTOQUE_WAREHOUSE_MANAGE",
+        "CRM_CUSTOMER_READ", "CRM_CUSTOMER_MANAGE"
     };
 
     private static final String[] DEV_ONLY_PERMISSIONS = {

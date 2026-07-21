@@ -70,12 +70,21 @@ import com.cernecommerce.core.ports.in.ComprasUseCase;
 import com.cernecommerce.core.ports.in.FinanceiroUseCase;
 import com.cernecommerce.core.ports.in.EcommerceUseCase;
 import com.cernecommerce.core.ports.in.LogisticaUseCase;
+import com.cernecommerce.core.ports.in.CrmUseCase;
+import com.cernecommerce.core.ports.out.crm.CampaignAutomationRepository;
+import com.cernecommerce.core.ports.out.crm.CampaignLogRepository;
+import com.cernecommerce.core.ports.out.crm.CustomerNoteRepository;
+import com.cernecommerce.core.ports.out.crm.CustomerRepository;
+import com.cernecommerce.core.ports.out.crm.CustomerTagRepository;
+import com.cernecommerce.core.ports.out.crm.StageTransitionRepository;
+import com.cernecommerce.core.ports.out.crm.TagRepository;
 import com.cernecommerce.core.service.PdvService;
 import com.cernecommerce.core.service.EstoqueService;
 import com.cernecommerce.core.service.ComprasService;
 import com.cernecommerce.core.service.FinanceiroService;
 import com.cernecommerce.core.service.EcommerceService;
 import com.cernecommerce.core.service.LogisticaService;
+import com.cernecommerce.core.service.CrmService;
 
 import java.nio.file.Path;
 
@@ -203,6 +212,15 @@ class CoreBeanConfig {
     @Bean
     LogisticaUseCase logisticaUseCase() {
         return new LogisticaService();
+    }
+
+    @Bean
+    CrmUseCase crmUseCase(CustomerRepository customerRepository, CustomerNoteRepository customerNoteRepository,
+            StageTransitionRepository stageTransitionRepository, TagRepository tagRepository,
+            CustomerTagRepository customerTagRepository, CampaignAutomationRepository campaignAutomationRepository,
+            CampaignLogRepository campaignLogRepository) {
+        return new CrmService(customerRepository, customerNoteRepository, stageTransitionRepository, tagRepository,
+                customerTagRepository, campaignAutomationRepository, campaignLogRepository);
     }
 
     @Bean

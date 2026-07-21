@@ -25,7 +25,8 @@ public class SeedConfig {
         "USER_CREATE", "USER_READ", "USER_UPDATE", "USER_DELETE", "USER_ROLE_ASSIGN", "USER_STATUS",
         "ROLE_READ", "ROLE_MANAGE_PERMISSIONS",
         "PERMISSION_READ",
-        "AUDIT_READ"
+        "AUDIT_READ",
+        "CRM_CUSTOMER_READ", "CRM_CUSTOMER_MANAGE"
     };
 
     // DEV_ONLY_PERMISSIONS e ROLE_DEV são gerenciados pelo DevRoleBootstrapConfig (todos os profiles).

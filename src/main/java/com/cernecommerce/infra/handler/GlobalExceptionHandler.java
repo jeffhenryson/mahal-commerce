@@ -32,6 +32,11 @@ import com.cernecommerce.core.domain.exception.rbac.RoleNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateSkuException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateWarehouseCodeException;
 import com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException;
+import com.cernecommerce.core.domain.exception.crm.CampaignAutomationNotFoundException;
+import com.cernecommerce.core.domain.exception.crm.CustomerNotFoundException;
+import com.cernecommerce.core.domain.exception.crm.DuplicateCustomerEmailException;
+import com.cernecommerce.core.domain.exception.crm.DuplicateTagNameException;
+import com.cernecommerce.core.domain.exception.crm.TagNotFoundException;
 import com.cernecommerce.core.domain.event.AuditEvent;
 import com.cernecommerce.core.domain.exception.user.EmailAlreadyExistsException;
 import com.cernecommerce.core.domain.exception.user.UserNotFoundException;
@@ -111,6 +116,31 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(WarehouseNotFoundException.class)
     public ResponseEntity<ApiError> handleWarehouseNotFound(WarehouseNotFoundException ex, HttpServletRequest req) {
         return error(HttpStatus.NOT_FOUND, ex.getMessage(), "WAREHOUSE_NOT_FOUND", req);
+    }
+
+    @ExceptionHandler(DuplicateCustomerEmailException.class)
+    public ResponseEntity<ApiError> handleDuplicateCustomerEmail(DuplicateCustomerEmailException ex, HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "CUSTOMER_EMAIL_ALREADY_EXISTS", req);
+    }
+
+    @ExceptionHandler(CustomerNotFoundException.class)
+    public ResponseEntity<ApiError> handleCustomerNotFound(CustomerNotFoundException ex, HttpServletRequest req) {
+        return error(HttpStatus.NOT_FOUND, ex.getMessage(), "CUSTOMER_NOT_FOUND", req);
+    }
+
+    @ExceptionHandler(DuplicateTagNameException.class)
+    public ResponseEntity<ApiError> handleDuplicateTagName(DuplicateTagNameException ex, HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "TAG_ALREADY_EXISTS", req);
+    }
+
+    @ExceptionHandler(TagNotFoundException.class)
+    public ResponseEntity<ApiError> handleTagNotFound(TagNotFoundException ex, HttpServletRequest req) {
+        return error(HttpStatus.NOT_FOUND, ex.getMessage(), "TAG_NOT_FOUND", req);
+    }
+
+    @ExceptionHandler(CampaignAutomationNotFoundException.class)
+    public ResponseEntity<ApiError> handleCampaignAutomationNotFound(CampaignAutomationNotFoundException ex, HttpServletRequest req) {
+        return error(HttpStatus.NOT_FOUND, ex.getMessage(), "CAMPAIGN_AUTOMATION_NOT_FOUND", req);
     }
 
     @ExceptionHandler(UsernameAlreadyExistsException.class)

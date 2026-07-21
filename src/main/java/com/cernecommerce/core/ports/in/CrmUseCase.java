@@ -1,0 +1,159 @@
+package com.cernecommerce.core.ports.in;
+
+import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.crm.CampaignAutomation;
+import com.cernecommerce.core.domain.model.crm.CampaignChannel;
+import com.cernecommerce.core.domain.model.crm.CampaignLogEntry;
+import com.cernecommerce.core.domain.model.crm.CampaignTrigger;
+import com.cernecommerce.core.domain.model.crm.CrmDashboardOverview;
+import com.cernecommerce.core.domain.model.crm.Customer;
+import com.cernecommerce.core.domain.model.crm.CustomerNote;
+import com.cernecommerce.core.domain.model.crm.CustomerStage;
+import com.cernecommerce.core.domain.model.crm.StageTransition;
+import com.cernecommerce.core.domain.model.crm.Tag;
+import com.cernecommerce.core.domain.model.crm.TagSummary;
+
+import java.util.List;
+
+/**
+ * Port de entrada do domínio <b>crm</b>.
+ */
+public interface CrmUseCase {
+
+    /**
+     * Cria um cliente. Lança
+     * {@link com.cernecommerce.core.domain.exception.crm.DuplicateCustomerEmailException}
+     * se o email já estiver cadastrado.
+     */
+    Customer createCustomer(String nome, String contato, String email, String cpf, String origem);
+
+    /**
+     * Busca um cliente por id. Lança
+     * {@link com.cernecommerce.core.domain.exception.crm.CustomerNotFoundException}
+     * se não existir.
+     */
+    Customer findCustomerById(Long id);
+
+    /**
+     * Lista clientes paginados, filtrando por nome ou contato quando {@code search} não for
+     * nulo/vazio.
+     */
+    PageResult<Customer> listCustomers(String search, int page, int size);
+
+    /**
+     * Lista todos os clientes correspondentes ao filtro, sem paginação — usado para exportação
+     * (ex.: CSV).
+     */
+    List<Customer> listCustomersForExport(String search);
+
+    /**
+     * Adiciona uma nota a um cliente. Lança
+     * {@link com.cernecommerce.core.domain.exception.crm.CustomerNotFoundException}
+     * se o cliente não existir.
+     */
+    CustomerNote addNote(Long customerId, String autor, String texto);
+
+    /**
+     * Lista as notas de um cliente, mais recentes primeiro. Lança
+     * {@link com.cernecommerce.core.domain.exception.crm.CustomerNotFoundException}
+     * se o cliente não existir.
+     */
+    List<CustomerNote> listNotes(Long customerId);
+
+    /**
+     * Move um cliente para um novo estágio no Kanban de atendimento, registrando a transição.
+     * Lança {@link com.cernecommerce.core.domain.exception.crm.CustomerNotFoundException}
+     * se o cliente não existir, ou {@link IllegalArgumentException} se {@code novoEstagio} for
+     * igual ao estágio atual.
+     */
+    Customer moveStage(Long customerId, CustomerStage novoEstagio, String autor);
+
+    /**
+     * Lista a trilha de transições de estágio de um cliente, mais recentes primeiro. Lança
+     * {@link com.cernecommerce.core.domain.exception.crm.CustomerNotFoundException}
+     * se o cliente não existir.
+     */
+    List<StageTransition> listStageHistory(Long customerId);
+
+    /** Agrega as métricas do CRM para o dashboard overview. */
+    CrmDashboardOverview getDashboardOverview();
+
+    /**
+     * Cria uma tag. Lança
+     * {@link com.cernecommerce.core.domain.exception.crm.DuplicateTagNameException}
+     * se o nome já existir.
+     */
+    Tag createTag(String nome);
+
+    /** Lista todas as tags com a contagem de clientes associados a cada uma. */
+    List<TagSummary> listTags();
+
+    /**
+     * Remove uma tag e todas as suas associações. Lança
+     * {@link com.cernecommerce.core.domain.exception.crm.TagNotFoundException}
+     * se não existir.
+     */
+    void deleteTag(Long tagId);
+
+    /**
+     * Associa uma tag a um cliente. Idempotente. Lança
+     * {@link com.cernecommerce.core.domain.exception.crm.CustomerNotFoundException}
+     * se o cliente não existir, ou
+     * {@link com.cernecommerce.core.domain.exception.crm.TagNotFoundException}
+     * se a tag não existir.
+     */
+    void addTagToCustomer(Long customerId, Long tagId);
+
+    /**
+     * Remove a associação entre um cliente e uma tag. Lança
+     * {@link com.cernecommerce.core.domain.exception.crm.CustomerNotFoundException}
+     * se o cliente não existir, ou
+     * {@link com.cernecommerce.core.domain.exception.crm.TagNotFoundException}
+     * se a tag não existir.
+     */
+    void removeTagFromCustomer(Long customerId, Long tagId);
+
+    /**
+     * Lista as tags associadas a um cliente. Lança
+     * {@link com.cernecommerce.core.domain.exception.crm.CustomerNotFoundException}
+     * se o cliente não existir.
+     */
+    List<Tag> listCustomerTags(Long customerId);
+
+    /** Cria uma automação de campanha (ativa por padrão). */
+    CampaignAutomation createAutomation(String nome, CampaignTrigger gatilho, CustomerStage segmentoAlvo,
+            CampaignChannel canal, String template);
+
+    /** Lista todas as automações de campanha. */
+    List<CampaignAutomation> listAutomations();
+
+    /**
+     * Ativa ou desativa uma automação. Lança
+     * {@link com.cernecommerce.core.domain.exception.crm.CampaignAutomationNotFoundException}
+     * se não existir.
+     */
+    CampaignAutomation setAutomationActive(Long automationId, boolean ativa);
+
+    /**
+     * Remove uma automação e seu log de disparos. Lança
+     * {@link com.cernecommerce.core.domain.exception.crm.CampaignAutomationNotFoundException}
+     * se não existir.
+     */
+    void deleteAutomation(Long automationId);
+
+    /**
+     * Dispara uma automação manualmente: resolve os clientes do {@code segmentoAlvo} e cria uma
+     * {@link CampaignLogEntry} por cliente, status {@code PENDENTE_INTEGRACAO} — não envia
+     * mensagem real (ver crm/integracao-canal-envio, F008). Lança
+     * {@link com.cernecommerce.core.domain.exception.crm.CampaignAutomationNotFoundException}
+     * se a automação não existir.
+     */
+    List<CampaignLogEntry> dispatchAutomation(Long automationId);
+
+    /**
+     * Lista o log de disparos de uma automação, mais recentes primeiro. Lança
+     * {@link com.cernecommerce.core.domain.exception.crm.CampaignAutomationNotFoundException}
+     * se a automação não existir.
+     */
+    List<CampaignLogEntry> listAutomationLog(Long automationId);
+}

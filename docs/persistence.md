@@ -307,6 +307,72 @@ Constraint única: `uk_stock_balance_sku_warehouse (sku, warehouse_id)` — um �
 
 ---
 
+### CustomerEntity — tabela `customers`
+
+| Coluna | Tipo | Constraint |
+|--------|------|-----------|
+| id | BIGINT | PK, auto-increment |
+| nome | VARCHAR(255) | NOT NULL |
+| contato | VARCHAR(30) | NOT NULL |
+| email | VARCHAR(255) | UNIQUE NOT NULL |
+| cpf | VARCHAR(11) | nullable |
+| origem | VARCHAR(100) | nullable |
+| cadastrado_em | TIMESTAMP | NOT NULL |
+| estagio | VARCHAR(20) | NOT NULL DEFAULT 'NOVO_LEAD' — `@Enumerated(STRING)`, estágio manual do Kanban de atendimento (`crm/kanban-segmentacao`), independente do segmento RFM |
+
+Fundação do módulo CRM (`crm/cadastro-cliente`). Histórico de pedidos e cashback ainda não têm domínio de origem implementado no backend (endpoints correspondentes retornam placeholder vazio).
+
+---
+
+### CustomerNoteEntity — tabela `customer_notes`
+
+| Coluna | Tipo | Constraint |
+|--------|------|-----------|
+| id | BIGINT | PK, auto-increment |
+| customer_id | BIGINT | FK → customers(id) ON DELETE CASCADE |
+| autor | VARCHAR(80) | NOT NULL |
+| texto | TEXT | NOT NULL |
+| criado_em | TIMESTAMP | NOT NULL |
+
+Índice: `idx_customer_notes_customer_id (customer_id)`. Sem relação JPA `@ManyToOne` com `CustomerEntity` — `customer_id` é uma coluna simples com FK apenas no schema, seguindo o mesmo padrão de `StockBalanceEntity.warehouseId` (evita carregar o cliente inteiro só para gravar uma nota).
+
+---
+
+### StageTransitionEntity — tabela `customer_stage_transitions`
+
+| Coluna | Tipo | Constraint |
+|--------|------|-----------|
+| id | BIGINT | PK, auto-increment |
+| customer_id | BIGINT | FK → customers(id) ON DELETE CASCADE |
+| de | VARCHAR(20) | NOT NULL — `@Enumerated(STRING)` |
+| para | VARCHAR(20) | NOT NULL — `@Enumerated(STRING)` |
+| autor | VARCHAR(80) | NOT NULL |
+| transicionado_em | TIMESTAMP | NOT NULL |
+
+Índice: `idx_customer_stage_transitions_customer_id (customer_id)`. Trilha de auditoria imutável — cada `PATCH /crm/customers/{id}/estagio` grava uma linha nova, nunca atualiza. `de == para` é rejeitado no domínio (`StageTransition`), então toda linha representa uma mudança real de estágio.
+
+---
+
+### TagEntity — tabela `tags`
+
+| Coluna | Tipo | Constraint |
+|--------|------|-----------|
+| id | BIGINT | PK, auto-increment |
+| nome | VARCHAR(50) | UNIQUE NOT NULL |
+
+---
+
+### CustomerTagEntity — tabela `customer_tags`
+
+| Coluna | Tipo | Constraint |
+|--------|------|-----------|
+| customer_id | BIGINT | PK (composta), FK → customers(id) ON DELETE CASCADE |
+| tag_id | BIGINT | PK (composta), FK → tags(id) ON DELETE CASCADE |
+
+Tabela de junção pura (muitos-para-muitos), sem coluna própria além das duas FKs — chave primária composta `(customer_id, tag_id)` evita duplicidade de associação no próprio schema. `CustomerTagRepositoryImpl.associate()` também verifica `existsByCustomerIdAndTagId` antes de inserir, tornando a operação idempotente mesmo sem depender só da constraint do banco. Índice: `idx_customer_tags_tag_id (tag_id)` — cobre a contagem de clientes por tag (`GET /crm/tags`) e a busca reversa. `TagJpaRepository.findAllWithCustomerCount()` e `CustomerTagJpaRepository.findTagsByCustomerId()` usam JOIN JPQL explícito entre `TagEntity`/`CustomerTagEntity` (entidades sem relação `@ManyToMany` mapeada — mesma escolha de simplicidade de `CustomerNoteEntity.customerId`).
+
+---
+
 ## Repositórios
 
 Cada port OUT tem uma implementação `*RepositoryImpl` que:
@@ -396,6 +462,12 @@ Em hml/prod não há seed automático — usuário admin deve ser criado via CLI
 | `V45__estoque_product_permissions.sql` | Insere `ESTOQUE_PRODUCT_READ` e `ESTOQUE_PRODUCT_MANAGE`, atribuídas ao `ROLE_ADMIN`. Também adicionadas ao array `ADMIN_PERMISSIONS` do `DevRoleBootstrapConfig` para que `ROLE_DEV` as herde. |
 | `V46__estoque_warehouse_stock_balance.sql` | Cria `warehouse` (código único, tipo `LOJA_FISICA`/`ECOMMERCE`) e `stock_balance` (saldo por SKU/depósito, FK → warehouse ON DELETE CASCADE, coluna `version` para locking otimista). Constraint única `(sku, warehouse_id)` — um único registro de saldo por par SKU/depósito. Índice em `stock_balance(warehouse_id)`. |
 | `V47__estoque_warehouse_permissions.sql` | Insere `ESTOQUE_WAREHOUSE_READ` e `ESTOQUE_WAREHOUSE_MANAGE`, atribuídas ao `ROLE_ADMIN`. Também adicionadas ao array `ADMIN_PERMISSIONS` do `DevRoleBootstrapConfig` para que `ROLE_DEV` as herde. |
+| `V48__crm_customer.sql` | Cria a tabela `customers` (nome, contato, email único, cpf opcional, origem opcional, cadastrado_em) — fundação do módulo CRM. Insere `CRM_CUSTOMER_READ` e `CRM_CUSTOMER_MANAGE`, atribuídas ao `ROLE_ADMIN` (`ON CONFLICT (name) DO NOTHING`). Também adicionadas ao array `ADMIN_PERMISSIONS` de `SeedConfig` e `DevRoleBootstrapConfig`. |
+| `V49__crm_customer_notes.sql` | Cria a tabela `customer_notes` (customer_id FK → customers ON DELETE CASCADE, autor, texto, criado_em). Índice em `customer_id` para a consulta de notas por cliente. |
+| `V50__crm_customer_stage.sql` | Adiciona coluna `estagio` em `customers` (default `NOVO_LEAD`) e cria a tabela `customer_stage_transitions` (trilha de auditoria de mudança de estágio). |
+| `V51__crm_tags.sql` | Cria a tabela `tags` (nome único) e a tabela de junção `customer_tags` (customer_id + tag_id, PK composta, FK ON DELETE CASCADE para ambos). |
+
+⚠️ **Conflito de numeração pendente:** o card Notion de `C010` (Sprint 2, ainda não implementado) planeja usar a próxima migration livre para índices em `email_verification_codes`/`password_reset_tokens`. Como cada feature de CRM implementada fora da Sprint 2 consumiu o próximo número livre (V50 por `crm/kanban-segmentacao`, V51 por `crm/tags-segmentos`), o card foi renumerado sucessivamente e agora aponta para **V52**. Confirme o próximo número livre em `src/main/resources/db/migration/` antes de implementar C010.
 
 ---
 
@@ -450,6 +522,10 @@ Um único `JOIN FETCH` traz usuários, roles e permissões em uma só query. O `
 ### `findFiltered` e a Criteria API
 
 `UserRepositoryImpl.findFiltered()` usa a Criteria API do JPA em vez de JPQL porque os filtros (`search`, `enabled`) são opcionais e o JPQL com `WHERE :param IS NULL OR campo = :param` causa erro de tipo no PostgreSQL quando o parâmetro é `null`. A Criteria API constrói os predicados dinamicamente apenas quando os filtros estão presentes.
+
+`CustomerRepositoryImpl.findAll(search, page, size)` evita o mesmo problema de forma mais simples, sem Criteria API: quando `search` é nulo/vazio, delega a `customerJpaRepository.findAll(pageable)`; caso contrário, usa o método derivado `findByNomeContainingIgnoreCaseOrContatoContaining`. `Customer` não tem coleções filhas, então não há necessidade do padrão ID-first — a paginação direta de `CustomerEntity` não sofre do bug de `LIMIT`/`OFFSET` junto de `JOIN FETCH`.
+
+`CustomerRepositoryImpl` também expõe agregações para o dashboard (`crm/dashboard-overview`, sem migration nova): `countAll()` delega a `JpaRepository.count()`; `countActive()` usa o método derivado `countByEstagioNot(INATIVO)`; `countByStage()` usa uma query JPQL `SELECT c.estagio, COUNT(c) FROM CustomerEntity c GROUP BY c.estagio`, convertendo o `List<Object[]>` retornado em `Map<CustomerStage, Long>` — estágios sem nenhum cliente simplesmente não aparecem no mapa.
 
 ### Campos de ordenação permitidos
 
