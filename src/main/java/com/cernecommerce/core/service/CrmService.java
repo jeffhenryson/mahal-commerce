@@ -10,6 +10,8 @@ import com.cernecommerce.core.domain.model.crm.CampaignAutomation;
 import com.cernecommerce.core.domain.model.crm.CampaignChannel;
 import com.cernecommerce.core.domain.model.crm.CampaignLogEntry;
 import com.cernecommerce.core.domain.model.crm.CampaignTrigger;
+import com.cernecommerce.core.domain.model.crm.ChannelStatus;
+import com.cernecommerce.core.domain.model.crm.ChannelType;
 import com.cernecommerce.core.domain.model.crm.CrmDashboardOverview;
 import com.cernecommerce.core.domain.model.crm.Customer;
 import com.cernecommerce.core.domain.model.crm.CustomerNote;
@@ -17,6 +19,7 @@ import com.cernecommerce.core.domain.model.crm.CustomerStage;
 import com.cernecommerce.core.domain.model.crm.StageTransition;
 import com.cernecommerce.core.domain.model.crm.Tag;
 import com.cernecommerce.core.domain.model.crm.TagSummary;
+import com.cernecommerce.core.domain.model.notification.EmailChannelStatus;
 import com.cernecommerce.core.ports.in.CrmUseCase;
 import com.cernecommerce.core.ports.out.crm.CampaignAutomationRepository;
 import com.cernecommerce.core.ports.out.crm.CampaignLogRepository;
@@ -25,6 +28,7 @@ import com.cernecommerce.core.ports.out.crm.CustomerRepository;
 import com.cernecommerce.core.ports.out.crm.CustomerTagRepository;
 import com.cernecommerce.core.ports.out.crm.StageTransitionRepository;
 import com.cernecommerce.core.ports.out.crm.TagRepository;
+import com.cernecommerce.core.ports.out.notification.EmailPort;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -46,11 +50,12 @@ public class CrmService implements CrmUseCase {
     private final CustomerTagRepository customerTagRepository;
     private final CampaignAutomationRepository campaignAutomationRepository;
     private final CampaignLogRepository campaignLogRepository;
+    private final EmailPort emailPort;
 
     public CrmService(CustomerRepository customerRepository, CustomerNoteRepository customerNoteRepository,
             StageTransitionRepository stageTransitionRepository, TagRepository tagRepository,
             CustomerTagRepository customerTagRepository, CampaignAutomationRepository campaignAutomationRepository,
-            CampaignLogRepository campaignLogRepository) {
+            CampaignLogRepository campaignLogRepository, EmailPort emailPort) {
         this.customerRepository = customerRepository;
         this.customerNoteRepository = customerNoteRepository;
         this.stageTransitionRepository = stageTransitionRepository;
@@ -58,6 +63,7 @@ public class CrmService implements CrmUseCase {
         this.customerTagRepository = customerTagRepository;
         this.campaignAutomationRepository = campaignAutomationRepository;
         this.campaignLogRepository = campaignLogRepository;
+        this.emailPort = emailPort;
     }
 
     @Override
@@ -219,6 +225,16 @@ public class CrmService implements CrmUseCase {
     public List<CampaignLogEntry> listAutomationLog(Long automationId) {
         requireAutomation(automationId);
         return campaignLogRepository.findByAutomationId(automationId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ChannelStatus> getChannelStatus() {
+        EmailChannelStatus email = emailPort.channelStatus();
+        return List.of(
+                ChannelStatus.of(ChannelType.EMAIL, email.conectado(), email.provedor(), email.detalhe()),
+                ChannelStatus.of(ChannelType.WHATSAPP, false, null,
+                        "Integração de WhatsApp ainda não implementada"));
     }
 
     private Customer requireCustomer(Long customerId) {

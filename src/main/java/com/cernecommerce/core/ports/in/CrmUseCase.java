@@ -5,6 +5,7 @@ import com.cernecommerce.core.domain.model.crm.CampaignAutomation;
 import com.cernecommerce.core.domain.model.crm.CampaignChannel;
 import com.cernecommerce.core.domain.model.crm.CampaignLogEntry;
 import com.cernecommerce.core.domain.model.crm.CampaignTrigger;
+import com.cernecommerce.core.domain.model.crm.ChannelStatus;
 import com.cernecommerce.core.domain.model.crm.CrmDashboardOverview;
 import com.cernecommerce.core.domain.model.crm.Customer;
 import com.cernecommerce.core.domain.model.crm.CustomerNote;
@@ -156,4 +157,11 @@ public interface CrmUseCase {
      * se a automação não existir.
      */
     List<CampaignLogEntry> listAutomationLog(Long automationId);
+
+    /**
+     * Status de conexão dos canais de envio (WhatsApp/E-mail) — substitui o badge fixo
+     * "API WhatsApp: Conectada" hoje hardcoded no frontend. WhatsApp não possui integração
+     * real ainda, por isso sempre reporta desconectado.
+     */
+    List<ChannelStatus> getChannelStatus();
 }

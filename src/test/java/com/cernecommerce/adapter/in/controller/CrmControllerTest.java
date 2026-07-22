@@ -5,6 +5,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 import com.cernecommerce.adapter.in.converter.CampaignDTOConverter;
+import com.cernecommerce.adapter.in.converter.ChannelStatusDTOConverter;
 import com.cernecommerce.adapter.in.converter.CustomerCsvConverter;
 import com.cernecommerce.adapter.in.converter.CustomerDTOConverter;
 import com.cernecommerce.adapter.in.converter.CustomerNoteDTOConverter;
@@ -20,6 +21,8 @@ import com.cernecommerce.core.domain.model.crm.CampaignAutomation;
 import com.cernecommerce.core.domain.model.crm.CampaignChannel;
 import com.cernecommerce.core.domain.model.crm.CampaignLogEntry;
 import com.cernecommerce.core.domain.model.crm.CampaignTrigger;
+import com.cernecommerce.core.domain.model.crm.ChannelStatus;
+import com.cernecommerce.core.domain.model.crm.ChannelType;
 import com.cernecommerce.core.domain.model.crm.CrmDashboardOverview;
 import com.cernecommerce.core.domain.model.crm.Customer;
 import com.cernecommerce.core.domain.model.crm.CustomerNote;
@@ -58,7 +61,8 @@ public class CrmControllerTest {
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new CrmController(crmUseCase, new CustomerDTOConverter(),
                         new CustomerNoteDTOConverter(), new StageTransitionDTOConverter(),
-                        new TagDTOConverter(), new CustomerCsvConverter(), new CampaignDTOConverter(), publisher))
+                        new TagDTOConverter(), new CustomerCsvConverter(), new CampaignDTOConverter(),
+                        new ChannelStatusDTOConverter(), publisher))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }
@@ -583,7 +587,7 @@ public class CrmControllerTest {
 
     @Test
     void setAutomationActive_notFound_returns_404() throws Exception {
-        when(crmUseCase.setAutomationActive(eq(99L), any())).thenThrow(new CampaignAutomationNotFoundException(99L));
+        when(crmUseCase.setAutomationActive(eq(99L), anyBoolean())).thenThrow(new CampaignAutomationNotFoundException(99L));
 
         mockMvc.perform(patch("/crm/automacoes/99/ativa")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -644,5 +648,20 @@ public class CrmControllerTest {
 
         mockMvc.perform(get("/crm/automacoes/99/log"))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void getChannelStatus_returns_200_with_email_and_whatsapp_status() throws Exception {
+        when(crmUseCase.getChannelStatus()).thenReturn(List.of(
+                ChannelStatus.of(ChannelType.EMAIL, true, "MAILPIT", "Conectado ao Mailpit"),
+                ChannelStatus.of(ChannelType.WHATSAPP, false, null, "Integração de WhatsApp ainda não implementada")));
+
+        mockMvc.perform(get("/crm/canais/status"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].canal").value("EMAIL"))
+                .andExpect(jsonPath("$[0].conectado").value(true))
+                .andExpect(jsonPath("$[0].provedor").value("MAILPIT"))
+                .andExpect(jsonPath("$[1].canal").value("WHATSAPP"))
+                .andExpect(jsonPath("$[1].conectado").value(false));
     }
 }

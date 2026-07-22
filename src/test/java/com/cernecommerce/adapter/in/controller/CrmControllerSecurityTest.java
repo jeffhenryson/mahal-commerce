@@ -222,6 +222,28 @@ public class CrmControllerSecurityTest {
     }
 
     @Test
+    void channel_status_without_auth_returns_401() throws Exception {
+        mockMvc.perform(get("/crm/canais/status"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void channel_status_without_crm_customer_read_returns_403() throws Exception {
+        mockMvc.perform(get("/crm/canais/status")
+                .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void channel_status_with_crm_customer_read_returns_200() throws Exception {
+        mockMvc.perform(get("/crm/canais/status")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("CRM_CUSTOMER_READ"))))
+                .andExpect(status().isOk());
+    }
+
+    @Test
     void create_tag_without_auth_returns_401() throws Exception {
         mockMvc.perform(post("/crm/tags")
                 .contentType(MediaType.APPLICATION_JSON)

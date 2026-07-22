@@ -11,6 +11,8 @@ import com.cernecommerce.core.domain.model.crm.CampaignChannel;
 import com.cernecommerce.core.domain.model.crm.CampaignDispatchStatus;
 import com.cernecommerce.core.domain.model.crm.CampaignLogEntry;
 import com.cernecommerce.core.domain.model.crm.CampaignTrigger;
+import com.cernecommerce.core.domain.model.crm.ChannelStatus;
+import com.cernecommerce.core.domain.model.crm.ChannelType;
 import com.cernecommerce.core.domain.model.crm.CrmDashboardOverview;
 import com.cernecommerce.core.domain.model.crm.Customer;
 import com.cernecommerce.core.domain.model.crm.CustomerNote;
@@ -18,6 +20,7 @@ import com.cernecommerce.core.domain.model.crm.CustomerStage;
 import com.cernecommerce.core.domain.model.crm.StageTransition;
 import com.cernecommerce.core.domain.model.crm.Tag;
 import com.cernecommerce.core.domain.model.crm.TagSummary;
+import com.cernecommerce.core.domain.model.notification.EmailChannelStatus;
 import com.cernecommerce.core.ports.out.crm.CampaignAutomationRepository;
 import com.cernecommerce.core.ports.out.crm.CampaignLogRepository;
 import com.cernecommerce.core.ports.out.crm.CustomerNoteRepository;
@@ -25,6 +28,7 @@ import com.cernecommerce.core.ports.out.crm.CustomerRepository;
 import com.cernecommerce.core.ports.out.crm.CustomerTagRepository;
 import com.cernecommerce.core.ports.out.crm.StageTransitionRepository;
 import com.cernecommerce.core.ports.out.crm.TagRepository;
+import com.cernecommerce.core.ports.out.notification.EmailPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -52,13 +56,15 @@ class CrmServiceTest {
     @Mock CustomerTagRepository customerTagRepository;
     @Mock CampaignAutomationRepository campaignAutomationRepository;
     @Mock CampaignLogRepository campaignLogRepository;
+    @Mock EmailPort emailPort;
 
     CrmService crmService;
 
     @BeforeEach
     void setUp() {
         crmService = new CrmService(customerRepository, customerNoteRepository, stageTransitionRepository,
-                tagRepository, customerTagRepository, campaignAutomationRepository, campaignLogRepository);
+                tagRepository, customerTagRepository, campaignAutomationRepository, campaignLogRepository,
+                emailPort);
     }
 
     private Customer customer(Long id, String email) {
@@ -467,5 +473,22 @@ class CrmServiceTest {
 
         assertThatThrownBy(() -> crmService.listAutomationLog(99L))
                 .isInstanceOf(CampaignAutomationNotFoundException.class);
+    }
+
+    @Test
+    void getChannelStatus_reflectsEmailPortAndAlwaysReportsWhatsappDisconnected() {
+        when(emailPort.channelStatus()).thenReturn(EmailChannelStatus.of(true, "MAILPIT", "Conectado ao Mailpit"));
+
+        List<ChannelStatus> result = crmService.getChannelStatus();
+
+        assertThat(result).hasSize(2);
+        ChannelStatus email = result.stream().filter(s -> s.canal() == ChannelType.EMAIL).findFirst().orElseThrow();
+        assertThat(email.conectado()).isTrue();
+        assertThat(email.provedor()).isEqualTo("MAILPIT");
+
+        ChannelStatus whatsapp = result.stream().filter(s -> s.canal() == ChannelType.WHATSAPP).findFirst()
+                .orElseThrow();
+        assertThat(whatsapp.conectado()).isFalse();
+        assertThat(whatsapp.provedor()).isNull();
     }
 }

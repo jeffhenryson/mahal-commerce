@@ -1,6 +1,7 @@
 package com.cernecommerce.adapter.in.controller;
 
 import com.cernecommerce.adapter.in.converter.CampaignDTOConverter;
+import com.cernecommerce.adapter.in.converter.ChannelStatusDTOConverter;
 import com.cernecommerce.adapter.in.converter.CustomerCsvConverter;
 import com.cernecommerce.adapter.in.converter.CustomerDTOConverter;
 import com.cernecommerce.adapter.in.converter.CustomerNoteDTOConverter;
@@ -15,6 +16,7 @@ import com.cernecommerce.adapter.in.dtos.request.CustomerStageRequest;
 import com.cernecommerce.adapter.in.dtos.request.TagRequest;
 import com.cernecommerce.adapter.in.dtos.response.CampaignAutomationResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.CampaignLogResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.ChannelStatusResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.CrmDashboardResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.CustomerNoteResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.CustomerResponseDTO;
@@ -70,12 +72,14 @@ public class CrmController {
     private final TagDTOConverter tagConverter;
     private final CustomerCsvConverter csvConverter;
     private final CampaignDTOConverter campaignConverter;
+    private final ChannelStatusDTOConverter channelStatusConverter;
     private final ApplicationEventPublisher publisher;
 
     public CrmController(CrmUseCase crmUseCase, CustomerDTOConverter converter,
             CustomerNoteDTOConverter noteConverter, StageTransitionDTOConverter stageConverter,
             TagDTOConverter tagConverter, CustomerCsvConverter csvConverter,
-            CampaignDTOConverter campaignConverter, ApplicationEventPublisher publisher) {
+            CampaignDTOConverter campaignConverter, ChannelStatusDTOConverter channelStatusConverter,
+            ApplicationEventPublisher publisher) {
         this.crmUseCase = crmUseCase;
         this.converter = converter;
         this.noteConverter = noteConverter;
@@ -83,6 +87,7 @@ public class CrmController {
         this.tagConverter = tagConverter;
         this.csvConverter = csvConverter;
         this.campaignConverter = campaignConverter;
+        this.channelStatusConverter = channelStatusConverter;
         this.publisher = publisher;
     }
 
@@ -459,6 +464,19 @@ public class CrmController {
     public ResponseEntity<List<CampaignLogResponseDTO>> listAutomationLog(@PathVariable Long id) {
         List<CampaignLogResponseDTO> response = crmUseCase.listAutomationLog(id).stream()
                 .map(campaignConverter::toResponse).toList();
+        return ResponseEntity.ok(response);
+    }
+
+    @Operation(summary = "Status de conexão dos canais de envio (WhatsApp/E-mail) — badge da tela Automações")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/canais/status")
+    @PreAuthorize("hasAuthority('CRM_CUSTOMER_READ')")
+    public ResponseEntity<List<ChannelStatusResponseDTO>> getChannelStatus() {
+        List<ChannelStatusResponseDTO> response = crmUseCase.getChannelStatus().stream()
+                .map(channelStatusConverter::toResponse).toList();
         return ResponseEntity.ok(response);
     }
 }

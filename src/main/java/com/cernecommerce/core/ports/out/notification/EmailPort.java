@@ -1,5 +1,7 @@
 package com.cernecommerce.core.ports.out.notification;
 
+import com.cernecommerce.core.domain.model.notification.EmailChannelStatus;
+
 public interface EmailPort {
     void sendVerificationCode(String to, String username, String code);
 
@@ -14,4 +16,7 @@ public interface EmailPort {
     void sendTotpStatusAlert(String to, String username, boolean enabled);
 
     void sendTokenTheftAlert(String to, String username);
+
+    /** Status de conexão do adapter de e-mail atualmente ativo (ver crm/integracao-canal-envio, F008). */
+    EmailChannelStatus channelStatus();
 }

@@ -1,5 +1,6 @@
 package com.cernecommerce.adapter.out.email;
 
+import com.cernecommerce.core.domain.model.notification.EmailChannelStatus;
 import com.cernecommerce.core.ports.out.notification.EmailPort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -56,6 +57,12 @@ public class LoggingEmailAdapter implements EmailPort {
     @Override
     public void sendTokenTheftAlert(String to, String username) {
         log.info("DEV EMAIL >> to={} username={} [security-alert:token-theft]", to, username);
+    }
+
+    @Override
+    public EmailChannelStatus channelStatus() {
+        return EmailChannelStatus.of(false, "LOG",
+                "Ambiente sem provedor real configurado — e-mails apenas registrados em log");
     }
 
     /** Returns the last plain-text verification code or reset link sent to the given username. Test use only. */

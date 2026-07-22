@@ -1,6 +1,7 @@
 package com.cernecommerce.adapter.out.email;
 
 import com.cernecommerce.core.domain.exception.email.EmailDeliveryException;
+import com.cernecommerce.core.domain.model.notification.EmailChannelStatus;
 import com.cernecommerce.core.ports.out.notification.EmailPort;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
@@ -116,6 +117,11 @@ public class MailpitEmailAdapter implements EmailPort {
                 "message", "Detectamos o reuso de uma credencial de sessão já utilizada — todas as sessões da sua conta foram encerradas automaticamente.",
                 "footerMessage", "Se não foi você, sua conta pode estar comprometida. Troque sua senha imediatamente."));
         send(to, "Alerta de segurança: acesso suspeito", html, "email.security-alert.token-theft");
+    }
+
+    @Override
+    public EmailChannelStatus channelStatus() {
+        return EmailChannelStatus.of(true, "MAILPIT", "Conectado ao Mailpit (ambiente de homologação)");
     }
 
     private void send(String to, String subject, String html, String logPrefix) {

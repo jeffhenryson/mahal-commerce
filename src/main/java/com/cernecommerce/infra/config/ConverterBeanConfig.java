@@ -5,6 +5,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import com.cernecommerce.adapter.in.converter.CampaignDTOConverter;
+import com.cernecommerce.adapter.in.converter.ChannelStatusDTOConverter;
 import com.cernecommerce.adapter.in.converter.CustomerCsvConverter;
 import com.cernecommerce.adapter.in.converter.CustomerDTOConverter;
 import com.cernecommerce.adapter.in.converter.CustomerNoteDTOConverter;
@@ -78,5 +79,10 @@ class ConverterBeanConfig {
     @Bean
     CampaignDTOConverter campaignDTOConverter() {
         return new CampaignDTOConverter();
+    }
+
+    @Bean
+    ChannelStatusDTOConverter channelStatusDTOConverter() {
+        return new ChannelStatusDTOConverter();
     }
 }

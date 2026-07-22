@@ -1,6 +1,7 @@
 package com.cernecommerce.adapter.out.email;
 
 import com.cernecommerce.core.domain.exception.email.EmailDeliveryException;
+import com.cernecommerce.core.domain.model.notification.EmailChannelStatus;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -11,6 +12,7 @@ import org.springframework.web.client.RestClient;
 
 import java.util.Map;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
@@ -107,5 +109,13 @@ class ResendEmailAdapterTest {
         adapter.sendTokenTheftAlert("user@example.com", "alice");
 
         server.verify();
+    }
+
+    @Test
+    void channelStatus_reportsConnectedToResend() {
+        EmailChannelStatus status = adapter.channelStatus();
+
+        assertThat(status.conectado()).isTrue();
+        assertThat(status.provedor()).isEqualTo("RESEND");
     }
 }
