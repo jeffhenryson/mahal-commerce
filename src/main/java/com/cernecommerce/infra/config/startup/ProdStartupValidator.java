@@ -17,6 +17,10 @@ import java.util.List;
 @Profile("prod")
 public class ProdStartupValidator {
 
+    // Default que esteve hardcoded em docker-compose.prod.yml — considerado comprometido
+    // por estar no histórico do git (ver C002).
+    private static final String KNOWN_COMPROMISED_TOTP_KEY = "Vx74sQn7CT7IQyr34DOxmhIT3zerUlBbeyOazfudKpU=";
+
     @Value("${spring.application.name:}")
     private String applicationName;
 
@@ -49,6 +53,12 @@ public class ProdStartupValidator {
 
     @Value("${oauth2.google.client-id:}")
     private String googleClientId;
+
+    @Value("${seed.dev.email:}")
+    private String devEmail;
+
+    @Value("${seed.dev.password:}")
+    private String devPassword;
 
     @PostConstruct
     public void validate() {
@@ -88,12 +98,19 @@ public class ProdStartupValidator {
             errors.add("totp.encryption.key (TOTP_ENCRYPTION_KEY) está ausente — gere com: openssl rand -base64 32");
         } else if (totpEncryptionKey.length() < 32) {
             errors.add("totp.encryption.key parece curto demais — use ao menos 32 caracteres (Base64 de 256 bits)");
+        } else if (KNOWN_COMPROMISED_TOTP_KEY.equals(totpEncryptionKey)) {
+            errors.add("totp.encryption.key está usando o valor default que já esteve hardcoded em "
+                    + "docker-compose.prod.yml (considerado comprometido por estar no histórico do git) — gere um novo valor com: openssl rand -base64 32");
         }
-        if (isBlankOrPlaceholder(avatarBaseUrl, "localhost")) {
+        if (isBlankOrPlaceholder(avatarBaseUrl, "localhost", "example.com")) {
             errors.add("avatar.base-url (AVATAR_BASE_URL) está ausente — URLs de avatar não funcionarão corretamente");
         }
         if (isBlankOrPlaceholder(googleClientId)) {
             errors.add("oauth2.google.client-id (GOOGLE_CLIENT_ID) está ausente — autenticação OAuth2 Google pode ser bypassada com qualquer token");
+        }
+        if (!isBlankOrPlaceholder(devEmail) && isBlankOrPlaceholder(devPassword, "Dev@secure1!")) {
+            errors.add("seed.dev.email (DEV_EMAIL) está definido mas seed.dev.password (DEV_PASSWORD) está ausente ou usa "
+                    + "o valor default do repositório — isso criaria uma conta ROLE_DEV com senha pública hardcoded; defina DEV_PASSWORD com um valor real");
         }
 
         if (!errors.isEmpty()) {

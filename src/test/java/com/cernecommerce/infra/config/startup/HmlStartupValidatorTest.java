@@ -26,6 +26,7 @@ class HmlStartupValidatorTest {
         ReflectionTestUtils.setField(v, "totpEncryptionKey", "c2VjcmV0LXRlc3Qta2V5LXNlZ3VyYS1obWwtMzI=");
         ReflectionTestUtils.setField(v, "jwtIssuer", "meu-servico-hml");
         ReflectionTestUtils.setField(v, "jwtAudience", "meu-servico-api");
+        ReflectionTestUtils.setField(v, "avatarBaseUrl", "https://cdn.meudominio.com/avatars");
         return v;
     }
 
@@ -187,6 +188,73 @@ class HmlStartupValidatorTest {
         assertThatThrownBy(v::validate)
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("jwt.audience");
+    }
+
+    // ── seed.dev.password (ROLE_DEV) ────────────────────────────────────────────
+
+    @Test
+    void deve_rejeitar_dev_email_definido_sem_dev_password() {
+        HmlStartupValidator v = validadorValido();
+        ReflectionTestUtils.setField(v, "devEmail", "dev@meudominio.com");
+        ReflectionTestUtils.setField(v, "devPassword", "");
+        assertThatThrownBy(v::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("seed.dev.password");
+    }
+
+    @Test
+    void deve_rejeitar_dev_email_definido_com_dev_password_default() {
+        HmlStartupValidator v = validadorValido();
+        ReflectionTestUtils.setField(v, "devEmail", "dev@meudominio.com");
+        ReflectionTestUtils.setField(v, "devPassword", "Dev@secure1!");
+        assertThatThrownBy(v::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("seed.dev.password");
+    }
+
+    @Test
+    void deve_aceitar_dev_email_definido_com_dev_password_real() {
+        HmlStartupValidator v = validadorValido();
+        ReflectionTestUtils.setField(v, "devEmail", "dev@meudominio.com");
+        ReflectionTestUtils.setField(v, "devPassword", "S3nhaReal!DoDev");
+        assertThatCode(v::validate).doesNotThrowAnyException();
+    }
+
+    @Test
+    void deve_aceitar_dev_password_default_quando_dev_email_ausente() {
+        HmlStartupValidator v = validadorValido();
+        ReflectionTestUtils.setField(v, "devEmail", "");
+        ReflectionTestUtils.setField(v, "devPassword", "Dev@secure1!");
+        assertThatCode(v::validate).doesNotThrowAnyException();
+    }
+
+    // ── avatar.base-url ──────────────────────────────────────────────────────
+
+    @Test
+    void deve_rejeitar_avatar_base_url_ausente() {
+        HmlStartupValidator v = validadorValido();
+        ReflectionTestUtils.setField(v, "avatarBaseUrl", "");
+        assertThatThrownBy(v::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("avatar.base-url");
+    }
+
+    @Test
+    void deve_rejeitar_avatar_base_url_localhost() {
+        HmlStartupValidator v = validadorValido();
+        ReflectionTestUtils.setField(v, "avatarBaseUrl", "http://localhost:8080/avatars");
+        assertThatThrownBy(v::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("avatar.base-url");
+    }
+
+    @Test
+    void deve_rejeitar_avatar_base_url_example_com() {
+        HmlStartupValidator v = validadorValido();
+        ReflectionTestUtils.setField(v, "avatarBaseUrl", "https://example.com/avatars");
+        assertThatThrownBy(v::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("avatar.base-url");
     }
 
     // ── múltiplos erros ───────────────────────────────────────────────────────

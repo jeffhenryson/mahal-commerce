@@ -176,6 +176,16 @@ class ProdStartupValidatorTest {
                 .hasMessageContaining("totp.encryption.key");
     }
 
+    @Test
+    void deve_rejeitar_totp_encryption_key_com_valor_default_comprometido() {
+        ProdStartupValidator v = validadorValido();
+        ReflectionTestUtils.setField(v, "totpEncryptionKey", "Vx74sQn7CT7IQyr34DOxmhIT3zerUlBbeyOazfudKpU=");
+        assertThatThrownBy(v::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("totp.encryption.key")
+                .hasMessageContaining("comprometido");
+    }
+
     // ── avatar.base-url ───────────────────────────────────────────────────────
 
     @Test
@@ -191,6 +201,15 @@ class ProdStartupValidatorTest {
     void deve_rejeitar_avatar_base_url_localhost() {
         ProdStartupValidator v = validadorValido();
         ReflectionTestUtils.setField(v, "avatarBaseUrl", "http://localhost:8080/avatars");
+        assertThatThrownBy(v::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("avatar.base-url");
+    }
+
+    @Test
+    void deve_rejeitar_avatar_base_url_example_com() {
+        ProdStartupValidator v = validadorValido();
+        ReflectionTestUtils.setField(v, "avatarBaseUrl", "https://example.com/avatars");
         assertThatThrownBy(v::validate)
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("avatar.base-url");
@@ -214,6 +233,44 @@ class ProdStartupValidatorTest {
         assertThatThrownBy(v::validate)
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("oauth2.google.client-id");
+    }
+
+    // ── seed.dev.password (ROLE_DEV) ────────────────────────────────────────────
+
+    @Test
+    void deve_rejeitar_dev_email_definido_sem_dev_password() {
+        ProdStartupValidator v = validadorValido();
+        ReflectionTestUtils.setField(v, "devEmail", "dev@meudominio.com");
+        ReflectionTestUtils.setField(v, "devPassword", "");
+        assertThatThrownBy(v::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("seed.dev.password");
+    }
+
+    @Test
+    void deve_rejeitar_dev_email_definido_com_dev_password_default() {
+        ProdStartupValidator v = validadorValido();
+        ReflectionTestUtils.setField(v, "devEmail", "dev@meudominio.com");
+        ReflectionTestUtils.setField(v, "devPassword", "Dev@secure1!");
+        assertThatThrownBy(v::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("seed.dev.password");
+    }
+
+    @Test
+    void deve_aceitar_dev_email_definido_com_dev_password_real() {
+        ProdStartupValidator v = validadorValido();
+        ReflectionTestUtils.setField(v, "devEmail", "dev@meudominio.com");
+        ReflectionTestUtils.setField(v, "devPassword", "S3nhaReal!DoDev");
+        assertThatCode(v::validate).doesNotThrowAnyException();
+    }
+
+    @Test
+    void deve_aceitar_dev_password_default_quando_dev_email_ausente() {
+        ProdStartupValidator v = validadorValido();
+        ReflectionTestUtils.setField(v, "devEmail", "");
+        ReflectionTestUtils.setField(v, "devPassword", "Dev@secure1!");
+        assertThatCode(v::validate).doesNotThrowAnyException();
     }
 
     // ── múltiplos erros — todos reportados juntos ─────────────────────────────

@@ -46,6 +46,15 @@ public class HmlStartupValidator {
     @Value("${jwt.audience:api}")
     private String jwtAudience;
 
+    @Value("${seed.dev.email:}")
+    private String devEmail;
+
+    @Value("${seed.dev.password:}")
+    private String devPassword;
+
+    @Value("${avatar.base-url:}")
+    private String avatarBaseUrl;
+
     @PostConstruct
     public void validate() {
         List<String> errors = new ArrayList<>();
@@ -83,6 +92,13 @@ public class HmlStartupValidator {
         }
         if ("api".equalsIgnoreCase(jwtAudience)) {
             errors.add("jwt.audience está com o valor padrão 'api' — defina JWT_AUDIENCE com um identificador único para este serviço");
+        }
+        if (!isBlankOrPlaceholder(devEmail) && isBlankOrPlaceholder(devPassword, "Dev@secure1!")) {
+            errors.add("seed.dev.email (DEV_EMAIL) está definido mas seed.dev.password (DEV_PASSWORD) está ausente ou usa "
+                    + "o valor default do repositório — isso criaria uma conta ROLE_DEV com senha pública hardcoded; defina DEV_PASSWORD com um valor real");
+        }
+        if (isBlankOrPlaceholder(avatarBaseUrl, "localhost", "example.com")) {
+            errors.add("avatar.base-url (AVATAR_BASE_URL) está ausente ou usa um valor de placeholder (localhost/example.com) — URLs de avatar não funcionarão corretamente");
         }
 
         if (!errors.isEmpty()) {

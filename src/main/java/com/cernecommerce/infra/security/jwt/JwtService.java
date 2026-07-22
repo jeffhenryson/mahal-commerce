@@ -33,7 +33,7 @@ public class JwtService {
     public JwtService(
             @Value("${jwt.secret}") String secret,
             @Value("${jwt.access-ttl-minutes}") long accessTtlMinutes,
-            @Value("${jwt.issuer:security-spring}") String issuer,
+            @Value("${jwt.issuer:mahal-commerce}") String issuer,
             @Value("${jwt.audience:api}") String audience) {
         byte[] keyBytes = decodeSecret(secret);
         if (keyBytes.length < 32) {
