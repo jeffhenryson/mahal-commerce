@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -20,7 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
  *
  * <p>Esqueleto: demonstra o fluxo Controller → {@link EcommerceUseCase} → service.
  * Endpoints previstos (TODO): carrinho, cupons, promoções, checkout/pagamentos.
- * Autorização por permissão RBAC a definir.</p>
+ * Endpoint atual requer {@code ECOMMERCE_READ}.</p>
  */
 @RestController
 @RequestMapping("/ecommerce")
@@ -35,9 +36,9 @@ public class EcommerceController {
         this.ecommerceUseCase = ecommerceUseCase;
     }
 
-    // TODO: @PreAuthorize com permissão RBAC do domínio ecommerce.
     @Operation(summary = "Lista carrinhos (stub — retorna página vazia)")
     @GetMapping("/carts")
+    @PreAuthorize("hasAuthority('ECOMMERCE_READ')")
     public ResponseEntity<PageResult<Cart>> listCarts(
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {

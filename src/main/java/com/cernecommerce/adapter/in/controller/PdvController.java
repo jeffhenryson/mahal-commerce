@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -20,7 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
  *
  * <p>Esqueleto: demonstra o fluxo hexagonal Controller → {@link PdvUseCase} →
  * service. Endpoints previstos (TODO): abertura/sangria/fechamento de caixa e
- * itens de venda balcão. Autorização por permissão RBAC a definir.</p>
+ * itens de venda balcão. Endpoint atual requer {@code PDV_READ}.</p>
  */
 @RestController
 @RequestMapping("/pdv")
@@ -35,9 +36,9 @@ public class PdvController {
         this.pdvUseCase = pdvUseCase;
     }
 
-    // TODO: @PreAuthorize com permissão RBAC do domínio PDV.
     @Operation(summary = "Lista sessões de caixa (stub — retorna página vazia)")
     @GetMapping("/sessions")
+    @PreAuthorize("hasAuthority('PDV_READ')")
     public ResponseEntity<PageResult<CashRegisterSession>> listSessions(
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {

@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -20,7 +21,7 @@ import org.springframework.validation.annotation.Validated;
  *
  * <p>Esqueleto: demonstra o fluxo Controller → {@link ComprasUseCase} → service.
  * Endpoints previstos (TODO): CRUD de fornecedores, pedidos de compra, recebimento
- * de mercadorias. Autorização por permissão RBAC a definir.</p>
+ * de mercadorias. Endpoint atual requer {@code COMPRAS_READ}.</p>
  */
 @RestController
 @RequestMapping("/compras")
@@ -35,9 +36,9 @@ public class ComprasController {
         this.comprasUseCase = comprasUseCase;
     }
 
-    // TODO: @PreAuthorize com permissão RBAC do domínio compras.
     @Operation(summary = "Lista fornecedores (stub — retorna página vazia)")
     @GetMapping("/suppliers")
+    @PreAuthorize("hasAuthority('COMPRAS_READ')")
     public ResponseEntity<PageResult<Supplier>> listSuppliers(
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
