@@ -8,16 +8,23 @@ import com.cernecommerce.core.domain.model.rbac.Role;
 import com.cernecommerce.core.ports.in.RoleUseCase;
 import com.cernecommerce.core.ports.out.role.PermissionRepository;
 import com.cernecommerce.core.ports.out.role.RoleRepository;
+import com.cernecommerce.core.ports.out.user.UserCachePort;
+import com.cernecommerce.core.ports.out.user.UserRepository;
 import org.springframework.transaction.annotation.Transactional;
 
 public class RoleService implements RoleUseCase {
 
     private final RoleRepository roleRepository;
     private final PermissionRepository permissionRepository;
+    private final UserRepository userRepository;
+    private final UserCachePort userCachePort;
 
-    public RoleService(RoleRepository roleRepository, PermissionRepository permissionRepository) {
+    public RoleService(RoleRepository roleRepository, PermissionRepository permissionRepository,
+            UserRepository userRepository, UserCachePort userCachePort) {
         this.roleRepository = roleRepository;
         this.permissionRepository = permissionRepository;
+        this.userRepository = userRepository;
+        this.userCachePort = userCachePort;
     }
 
     @Override
@@ -59,6 +66,7 @@ public class RoleService implements RoleUseCase {
         permissionRepository.findByName(permissionName)
                 .orElseThrow(() -> new PermissionNotFoundException(permissionName));
         roleRepository.addPermissions(roleName, java.util.Set.of(permissionName));
+        evictUsersWithRole(roleName);
     }
 
     @Override
@@ -67,6 +75,16 @@ public class RoleService implements RoleUseCase {
         roleRepository.findByName(roleName)
                 .orElseThrow(() -> new RoleNotFoundException(roleName));
         roleRepository.removePermission(roleName, permissionName);
+        evictUsersWithRole(roleName);
+    }
+
+    /**
+     * Evicta o cache de authorities de todo usuário com a role alterada — sem isso, usuários
+     * mantêm a authority antiga até o TTL do cache expirar, mesmo em resposta a um incidente
+     * de segurança que exija revogação imediata (ver C003).
+     */
+    private void evictUsersWithRole(String roleName) {
+        userRepository.findUsernamesByRole(roleName).forEach(userCachePort::evict);
     }
 
     @Override

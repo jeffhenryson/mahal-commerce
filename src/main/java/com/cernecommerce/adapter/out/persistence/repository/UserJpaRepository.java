@@ -50,4 +50,7 @@ public interface UserJpaRepository extends JpaRepository<UserEntity, Long> {
     @Modifying
     @Query("UPDATE UserEntity u SET u.deletedAt = :deletedAt WHERE u.id = :id")
     void softDeleteById(@Param("id") Long id, @Param("deletedAt") Instant deletedAt);
+
+    @Query("select u.username from UserEntity u join u.roles r where r.name = :roleName")
+    List<String> findUsernamesByRoleName(@Param("roleName") String roleName);
 }

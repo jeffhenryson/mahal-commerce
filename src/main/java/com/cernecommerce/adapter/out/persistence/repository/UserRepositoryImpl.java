@@ -217,4 +217,10 @@ public class UserRepositoryImpl implements UserRepository {
     public long countDisabled() {
         return userRepo.countByEnabledFalse();
     }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Set<String> findUsernamesByRole(String roleName) {
+        return Set.copyOf(userRepo.findUsernamesByRoleName(roleName));
+    }
 }

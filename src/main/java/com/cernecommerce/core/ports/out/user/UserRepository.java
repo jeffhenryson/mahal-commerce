@@ -28,4 +28,7 @@ public interface UserRepository {
     long countEnabled();
 
     long countDisabled();
+
+    /** Usernames de todos os usuários que possuem a role informada — usado para invalidar cache de authorities. */
+    Set<String> findUsernamesByRole(String roleName);
 }

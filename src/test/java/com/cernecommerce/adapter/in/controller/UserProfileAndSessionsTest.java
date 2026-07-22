@@ -1,5 +1,6 @@
 package com.cernecommerce.adapter.in.controller;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -13,6 +14,7 @@ import com.cernecommerce.infra.security.support.TestHashUtils;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.samstevens.totp.code.DefaultCodeGenerator;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -43,6 +45,12 @@ public class UserProfileAndSessionsTest {
 
     private MockMvc mockMvc;
     private final ObjectMapper om = new ObjectMapper();
+    private final DefaultCodeGenerator codeGenerator = new DefaultCodeGenerator();
+
+    private String generateTotpCode(String secret) throws Exception {
+        long counter = Math.floorDiv(System.currentTimeMillis() / 1000L, 30L);
+        return codeGenerator.generate(secret, counter);
+    }
 
     @BeforeEach
     void setup() {
@@ -89,6 +97,48 @@ public class UserProfileAndSessionsTest {
                 .content(changeBody)
                 .with(user(uniqueUsername).authorities(
                         new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isNoContent());
+    }
+
+    @Test
+    void change_own_password_with_real_backup_code_returns_204() throws Exception {
+        // Regressão do C022: ChangePasswordRequest.totpCode tinha @Size(max = 8), rejeitando
+        // todo backup code real (formato XXXX-XXXX-XXXX, 14 chars) antes de chegar na
+        // validação de negócio — trocar senha com backup code estava sempre quebrado.
+        String username = "pwbkp_" + System.currentTimeMillis();
+        String password = "Pass1@word";
+
+        mockMvc.perform(post("/users")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(String.format("{\"username\":\"%s\",\"password\":\"%s\"}", username, password))
+                .with(user("admin").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("USER_CREATE"))))
+                .andExpect(status().isCreated());
+
+        MvcResult setupResult = mockMvc.perform(post("/auth/2fa/setup")
+                        .with(user(username).authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isOk())
+                .andReturn();
+        String secret = om.readTree(setupResult.getResponse().getContentAsString()).get("secret").asText();
+
+        MvcResult confirmResult = mockMvc.perform(post("/auth/2fa/confirm")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(String.format("{\"code\":\"%s\"}", generateTotpCode(secret)))
+                        .with(user(username).authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isOk())
+                .andReturn();
+        String backupCode = om.readTree(confirmResult.getResponse().getContentAsString())
+                .get("backupCodes").get(0).asText();
+        assertThat(backupCode).hasSize(14); // XXXX-XXXX-XXXX
+
+        String changeBody = String.format(
+                "{\"currentPassword\":\"%s\",\"newPassword\":\"NewPass@Backup1\",\"totpCode\":\"%s\"}",
+                password, backupCode);
+        mockMvc.perform(put("/users/me/password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(changeBody)
+                        .with(user(username).authorities(new SimpleGrantedAuthority("ROLE_USER"))))
                 .andExpect(status().isNoContent());
     }
 

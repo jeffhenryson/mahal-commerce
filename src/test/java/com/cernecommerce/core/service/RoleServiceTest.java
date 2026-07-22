@@ -8,6 +8,8 @@ import com.cernecommerce.core.domain.model.rbac.Permission;
 import com.cernecommerce.core.domain.model.rbac.Role;
 import com.cernecommerce.core.ports.out.role.PermissionRepository;
 import com.cernecommerce.core.ports.out.role.RoleRepository;
+import com.cernecommerce.core.ports.out.user.UserCachePort;
+import com.cernecommerce.core.ports.out.user.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -28,12 +30,14 @@ class RoleServiceTest {
 
     @Mock RoleRepository roleRepository;
     @Mock PermissionRepository permissionRepository;
+    @Mock UserRepository userRepository;
+    @Mock UserCachePort userCachePort;
 
     RoleService roleService;
 
     @BeforeEach
     void setUp() {
-        roleService = new RoleService(roleRepository, permissionRepository);
+        roleService = new RoleService(roleRepository, permissionRepository, userRepository, userCachePort);
     }
 
     @Test
@@ -114,6 +118,27 @@ class RoleServiceTest {
     }
 
     @Test
+    void assignPermission_evictsCacheOfEveryUserWithRole() {
+        when(roleRepository.findByName("ROLE_USER")).thenReturn(Optional.of(new Role("ROLE_USER")));
+        when(permissionRepository.findByName("USER_READ")).thenReturn(Optional.of(new Permission("USER_READ")));
+        when(userRepository.findUsernamesByRole("ROLE_USER")).thenReturn(Set.of("alice", "bob"));
+
+        roleService.assignPermission("ROLE_USER", "USER_READ");
+
+        verify(userCachePort).evict("alice");
+        verify(userCachePort).evict("bob");
+    }
+
+    @Test
+    void assignPermission_doesNotEvictWhenRoleOrPermissionMissing() {
+        when(roleRepository.findByName("ROLE_GHOST")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> roleService.assignPermission("ROLE_GHOST", "USER_READ"))
+                .isInstanceOf(RoleNotFoundException.class);
+        verify(userCachePort, never()).evict(any());
+    }
+
+    @Test
     void assignPermission_throwsWhenRoleNotFound() {
         when(roleRepository.findByName("ROLE_GHOST")).thenReturn(Optional.empty());
 
@@ -142,11 +167,22 @@ class RoleServiceTest {
     }
 
     @Test
+    void removePermission_evictsCacheOfEveryUserWithRole() {
+        when(roleRepository.findByName("ROLE_USER")).thenReturn(Optional.of(new Role("ROLE_USER")));
+        when(userRepository.findUsernamesByRole("ROLE_USER")).thenReturn(Set.of("alice"));
+
+        roleService.removePermission("ROLE_USER", "USER_READ");
+
+        verify(userCachePort).evict("alice");
+    }
+
+    @Test
     void removePermission_throwsWhenRoleNotFound() {
         when(roleRepository.findByName("ROLE_GHOST")).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> roleService.removePermission("ROLE_GHOST", "USER_READ"))
                 .isInstanceOf(RoleNotFoundException.class);
         verify(roleRepository, never()).removePermission(any(), any());
+        verify(userCachePort, never()).evict(any());
     }
 }

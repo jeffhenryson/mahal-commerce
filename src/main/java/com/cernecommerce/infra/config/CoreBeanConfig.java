@@ -163,8 +163,9 @@ class CoreBeanConfig {
     }
 
     @Bean
-    RoleUseCase roleUseCase(RoleRepository roleRepository, PermissionRepository permissionRepository) {
-        return new RoleService(roleRepository, permissionRepository);
+    RoleUseCase roleUseCase(RoleRepository roleRepository, PermissionRepository permissionRepository,
+            UserRepository userRepository, UserCachePort userCachePort) {
+        return new RoleService(roleRepository, permissionRepository, userRepository, userCachePort);
     }
 
     @Bean
@@ -218,9 +219,9 @@ class CoreBeanConfig {
     CrmUseCase crmUseCase(CustomerRepository customerRepository, CustomerNoteRepository customerNoteRepository,
             StageTransitionRepository stageTransitionRepository, TagRepository tagRepository,
             CustomerTagRepository customerTagRepository, CampaignAutomationRepository campaignAutomationRepository,
-            CampaignLogRepository campaignLogRepository) {
+            CampaignLogRepository campaignLogRepository, EmailPort emailPort) {
         return new CrmService(customerRepository, customerNoteRepository, stageTransitionRepository, tagRepository,
-                customerTagRepository, campaignAutomationRepository, campaignLogRepository);
+                customerTagRepository, campaignAutomationRepository, campaignLogRepository, emailPort);
     }
 
     @Bean
