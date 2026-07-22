@@ -237,7 +237,11 @@
 			<groupId>software.amazon.awssdk</groupId>
 			<artifactId>s3</artifactId>
 			<version>${aws.sdk.version}</version>
-			<optional>true</optional>
+		</dependency>
+		<dependency>
+			<groupId>software.amazon.awssdk</groupId>
+			<artifactId>auth</artifactId>
+			<version>${aws.sdk.version}</version>
 		</dependency>
 
 		<!-- OAuth2 — validação de ID tokens do Google (OIDC/JWK) sem autoconfiguration de resource server -->
