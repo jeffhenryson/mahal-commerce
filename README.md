@@ -1,4 +1,4 @@
-# cerne-commerce
+# mahal-commerce
 
 Construí esse projeto para ter uma base sólida de autenticação e autorização que eu possa reutilizar em qualquer novo projeto Spring Boot — sem precisar reinventar a roda a cada vez.
 
@@ -70,7 +70,7 @@ Usuários criados automaticamente: `admin / Admin@dev1` e `user / User@dev1`.
 ./mvnw test
 ```
 
-69 arquivos de teste — unitários, integração (H2), testes de segurança, ArchUnit e Testcontainers (PostgreSQL real, opcional).
+128 arquivos de teste — unitários, integração (H2), testes de segurança, ArchUnit e Testcontainers (PostgreSQL real, opcional).
 
 ---
 

@@ -73,6 +73,7 @@ Entradas expiram automaticamente quando o access TTL passa (não há tokens mais
 - Implementa `UserDetailsService`
 - Anotado com `@Cacheable` (cache `userDetails`, TTL 60s padrão — `spring.cache.caffeine.spec` em dev, `spring.cache.redis.time-to-live` em hml/prod)
 - Cache evicted em toda mutação de usuário via `UserCachePort.evict(username)`
+- Cache também evicted em `RoleService.assignPermission`/`removePermission` (C003) — como a mutação é na *role*, não no usuário, `RoleService` resolve `UserRepository.findUsernamesByRole(roleName)` e evicta o cache de cada usuário com aquela role, garantindo que uma revogação de permissão tenha efeito imediato (não espera o TTL de 60s) em todos os usuários afetados, não só no que disparou a ação
 
 ---
 
@@ -288,7 +289,7 @@ Ao concluir o reset: todas as sessões são revogadas + todos os JWTs anteriores
 
 ## H2 Console (dev)
 
-`H2ConsoleSecurityConfig` libera `/h2-console/**` apenas em `@Profile("dev")` com permissão exigida.
+`H2ConsoleSecurityConfig` libera `/h2-console/**` **totalmente** (`permitAll()`, sem autenticação nem permissão — CSRF desabilitado e `frameOptions.sameOrigin()` para o console carregar em iframe) — não há nenhum controle de acesso no próprio endpoint (C021). A única mitigação é a classe inteira ser `@Profile("dev")`: o bean nunca é registrado em hml/prod, então o endpoint simplesmente não existe fora de dev.
 
 ---
 
@@ -355,7 +356,7 @@ Todos os eventos publicados via `ApplicationEventPublisher` e persistidos pelo `
 | DEV | `DEV_ELEVATION_COMPLETED` |
 | OAuth | `OAUTH_GOOGLE_LOGIN` |
 | Estoque | `PRODUCT_CREATED`, `WAREHOUSE_CREATED` |
-| CRM | `CUSTOMER_CREATED`, `CUSTOMER_NOTE_ADDED`, `CUSTOMER_STAGE_CHANGED`, `TAG_CREATED`, `TAG_DELETED`, `CUSTOMER_TAG_ADDED`, `CUSTOMER_TAG_REMOVED` |
+| CRM | `CUSTOMER_CREATED`, `CUSTOMER_NOTE_ADDED`, `CUSTOMER_STAGE_CHANGED`, `TAG_CREATED`, `TAG_DELETED`, `CUSTOMER_TAG_ADDED`, `CUSTOMER_TAG_REMOVED`, `CAMPAIGN_AUTOMATION_CREATED`, `CAMPAIGN_AUTOMATION_DELETED`, `CAMPAIGN_AUTOMATION_DISPATCHED` |
 
 **`ACCESS_DENIED`:** publicado por `GlobalExceptionHandler.handleAccessDenied` sempre que uma `AccessDeniedException` for lançada. O evento inclui o `username` do contexto de segurança (ou `"anonymous"`) e o `path` da requisição no campo `details`.
 
@@ -410,7 +411,7 @@ Expõe buckets `http_server_requests_seconds_bucket` para cálculo de percentis 
 histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket[5m])) by (le))
 ```
 
-### Dashboard Grafana (`grafana/provisioning/dashboards/security-spring.json`)
+### Dashboard Grafana (`grafana/provisioning/dashboards/mahal-commerce.json`)
 
 Dashboard provisionado automaticamente com **22 painéis** em 4 rows colapsáveis:
 
@@ -421,7 +422,7 @@ Dashboard provisionado automaticamente com **22 painéis** em 4 rows colapsávei
 | ⚡ Performance HTTP | 4 stats (CPU, req/s, p95, 5xx) + latência p50/p95/p99 + erros 4xx/5xx |
 | ☕ JVM / Sistema | Heap JVM + Non-Heap + CPU processo/sistema + JVM Threads |
 
-Template variable `$job` filtra por job do Prometheus (default: `security-spring`).
+Template variable `$job` filtra por job do Prometheus (default: `mahal-commerce`).
 
 ### Alertas Grafana (`grafana/provisioning/alerting/alerts.yml`)
 
@@ -453,8 +454,9 @@ Variáveis validadas em **prod**:
 | `RESEND_FROM` | `resend.from` | Domínio de envio real |
 | `JWT_ISSUER` | `jwt.issuer` | Não pode ser `security-spring` (valor padrão) |
 | `JWT_AUDIENCE` | `jwt.audience` | Não pode ser `api` (valor padrão) |
-| `TOTP_ENCRYPTION_KEY` | `totp.encryption.key` | Mínimo 32 chars |
-| `AVATAR_BASE_URL` | `avatar.base-url` | Não pode apontar para localhost |
+| `TOTP_ENCRYPTION_KEY` | `totp.encryption.key` | Mínimo 32 chars; rejeita explicitamente o valor default que esteve hardcoded como fallback em `docker-compose.prod.yml` (`${TOTP_ENCRYPTION_KEY:-Vx74...}`, removido em C002 — comprometido por estar no histórico do git) |
+| `AVATAR_BASE_URL` | `avatar.base-url` | Não pode apontar para `localhost` nem para `example.com` (C016 — antes só rejeitava `localhost`, deixando `https://example.com` passar despercebido em prod) |
 | `GOOGLE_CLIENT_ID` | `oauth2.google.client-id` | Obrigatório para validar tokens Google |
+| `DEV_PASSWORD` | `seed.dev.password` | Só validado quando `DEV_EMAIL` (`seed.dev.email`) está definido: rejeita ausente/vazio ou igual ao default do repositório `Dev@secure1!` — sem isso, `DevRoleBootstrapConfig` criaria uma conta `ROLE_DEV` real (acesso a `/actuator/**`, gestão de roles/permissions) com senha pública hardcoded (C005) |
 
-Em **hml** são verificados: `jwt.secret`, `DB_PASSWORD`, `REDIS_PASSWORD`, `resend.api-key`, `resend.from`, `cors.allowed-origins` e `GOOGLE_CLIENT_ID`.
+Em **hml** são verificados: `jwt.secret`, `DB_PASSWORD`, `REDIS_PASSWORD`, `resend.api-key`, `resend.from`, `cors.allowed-origins`, `GOOGLE_CLIENT_ID`, `AVATAR_BASE_URL` (C016 — `HmlStartupValidator` não validava esse campo antes; `application-hml.properties` tem `avatar.base-url=${AVATAR_BASE_URL:https://example.com}` como default, então sem essa validação um deploy de hml podia subir "funcional" com URLs de avatar quebradas) e, condicionalmente, `DEV_PASSWORD` (mesma regra do C005 acima).

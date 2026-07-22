@@ -2,7 +2,7 @@ apiVersion: 1
 
 groups:
   - orgId: 1
-    name: cerne-commerce
+    name: mahal-commerce
     folder: Security Alerts
     interval: 1m
     rules:

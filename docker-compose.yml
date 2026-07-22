@@ -1,9 +1,23 @@
 version: "3.9"
 
-# Stack de homologação: PostgreSQL + Redis + Prometheus
+# Stack de homologação: PostgreSQL + Redis + Prometheus + Grafana + app (mahal-backend)
 # Uso: docker compose up -d
-# A aplicação roda fora do compose — inicie com SPRING_PROFILES_ACTIVE=hml ./mvnw spring-boot:run
-# Prometheus scrapa http://host.docker.internal:8080/actuator/prometheus a cada 15s
+# Prometheus scrapa mahal-backend:8081/actuator/prometheus a cada 15s (rede interna do
+# compose — ver prometheus.yml; porta 8081 é o management.server.port do perfil hml, sem
+# filtro JWT). Para rodar a app fora do compose: SPRING_PROFILES_ACTIVE=hml ./mvnw spring-boot:run
+#
+# Requer um .env na raiz do projeto (nunca versionado — ver .env.example) com:
+# DB_PASSWORD, REDIS_PASSWORD, JWT_SECRET, TOTP_ENCRYPTION_KEY, RESEND_API_KEY, GOOGLE_CLIENT_ID
+#
+# Frontends (mahal-admin-ui:4201, mahal-market-ui:4300) — C013: propositalmente ausentes
+# deste compose. Em hml/local, cada um vive em seu próprio repositório sibling
+# (../mahal-commerce-ui, ../mahal-commerce-ui-market) com seu próprio docker-compose.yml,
+# que se conecta à network externa "cerne-commerce_default" criada por este arquivo.
+# Suba o backend primeiro (docker compose up -d aqui), depois cada frontend separadamente
+# (docker compose up -d dentro de cada repositório sibling). Em produção, os três serviços
+# são unificados em docker-compose.prod.yml (build context ./cerne-commerce-ui e
+# ./mahal-commerce-ui-market, espera os repositórios de frontend como diretórios sibling
+# já clonados no host de deploy). Ver docs/architecture.md ("Topologia de deploy") para detalhes.
 
 services:
   postgres-mahal:
@@ -13,7 +27,7 @@ services:
     environment:
       POSTGRES_DB: security
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
     ports:
       - "5435:5432"
     volumes:
@@ -28,11 +42,11 @@ services:
     image: redis:7-alpine
     container_name: redis-mahal
     restart: unless-stopped
-    command: redis-server --requirepass hml_redis_2026
+    command: redis-server --requirepass ${REDIS_PASSWORD}
     ports:
       - "6382:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "hml_redis_2026", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -52,6 +66,12 @@ services:
       - "--storage.tsdb.retention.time=7d"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/healthy || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   grafana-mahal:
     image: grafana/grafana:11.0.0
@@ -74,8 +94,14 @@ services:
       - prometheus-mahal
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
-  app:
+  mahal-backend:
     build:
       context: .
       dockerfile: Dockerfile
@@ -91,18 +117,18 @@ services:
       SPRING_PROFILES_ACTIVE: hml
       DB_URL: jdbc:postgresql://postgres-mahal:5432/security
       DB_USERNAME: postgres
-      DB_PASSWORD: postgres
+      DB_PASSWORD: ${DB_PASSWORD}
       REDIS_HOST: redis-mahal
       REDIS_PORT: 6379
-      REDIS_PASSWORD: hml_redis_2026
-      JWT_SECRET: WsYV6lC353xcMmE/C6buo96jGsm4JQMf4EyV3KZzJlk=
-      TOTP_ENCRYPTION_KEY: IFFvdSZ3K5jEyYAOLGSfWLriOSGBvgpEYGrj24jLTUw=
-      JWT_ISSUER: security-spring-hml
-      JWT_AUDIENCE: security-spring-api
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY}
+      JWT_ISSUER: mahaltabacaria-api
+      JWT_AUDIENCE: mahaltabacaria-ui
       CORS_ALLOWED_ORIGINS: http://localhost:4200,http://localhost:4201,http://localhost:4300
-      RESEND_API_KEY: re_cc831ztx_AyBLXdqXoogo2spffzTLHtar
+      RESEND_API_KEY: ${RESEND_API_KEY}
       RESEND_FROM: noreply@cernedsgn.xyz
-      GOOGLE_CLIENT_ID: 272358372118-v3nf24o331kfpg0n3gqm0497o1fd9faf.apps.googleusercontent.com
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
     ports:
       - "8082:8082"
       - "8083:8081"

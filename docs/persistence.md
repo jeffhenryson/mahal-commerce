@@ -79,7 +79,7 @@ Queries relevantes em `RefreshTokenJpaRepository`:
 | used | BOOLEAN | NOT NULL, default false |
 | sent_at | TIMESTAMP | NOT NULL |
 
-Índices: `(code)`, `idx_email_verification_codes_expires_at (expires_at)` (para cleanup scheduler)
+Índices: `(code)`, `idx_email_verification_codes_expires_at (expires_at)` (para cleanup scheduler), `idx_email_verification_codes_username (username)` (C010 — usado por `findFirstByUsernameOrderByExpiresAtDescIdDesc`/`deleteByUsername`)
 
 O código plaintext **nunca** é persistido.
 
@@ -96,7 +96,7 @@ O código plaintext **nunca** é persistido.
 | requested_at | TIMESTAMPTZ | NOT NULL default now() |
 | used_at | TIMESTAMPTZ | nullable — null = não usado |
 
-Índices: `uk_prt_token_hash (token_hash)`, `idx_prt_token_hash (token_hash)`, `idx_password_reset_tokens_expires_at (expires_at)`
+Índices: `uk_prt_token_hash (token_hash)`, `idx_prt_token_hash (token_hash)`, `idx_password_reset_tokens_expires_at (expires_at)`, `idx_password_reset_tokens_username (username)` (C010 — usado por `deleteByUsername`)
 
 O token plaintext **nunca** é persistido.
 
@@ -373,6 +373,38 @@ Tabela de junção pura (muitos-para-muitos), sem coluna própria além das duas
 
 ---
 
+### CampaignAutomationEntity — tabela `campaign_automations`
+
+| Coluna | Tipo | Constraint |
+|--------|------|-----------|
+| id | BIGINT | PK, auto-increment |
+| nome | VARCHAR(100) | NOT NULL |
+| gatilho | VARCHAR(20) | NOT NULL — `@Enumerated(STRING)`, `MANUAL` \| `ENTRADA_ESTAGIO` |
+| segmento_alvo | VARCHAR(20) | NOT NULL — `@Enumerated(STRING)`, um `CustomerStage` (Kanban) |
+| canal | VARCHAR(10) | NOT NULL — `@Enumerated(STRING)`, `WHATSAPP` \| `EMAIL` \| `AMBOS` |
+| template | TEXT | NOT NULL |
+| ativa | BOOLEAN | NOT NULL DEFAULT TRUE |
+| criado_em | TIMESTAMP | NOT NULL |
+
+`segmento_alvo` referencia `CustomerStage`, não o segmento RFM (placeholder) — decisão de escopo tomada com o usuário (ver `crm/automacoes-campanhas`), já que o segmento RFM é sempre `"NOVO"` e seria inútil como filtro de público-alvo.
+
+---
+
+### CampaignLogEntryEntity — tabela `campaign_log`
+
+| Coluna | Tipo | Constraint |
+|--------|------|-----------|
+| id | BIGINT | PK, auto-increment |
+| automation_id | BIGINT | FK → campaign_automations(id) ON DELETE CASCADE |
+| customer_id | BIGINT | FK → customers(id) ON DELETE CASCADE |
+| status | VARCHAR(30) | NOT NULL — `@Enumerated(STRING)`, único valor hoje: `PENDENTE_INTEGRACAO` |
+| disparado_em | TIMESTAMP | NOT NULL |
+| convertido_em | TIMESTAMP | nullable — sempre `NULL` nesta versão, reservado para quando o domínio de pedidos existir |
+
+Índice: `idx_campaign_log_automation_id (automation_id)`. Uma linha por cliente-alvo a cada `POST /crm/automacoes/{id}/disparar` — nenhum envio real ocorre; `crm/integracao-canal-envio` (F008) entregou apenas o status de conexão dos canais (`GET /crm/canais/status`), não o envio de mensagens em si.
+
+---
+
 ## Repositórios
 
 Cada port OUT tem uma implementação `*RepositoryImpl` que:
@@ -404,6 +436,38 @@ adapter/out/persistence/converter/*EntityConverter  (domínio ↔ entidade)
 
 Em hml/prod não há seed automático — usuário admin deve ser criado via CLI (`create-admin`).
 
+## Dimensionamento HikariCP x Tomcat (C012)
+
+`spring.datasource.hikari.maximum-pool-size` (`application.properties`) tinha um único valor default (`10`, via `HIKARI_MAX_POOL_SIZE`) compartilhado por dev/hml/prod, e nenhum arquivo de propriedades definia `server.tomcat.threads.max` — ou seja, o Tomcat embutido rodava com o default do Spring Boot de **200 threads** contra um pool de **10 conexões** de banco: uma proporção de 20:1. Como a maioria dos endpoints é I/O-bound no banco (toda operação CRUD passa por uma query), sob pico de tráfego muito mais requisições HTTP concorrentes do que conexões disponíveis significa fila crescente esperando conexão em vez de rejeição rápida — degradação em cascata (latência sobe para todos, não só para quem excede a capacidade real).
+
+### Fórmula de dimensionamento do HikariCP
+
+A [fórmula usual da própria HikariCP](https://github.com/brettwooldridge/HikariCP/wiki/About-Pool-Sizing) para uma conexão por requisição (sem pooling de statements em cascata):
+
+```
+connections = ((core_count * 2) + effective_spindle_count)
+```
+
+- `core_count` — núcleos de CPU disponíveis para o **banco** (não para a aplicação).
+- `effective_spindle_count` — número de discos físicos independentes; **0** para SSD/NVMe (praticamente todo banco gerenciado hoje — RDS, Cloud SQL, etc. — usa SSD), já que não há penalidade de seek.
+
+Para um Postgres gerenciado em SSD com, por exemplo, 2 vCPUs: `(2 * 2) + 0 = 4` conexões já seriam suficientes para saturar a capacidade de processamento paralelo do banco — pools muito maiores que isso não aumentam throughput, só competem por CPU/locks no lado do banco e consomem memória (cada conexão Postgres tem overhead de processo/memória próprio).
+
+**Este projeto não tem, no código, visibilidade sobre o dimensionamento real da instância de banco em produção** (`docker-compose.prod.yml` só define o container `postgres`, sem requests/limits de CPU explícitos) — por isso o default `HIKARI_MAX_POOL_SIZE=10` permanece como ponto de partida conservador (cobre até ~3 vCPUs pela fórmula acima com folga), não uma calibração real. **Ação recomendada:** assim que o dimensionamento real da instância de produção for conhecido (vCPUs do banco gerenciado), recalcular via a fórmula acima e definir `HIKARI_MAX_POOL_SIZE` explicitamente no ambiente de deploy.
+
+### Tomcat — `server.tomcat.threads.max`
+
+Diferente do HikariCP, o pool de threads HTTP do Tomcat não precisa ser dimensionado só em função do banco — outros endpoints não tocam o banco (ex.: `/actuator/health`, `/system/config/public`) e podem ser atendidos mesmo com o pool de conexões saturado. Ainda assim, manter o default implícito de 200 threads sem nenhuma relação documentada com os 10 do HikariCP deixava a proporção 20:1 acidental, não uma decisão.
+
+`server.tomcat.threads.max=${TOMCAT_MAX_THREADS:50}` foi definido explicitamente em `application-hml.properties` e `application-prod.properties` (C012) — proporção 5:1 com o pool HikariCP padrão, uma folga que ainda absorve picos de requisições não-DB-bound sem deixar a proporção tão desalinhada quanto o default anterior. Ajustável via `TOMCAT_MAX_THREADS` sem rebuild.
+
+### Resumo — valores atuais
+
+| Variável | Property | Default atual | Onde |
+|----------|----------|----------------|------|
+| `HIKARI_MAX_POOL_SIZE` | `spring.datasource.hikari.maximum-pool-size` | `10` (todos os perfis) | `application.properties` |
+| `TOMCAT_MAX_THREADS` | `server.tomcat.threads.max` | `50` (hml/prod apenas — dev usa H2 embutido, sem necessidade de tuning) | `application-hml.properties`, `application-prod.properties` |
+
 ### Histórico completo de migrations (V1–V42)
 
 #### V1–V12 — Schema base e segurança inicial
@@ -433,14 +497,14 @@ Em hml/prod não há seed automático — usuário admin deve ser criado via CLI
 | `V16__totp.sql` | Cria `totp_config`, `totp_backup_codes` e `totp_challenge_tokens`. |
 | `V17__add_junction_indexes.sql` | Índices reversos nas tabelas de junção: `idx_rp_permission_id ON role_permissions(permission_id)` e `idx_ur_role_id ON user_roles(role_id)`. A PK composta cobre buscas pelo primeiro campo; estes índices cobrem buscas pelo segundo ("quais roles têm a permission X?", "quais users têm a role Y?"). |
 | `V18__audit_logs.sql` | Cria tabela `audit_logs` com índices em username, action e timestamp. |
-| `V19__audit_read_permission.sql` | Insere permissão `AUDIT_READ` e a atribui ao `ROLE_ADMIN`. |
+| `V19__audit_read_permission.sql` | Insere permissão `AUDIT_READ` e a atribui ao `ROLE_ADMIN`. ⚠️ Sem `ON CONFLICT DO NOTHING` (C018) — ver seção "Migrations de seed sem ON CONFLICT DO NOTHING". |
 | `V20__audit_logs_range_index.sql` | Índice composto `(username, timestamp DESC)` para queries com filtro de usuário + período. |
 | `V21__add_totp_config_created_at.sql` | Adiciona `created_at` em `totp_config` (para cleanup de setups pendentes por data). |
 | `V22__add_user_avatar.sql` | Adiciona coluna `avatar_filename` em `users`. |
 | `V23__add_user_created_at.sql` | Adiciona coluna `created_at` em `users`. |
 | `V24__soft_delete_users.sql` | Adiciona coluna `deleted_at` em `users` (soft delete). |
 | `V25__add_oauth_google.sql` | Adiciona `auth_provider` e `google_id` em `users`; remove NOT NULL de `password`. |
-| `V26__normalize_email_lowercase.sql` | Normaliza emails existentes para `lowercase + strip`. **Atenção em tabelas grandes:** o `UPDATE` bloqueia a tabela `users` durante a execução. Para zero-downtime em produção com muitos registros, considere rodar o UPDATE em batches fora do Flyway antes de aplicar a migration. |
+| `V26__normalize_email_lowercase.sql` | Normaliza emails existentes para `lowercase + strip`. **Não reversível** (transformação com perda de informação) e **sem batching real** — ver seção [Migrations de UPDATE em massa — batching e rollback](#migrations-de-update-em-massa--batching-e-rollback-c011) para o procedimento seguro de reexecução em bases grandes e a limitação de rollback (C011). |
 | `V27__add_ttl_indexes.sql` | Índices em `expires_at` de `refresh_tokens`, `email_verification_codes` e `password_reset_tokens` — melhora performance dos schedulers de cleanup. |
 | `V28__add_totp_challenge_ttl_index.sql` | Índice em `totp_challenge_tokens(expires_at)` para o scheduler de limpeza de challenges. |
 | `V29__add_google_id_index.sql` | Índice parcial único `idx_users_google_id ON users(google_id) WHERE google_id IS NOT NULL` — otimiza lookup por `sub` do token Google. |
@@ -459,15 +523,93 @@ Em hml/prod não há seed automático — usuário admin deve ser criado via CLI
 | `V42__notification_indexes_and_fk.sql` | Adiciona índice `idx_notification_preferences_username ON notification_preferences(username)` — evita full table scan em `findByUsername`. Adiciona FK `fk_notifications_username → users(username) ON DELETE CASCADE` e `fk_notification_prefs_username → users(username) ON DELETE CASCADE` — garante integridade referencial e limpeza automática de notificações ao deletar usuário. |
 | `V43__add_notification_read_at_index.sql` | Índice parcial `idx_notifications_read_at ON notifications(read_at) WHERE read_at IS NOT NULL` — melhora o DELETE do `NotificationCleanupService`, que filtra por `read_at IS NOT NULL AND read_at < :cutoff`. Sem este índice a query faz full scan conforme a tabela cresce. |
 | `V44__estoque_product.sql` | Cria `product` (SKU pai), `product_variant` (SKU filho, FK → product ON DELETE CASCADE) e `product_attribute` (sem PK própria — `@ElementCollection`, FK → product_variant ON DELETE CASCADE). Índices em `product_variant(product_id)` e `product_attribute(variant_id)`. |
-| `V45__estoque_product_permissions.sql` | Insere `ESTOQUE_PRODUCT_READ` e `ESTOQUE_PRODUCT_MANAGE`, atribuídas ao `ROLE_ADMIN`. Também adicionadas ao array `ADMIN_PERMISSIONS` do `DevRoleBootstrapConfig` para que `ROLE_DEV` as herde. |
+| `V45__estoque_product_permissions.sql` | Insere `ESTOQUE_PRODUCT_READ` e `ESTOQUE_PRODUCT_MANAGE`, atribuídas ao `ROLE_ADMIN`. Também adicionadas ao array `ADMIN_PERMISSIONS` do `DevRoleBootstrapConfig` para que `ROLE_DEV` as herde. ⚠️ Sem `ON CONFLICT DO NOTHING` (C018). |
 | `V46__estoque_warehouse_stock_balance.sql` | Cria `warehouse` (código único, tipo `LOJA_FISICA`/`ECOMMERCE`) e `stock_balance` (saldo por SKU/depósito, FK → warehouse ON DELETE CASCADE, coluna `version` para locking otimista). Constraint única `(sku, warehouse_id)` — um único registro de saldo por par SKU/depósito. Índice em `stock_balance(warehouse_id)`. |
-| `V47__estoque_warehouse_permissions.sql` | Insere `ESTOQUE_WAREHOUSE_READ` e `ESTOQUE_WAREHOUSE_MANAGE`, atribuídas ao `ROLE_ADMIN`. Também adicionadas ao array `ADMIN_PERMISSIONS` do `DevRoleBootstrapConfig` para que `ROLE_DEV` as herde. |
+| `V47__estoque_warehouse_permissions.sql` | Insere `ESTOQUE_WAREHOUSE_READ` e `ESTOQUE_WAREHOUSE_MANAGE`, atribuídas ao `ROLE_ADMIN`. Também adicionadas ao array `ADMIN_PERMISSIONS` do `DevRoleBootstrapConfig` para que `ROLE_DEV` as herde. ⚠️ Sem `ON CONFLICT DO NOTHING` (C018). |
 | `V48__crm_customer.sql` | Cria a tabela `customers` (nome, contato, email único, cpf opcional, origem opcional, cadastrado_em) — fundação do módulo CRM. Insere `CRM_CUSTOMER_READ` e `CRM_CUSTOMER_MANAGE`, atribuídas ao `ROLE_ADMIN` (`ON CONFLICT (name) DO NOTHING`). Também adicionadas ao array `ADMIN_PERMISSIONS` de `SeedConfig` e `DevRoleBootstrapConfig`. |
 | `V49__crm_customer_notes.sql` | Cria a tabela `customer_notes` (customer_id FK → customers ON DELETE CASCADE, autor, texto, criado_em). Índice em `customer_id` para a consulta de notas por cliente. |
 | `V50__crm_customer_stage.sql` | Adiciona coluna `estagio` em `customers` (default `NOVO_LEAD`) e cria a tabela `customer_stage_transitions` (trilha de auditoria de mudança de estágio). |
 | `V51__crm_tags.sql` | Cria a tabela `tags` (nome único) e a tabela de junção `customer_tags` (customer_id + tag_id, PK composta, FK ON DELETE CASCADE para ambos). |
+| `V52__crm_campaign_automations.sql` | Cria as tabelas `campaign_automations` (regra de automação/campanha) e `campaign_log` (log de disparos por cliente-alvo, FK ON DELETE CASCADE para ambos). |
+| `V53__stub_controllers_read_permissions.sql` | Insere `COMPRAS_READ`, `ECOMMERCE_READ`, `FINANCEIRO_READ`, `LOGISTICA_READ`, `PDV_READ`, atribuídas ao `ROLE_ADMIN` (C004 — `@PreAuthorize` nos 5 controllers stub). Também adicionadas ao array `ADMIN_PERMISSIONS` de `SeedConfig` e `DevRoleBootstrapConfig`. |
+| `V54__add_username_indices.sql` | Índices em `email_verification_codes(username)` e `password_reset_tokens(username)` — elimina full table scan em `findFirstByUsernameOrderBy...`/`deleteByUsername` (C010). |
 
-⚠️ **Conflito de numeração pendente:** o card Notion de `C010` (Sprint 2, ainda não implementado) planeja usar a próxima migration livre para índices em `email_verification_codes`/`password_reset_tokens`. Como cada feature de CRM implementada fora da Sprint 2 consumiu o próximo número livre (V50 por `crm/kanban-segmentacao`, V51 por `crm/tags-segmentos`), o card foi renumerado sucessivamente e agora aponta para **V52**. Confirme o próximo número livre em `src/main/resources/db/migration/` antes de implementar C010.
+---
+
+## Migrations de UPDATE em massa — batching e rollback (C011)
+
+`V26__normalize_email_lowercase.sql` já foi aplicada em todos os ambientes (Flyway não permite reeditar uma migration histórica), então esta seção documenta o procedimento correto — para reexecutar esse padrão numa base grande no futuro, e como checklist para as próximas migrations de UPDATE em massa.
+
+### Batching seguro para UPDATE em massa em produção
+
+Um `UPDATE` sem `WHERE` restritivo (ou com `WHERE` que ainda toca uma fração grande da tabela) mantém locks de linha durante toda a transação da migration — em uma tabela com muitos registros isso pode significar minutos de lock, bloqueando outras transações que tentem escrever nas mesmas linhas (ex.: login, troca de senha, criação de conta, todos escrevem em `users`).
+
+Padrão recomendado — lotes por faixa de id, cada lote em sua própria transação, com um intervalo entre lotes para não saturar I/O:
+
+```sql
+-- Fora do Flyway (rodar manualmente antes de aplicar a migration em bases grandes),
+-- ou como script de apoio referenciado pela migration:
+DO $$
+DECLARE
+    batch_size INT := 5000;
+    max_id BIGINT;
+    current_id BIGINT := 0;
+BEGIN
+    SELECT MAX(id) INTO max_id FROM users;
+    WHILE current_id < max_id LOOP
+        UPDATE users
+        SET email = LOWER(TRIM(email))
+        WHERE id > current_id AND id <= current_id + batch_size
+          AND email IS NOT NULL
+          AND email <> LOWER(TRIM(email)); -- pula linhas já normalizadas (idempotente, permite retomar após falha)
+        current_id := current_id + batch_size;
+        COMMIT; -- cada lote é sua própria transação — libera os locks entre lotes
+        PERFORM pg_sleep(0.1); -- alivia I/O sob carga de produção real
+    END LOOP;
+END $$;
+```
+
+Pontos-chave do padrão:
+- **Lotes por faixa de `id`** (não `OFFSET`/`LIMIT` — `OFFSET` em tabela mutável durante o loop pode pular ou repetir linhas).
+- **Cada lote commita separadamente** — um `UPDATE` de 5k linhas prende locks por muito menos tempo que um de 5M.
+- **Filtro de idempotência** (`email <> LOWER(TRIM(email))`) — permite interromper e retomar o script sem reprocessar linhas já normalizadas.
+- **`pg_sleep` entre lotes** — evita saturar I/O/replicação em produção; ajustar o valor conforme o tamanho real da tabela e a janela de manutenção disponível.
+
+### Plano de rollback de V26
+
+**Normalizar para lowercase não é uma operação reversível sem um backup do valor original.** `LOWER(TRIM(email))` é uma transformação com perda de informação (não há como recuperar a capitalização original de `Joao@Example.com` a partir de `joao@example.com`) — isso deve ser documentado explicitamente em qualquer migration de normalização de dados, não assumido como "reversível porque é só um UPDATE".
+
+Se for necessário reverter V26 (cenário hipotético: um bug downstream que dependia de emails case-sensitive):
+1. **Não existe rollback via SQL a partir do estado pós-migration** — a informação original já foi perdida.
+2. A única forma real de reverter é restaurar os valores de `users.email`/`users.pending_email` a partir de um **backup ou snapshot tirado antes da migration** (backup completo do banco, ou point-in-time recovery se o provedor de banco suportar).
+3. Se nenhum backup pré-migration existir, a reversão é **impossível** — os dados originais estão perdidos permanentemente.
+
+### Checklist para futuras migrations de UPDATE em massa
+
+Antes de commitar uma migration Flyway que faz `UPDATE`/`DELETE` sem `WHERE id = :id` (ou equivalente pontual):
+
+- [ ] A migration toca potencialmente **toda** a tabela, ou uma fração grande dela? Se sim, documentar o batching (ver padrão acima) — mesmo que a migration em si rode o UPDATE direto (aceitável em tabelas pequenas/nova feature), o comentário deve dizer explicitamente a partir de qual volume de linhas o padrão de batching precisa ser aplicado manualmente antes do deploy.
+- [ ] A transformação é **reversível**? Se não (normalização, hashing, deleção), documentar essa limitação explicitamente no comentário da migration — não deixar implícito.
+- [ ] Se reversível, existe uma migration de rollback ou um script documentado para reverter?
+- [ ] O `WHERE` da query de UPDATE/DELETE é idempotente (pode rodar de novo sem duplicar efeito) para permitir retomar após falha no meio de um batch?
+
+---
+
+## Migrations de seed sem `ON CONFLICT DO NOTHING` (C018)
+
+`V19__audit_read_permission.sql`, `V45__estoque_product_permissions.sql` e `V47__estoque_warehouse_permissions.sql` fazem `INSERT INTO permissions`/`INSERT INTO role_permissions` sem `ON CONFLICT DO NOTHING` — inconsistente com o padrão já adotado em `V3`, `V4`, `V9`, `V36`, `V37`, `V38` (todas usam `ON CONFLICT (name) DO NOTHING` no insert de permissions, e `ON CONFLICT DO NOTHING` no insert de role_permissions).
+
+**Por que não foram editadas diretamente:** as três já foram aplicadas (Flyway valida checksum dos arquivos já aplicados contra o registrado em `flyway_schema_history` — editar um arquivo histórico quebra essa validação e trava o próximo boot com `spring.flyway.enabled=true`, a menos que `flyway repair` seja rodado antes, recalculando os checksums). Mesma situação do `V26` (ver seção acima, C011) — o perfil `dev` não é afetado (usa H2 com schema JPA automático, sem Flyway), mas hml/prod usam Flyway real.
+
+**Risco concreto:** sem `ON CONFLICT DO NOTHING`, um `INSERT` que tente reinserir uma permissão já existente falha com violação de constraint única. Isso não acontece em uma sequência normal de deploy (cada migration roda uma única vez, em ordem), mas quebraria em um cenário de `flyway repair`/rebaseline manual onde essas migrations precisassem ser re-executadas contra um schema que já tem os dados (ex.: recuperação de um `flyway_schema_history` corrompido, ou um baseline manual mal calibrado).
+
+**Se algum dia for necessário corrigir de fato:** confirmar primeiro que V19/V45/V47 nunca rodaram em nenhum ambiente real (só então é seguro editá-las diretamente); caso já tenham rodado em hml/prod, a correção exigiria coordenar um `flyway repair` como parte do deploy — fora do escopo de uma correção de código isolada.
+
+### Checklist para futuras migrations de seed (INSERT de dados de referência)
+
+- [ ] `INSERT INTO permissions (name) VALUES (...)` sempre com `ON CONFLICT (name) DO NOTHING`
+- [ ] `INSERT INTO role_permissions (...) SELECT ...` sempre com `ON CONFLICT DO NOTHING`
+- [ ] Isso vale mesmo quando a migration é "nova" e o dado "obviamente" ainda não existe — o ponto não é a primeira execução, é permitir retry seguro depois de uma falha parcial ou um rebaseline
 
 ---
 
@@ -527,6 +669,8 @@ Um único `JOIN FETCH` traz usuários, roles e permissões em uma só query. O `
 
 `CustomerRepositoryImpl` também expõe agregações para o dashboard (`crm/dashboard-overview`, sem migration nova): `countAll()` delega a `JpaRepository.count()`; `countActive()` usa o método derivado `countByEstagioNot(INATIVO)`; `countByStage()` usa uma query JPQL `SELECT c.estagio, COUNT(c) FROM CustomerEntity c GROUP BY c.estagio`, convertendo o `List<Object[]>` retornado em `Map<CustomerStage, Long>` — estágios sem nenhum cliente simplesmente não aparecem no mapa.
 
+`CrmService.getChannelStatus()` (`crm/integracao-canal-envio`, F008) não tem persistência própria — não há tabela nem migration nova. O status do canal `EMAIL` é derivado do bean `EmailPort` ativo no profile (`LoggingEmailAdapter`/`MailpitEmailAdapter`/`ResendEmailAdapter`, selecionados via `email.provider` em `EmailAdapterConfig`), e o canal `WHATSAPP` é uma constante desconectada em código — não uma consulta ao banco.
+
 ### Campos de ordenação permitidos
 
 `GET /users?sortBy=createdAt&sortDir=desc` aceita somente campos da whitelist para evitar injeção de nome de coluna:
@@ -559,3 +703,11 @@ Todos usam **ShedLock** para garantir execução em apenas uma instância.
 | `TotpChallengeCleanupService` | `0 30 3 * * *` (`totp.challenge.cleanup.cron`) | Challenge tokens expirados | lockAtMostFor PT15M |
 | `TotpPendingSetupCleanupService` | `0 45 3 * * *` (`totp.pending-setup.cleanup.cron`) | Configs TOTP não confirmadas > TTL | lockAtMostFor PT30M |
 | `AuditLogCleanupService` | `0 45 3 * * *` (`audit.cleanup.cron`) | Audit logs mais antigos que `audit.retention-days` | lockAtMostFor PT55M |
+| `DevChallengeCleanupService` | `0 45 3 * * *` (`dev.challenge.cleanup.cron`) | Dev challenge tokens (duplo TOTP) expirados | lockAtMostFor PT15M |
+| `NotificationCleanupService` | `0 0 4 * * *` (`notification.cleanup.cron`) | Notificações lidas mais antigas que `notification.read.retention-days` | lockAtMostFor PT15M |
+
+### Pool de threads dos jobs (C019)
+
+Os 8 schedulers acima concentram-se entre 03:00–04:00, com **3 jobs no mesmo horário às 03:45** (`TotpPendingSetupCleanupService`, `AuditLogCleanupService`, `DevChallengeCleanupService`) e **2 às 03:30** (`EmailVerificationCodeCleanupService`, `TotpChallengeCleanupService`). Sem `spring.task.scheduling.pool.size` configurado, o Spring Boot usa o default de **1 thread** para todos os `@Scheduled` — os jobs do mesmo horário executam em fila no mesmo thread em vez de em paralelo, atrasando uns aos outros (o atraso de um DELETE lento em `audit_logs`, por exemplo, empurraria `devChallengeCleanup` e `totpPendingSetupCleanup` para depois do horário programado).
+
+`spring.task.scheduling.pool.size=${SCHEDULER_POOL_SIZE:4}` (`application.properties`) resolve isso — 4 threads cobre o maior grupo concorrente (3 jobs às 03:45) com uma folga. ShedLock continua garantindo que cada job individual rode em **apenas uma instância** da aplicação (múltiplas instâncias, mesmo cron) — o pool de threads é sobre paralelismo **dentro** de uma instância entre jobs *diferentes* no mesmo horário, um problema ortogonal ao que o ShedLock resolve.

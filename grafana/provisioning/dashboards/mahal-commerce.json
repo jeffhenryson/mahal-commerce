@@ -22,8 +22,8 @@
           "refId": "A"
         },
         "current": {
-          "value": "cerne-commerce",
-          "text": "cerne-commerce"
+          "value": "mahal-commerce",
+          "text": "mahal-commerce"
         },
         "refresh": 1,
         "sort": 1,
@@ -2225,7 +2225,7 @@
   "refresh": "30s",
   "schemaVersion": 39,
   "tags": [
-    "cerne-commerce"
+    "mahal-commerce"
   ],
   "time": {
     "from": "now-1h",
@@ -2233,7 +2233,7 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "Cerne Commerce",
-  "uid": "cerne-commerce",
+  "title": "Mahal Commerce",
+  "uid": "mahal-commerce",
   "version": 3
 }

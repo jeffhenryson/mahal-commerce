@@ -24,8 +24,8 @@
 ## Estrutura de pacotes
 
 ```
-com.securityspring
-├── SecuritySpringApplication             — entry point
+com.cernecommerce
+├── CerneCommerceApplication              — entry point
 ├── core/                                 — lógica de negócio pura (sem framework)
 │   ├── domain/
 │   │   ├── model/
@@ -325,3 +325,22 @@ Além dos defaults do Spring Security (X-Content-Type-Options, X-Frame-Options, 
 | `Referrer-Policy` | `no-referrer` |
 | `Content-Security-Policy` | Configurável via `security.content-security-policy` (vazio = desabilitado em dev) |
 | `Permissions-Policy` | `camera=(), microphone=(), geolocation=(), payment=(), usb=()` |
+
+### Topologia de deploy: backend + frontends (C013)
+
+O backend (este repositório) e os dois frontends Angular vivem em **repositórios separados**, sibling entre si no filesystem:
+
+```
+mahaltabacaria/
+├── mahal-commerce/            (este repo — backend)
+├── mahal-commerce-ui/         (admin UI — porta 4201)
+└── mahal-commerce-ui-market/  (market UI — porta 4300)
+```
+
+`docker-compose.yml` (raiz deste repo, stack de hml/local) define **apenas** backend + infra (Postgres, Redis, Prometheus, Grafana) — nenhum frontend. Isso é intencional, não uma lacuna: cada frontend tem seu próprio `docker-compose.yml` no seu próprio repositório, com uma network externa (`cerne-commerce_default`) apontando para a criada por este compose. Fluxo local:
+
+1. `docker compose up -d` neste repositório (cria a network `cerne-commerce_default`)
+2. `docker compose up -d` em `../mahal-commerce-ui` (admin UI, porta 4201)
+3. `docker compose up -d` em `../mahal-commerce-ui-market` (market UI, porta 4300)
+
+Em **produção**, os três serviços são unificados em `docker-compose.prod.yml` (raiz deste repo) — os serviços `cerne-commerce-ui` e `mahal-commerce-ui-market` usam `build.context` relativo (`./cerne-commerce-ui`, `./mahal-commerce-ui-market`), então o host de deploy precisa ter os dois repositórios de frontend clonados como diretórios sibling do backend antes de rodar `docker compose -f docker-compose.prod.yml up -d` (tipicamente via script de deploy, não documentado neste repositório).

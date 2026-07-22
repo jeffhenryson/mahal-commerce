@@ -1,12 +1,12 @@
 version: "3.9"
 
-# Stack de producao do Cerne Commerce — API, Admin UI e Market UI
+# Stack de producao do Mahal Commerce — API, Admin UI e Market UI
 # Uso: docker compose -f docker-compose.prod.yml up -d
 
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: postgres-cerne-prod
+    container_name: postgres-mahal-prod
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${DB_NAME:-security}
@@ -24,7 +24,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: redis-cerne-prod
+    container_name: redis-mahal-prod
     restart: unless-stopped
     command: redis-server --requirepass ${REDIS_PASSWORD} --save 60 1 --loglevel warning
     volumes:
@@ -38,11 +38,11 @@ services:
       - backend
 
   app:
-    image: cerne-commerce:latest
+    image: mahal-commerce-backend:latest
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: app-cerne-prod
+    container_name: app-mahal-prod
     restart: unless-stopped
     depends_on:
       postgres:
@@ -57,7 +57,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       JWT_ISSUER: ${JWT_ISSUER:-mahaltabacaria-api}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-mahaltabacaria-ui}
-      TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY:-Vx74sQn7CT7IQyr34DOxmhIT3zerUlBbeyOazfudKpU=}
+      TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY}
       AVATAR_BASE_URL: ${AVATAR_BASE_URL:-https://mahaltabacaria.com.br}
       EMAIL_VERIFICATION_FRONTEND_URL: ${EMAIL_VERIFICATION_FRONTEND_URL:-https://mahaltabacaria.com.br/verify}
       REDIS_HOST: redis

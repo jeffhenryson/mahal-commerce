@@ -1,4 +1,4 @@
-# API Reference — security-spring
+# API Reference — mahal-commerce
 
 **Base URL (dev):** `http://localhost:8080` 
 **Auth:** `Authorization: Bearer <accessToken>` em todos os endpoints, exceto os marcados como **Público**.
@@ -334,7 +334,7 @@ Inicia o setup de 2FA. Retorna o segredo e o URI para gerar o QR code.
 // Response 200
 {
   "secret": "BASE32SECRET",
-  "otpauthUri": "otpauth://totp/security-spring:username?secret=...&issuer=security-spring"
+  "otpauthUri": "otpauth://totp/mahal-commerce:username?secret=...&issuer=mahal-commerce"
 }
 ```
 
@@ -1136,6 +1136,124 @@ Cada transição é registrada com autor (username autenticado, nunca informado 
 
 ---
 
+### POST /crm/automacoes — Permissão: CRM_CUSTOMER_MANAGE
+
+```json
+{
+  "nome": "Boas-vindas",               // obrigatório, máx. 100 chars
+  "gatilho": "MANUAL",                  // obrigatório — MANUAL | ENTRADA_ESTAGIO (só MANUAL dispara nesta versão)
+  "segmentoAlvo": "NOVO_LEAD",          // obrigatório — um CustomerStage (Kanban), não o segmento RFM
+  "canal": "EMAIL",                     // obrigatório — WHATSAPP | EMAIL | AMBOS
+  "template": "Ola {nome}, seu saldo e {saldo}"  // obrigatório, máx. 2000 chars — placeholders não são interpolados nesta versão
+}
+// Response 201 + Location → CampaignAutomationResponse / 400 VALIDATION_ERROR / 403
+```
+
+```json
+// CampaignAutomationResponse
+{
+  "id": 1,
+  "nome": "Boas-vindas",
+  "gatilho": "MANUAL",
+  "segmentoAlvo": "NOVO_LEAD",
+  "canal": "EMAIL",
+  "template": "Ola {nome}, seu saldo e {saldo}",
+  "ativa": true,
+  "criadoEm": "2026-07-21T20:00:00Z"
+}
+```
+
+---
+
+### GET /crm/automacoes — Permissão: CRM_CUSTOMER_READ
+
+```
+// Response 200 → CampaignAutomationResponse[]
+```
+
+---
+
+### PATCH /crm/automacoes/{id}/ativa — Permissão: CRM_CUSTOMER_MANAGE
+
+```json
+{
+  "ativa": false   // obrigatório
+}
+// Response 200 → CampaignAutomationResponse / 404 CAMPAIGN_AUTOMATION_NOT_FOUND / 400 VALIDATION_ERROR
+```
+
+---
+
+### DELETE /crm/automacoes/{id} — Permissão: CRM_CUSTOMER_MANAGE
+
+```
+// Remove a automação e todo o seu log de disparos (ON DELETE CASCADE)
+// Response 204 / 404 CAMPAIGN_AUTOMATION_NOT_FOUND
+```
+
+---
+
+### POST /crm/automacoes/{id}/disparar — Permissão: CRM_CUSTOMER_MANAGE
+
+```
+// Resolve os clientes cujo estagio == segmentoAlvo da automação e cria 1 CampaignLogEntry por
+// cliente, status PENDENTE_INTEGRACAO. NÃO envia mensagem real — o canal de envio ainda não
+// existe no backend (ver crm/integracao-canal-envio, F008).
+// Response 200 → CampaignLogResponse[] (uma entrada por cliente-alvo) / 404 CAMPAIGN_AUTOMATION_NOT_FOUND
+```
+
+```json
+// CampaignLogResponse — convertidoEm é sempre null nesta versão (depende do domínio de pedidos,
+// inexistente — ver crm/listagem-clientes-rfm)
+{
+  "id": 10,
+  "automationId": 1,
+  "customerId": 5,
+  "status": "PENDENTE_INTEGRACAO",
+  "disparadoEm": "2026-07-21T20:05:00Z",
+  "convertidoEm": null
+}
+```
+
+---
+
+### GET /crm/automacoes/{id}/log — Permissão: CRM_CUSTOMER_READ
+
+```
+// Response 200 → CampaignLogResponse[] (mais recentes primeiro) / 404 CAMPAIGN_AUTOMATION_NOT_FOUND
+```
+
+---
+
+### GET /crm/canais/status — Permissão: CRM_CUSTOMER_READ
+
+```
+// Status de conexão dos canais de envio (WhatsApp/E-mail) — substitui o badge fixo
+// "API WhatsApp: Conectada" hoje hardcoded no frontend. "conectado" reflete qual adapter de
+// e-mail está ativo no profile (email.provider), não é um health-check de rede ao vivo.
+// WhatsApp sempre reporta desconectado — não existe integração real no backend.
+// Response 200 → ChannelStatusResponse[]
+```
+
+```json
+[
+  {
+    "canal": "EMAIL",
+    "conectado": true,
+    "provedor": "MAILPIT",
+    "detalhe": "Conectado ao Mailpit (ambiente de homologação)"
+  },
+  {
+    "canal": "WHATSAPP",
+    "conectado": false,
+    "provedor": null,
+    "detalhe": "Integração de WhatsApp ainda não implementada"
+  }
+]
+```
+
+---
+
 ## Audit Logs — `/audit-logs`
 
 ### GET /audit-logs — Permissão: AUDIT_READ
@@ -1595,6 +1713,11 @@ interface TotpConfirmResponse {
 | `AUDIT_READ` | Ver audit logs |
 | `ESTOQUE_PRODUCT_READ` | Listar produtos do estoque |
 | `ESTOQUE_PRODUCT_MANAGE` | Criar/gerenciar produtos do estoque |
+| `COMPRAS_READ` | Acesso ao endpoint stub `GET /compras/suppliers` |
+| `ECOMMERCE_READ` | Acesso ao endpoint stub `GET /ecommerce/carts` |
+| `FINANCEIRO_READ` | Acesso ao endpoint stub `GET /financeiro/cash-flow` |
+| `LOGISTICA_READ` | Acesso ao endpoint stub `GET /logistica/shipments` |
+| `PDV_READ` | Acesso ao endpoint stub `GET /pdv/sessions` |
 
 ---
 

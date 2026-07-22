@@ -34,7 +34,17 @@ jobs:
 
       - name: Build Docker image
         run: |
-          docker build -t cerne-commerce:${{ github.sha }} -t cerne-commerce:latest .
+          docker build -t mahal-commerce:${{ github.sha }} -t mahal-commerce:latest .
+
+      - name: Save Docker image as artifact (C015 — build once, reuse in deploy-ecr)
+        run: docker save mahal-commerce:${{ github.sha }} | gzip > mahal-commerce-image.tar.gz
+
+      - name: Upload Docker image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: mahal-commerce-image.tar.gz
+          retention-days: 1
 
   deploy-ecr:
     runs-on: ubuntu-latest
@@ -47,18 +57,13 @@ jobs:
       contents: read
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up JDK 21
-        uses: actions/setup-java@v4
+      - name: Download Docker image artifact (C015 — reusa a imagem buildada em build-test, sem rebuild)
+        uses: actions/download-artifact@v4
         with:
-          distribution: 'temurin'
-          java-version: '21'
-          cache: 'maven'
+          name: docker-image
 
-      - name: Build JAR (skip tests — already ran in build-test)
-        run: ./mvnw -B -ntp -DskipTests package
+      - name: Load Docker image
+        run: docker load -i mahal-commerce-image.tar.gz
 
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
@@ -70,26 +75,24 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build, tag and push Docker image to ECR
+      - name: Tag and push Docker image to ECR
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY_NAME }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build \
-            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
-            -t $ECR_REGISTRY/$ECR_REPOSITORY:latest \
-            .
+          docker tag mahal-commerce:${{ github.sha }} $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker tag mahal-commerce:${{ github.sha }} $ECR_REGISTRY/$ECR_REPOSITORY:latest
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
           echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
-        id: build-image
+        id: tag-and-push-image
 
       - name: Deploy to ECS (update service with new image)
         env:
           CLUSTER: ${{ secrets.ECS_CLUSTER_NAME }}
           SERVICE: ${{ secrets.ECS_SERVICE_NAME }}
-          IMAGE:   ${{ steps.build-image.outputs.image }}
+          IMAGE:   ${{ steps.tag-and-push-image.outputs.image }}
         run: |
           # Update the ECS service task definition with the new image
           TASK_DEF=$(aws ecs describe-task-definition \

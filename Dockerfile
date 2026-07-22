@@ -24,7 +24,7 @@ RUN addgroup -S spring && adduser -S -G spring spring
 RUN mkdir -p /app/uploads && chown -R spring:spring /app
 USER spring
 
-COPY --from=build /app/target/cerne-commerce-*-SNAPSHOT.jar /app/app.jar
+COPY --from=build /app/target/mahal-commerce-*-SNAPSHOT.jar /app/app.jar
 
 EXPOSE 8080
 
