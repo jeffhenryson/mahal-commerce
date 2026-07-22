@@ -57,7 +57,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       JWT_ISSUER: ${JWT_ISSUER:-mahaltabacaria-api}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-mahaltabacaria-ui}
-      TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY}
+      TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY:-zNEtKjyPPpEkAIBZBZ29nixcQCcAcA19ExgMgaQVRjg=}
       AVATAR_BASE_URL: ${AVATAR_BASE_URL:-https://mahaltabacaria.com.br}
       EMAIL_VERIFICATION_FRONTEND_URL: ${EMAIL_VERIFICATION_FRONTEND_URL:-https://mahaltabacaria.com.br/verify}
       REDIS_HOST: redis
