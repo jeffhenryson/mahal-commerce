@@ -9,6 +9,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.MediaType;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
@@ -49,5 +50,36 @@ public class PdvControllerSecurityTest {
                         new SimpleGrantedAuthority("ROLE_ADMIN"),
                         new SimpleGrantedAuthority("PDV_READ"))))
                 .andExpect(status().isOk());
+    }
+
+    private static final String SALE_BODY = "{\"warehouseCode\":\"LOJA-01\",\"items\":["
+            + "{\"sku\":\"NARG-001\",\"quantity\":1,\"unitPrice\":10.00}]}";
+
+    @Test
+    void register_sale_without_auth_returns_401() throws Exception {
+        mockMvc.perform(post("/pdv/sessions/999999/sales")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(SALE_BODY))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void register_sale_without_pdv_sale_manage_returns_403() throws Exception {
+        mockMvc.perform(post("/pdv/sessions/999999/sales")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(SALE_BODY)
+                .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void register_sale_with_pdv_sale_manage_and_nonexistent_session_returns_404() throws Exception {
+        mockMvc.perform(post("/pdv/sessions/999999/sales")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(SALE_BODY)
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("PDV_SALE_MANAGE"))))
+                .andExpect(status().isNotFound());
     }
 }

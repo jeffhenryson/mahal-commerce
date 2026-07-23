@@ -883,11 +883,41 @@ Query: sku (obrigatório), warehouseCode (obrigatório)
 ```
 
 ```json
-// StockBalanceResponse — quantity é 0 se ainda não houve nenhuma movimentação (F003) para o par sku/depósito
+// StockBalanceResponse — quantity é 0 se ainda não houve nenhuma movimentação para o par sku/depósito
 {
   "sku": "NARG-001",
   "warehouseCode": "LOJA-01",
   "quantity": 0
+}
+```
+
+---
+
+### POST /estoque/movements — Permissão: ESTOQUE_STOCK_MANAGE
+
+```json
+{
+  "sku": "NARG-001",           // 3–50 chars, obrigatório
+  "warehouseCode": "LOJA-01",   // obrigatório
+  "type": "ENTRADA",            // obrigatório — ENTRADA | SAIDA | AJUSTE
+  "quantity": 5.000,             // obrigatório, > 0
+  "reason": "Recebimento de fornecedor" // obrigatório, máx. 255 chars
+}
+// Response 201 + Location → StockBalanceResponse (saldo já atualizado)
+// 404 WAREHOUSE_NOT_FOUND / 400 INSUFFICIENT_STOCK (SAIDA deixaria o saldo negativo) / 400 VALIDATION_ERROR
+// 409 STOCK_UPDATE_CONFLICT (conflito de concorrência otimista — tente novamente)
+```
+
+`username` **não** é enviado no corpo — é sempre o usuário autenticado (JWT), nunca informado
+pelo cliente da API. ENTRADA e AJUSTE somam `quantity` ao saldo; SAIDA subtrai (rejeitada com
+400 se o resultado ficaria negativo — saldo zerado é permitido).
+
+```json
+// StockBalanceResponse (mesmo shape de GET /estoque/stock-balance)
+{
+  "sku": "NARG-001",
+  "warehouseCode": "LOJA-01",
+  "quantity": 5.000
 }
 ```
 

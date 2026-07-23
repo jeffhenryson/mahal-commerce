@@ -367,6 +367,52 @@ Valor sem identidade própria — sempre filho de um `ProductVariant`.
 record ProductAttribute(String type, String value)
 ```
 
+### Warehouse (record) — domínio `estoque`
+
+Depósito de estoque (loja física ou e-commerce). Cada `StockBalance` é mantido por SKU
+dentro de um depósito.
+
+```java
+record Warehouse(Long id, String code, String name, WarehouseType type, boolean active) {
+    static Warehouse create(code, name, type)                    // criação (id=null, active=true)
+    static Warehouse of(id, code, name, type, active)             // reconstituição a partir de persistência
+}
+
+enum WarehouseType { LOJA_FISICA, ECOMMERCE }
+```
+
+### StockBalance (record) — domínio `estoque`
+
+Saldo de um SKU em um `Warehouse`. `version` suporta locking otimista para as escritas
+concorrentes de `StockMovement`.
+
+```java
+record StockBalance(Long id, String sku, Long warehouseId, BigDecimal quantity, long version) {
+    static StockBalance zero(sku, warehouseId)                    // saldo inicial (zero), sem persistir
+    static StockBalance of(id, sku, warehouseId, quantity, version) // reconstituição a partir de persistência
+    StockBalance apply(MovementType type, BigDecimal quantity)     // aplica movimentação; ENTRADA/AJUSTE somam,
+                                                                     // SAIDA subtrai; lança InsufficientStockException
+                                                                     // se o resultado ficaria negativo
+}
+```
+
+### StockMovement (record) — domínio `estoque`
+
+Registro auditável de uma movimentação manual de estoque (entrada, saída ou ajuste) que
+altera um `StockBalance`.
+
+```java
+record StockMovement(Long id, String sku, Long warehouseId, MovementType type, BigDecimal quantity,
+        String reason, String username, Instant createdAt) {
+    static StockMovement create(sku, warehouseId, type, quantity, reason, username) // criação (id=null, createdAt=now)
+    static StockMovement of(id, sku, warehouseId, type, quantity, reason, username, createdAt) // reconstituição
+}
+
+enum MovementType { ENTRADA, SAIDA, AJUSTE }
+```
+
+`username` é sempre o usuário autenticado (JWT) — nunca informado pelo cliente da API.
+
 ---
 
 ## Ports IN — contratos de use case
@@ -495,6 +541,10 @@ record ProductAttribute(String type, String value)
 |--------|-----------|
 | `Product createProduct(sku, name, category, variants)` | Cria produto (SKU pai) com variações; lança `DuplicateSkuException` se o SKU já existir |
 | `PageResult<Product> listProducts(page, size)` | Lista produtos paginados |
+| `Warehouse createWarehouse(code, name, type)` | Cria um depósito; lança `DuplicateWarehouseCodeException` se o código já existir |
+| `List<Warehouse> listWarehouses()` | Lista todos os depósitos cadastrados |
+| `StockBalance getStockBalance(sku, warehouseCode)` | Consulta o saldo de um SKU em um depósito; retorna saldo zero se nunca movimentado; lança `WarehouseNotFoundException` se o depósito não existir |
+| `StockBalance adjustStock(sku, warehouseCode, type, quantity, reason, username)` | Registra uma movimentação manual (entrada/saída/ajuste) e atualiza o `StockBalance` na mesma transação; lança `WarehouseNotFoundException` ou `InsufficientStockException` (SAIDA que deixaria o saldo negativo) |
 
 ---
 
@@ -600,6 +650,25 @@ Implementado por `SseEmitterRegistry` em `adapter/in/sse/`. Injetado em `Notific
 PageResult<Product> findAll(page, size)
 Optional<Product> findBySku(String sku)
 Product save(Product product)
+```
+
+**WarehouseRepository**
+```
+Warehouse save(Warehouse warehouse)
+Optional<Warehouse> findByCode(String code)
+List<Warehouse> findAll()
+```
+
+**StockBalanceRepository**
+```
+Optional<StockBalance> findBySkuAndWarehouseId(String sku, Long warehouseId)
+StockBalance save(StockBalance stockBalance)
+```
+
+**StockMovementRepository**
+```
+StockMovement save(StockMovement movement)
+PageResult<StockMovement> findBySkuAndWarehouseId(String sku, Long warehouseId, int page, int size) // histórico, mais recentes primeiro
 ```
 
 **EmailPort**

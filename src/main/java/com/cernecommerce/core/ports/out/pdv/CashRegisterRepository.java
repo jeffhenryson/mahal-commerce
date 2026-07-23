@@ -7,14 +7,14 @@ import java.util.Optional;
 
 /**
  * Port de saída para persistência de sessões de caixa do PDV.
- *
- * <p>Stub — a ser implementado por um adapter em {@code adapter/out/persistence}.</p>
  */
 public interface CashRegisterRepository {
 
     PageResult<CashRegisterSession> findAll(int page, int size);
 
     Optional<CashRegisterSession> findOpenByOperator(String operator);
+
+    Optional<CashRegisterSession> findById(Long id);
 
     CashRegisterSession save(CashRegisterSession session);
 }

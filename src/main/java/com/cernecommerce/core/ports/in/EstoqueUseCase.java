@@ -1,12 +1,14 @@
 package com.cernecommerce.core.ports.in;
 
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
 import com.cernecommerce.core.domain.model.estoque.Warehouse;
 import com.cernecommerce.core.domain.model.estoque.WarehouseType;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 /**
@@ -41,4 +43,15 @@ public interface EstoqueUseCase {
      * se o código do depósito não existir.
      */
     StockBalance getStockBalance(String sku, String warehouseCode);
+
+    /**
+     * Registra uma movimentação manual de estoque (entrada, saída ou ajuste) e atualiza o
+     * {@link StockBalance} correspondente na mesma transação. Retorna o saldo atualizado.
+     * Lança {@link com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException}
+     * se o código do depósito não existir, ou
+     * {@link com.cernecommerce.core.domain.exception.estoque.InsufficientStockException} se
+     * uma SAIDA deixaria o saldo negativo.
+     */
+    StockBalance adjustStock(String sku, String warehouseCode, MovementType type, BigDecimal quantity,
+            String reason, String username);
 }

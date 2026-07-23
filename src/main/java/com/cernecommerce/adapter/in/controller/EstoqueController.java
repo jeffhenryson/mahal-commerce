@@ -1,8 +1,10 @@
 package com.cernecommerce.adapter.in.controller;
 
 import com.cernecommerce.adapter.in.converter.ProductDTOConverter;
+import com.cernecommerce.adapter.in.converter.StockMovementDTOConverter;
 import com.cernecommerce.adapter.in.converter.WarehouseDTOConverter;
 import com.cernecommerce.adapter.in.dtos.request.ProductRequest;
+import com.cernecommerce.adapter.in.dtos.request.StockMovementRequest;
 import com.cernecommerce.adapter.in.dtos.request.WarehouseRequest;
 import com.cernecommerce.adapter.in.dtos.response.ProductResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.StockBalanceResponseDTO;
@@ -46,13 +48,16 @@ public class EstoqueController {
     private final EstoqueUseCase estoqueUseCase;
     private final ProductDTOConverter converter;
     private final WarehouseDTOConverter warehouseConverter;
+    private final StockMovementDTOConverter movementConverter;
     private final ApplicationEventPublisher publisher;
 
     public EstoqueController(EstoqueUseCase estoqueUseCase, ProductDTOConverter converter,
-            WarehouseDTOConverter warehouseConverter, ApplicationEventPublisher publisher) {
+            WarehouseDTOConverter warehouseConverter, StockMovementDTOConverter movementConverter,
+            ApplicationEventPublisher publisher) {
         this.estoqueUseCase = estoqueUseCase;
         this.converter = converter;
         this.warehouseConverter = warehouseConverter;
+        this.movementConverter = movementConverter;
         this.publisher = publisher;
     }
 
@@ -134,5 +139,27 @@ public class EstoqueController {
             @RequestParam String warehouseCode) {
         StockBalance balance = estoqueUseCase.getStockBalance(sku, warehouseCode);
         return ResponseEntity.ok(warehouseConverter.toResponse(balance, warehouseCode));
+    }
+
+    @Operation(summary = "Registra uma movimentação manual de estoque (entrada, saída ou ajuste)")
+    @ApiResponses({
+            @ApiResponse(responseCode = "201", description = "Registrada", content = @Content(schema = @Schema(implementation = StockBalanceResponseDTO.class))),
+            @ApiResponse(responseCode = "400", description = "Saldo insuficiente ou requisição inválida", content = @Content),
+            @ApiResponse(responseCode = "404", description = "Depósito não encontrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PostMapping("/movements")
+    @PreAuthorize("hasAuthority('ESTOQUE_STOCK_MANAGE')")
+    public ResponseEntity<StockBalanceResponseDTO> registerMovement(@Valid @RequestBody StockMovementRequest request,
+            Authentication authentication) {
+        StockBalance updated = estoqueUseCase.adjustStock(request.getSku(), request.getWarehouseCode(),
+                movementConverter.toType(request.getType()), request.getQuantity(), request.getReason(),
+                authentication.getName());
+        publisher.publishEvent(AuditEvent.of(EventType.STOCK_MOVEMENT_REGISTERED, authentication.getName(),
+                Map.of("sku", request.getSku(), "warehouseCode", request.getWarehouseCode(),
+                        "type", request.getType(), "quantity", request.getQuantity())));
+        return ResponseEntity.created(URI.create("/estoque/stock-balance?sku=" + request.getSku()
+                        + "&warehouseCode=" + request.getWarehouseCode()))
+                .body(warehouseConverter.toResponse(updated, request.getWarehouseCode()));
     }
 }

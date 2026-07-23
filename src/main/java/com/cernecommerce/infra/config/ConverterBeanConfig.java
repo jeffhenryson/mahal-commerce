@@ -9,11 +9,14 @@ import com.cernecommerce.adapter.in.converter.ChannelStatusDTOConverter;
 import com.cernecommerce.adapter.in.converter.CustomerCsvConverter;
 import com.cernecommerce.adapter.in.converter.CustomerDTOConverter;
 import com.cernecommerce.adapter.in.converter.CustomerNoteDTOConverter;
+import com.cernecommerce.adapter.in.converter.GoodsReceiptDTOConverter;
 import com.cernecommerce.adapter.in.converter.PermissionDTOConverter;
 import com.cernecommerce.adapter.in.converter.StageTransitionDTOConverter;
 import com.cernecommerce.adapter.in.converter.TagDTOConverter;
 import com.cernecommerce.adapter.in.converter.ProductDTOConverter;
 import com.cernecommerce.adapter.in.converter.RoleDTOConverter;
+import com.cernecommerce.adapter.in.converter.SaleDTOConverter;
+import com.cernecommerce.adapter.in.converter.StockMovementDTOConverter;
 import com.cernecommerce.adapter.in.converter.UserDTOConverter;
 import com.cernecommerce.adapter.in.converter.WarehouseDTOConverter;
 import com.cernecommerce.adapter.out.persistence.converter.UserEntityConverter;
@@ -52,6 +55,16 @@ class ConverterBeanConfig {
     }
 
     @Bean
+    StockMovementDTOConverter stockMovementDTOConverter() {
+        return new StockMovementDTOConverter();
+    }
+
+    @Bean
+    GoodsReceiptDTOConverter goodsReceiptDTOConverter() {
+        return new GoodsReceiptDTOConverter();
+    }
+
+    @Bean
     CustomerDTOConverter customerDTOConverter() {
         return new CustomerDTOConverter();
     }
@@ -84,5 +97,10 @@ class ConverterBeanConfig {
     @Bean
     ChannelStatusDTOConverter channelStatusDTOConverter() {
         return new ChannelStatusDTOConverter();
+    }
+
+    @Bean
+    SaleDTOConverter saleDTOConverter() {
+        return new SaleDTOConverter();
     }
 }

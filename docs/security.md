@@ -108,6 +108,22 @@ Adicionada ao JWT apenas após completar o **duplo TOTP DEV** (`POST /auth/dev/c
 
 ---
 
+### Permissões — Estoque
+
+Endpoints de `EstoqueController` (`/estoque/**`), protegidos via `@PreAuthorize("hasAuthority('...')")`:
+
+| Método | Endpoint | Permissão |
+|--------|----------|-----------|
+| `GET` | `/estoque/products` | `ESTOQUE_PRODUCT_READ` |
+| `POST` | `/estoque/products` | `ESTOQUE_PRODUCT_MANAGE` |
+| `POST` | `/estoque/warehouses` | `ESTOQUE_WAREHOUSE_MANAGE` |
+| `GET` | `/estoque/warehouses` | `ESTOQUE_WAREHOUSE_READ` |
+| `GET` | `/estoque/stock-balance` | `ESTOQUE_WAREHOUSE_READ` |
+
+Permissões criadas em `V45__estoque_product_permissions.sql` (`ESTOQUE_PRODUCT_READ`, `ESTOQUE_PRODUCT_MANAGE`) e `V47__estoque_warehouse_permissions.sql` (`ESTOQUE_WAREHOUSE_READ`, `ESTOQUE_WAREHOUSE_MANAGE`). Ambas as migrations concedem as permissões apenas a `ROLE_ADMIN`.
+
+---
+
 ## Senhas
 
 - Hash: BCrypt via `BcryptPasswordHashAdapter`

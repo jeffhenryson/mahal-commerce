@@ -65,8 +65,13 @@ import com.cernecommerce.core.ports.in.PdvUseCase;
 import com.cernecommerce.core.ports.in.EstoqueUseCase;
 import com.cernecommerce.core.ports.out.estoque.ProductRepository;
 import com.cernecommerce.core.ports.out.estoque.StockBalanceRepository;
+import com.cernecommerce.core.ports.out.estoque.StockMovementRepository;
 import com.cernecommerce.core.ports.out.estoque.WarehouseRepository;
+import com.cernecommerce.core.ports.out.pdv.CashRegisterRepository;
+import com.cernecommerce.core.ports.out.pdv.SaleRepository;
 import com.cernecommerce.core.ports.in.ComprasUseCase;
+import com.cernecommerce.core.ports.out.compras.GoodsReceiptRepository;
+import com.cernecommerce.core.ports.out.compras.SupplierRepository;
 import com.cernecommerce.core.ports.in.FinanceiroUseCase;
 import com.cernecommerce.core.ports.in.EcommerceUseCase;
 import com.cernecommerce.core.ports.in.LogisticaUseCase;
@@ -185,19 +190,22 @@ class CoreBeanConfig {
     // Ao implementar cada domínio, injetar aqui o(s) repository/port correspondente.
 
     @Bean
-    PdvUseCase pdvUseCase() {
-        return new PdvService();
+    PdvUseCase pdvUseCase(CashRegisterRepository cashRegisterRepository, SaleRepository saleRepository,
+            EstoqueUseCase estoqueUseCase) {
+        return new PdvService(cashRegisterRepository, saleRepository, estoqueUseCase);
     }
 
     @Bean
     EstoqueUseCase estoqueUseCase(ProductRepository productRepository, WarehouseRepository warehouseRepository,
-            StockBalanceRepository stockBalanceRepository) {
-        return new EstoqueService(productRepository, warehouseRepository, stockBalanceRepository);
+            StockBalanceRepository stockBalanceRepository, StockMovementRepository stockMovementRepository) {
+        return new EstoqueService(productRepository, warehouseRepository, stockBalanceRepository,
+                stockMovementRepository);
     }
 
     @Bean
-    ComprasUseCase comprasUseCase() {
-        return new ComprasService();
+    ComprasUseCase comprasUseCase(SupplierRepository supplierRepository, GoodsReceiptRepository goodsReceiptRepository,
+            EstoqueUseCase estoqueUseCase) {
+        return new ComprasService(supplierRepository, goodsReceiptRepository, estoqueUseCase);
     }
 
     @Bean

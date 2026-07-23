@@ -141,4 +141,45 @@ public class EstoqueControllerSecurityTest {
                 .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
                 .andExpect(status().isForbidden());
     }
+
+    @Test
+    void register_movement_without_auth_returns_401() throws Exception {
+        mockMvc.perform(post("/estoque/movements")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"sku\":\"NARG-001\",\"warehouseCode\":\"LOJA-01\",\"type\":\"ENTRADA\","
+                        + "\"quantity\":1,\"reason\":\"teste\"}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void register_movement_with_user_role_only_returns_403() throws Exception {
+        mockMvc.perform(post("/estoque/movements")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"sku\":\"NARG-001\",\"warehouseCode\":\"LOJA-01\",\"type\":\"ENTRADA\","
+                        + "\"quantity\":1,\"reason\":\"teste\"}")
+                .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void register_movement_with_estoque_stock_manage_returns_201() throws Exception {
+        String code = "LOJA_MOV_SEC_TEST_" + System.currentTimeMillis();
+        mockMvc.perform(post("/estoque/warehouses")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"code\":\"" + code + "\",\"name\":\"Loja Teste\",\"type\":\"LOJA_FISICA\"}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_WAREHOUSE_MANAGE"))))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(post("/estoque/movements")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"sku\":\"NARG-001\",\"warehouseCode\":\"" + code + "\",\"type\":\"ENTRADA\","
+                        + "\"quantity\":1,\"reason\":\"teste\"}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_STOCK_MANAGE"))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.warehouseCode").value(code));
+    }
 }

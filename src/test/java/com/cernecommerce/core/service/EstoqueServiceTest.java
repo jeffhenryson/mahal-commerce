@@ -2,8 +2,10 @@ package com.cernecommerce.core.service;
 
 import com.cernecommerce.core.domain.exception.estoque.DuplicateSkuException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateWarehouseCodeException;
+import com.cernecommerce.core.domain.exception.estoque.InsufficientStockException;
 import com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException;
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
@@ -12,6 +14,7 @@ import com.cernecommerce.core.domain.model.estoque.Warehouse;
 import com.cernecommerce.core.domain.model.estoque.WarehouseType;
 import com.cernecommerce.core.ports.out.estoque.ProductRepository;
 import com.cernecommerce.core.ports.out.estoque.StockBalanceRepository;
+import com.cernecommerce.core.ports.out.estoque.StockMovementRepository;
 import com.cernecommerce.core.ports.out.estoque.WarehouseRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -34,12 +37,14 @@ class EstoqueServiceTest {
     @Mock ProductRepository productRepository;
     @Mock WarehouseRepository warehouseRepository;
     @Mock StockBalanceRepository stockBalanceRepository;
+    @Mock StockMovementRepository stockMovementRepository;
 
     EstoqueService estoqueService;
 
     @BeforeEach
     void setUp() {
-        estoqueService = new EstoqueService(productRepository, warehouseRepository, stockBalanceRepository);
+        estoqueService = new EstoqueService(productRepository, warehouseRepository, stockBalanceRepository,
+                stockMovementRepository);
     }
 
     private List<ProductVariant> oneVariant() {
@@ -152,5 +157,63 @@ class EstoqueServiceTest {
 
         assertThatThrownBy(() -> estoqueService.getStockBalance("NARG-001", "INEXISTENTE"))
                 .isInstanceOf(WarehouseNotFoundException.class);
+    }
+
+    @Test
+    void adjustStock_entrada_withoutPriorBalance_startsFromZeroAndPersists() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("NARG-001", 1L)).thenReturn(Optional.empty());
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        StockBalance result = estoqueService.adjustStock("NARG-001", "LOJA-01", MovementType.ENTRADA,
+                new BigDecimal("5.000"), "Recebimento inicial", "gerente");
+
+        assertThat(result.quantity()).isEqualByComparingTo("5.000");
+        verify(stockMovementRepository).save(argThat(m -> m.type() == MovementType.ENTRADA
+                && m.quantity().compareTo(new BigDecimal("5.000")) == 0
+                && m.username().equals("gerente")));
+        verify(stockBalanceRepository).save(any());
+    }
+
+    @Test
+    void adjustStock_saida_decreasesExistingBalance() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        StockBalance existing = StockBalance.of(10L, "NARG-001", 1L, new BigDecimal("10.000"), 2L);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("NARG-001", 1L)).thenReturn(Optional.of(existing));
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        StockBalance result = estoqueService.adjustStock("NARG-001", "LOJA-01", MovementType.SAIDA,
+                new BigDecimal("3.000"), "Venda balcão", "gerente");
+
+        assertThat(result.quantity()).isEqualByComparingTo("7.000");
+    }
+
+    @Test
+    void adjustStock_saida_insufficientBalance_throwsAndDoesNotPersistAnything() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        StockBalance existing = StockBalance.of(10L, "NARG-001", 1L, new BigDecimal("2.000"), 0L);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("NARG-001", 1L)).thenReturn(Optional.of(existing));
+
+        assertThatThrownBy(() -> estoqueService.adjustStock("NARG-001", "LOJA-01", MovementType.SAIDA,
+                new BigDecimal("5.000"), "Venda balcão", "gerente"))
+                .isInstanceOf(InsufficientStockException.class);
+
+        verify(stockMovementRepository, never()).save(any());
+        verify(stockBalanceRepository, never()).save(any());
+    }
+
+    @Test
+    void adjustStock_throwsWhenWarehouseNotFound() {
+        when(warehouseRepository.findByCode("INEXISTENTE")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.adjustStock("NARG-001", "INEXISTENTE", MovementType.ENTRADA,
+                BigDecimal.ONE, "motivo", "gerente"))
+                .isInstanceOf(WarehouseNotFoundException.class);
+
+        verify(stockMovementRepository, never()).save(any());
+        verify(stockBalanceRepository, never()).save(any());
     }
 }

@@ -4,17 +4,21 @@ import com.cernecommerce.core.domain.exception.estoque.DuplicateSkuException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateWarehouseCodeException;
 import com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException;
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
+import com.cernecommerce.core.domain.model.estoque.StockMovement;
 import com.cernecommerce.core.domain.model.estoque.Warehouse;
 import com.cernecommerce.core.domain.model.estoque.WarehouseType;
 import com.cernecommerce.core.ports.in.EstoqueUseCase;
 import com.cernecommerce.core.ports.out.estoque.ProductRepository;
 import com.cernecommerce.core.ports.out.estoque.StockBalanceRepository;
+import com.cernecommerce.core.ports.out.estoque.StockMovementRepository;
 import com.cernecommerce.core.ports.out.estoque.WarehouseRepository;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 public class EstoqueService implements EstoqueUseCase {
@@ -22,12 +26,14 @@ public class EstoqueService implements EstoqueUseCase {
     private final ProductRepository productRepository;
     private final WarehouseRepository warehouseRepository;
     private final StockBalanceRepository stockBalanceRepository;
+    private final StockMovementRepository stockMovementRepository;
 
     public EstoqueService(ProductRepository productRepository, WarehouseRepository warehouseRepository,
-            StockBalanceRepository stockBalanceRepository) {
+            StockBalanceRepository stockBalanceRepository, StockMovementRepository stockMovementRepository) {
         this.productRepository = productRepository;
         this.warehouseRepository = warehouseRepository;
         this.stockBalanceRepository = stockBalanceRepository;
+        this.stockMovementRepository = stockMovementRepository;
     }
 
     @Override
@@ -68,5 +74,18 @@ public class EstoqueService implements EstoqueUseCase {
                 .orElseThrow(() -> new WarehouseNotFoundException(warehouseCode));
         return stockBalanceRepository.findBySkuAndWarehouseId(sku, warehouse.id())
                 .orElseGet(() -> StockBalance.zero(sku, warehouse.id()));
+    }
+
+    @Override
+    @Transactional
+    public StockBalance adjustStock(String sku, String warehouseCode, MovementType type, BigDecimal quantity,
+            String reason, String username) {
+        Warehouse warehouse = warehouseRepository.findByCode(warehouseCode)
+                .orElseThrow(() -> new WarehouseNotFoundException(warehouseCode));
+        StockBalance current = stockBalanceRepository.findBySkuAndWarehouseId(sku, warehouse.id())
+                .orElseGet(() -> StockBalance.zero(sku, warehouse.id()));
+        StockBalance updated = current.apply(type, quantity);
+        stockMovementRepository.save(StockMovement.create(sku, warehouse.id(), type, quantity, reason, username));
+        return stockBalanceRepository.save(updated);
     }
 }

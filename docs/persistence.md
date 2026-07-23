@@ -298,12 +298,35 @@ Relacionamento: `@ElementCollection` de `ProductAttributeEmbeddable` (tabela `pr
 | sku | VARCHAR(50) | NOT NULL |
 | warehouse_id | BIGINT | FK → warehouse(id) ON DELETE CASCADE |
 | quantity | NUMERIC(14,3) | NOT NULL DEFAULT 0 |
-| version | BIGINT | NOT NULL DEFAULT 0 — `@Version`, locking otimista para as escritas concorrentes da movimentação de estoque (F003) |
+| version | BIGINT | NOT NULL DEFAULT 0 — `@Version`, locking otimista para as escritas concorrentes de `StockMovement` (`POST /estoque/movements`) |
 
 Constraint única: `uk_stock_balance_sku_warehouse (sku, warehouse_id)` — um único registro de saldo por par SKU/depósito.
 Índice: `idx_stock_balance_warehouse_id (warehouse_id)`.
 
-`getStockBalance(sku, warehouseCode)` retorna saldo zero (sem persistir linha) quando ainda não existe registro para o par — inventário sem nenhuma movimentação começa em zero. O primeiro `save()` de fato só ocorrerá quando F003 (`movimentacao-manual`) escrever a primeira movimentação.
+`getStockBalance(sku, warehouseCode)` retorna saldo zero (sem persistir linha) quando ainda não existe registro para o par — inventário sem nenhuma movimentação começa em zero. `EstoqueService.adjustStock` faz o primeiro `save()` real (via `StockBalance.apply`), sob proteção do `@Version` acima: um conflito de escrita concorrente lança `ObjectOptimisticLockingFailureException`, traduzida pelo `GlobalExceptionHandler` para `409 STOCK_UPDATE_CONFLICT`.
+
+---
+
+### StockMovementEntity — tabela `stock_movement`
+
+| Coluna | Tipo | Constraint |
+|--------|------|-----------|
+| id | BIGINT | PK, auto-increment |
+| sku | VARCHAR(50) | NOT NULL |
+| warehouse_id | BIGINT | FK → warehouse(id) ON DELETE CASCADE |
+| type | VARCHAR(10) | NOT NULL — `ENTRADA` \| `SAIDA` \| `AJUSTE` (`@Enumerated(STRING)`) |
+| quantity | NUMERIC(14,3) | NOT NULL |
+| reason | VARCHAR(255) | NOT NULL |
+| username | VARCHAR(80) | NOT NULL — sempre o usuário autenticado (JWT), nunca informado pelo cliente da API |
+| created_at | TIMESTAMP | NOT NULL |
+
+Índice composto: `idx_stock_movement_sku_warehouse_created (sku, warehouse_id, created_at)` — suporta o
+histórico paginado (`StockMovementRepository.findBySkuAndWarehouseId`, mais recentes primeiro),
+ainda sem endpoint HTTP consumindo-o nesta sprint.
+
+`EstoqueService.adjustStock` grava a `StockMovementEntity` e atualiza `StockBalanceEntity` na
+mesma transação (`@Transactional`) — a movimentação nunca é persistida sem o saldo refletir a
+mudança, e vice-versa.
 
 ---
 
@@ -533,6 +556,8 @@ Diferente do HikariCP, o pool de threads HTTP do Tomcat não precisa ser dimensi
 | `V52__crm_campaign_automations.sql` | Cria as tabelas `campaign_automations` (regra de automação/campanha) e `campaign_log` (log de disparos por cliente-alvo, FK ON DELETE CASCADE para ambos). |
 | `V53__stub_controllers_read_permissions.sql` | Insere `COMPRAS_READ`, `ECOMMERCE_READ`, `FINANCEIRO_READ`, `LOGISTICA_READ`, `PDV_READ`, atribuídas ao `ROLE_ADMIN` (C004 — `@PreAuthorize` nos 5 controllers stub). Também adicionadas ao array `ADMIN_PERMISSIONS` de `SeedConfig` e `DevRoleBootstrapConfig`. |
 | `V54__add_username_indices.sql` | Índices em `email_verification_codes(username)` e `password_reset_tokens(username)` — elimina full table scan em `findFirstByUsernameOrderBy...`/`deleteByUsername` (C010). |
+| `V55__estoque_movement.sql` | Cria a tabela `stock_movement` (ledger auditável de entradas/saídas/ajustes, FK → warehouse ON DELETE CASCADE). Índice composto `(sku, warehouse_id, created_at)`. |
+| `V56__estoque_movement_permissions.sql` | Insere `ESTOQUE_STOCK_MANAGE`, atribuída ao `ROLE_ADMIN` (com `ON CONFLICT DO NOTHING` — ao contrário de V45/V47, não repete o débito técnico C018). Também adicionada ao array `ADMIN_PERMISSIONS` de `SeedConfig` e `DevRoleBootstrapConfig`. |
 
 ---
 
