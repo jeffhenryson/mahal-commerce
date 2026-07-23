@@ -223,4 +223,10 @@ public class UserRepositoryImpl implements UserRepository {
     public Set<String> findUsernamesByRole(String roleName) {
         return Set.copyOf(userRepo.findUsernamesByRoleName(roleName));
     }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Set<String> findUsernamesByPermission(String permissionName) {
+        return Set.copyOf(userRepo.findUsernamesByPermissionName(permissionName));
+    }
 }

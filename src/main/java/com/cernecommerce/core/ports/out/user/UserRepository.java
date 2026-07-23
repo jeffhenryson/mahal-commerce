@@ -31,4 +31,7 @@ public interface UserRepository {
 
     /** Usernames de todos os usuários que possuem a role informada — usado para invalidar cache de authorities. */
     Set<String> findUsernamesByRole(String roleName);
+
+    /** Usernames de todos os usuários que possuem a permissão informada (via alguma de suas roles). */
+    Set<String> findUsernamesByPermission(String permissionName);
 }

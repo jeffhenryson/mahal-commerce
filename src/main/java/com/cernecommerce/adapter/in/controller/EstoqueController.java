@@ -4,6 +4,7 @@ import com.cernecommerce.adapter.in.converter.ProductDTOConverter;
 import com.cernecommerce.adapter.in.converter.StockMovementDTOConverter;
 import com.cernecommerce.adapter.in.converter.WarehouseDTOConverter;
 import com.cernecommerce.adapter.in.dtos.request.ProductRequest;
+import com.cernecommerce.adapter.in.dtos.request.ReorderPointRequest;
 import com.cernecommerce.adapter.in.dtos.request.StockMovementRequest;
 import com.cernecommerce.adapter.in.dtos.request.WarehouseRequest;
 import com.cernecommerce.adapter.in.dtos.response.ProductResponseDTO;
@@ -161,5 +162,22 @@ public class EstoqueController {
         return ResponseEntity.created(URI.create("/estoque/stock-balance?sku=" + request.getSku()
                         + "&warehouseCode=" + request.getWarehouseCode()))
                 .body(warehouseConverter.toResponse(updated, request.getWarehouseCode()));
+    }
+
+    @Operation(summary = "Define o ponto de reposição (quantidade mínima) de um SKU em um depósito")
+    @ApiResponses({
+            @ApiResponse(responseCode = "204", description = "Definido"),
+            @ApiResponse(responseCode = "404", description = "Depósito não encontrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PutMapping("/products/{sku}/reorder-point")
+    @PreAuthorize("hasAuthority('ESTOQUE_STOCK_MANAGE')")
+    public ResponseEntity<Void> setReorderPoint(@PathVariable String sku,
+            @Valid @RequestBody ReorderPointRequest request, Authentication authentication) {
+        estoqueUseCase.setReorderPoint(sku, request.getWarehouseCode(), request.getMinQuantity());
+        publisher.publishEvent(AuditEvent.of(EventType.REORDER_POINT_SET, authentication.getName(),
+                Map.of("sku", sku, "warehouseCode", request.getWarehouseCode(),
+                        "minQuantity", request.getMinQuantity())));
+        return ResponseEntity.noContent().build();
     }
 }

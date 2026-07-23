@@ -9,13 +9,18 @@ import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
+import com.cernecommerce.core.domain.model.estoque.ReorderPoint;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
 import com.cernecommerce.core.domain.model.estoque.Warehouse;
 import com.cernecommerce.core.domain.model.estoque.WarehouseType;
+import com.cernecommerce.core.domain.model.notification.NotificationType;
+import com.cernecommerce.core.ports.in.NotificationUseCase;
 import com.cernecommerce.core.ports.out.estoque.ProductRepository;
+import com.cernecommerce.core.ports.out.estoque.ReorderPointRepository;
 import com.cernecommerce.core.ports.out.estoque.StockBalanceRepository;
 import com.cernecommerce.core.ports.out.estoque.StockMovementRepository;
 import com.cernecommerce.core.ports.out.estoque.WarehouseRepository;
+import com.cernecommerce.core.ports.out.user.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -25,10 +30,12 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -38,13 +45,17 @@ class EstoqueServiceTest {
     @Mock WarehouseRepository warehouseRepository;
     @Mock StockBalanceRepository stockBalanceRepository;
     @Mock StockMovementRepository stockMovementRepository;
+    @Mock ReorderPointRepository reorderPointRepository;
+    @Mock NotificationUseCase notificationUseCase;
+    @Mock UserRepository userRepository;
 
     EstoqueService estoqueService;
 
     @BeforeEach
     void setUp() {
         estoqueService = new EstoqueService(productRepository, warehouseRepository, stockBalanceRepository,
-                stockMovementRepository);
+                stockMovementRepository, reorderPointRepository, notificationUseCase, userRepository);
+        lenient().when(reorderPointRepository.findBySkuAndWarehouseId(any(), any())).thenReturn(Optional.empty());
     }
 
     private List<ProductVariant> oneVariant() {
@@ -215,5 +226,89 @@ class EstoqueServiceTest {
 
         verify(stockMovementRepository, never()).save(any());
         verify(stockBalanceRepository, never()).save(any());
+    }
+
+    @Test
+    void setReorderPoint_createsNewWhenNoneExists() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(reorderPointRepository.findBySkuAndWarehouseId("NARG-001", 1L)).thenReturn(Optional.empty());
+        when(reorderPointRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        estoqueService.setReorderPoint("NARG-001", "LOJA-01", new BigDecimal("10.000"));
+
+        verify(reorderPointRepository).save(argThat(rp -> rp.id() == null
+                && rp.sku().equals("NARG-001") && rp.warehouseId().equals(1L)
+                && rp.minQuantity().compareTo(new BigDecimal("10.000")) == 0));
+    }
+
+    @Test
+    void setReorderPoint_updatesExisting() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        ReorderPoint existing = ReorderPoint.of(5L, "NARG-001", 1L, new BigDecimal("5.000"));
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(reorderPointRepository.findBySkuAndWarehouseId("NARG-001", 1L)).thenReturn(Optional.of(existing));
+        when(reorderPointRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        estoqueService.setReorderPoint("NARG-001", "LOJA-01", new BigDecimal("10.000"));
+
+        verify(reorderPointRepository).save(argThat(rp -> rp.id().equals(5L)
+                && rp.minQuantity().compareTo(new BigDecimal("10.000")) == 0));
+    }
+
+    @Test
+    void setReorderPoint_throwsWhenWarehouseNotFound() {
+        when(warehouseRepository.findByCode("INEXISTENTE")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.setReorderPoint("NARG-001", "INEXISTENTE", BigDecimal.TEN))
+                .isInstanceOf(WarehouseNotFoundException.class);
+        verify(reorderPointRepository, never()).save(any());
+    }
+
+    @Test
+    void adjustStock_saida_belowReorderPoint_notifiesUsersWithStockManagePermission() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        StockBalance existing = StockBalance.of(10L, "NARG-001", 1L, new BigDecimal("10.000"), 2L);
+        ReorderPoint reorderPoint = ReorderPoint.of(1L, "NARG-001", 1L, new BigDecimal("10.000"));
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("NARG-001", 1L)).thenReturn(Optional.of(existing));
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(reorderPointRepository.findBySkuAndWarehouseId("NARG-001", 1L)).thenReturn(Optional.of(reorderPoint));
+        when(userRepository.findUsernamesByPermission("ESTOQUE_STOCK_MANAGE")).thenReturn(Set.of("gerente-estoque"));
+
+        estoqueService.adjustStock("NARG-001", "LOJA-01", MovementType.SAIDA, new BigDecimal("2.000"),
+                "Venda balcão", "vendedor");
+
+        verify(notificationUseCase).notify(eq("gerente-estoque"), eq(NotificationType.SYSTEM), any(), any());
+    }
+
+    @Test
+    void adjustStock_saida_aboveReorderPoint_doesNotNotify() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        StockBalance existing = StockBalance.of(10L, "NARG-001", 1L, new BigDecimal("10.000"), 2L);
+        ReorderPoint reorderPoint = ReorderPoint.of(1L, "NARG-001", 1L, new BigDecimal("5.000"));
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("NARG-001", 1L)).thenReturn(Optional.of(existing));
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(reorderPointRepository.findBySkuAndWarehouseId("NARG-001", 1L)).thenReturn(Optional.of(reorderPoint));
+
+        estoqueService.adjustStock("NARG-001", "LOJA-01", MovementType.SAIDA, new BigDecimal("2.000"),
+                "Venda balcão", "vendedor");
+
+        verify(notificationUseCase, never()).notify(any(), any(), any(), any());
+        verify(userRepository, never()).findUsernamesByPermission(any());
+    }
+
+    @Test
+    void adjustStock_withoutReorderPointConfigured_doesNotNotify() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("NARG-001", 1L)).thenReturn(Optional.empty());
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        estoqueService.adjustStock("NARG-001", "LOJA-01", MovementType.ENTRADA, new BigDecimal("5.000"),
+                "Recebimento", "gerente");
+
+        verify(notificationUseCase, never()).notify(any(), any(), any(), any());
     }
 }

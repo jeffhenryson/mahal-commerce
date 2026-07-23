@@ -182,4 +182,41 @@ public class EstoqueControllerSecurityTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.warehouseCode").value(code));
     }
+
+    @Test
+    void set_reorder_point_without_auth_returns_401() throws Exception {
+        mockMvc.perform(put("/estoque/products/NARG-001/reorder-point")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"warehouseCode\":\"LOJA-01\",\"minQuantity\":10}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void set_reorder_point_with_user_role_only_returns_403() throws Exception {
+        mockMvc.perform(put("/estoque/products/NARG-001/reorder-point")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"warehouseCode\":\"LOJA-01\",\"minQuantity\":10}")
+                .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void set_reorder_point_with_estoque_stock_manage_returns_204() throws Exception {
+        String code = "LOJA_REORDER_SEC_TEST_" + System.currentTimeMillis();
+        mockMvc.perform(post("/estoque/warehouses")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"code\":\"" + code + "\",\"name\":\"Loja Teste\",\"type\":\"LOJA_FISICA\"}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_WAREHOUSE_MANAGE"))))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(put("/estoque/products/NARG-001/reorder-point")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"warehouseCode\":\"" + code + "\",\"minQuantity\":10}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_STOCK_MANAGE"))))
+                .andExpect(status().isNoContent());
+    }
 }

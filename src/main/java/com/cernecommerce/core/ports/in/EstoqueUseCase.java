@@ -54,4 +54,13 @@ public interface EstoqueUseCase {
      */
     StockBalance adjustStock(String sku, String warehouseCode, MovementType type, BigDecimal quantity,
             String reason, String username);
+
+    /**
+     * Define (cria ou atualiza) o ponto de reposição de um SKU em um depósito. A partir dessa
+     * chamada, toda movimentação que deixe o saldo abaixo de {@code minQuantity} dispara uma
+     * notificação para os usuários com permissão {@code ESTOQUE_STOCK_MANAGE}. Lança
+     * {@link com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException} se o
+     * código do depósito não existir.
+     */
+    void setReorderPoint(String sku, String warehouseCode, BigDecimal minQuantity);
 }

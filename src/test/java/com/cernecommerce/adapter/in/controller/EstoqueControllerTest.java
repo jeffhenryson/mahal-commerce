@@ -274,4 +274,37 @@ public class EstoqueControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errorCode").value("INSUFFICIENT_STOCK"));
     }
+
+    @Test
+    void setReorderPoint_returns_204() throws Exception {
+        mockMvc.perform(put("/estoque/products/NARG-001/reorder-point")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"warehouseCode\":\"LOJA-01\",\"minQuantity\":10.000}"))
+                .andExpect(status().isNoContent());
+
+        verify(estoqueUseCase).setReorderPoint("NARG-001", "LOJA-01", new BigDecimal("10.000"));
+    }
+
+    @Test
+    void setReorderPoint_withoutWarehouseCode_returns_400() throws Exception {
+        mockMvc.perform(put("/estoque/products/NARG-001/reorder-point")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"minQuantity\":10.000}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void setReorderPoint_warehouseNotFound_returns_404() throws Exception {
+        doThrow(new WarehouseNotFoundException("INEXISTENTE"))
+                .when(estoqueUseCase).setReorderPoint(eq("NARG-001"), eq("INEXISTENTE"), any());
+
+        mockMvc.perform(put("/estoque/products/NARG-001/reorder-point")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"warehouseCode\":\"INEXISTENTE\",\"minQuantity\":10.000}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.errorCode").value("WAREHOUSE_NOT_FOUND"));
+    }
 }

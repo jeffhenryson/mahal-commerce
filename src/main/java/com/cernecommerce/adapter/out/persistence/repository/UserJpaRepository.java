@@ -53,4 +53,7 @@ public interface UserJpaRepository extends JpaRepository<UserEntity, Long> {
 
     @Query("select u.username from UserEntity u join u.roles r where r.name = :roleName")
     List<String> findUsernamesByRoleName(@Param("roleName") String roleName);
+
+    @Query("select distinct u.username from UserEntity u join u.roles r join r.permissions p where p.name = :permissionName")
+    List<String> findUsernamesByPermissionName(@Param("permissionName") String permissionName);
 }
