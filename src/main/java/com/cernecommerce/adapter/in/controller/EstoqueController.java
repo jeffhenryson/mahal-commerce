@@ -9,6 +9,7 @@ import com.cernecommerce.adapter.in.dtos.request.StockMovementRequest;
 import com.cernecommerce.adapter.in.dtos.request.WarehouseRequest;
 import com.cernecommerce.adapter.in.dtos.response.ProductResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.StockBalanceResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.StockMovementResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.WarehouseResponseDTO;
 import com.cernecommerce.core.domain.event.AuditEvent;
 import com.cernecommerce.core.domain.event.AuditEvent.EventType;
@@ -16,6 +17,7 @@ import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
+import com.cernecommerce.core.domain.model.estoque.StockMovement;
 import com.cernecommerce.core.domain.model.estoque.Warehouse;
 import com.cernecommerce.core.ports.in.EstoqueUseCase;
 import io.swagger.v3.oas.annotations.Operation;
@@ -162,6 +164,26 @@ public class EstoqueController {
         return ResponseEntity.created(URI.create("/estoque/stock-balance?sku=" + request.getSku()
                         + "&warehouseCode=" + request.getWarehouseCode()))
                 .body(warehouseConverter.toResponse(updated, request.getWarehouseCode()));
+    }
+
+    @Operation(summary = "Lista o histórico paginado de movimentações de um SKU em um depósito")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "404", description = "Depósito não encontrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/movements")
+    @PreAuthorize("hasAuthority('ESTOQUE_STOCK_MANAGE')")
+    public ResponseEntity<PageResult<StockMovementResponseDTO>> listMovements(
+            @RequestParam String sku,
+            @RequestParam String warehouseCode,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        PageResult<StockMovement> result = estoqueUseCase.listMovements(sku, warehouseCode, page, Math.min(size, 100));
+        PageResult<StockMovementResponseDTO> response = new PageResult<>(
+                result.content().stream().map(m -> movementConverter.toResponse(m, warehouseCode)).toList(),
+                result.page(), result.size(), result.totalElements(), result.totalPages());
+        return ResponseEntity.ok(response);
     }
 
     @Operation(summary = "Define o ponto de reposição (quantidade mínima) de um SKU em um depósito")

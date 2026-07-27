@@ -11,6 +11,7 @@ import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.ReorderPoint;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
+import com.cernecommerce.core.domain.model.estoque.StockMovement;
 import com.cernecommerce.core.domain.model.estoque.Warehouse;
 import com.cernecommerce.core.domain.model.estoque.WarehouseType;
 import com.cernecommerce.core.domain.model.notification.NotificationType;
@@ -28,6 +29,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -35,6 +37,7 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
@@ -254,6 +257,45 @@ class EstoqueServiceTest {
 
         verify(reorderPointRepository).save(argThat(rp -> rp.id().equals(5L)
                 && rp.minQuantity().compareTo(new BigDecimal("10.000")) == 0));
+    }
+
+    @Test
+    void listMovements_resolvesWarehouseCodeAndDelegatesPaging() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        StockMovement movement = StockMovement.of(9L, "NARG-001", 1L, MovementType.SAIDA, new BigDecimal("2"),
+                "Venda balcão sessão #7", "gerente", Instant.parse("2026-07-26T12:00:00Z"));
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(stockMovementRepository.findBySkuAndWarehouseId("NARG-001", 1L, 0, 20))
+                .thenReturn(new PageResult<>(List.of(movement), 0, 20, 1L, 1));
+
+        PageResult<StockMovement> result = estoqueService.listMovements("NARG-001", "LOJA-01", 0, 20);
+
+        assertThat(result.content()).containsExactly(movement);
+        assertThat(result.totalElements()).isEqualTo(1L);
+        verify(stockMovementRepository).findBySkuAndWarehouseId("NARG-001", 1L, 0, 20);
+    }
+
+    @Test
+    void listMovements_returnsEmptyPageWhenSkuNeverMoved() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(stockMovementRepository.findBySkuAndWarehouseId("SEM-USO", 1L, 0, 20))
+                .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0));
+
+        PageResult<StockMovement> result = estoqueService.listMovements("SEM-USO", "LOJA-01", 0, 20);
+
+        assertThat(result.content()).isEmpty();
+        assertThat(result.totalElements()).isZero();
+    }
+
+    @Test
+    void listMovements_throwsWhenWarehouseNotFound() {
+        when(warehouseRepository.findByCode("INEXISTENTE")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.listMovements("NARG-001", "INEXISTENTE", 0, 20))
+                .isInstanceOf(WarehouseNotFoundException.class);
+
+        verify(stockMovementRepository, never()).findBySkuAndWarehouseId(any(), any(), anyInt(), anyInt());
     }
 
     @Test

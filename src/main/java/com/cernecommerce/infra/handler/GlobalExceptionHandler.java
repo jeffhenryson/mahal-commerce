@@ -64,6 +64,7 @@ import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
@@ -357,6 +358,19 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ApiError> handleUnreadableBody(HttpMessageNotReadableException ex, HttpServletRequest req) {
         return error(HttpStatus.BAD_REQUEST, "Corpo da requisição inválido ou ausente", "UNREADABLE_BODY", req);
+    }
+
+    /**
+     * Sem este handler, um {@code @RequestParam} obrigatório ausente cairia no catch-all de
+     * {@link Exception} e devolveria 500 em vez de 400 — vale para todo endpoint com parâmetro
+     * de query obrigatório, incluindo {@code GET /estoque/stock-balance} e
+     * {@code GET /estoque/movements}.
+     */
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<ApiError> handleMissingParam(MissingServletRequestParameterException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.BAD_REQUEST, "Parâmetro obrigatório ausente: '" + ex.getParameterName() + "'",
+                "MISSING_PARAMETER", req);
     }
 
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)

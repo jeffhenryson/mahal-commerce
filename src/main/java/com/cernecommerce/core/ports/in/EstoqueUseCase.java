@@ -5,6 +5,7 @@ import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
+import com.cernecommerce.core.domain.model.estoque.StockMovement;
 import com.cernecommerce.core.domain.model.estoque.Warehouse;
 import com.cernecommerce.core.domain.model.estoque.WarehouseType;
 
@@ -54,6 +55,14 @@ public interface EstoqueUseCase {
      */
     StockBalance adjustStock(String sku, String warehouseCode, MovementType type, BigDecimal quantity,
             String reason, String username);
+
+    /**
+     * Histórico paginado de movimentações de um SKU em um depósito, mais recentes primeiro.
+     * Retorna página vazia se o par SKU/depósito nunca foi movimentado. Lança
+     * {@link com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException}
+     * se o código do depósito não existir.
+     */
+    PageResult<StockMovement> listMovements(String sku, String warehouseCode, int page, int size);
 
     /**
      * Define (cria ou atualiza) o ponto de reposição de um SKU em um depósito. A partir dessa

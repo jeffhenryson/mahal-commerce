@@ -174,6 +174,19 @@ class GlobalExceptionHandlerTest {
         assertThat(resp.getBody().errorCode()).isEqualTo("BAD_REQUEST");
     }
 
+    /**
+     * Sem handler dedicado, um {@code @RequestParam} obrigatório ausente cairia no catch-all de
+     * {@link Exception} e viraria 500 (EST-F017).
+     */
+    @Test
+    void missingRequestParameter_returns400_namingTheParameter() {
+        ResponseEntity<ApiError> resp = handler.handleMissingParam(
+                new org.springframework.web.bind.MissingServletRequestParameterException("sku", "String"), req);
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(resp.getBody().errorCode()).isEqualTo("MISSING_PARAMETER");
+        assertThat(resp.getBody().message()).contains("sku");
+    }
+
     // ── 401 Unauthorized ─────────────────────────────────────────────────────
 
     @Test

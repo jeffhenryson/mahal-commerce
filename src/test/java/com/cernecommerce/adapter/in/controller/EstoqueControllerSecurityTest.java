@@ -219,4 +219,53 @@ public class EstoqueControllerSecurityTest {
                         new SimpleGrantedAuthority("ESTOQUE_STOCK_MANAGE"))))
                 .andExpect(status().isNoContent());
     }
+
+    @Test
+    void list_movements_without_auth_returns_401() throws Exception {
+        mockMvc.perform(get("/estoque/movements")
+                .param("sku", "NARG-001")
+                .param("warehouseCode", "LOJA-01"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void list_movements_with_user_role_only_returns_403() throws Exception {
+        mockMvc.perform(get("/estoque/movements")
+                .param("sku", "NARG-001")
+                .param("warehouseCode", "LOJA-01")
+                .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isForbidden());
+    }
+
+    /** Ler o ledger expõe quem movimentou o quê, então exige STOCK_MANAGE — não basta WAREHOUSE_READ. */
+    @Test
+    void list_movements_with_warehouse_read_only_returns_403() throws Exception {
+        mockMvc.perform(get("/estoque/movements")
+                .param("sku", "NARG-001")
+                .param("warehouseCode", "LOJA-01")
+                .with(user("bob").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_WAREHOUSE_READ"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void list_movements_with_estoque_stock_manage_returns_200() throws Exception {
+        String code = "LOJA_MOVLIST_SEC_TEST_" + System.currentTimeMillis();
+        mockMvc.perform(post("/estoque/warehouses")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"code\":\"" + code + "\",\"name\":\"Loja Teste\",\"type\":\"LOJA_FISICA\"}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_WAREHOUSE_MANAGE"))))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(get("/estoque/movements")
+                .param("sku", "NARG-001")
+                .param("warehouseCode", code)
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_STOCK_MANAGE"))))
+                .andExpect(status().isOk());
+    }
 }

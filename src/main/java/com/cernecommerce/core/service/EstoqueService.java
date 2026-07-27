@@ -107,6 +107,14 @@ public class EstoqueService implements EstoqueUseCase {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public PageResult<StockMovement> listMovements(String sku, String warehouseCode, int page, int size) {
+        Warehouse warehouse = warehouseRepository.findByCode(warehouseCode)
+                .orElseThrow(() -> new WarehouseNotFoundException(warehouseCode));
+        return stockMovementRepository.findBySkuAndWarehouseId(sku, warehouse.id(), page, size);
+    }
+
+    @Override
     @Transactional
     public void setReorderPoint(String sku, String warehouseCode, BigDecimal minQuantity) {
         Warehouse warehouse = warehouseRepository.findByCode(warehouseCode)

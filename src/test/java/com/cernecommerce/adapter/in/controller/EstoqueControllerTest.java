@@ -17,6 +17,7 @@ import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
+import com.cernecommerce.core.domain.model.estoque.StockMovement;
 import com.cernecommerce.core.domain.model.estoque.Warehouse;
 import com.cernecommerce.core.domain.model.estoque.WarehouseType;
 import com.cernecommerce.core.ports.in.EstoqueUseCase;
@@ -31,6 +32,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 
 public class EstoqueControllerTest {
@@ -304,6 +306,97 @@ public class EstoqueControllerTest {
                         .principal(AUTH)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"warehouseCode\":\"INEXISTENTE\",\"minQuantity\":10.000}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.errorCode").value("WAREHOUSE_NOT_FOUND"));
+    }
+
+    private StockMovement movement(long id, MovementType type, String quantity, String reason) {
+        return StockMovement.of(id, "NARG-001", 1L, type, new BigDecimal(quantity), reason, "gerente",
+                Instant.parse("2026-07-26T12:00:00Z"));
+    }
+
+    @Test
+    void listMovements_returns_200_with_ledger() throws Exception {
+        when(estoqueUseCase.listMovements("NARG-001", "LOJA-01", 0, 20))
+                .thenReturn(new PageResult<>(List.of(
+                        movement(9L, MovementType.SAIDA, "2.000", "Venda balcão sessão #7"),
+                        movement(8L, MovementType.ENTRADA, "20.000", "Recebimento de mercadoria - fornecedor #3")),
+                        0, 20, 2L, 1));
+
+        mockMvc.perform(get("/estoque/movements")
+                        .principal(AUTH)
+                        .param("sku", "NARG-001")
+                        .param("warehouseCode", "LOJA-01"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isArray())
+                .andExpect(jsonPath("$.content[0].id").value(9))
+                .andExpect(jsonPath("$.content[0].type").value("SAIDA"))
+                .andExpect(jsonPath("$.content[0].sku").value("NARG-001"))
+                .andExpect(jsonPath("$.content[0].warehouseCode").value("LOJA-01"))
+                .andExpect(jsonPath("$.content[0].username").value("gerente"))
+                .andExpect(jsonPath("$.content[0].reason").value("Venda balcão sessão #7"))
+                .andExpect(jsonPath("$.content[1].type").value("ENTRADA"))
+                .andExpect(jsonPath("$.totalElements").value(2));
+    }
+
+    @Test
+    void listMovements_returns_200_withEmptyPageWhenNeverMoved() throws Exception {
+        when(estoqueUseCase.listMovements("SEM-USO", "LOJA-01", 0, 20))
+                .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0));
+
+        mockMvc.perform(get("/estoque/movements")
+                        .principal(AUTH)
+                        .param("sku", "SEM-USO")
+                        .param("warehouseCode", "LOJA-01"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isEmpty())
+                .andExpect(jsonPath("$.totalElements").value(0));
+    }
+
+    @Test
+    void listMovements_capsPageSizeAt100() throws Exception {
+        when(estoqueUseCase.listMovements("NARG-001", "LOJA-01", 0, 100))
+                .thenReturn(new PageResult<>(List.of(), 0, 100, 0L, 0));
+
+        mockMvc.perform(get("/estoque/movements")
+                        .principal(AUTH)
+                        .param("sku", "NARG-001")
+                        .param("warehouseCode", "LOJA-01")
+                        .param("size", "5000"))
+                .andExpect(status().isOk());
+
+        verify(estoqueUseCase).listMovements("NARG-001", "LOJA-01", 0, 100);
+    }
+
+    @Test
+    void listMovements_withoutSku_returns_400() throws Exception {
+        mockMvc.perform(get("/estoque/movements")
+                        .principal(AUTH)
+                        .param("warehouseCode", "LOJA-01"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("MISSING_PARAMETER"));
+
+        verify(estoqueUseCase, never()).listMovements(any(), any(), anyInt(), anyInt());
+    }
+
+    @Test
+    void listMovements_withoutWarehouseCode_returns_400() throws Exception {
+        mockMvc.perform(get("/estoque/movements")
+                        .principal(AUTH)
+                        .param("sku", "NARG-001"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("MISSING_PARAMETER"));
+    }
+
+    @Test
+    void listMovements_warehouseNotFound_returns_404() throws Exception {
+        when(estoqueUseCase.listMovements("NARG-001", "INEXISTENTE", 0, 20))
+                .thenThrow(new WarehouseNotFoundException("INEXISTENTE"));
+
+        mockMvc.perform(get("/estoque/movements")
+                        .principal(AUTH)
+                        .param("sku", "NARG-001")
+                        .param("warehouseCode", "INEXISTENTE"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.errorCode").value("WAREHOUSE_NOT_FOUND"));
     }
