@@ -1,0 +1,545 @@
+{
+  "info": {
+    "_postman_id": "94c0cc37-d5b8-56d8-8ce2-32043e97cb9a",
+    "name": "Mahal — E-commerce",
+    "description": "Coleção de testes do módulo **E-commerce** (`/ecommerce`) do mahal-backend.\n\n> **Status do módulo: esqueleto.** Hoje existe apenas `GET /ecommerce/carts` (listagem paginada de\n> carrinhos), que responde 200 com página vazia enquanto não houver escrita no domínio.\n> Esta coleção valida o contrato de paginação, a validação dos parâmetros e a proteção por\n> permissão — e é o lugar para acrescentar as requisições conforme o módulo for implementado.\n\nDocumentação do módulo: `docs/dominios/ecommerce/README.md`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8082",
+      "type": "string"
+    },
+    {
+      "key": "username",
+      "value": "admin",
+      "type": "string"
+    },
+    {
+      "key": "password",
+      "value": "Admin@dev1",
+      "type": "string"
+    },
+    {
+      "key": "totpCode",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "accessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "refreshToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "challengeToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "permissions",
+      "value": "[]",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "00 — Autenticação",
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Autentica com usuário/senha e guarda o `accessToken` na coleção.\n\nSe o usuário tiver 2FA ativo a resposta é `PENDING_2FA`: preencha a variável `totpCode` e rode a requisição seguinte.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "",
+                  "if (json.status === 'PENDING_2FA') {",
+                  "    pm.collectionVariables.set('challengeToken', json.challengeToken);",
+                  "    console.warn('2FA ativo — preencha {{totpCode}} e rode \"Login 2FA — concluir\".');",
+                  "} else {",
+                  "    pm.test('Retorna accessToken e refreshToken', () => {",
+                  "        pm.expect(json.accessToken, 'accessToken').to.be.a('string').and.not.empty;",
+                  "        pm.expect(json.refreshToken, 'refreshToken').to.be.a('string').and.not.empty;",
+                  "    });",
+                  "    pm.test('tokenType = Bearer', () => pm.expect(json.tokenType).to.eql('Bearer'));",
+                  "    pm.collectionVariables.set('accessToken', json.accessToken);",
+                  "    pm.collectionVariables.set('refreshToken', json.refreshToken);",
+                  "    pm.collectionVariables.set('challengeToken', '');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login 2FA — concluir",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/2fa/verify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "2fa",
+                "verify"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"challengeToken\": \"{{challengeToken}}\",\n  \"code\": \"{{totpCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Só é necessária quando o login devolve `PENDING_2FA`. É ignorada automaticamente quando não há challenge pendente.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.collectionVariables.get('challengeToken')) {",
+                  "    console.log('Sem challenge de 2FA pendente — requisição ignorada.');",
+                  "    if (pm.execution && pm.execution.skipRequest) pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.collectionVariables.set('accessToken', json.accessToken);",
+                  "pm.collectionVariables.set('refreshToken', json.refreshToken);",
+                  "pm.collectionVariables.set('challengeToken', '');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Perfil e permissões do usuário logado",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "me"
+              ]
+            },
+            "description": "Confere se o token funciona e se o usuário tem as permissões exigidas por E-commerce. Guarda a lista em `{{permissions}}` para as requisições que dependem de permissões DEV."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "const perms = json.permissions || [];",
+                  "pm.collectionVariables.set('permissions', JSON.stringify(perms));",
+                  "",
+                  "const required = [\"ECOMMERCE_READ\"];",
+                  "pm.test('Usuário tem as permissões do módulo', () => {",
+                  "    const missing = required.filter(p => !perms.includes(p));",
+                  "    pm.expect(missing, 'permissões faltando: ' + missing.join(', ')).to.be.an('array').that.is.empty;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Rode esta pasta primeiro. O `accessToken` fica salvo na coleção e é reaproveitado por todas as outras requisições."
+    },
+    {
+      "name": "01 — Listagem",
+      "item": [
+        {
+          "name": "Listar carrinhos (paginado)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ecommerce/carts?page=0&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ecommerce",
+                "carts"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "`ECOMMERCE_READ`. Devolve um `PageResult`; hoje o conteúdo vem vazio."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Estrutura de PageResult', () => {",
+                  "    pm.expect(json.content).to.be.an('array');",
+                  "    pm.expect(json.page).to.eql(0);",
+                  "    pm.expect(json.size).to.eql(20);",
+                  "    pm.expect(json.totalElements).to.be.a('number');",
+                  "    pm.expect(json.totalPages).to.be.a('number');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar com página e tamanho customizados",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ecommerce/carts?page=1&size=5",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ecommerce",
+                "carts"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "size",
+                  "value": "5"
+                }
+              ]
+            },
+            "description": "Confere que os parâmetros são refletidos na resposta."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Ecoa page=1 e size=5', () => {",
+                  "    pm.expect(json.page).to.eql(1);",
+                  "    pm.expect(json.size).to.eql(5);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 — Validação e segurança",
+      "item": [
+        {
+          "name": "Erro: page negativa → 400",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ecommerce/carts?page=-1&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ecommerce",
+                "carts"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "-1"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "O controller é `@Validated`: `page` ≥ 0."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('errorCode = VALIDATION_ERROR',",
+                  "    () => pm.expect(pm.response.json().errorCode).to.eql('VALIDATION_ERROR'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Erro: size acima do teto → 400",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ecommerce/carts?page=0&size=500",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ecommerce",
+                "carts"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "500"
+                }
+              ]
+            },
+            "description": "`size` aceita de 1 a 100."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('errorCode = VALIDATION_ERROR',",
+                  "    () => pm.expect(pm.response.json().errorCode).to.eql('VALIDATION_ERROR'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Sem token → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/ecommerce/carts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ecommerce",
+                "carts"
+              ]
+            },
+            "description": "Confirma que o endpoint está protegido: sem `Authorization` a resposta é 401.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "99 — Encerramento",
+      "item": [
+        {
+          "name": "Logout (revoga o refresh token)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "logout"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Revoga o refresh token da sessão. O accessToken continua válido até expirar."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 204', () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set('refreshToken', '');"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

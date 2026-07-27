@@ -1,0 +1,937 @@
+{
+  "info": {
+    "_postman_id": "95a88730-fd29-55d1-bebc-6a505d4d8a53",
+    "name": "Mahal — Compras",
+    "description": "Coleção de testes do módulo **Compras** (`/compras`) do mahal-backend.\n\nCobre a consulta de fornecedores e o recebimento de mercadoria, que **dá entrada automática\nno estoque** item a item (mesma transação: se um item falhar, nada é gravado).\n\n**Pré-requisito:** ainda não existe endpoint para cadastrar fornecedor (ver backlog do módulo).\nA pasta `02 — Fornecedores` pega o primeiro fornecedor da lista; se a base estiver vazia,\ninsira um pelo banco:\n\n```sql\nINSERT INTO supplier (legal_name, tax_id, email, active)\nVALUES ('Fornecedor Teste Postman', '12345678000199', 'fornecedor@teste.local', TRUE);\n```\n\nSem fornecedor cadastrado, as requisições de recebimento são ignoradas automaticamente\n(com aviso no console) em vez de falharem.\n\nDocumentação do módulo: `docs/dominios/compras/README.md`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8082",
+      "type": "string"
+    },
+    {
+      "key": "username",
+      "value": "admin",
+      "type": "string"
+    },
+    {
+      "key": "password",
+      "value": "Admin@dev1",
+      "type": "string"
+    },
+    {
+      "key": "totpCode",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "accessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "refreshToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "challengeToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "permissions",
+      "value": "[]",
+      "type": "string"
+    },
+    {
+      "key": "supplierId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "warehouseCode",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "sku",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "00 — Autenticação",
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Autentica com usuário/senha e guarda o `accessToken` na coleção.\n\nSe o usuário tiver 2FA ativo a resposta é `PENDING_2FA`: preencha a variável `totpCode` e rode a requisição seguinte.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "",
+                  "if (json.status === 'PENDING_2FA') {",
+                  "    pm.collectionVariables.set('challengeToken', json.challengeToken);",
+                  "    console.warn('2FA ativo — preencha {{totpCode}} e rode \"Login 2FA — concluir\".');",
+                  "} else {",
+                  "    pm.test('Retorna accessToken e refreshToken', () => {",
+                  "        pm.expect(json.accessToken, 'accessToken').to.be.a('string').and.not.empty;",
+                  "        pm.expect(json.refreshToken, 'refreshToken').to.be.a('string').and.not.empty;",
+                  "    });",
+                  "    pm.test('tokenType = Bearer', () => pm.expect(json.tokenType).to.eql('Bearer'));",
+                  "    pm.collectionVariables.set('accessToken', json.accessToken);",
+                  "    pm.collectionVariables.set('refreshToken', json.refreshToken);",
+                  "    pm.collectionVariables.set('challengeToken', '');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login 2FA — concluir",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/2fa/verify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "2fa",
+                "verify"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"challengeToken\": \"{{challengeToken}}\",\n  \"code\": \"{{totpCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Só é necessária quando o login devolve `PENDING_2FA`. É ignorada automaticamente quando não há challenge pendente.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.collectionVariables.get('challengeToken')) {",
+                  "    console.log('Sem challenge de 2FA pendente — requisição ignorada.');",
+                  "    if (pm.execution && pm.execution.skipRequest) pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.collectionVariables.set('accessToken', json.accessToken);",
+                  "pm.collectionVariables.set('refreshToken', json.refreshToken);",
+                  "pm.collectionVariables.set('challengeToken', '');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Perfil e permissões do usuário logado",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "me"
+              ]
+            },
+            "description": "Confere se o token funciona e se o usuário tem as permissões exigidas por Compras. Guarda a lista em `{{permissions}}` para as requisições que dependem de permissões DEV."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "const perms = json.permissions || [];",
+                  "pm.collectionVariables.set('permissions', JSON.stringify(perms));",
+                  "",
+                  "const required = [\"COMPRAS_READ\", \"COMPRAS_RECEIPT_MANAGE\", \"ESTOQUE_PRODUCT_MANAGE\", \"ESTOQUE_WAREHOUSE_MANAGE\", \"ESTOQUE_WAREHOUSE_READ\"];",
+                  "pm.test('Usuário tem as permissões do módulo', () => {",
+                  "    const missing = required.filter(p => !perms.includes(p));",
+                  "    pm.expect(missing, 'permissões faltando: ' + missing.join(', ')).to.be.an('array').that.is.empty;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Rode esta pasta primeiro. O `accessToken` fica salvo na coleção e é reaproveitado por todas as outras requisições."
+    },
+    {
+      "name": "01 — Pré-requisitos (domínio estoque)",
+      "item": [
+        {
+          "name": "Criar depósito de recebimento",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/warehouses",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "warehouses"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"{{warehouseCode}}\",\n  \"name\": \"Depósito de recebimento — Postman\",\n  \"type\": \"LOJA_FISICA\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "O recebimento precisa de um depósito existente; senão devolve 404 WAREHOUSE_NOT_FOUND."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('warehouseCode', 'PM-CMP-' + Date.now());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Código confere',",
+                  "    () => pm.expect(pm.response.json().code).to.eql(pm.collectionVariables.get('warehouseCode')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Criar produto que será recebido",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/products",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "products"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"{{sku}}\",\n  \"name\": \"Carvão de coco — teste Postman\",\n  \"category\": \"CARVAO\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "O SKU é texto livre nas movimentações (não há FK — ver EST-C002), mas cadastrar o produto mantém o cenário realista."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('sku', 'PM-CMP-SKU-' + Date.now());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('SKU confere',",
+                  "    () => pm.expect(pm.response.json().sku).to.eql(pm.collectionVariables.get('sku')));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 — Fornecedores",
+      "item": [
+        {
+          "name": "Listar fornecedores (paginado)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compras/suppliers?page=0&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compras",
+                "suppliers"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "`COMPRAS_READ`. Guarda o id do primeiro fornecedor em `{{supplierId}}` para as requisições de recebimento."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Estrutura de PageResult', () => {",
+                  "    pm.expect(json.content).to.be.an('array');",
+                  "    pm.expect(json.page).to.eql(0);",
+                  "    pm.expect(json.totalElements).to.be.a('number');",
+                  "});",
+                  "",
+                  "if (json.content.length) {",
+                  "    pm.collectionVariables.set('supplierId', json.content[0].id);",
+                  "    console.log('supplierId = ' + json.content[0].id);",
+                  "} else {",
+                  "    pm.collectionVariables.set('supplierId', '');",
+                  "    console.warn('Nenhum fornecedor cadastrado — as requisições de recebimento serão ignoradas. Veja o SQL na descrição da coleção.');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Erro: size acima do teto → 400",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compras/suppliers?page=0&size=500",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compras",
+                "suppliers"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "500"
+                }
+              ]
+            },
+            "description": "O controller é `@Validated`: `size` aceita de 1 a 100 e `page` não pode ser negativo."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('errorCode = VALIDATION_ERROR',",
+                  "    () => pm.expect(pm.response.json().errorCode).to.eql('VALIDATION_ERROR'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 — Recebimento de mercadoria",
+      "item": [
+        {
+          "name": "Registrar recebimento (2 itens)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compras/goods-receipts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compras",
+                "goods-receipts"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"supplierId\": \"{{supplierId}}\",\n  \"warehouseCode\": \"{{warehouseCode}}\",\n  \"items\": [\n    {\n      \"sku\": \"{{sku}}\",\n      \"quantity\": 30\n    },\n    {\n      \"sku\": \"{{sku}}\",\n      \"quantity\": 12\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "`COMPRAS_RECEIPT_MANAGE`. Cada item vira um `StockMovement` de `ENTRADA` com o motivo *Recebimento de mercadoria - fornecedor #id*. O ajuste de estoque acontece **antes** de persistir o documento, na mesma transação."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.collectionVariables.get('supplierId')) {",
+                  "    console.warn('Nenhum fornecedor cadastrado — requisição ignorada. Veja o SQL na descrição da coleção.');",
+                  "    if (pm.execution && pm.execution.skipRequest) pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const json = pm.response.json();",
+                  "pm.test('Documento devolvido com os 2 itens', () => {",
+                  "    pm.expect(json.id).to.be.a('number');",
+                  "    pm.expect(json.warehouseCode).to.eql(pm.collectionVariables.get('warehouseCode'));",
+                  "    pm.expect(json.items).to.have.lengthOf(2);",
+                  "    pm.expect(json.receivedAt).to.be.a('string');",
+                  "});",
+                  "pm.test('Usuário do recebimento é o autenticado',",
+                  "    () => pm.expect(json.username).to.eql(pm.collectionVariables.get('username')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Conferir a entrada no estoque",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/stock-balance?sku={{sku}}&warehouseCode={{warehouseCode}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "stock-balance"
+              ],
+              "query": [
+                {
+                  "key": "sku",
+                  "value": "{{sku}}"
+                },
+                {
+                  "key": "warehouseCode",
+                  "value": "{{warehouseCode}}"
+                }
+              ]
+            },
+            "description": "Saldo esperado: 30 + 12 = 42 — a soma dos itens do recebimento."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.collectionVariables.get('supplierId')) {",
+                  "    console.warn('Nenhum fornecedor cadastrado — requisição ignorada. Veja o SQL na descrição da coleção.');",
+                  "    if (pm.execution && pm.execution.skipRequest) pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Saldo é 42 (30 + 12)',",
+                  "    () => pm.expect(Number(pm.response.json().quantity)).to.eql(42));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 — Casos de erro",
+      "item": [
+        {
+          "name": "Erro: fornecedor inexistente → 404",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compras/goods-receipts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compras",
+                "goods-receipts"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"supplierId\": 999999,\n  \"warehouseCode\": \"{{warehouseCode}}\",\n  \"items\": [\n    {\n      \"sku\": \"{{sku}}\",\n      \"quantity\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "O fornecedor é validado antes de qualquer escrita no estoque."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));",
+                  "pm.test('errorCode = SUPPLIER_NOT_FOUND',",
+                  "    () => pm.expect(pm.response.json().errorCode).to.eql('SUPPLIER_NOT_FOUND'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Erro: depósito inexistente → 404",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compras/goods-receipts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compras",
+                "goods-receipts"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"supplierId\": \"{{supplierId}}\",\n  \"warehouseCode\": \"DEPOSITO-QUE-NAO-EXISTE\",\n  \"items\": [\n    {\n      \"sku\": \"{{sku}}\",\n      \"quantity\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Vem do domínio estoque, ao tentar movimentar o saldo do primeiro item."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.collectionVariables.get('supplierId')) {",
+                  "    console.warn('Nenhum fornecedor cadastrado — requisição ignorada. Veja o SQL na descrição da coleção.');",
+                  "    if (pm.execution && pm.execution.skipRequest) pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));",
+                  "pm.test('errorCode = WAREHOUSE_NOT_FOUND',",
+                  "    () => pm.expect(pm.response.json().errorCode).to.eql('WAREHOUSE_NOT_FOUND'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Erro: lista de itens vazia → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compras/goods-receipts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compras",
+                "goods-receipts"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"supplierId\": \"{{supplierId}}\",\n  \"warehouseCode\": \"{{warehouseCode}}\",\n  \"items\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "`items` é `@NotEmpty` — um recebimento sem itens não faz sentido."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('errorCode = VALIDATION_ERROR',",
+                  "    () => pm.expect(pm.response.json().errorCode).to.eql('VALIDATION_ERROR'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Erro: quantidade zerada → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compras/goods-receipts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compras",
+                "goods-receipts"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"supplierId\": \"{{supplierId}}\",\n  \"warehouseCode\": \"{{warehouseCode}}\",\n  \"items\": [\n    {\n      \"sku\": \"{{sku}}\",\n      \"quantity\": 0\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "A quantidade de cada item deve ser estritamente maior que zero."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('errorCode = VALIDATION_ERROR',",
+                  "    () => pm.expect(pm.response.json().errorCode).to.eql('VALIDATION_ERROR'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Sem token → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/compras/suppliers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "compras",
+                "suppliers"
+              ]
+            },
+            "description": "Confirma que o endpoint está protegido: sem `Authorization` a resposta é 401.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "99 — Encerramento",
+      "item": [
+        {
+          "name": "Logout (revoga o refresh token)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "logout"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Revoga o refresh token da sessão. O accessToken continua válido até expirar."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 204', () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set('refreshToken', '');"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,86 +1,70 @@
-# mahal-commerce
+# 🛍️ Mahal Commerce — Backend API
 
-Construí esse projeto para ter uma base sólida de autenticação e autorização que eu possa reutilizar em qualquer novo projeto Spring Boot — sem precisar reinventar a roda a cada vez.
+> **API RESTful de alta performance e segurança para ecossistema de E-Commerce e Gestão Comercial.**
 
-A ideia é simples: toda a lógica de segurança já está pronta e testada. Quando eu começo um projeto novo, só adiciono o domínio de negócio no `core/` e a infraestrutura de auth já funciona do primeiro deploy.
-
----
-
-## O que tem aqui
-
-**Autenticação completa**
-JWT com refresh token opaco (hash SHA-256 no banco, plaintext nunca persiste), rotação a cada uso, detecção de reutilização com revogação automática de todas as sessões, blocklist por threshold `iat` no Redis. Login com Google via ID Token. 2FA com TOTP (Google Authenticator), backup codes e fluxo de duplo TOTP para elevação de privilégio DEV.
-
-**Autorização granular**
-RBAC com permissões individuais por role. Toda proteção via `@PreAuthorize("hasAuthority('...')")` — sem `hasRole()`, sem sessão HTTP. Hierarquia `ROLE_USER ⊂ ROLE_ADMIN ⊂ ROLE_DEV`.
-
-**Segurança de produção**
-Rate limiting por IP (Redis em hml/prod, in-memory em dev), bloqueio de conta por tentativas, verificação de email com código 12 chars (62 bits de entropia), troca de email com confirmação no novo endereço, reset de senha com token de uso único.
-
-**Infraestrutura**
-37 migrations Flyway, 7 schedulers com ShedLock, audit trail de todos os eventos, alertas de segurança por email, métricas Prometheus + dashboard Grafana provisionado automaticamente, feature flags em banco de dados, CLI administrativo.
+O **Mahal Commerce** é um backend enterprise para e-commerce e gestão operacional integrada, desenvolvido em **Java 21** e **Spring Boot 4**. O objetivo do projeto é fornecer uma plataforma escalável, desacoplada e extremamente segura para suportar operações de vendas online e físicas (balcão), controle de estoque, logística, gestão financeira e suprimentos.
 
 ---
 
-## Tecnologias
+## 📖 Documentação Completa no Notion
 
-| | |
+Para manter o repositório enxuto e de fácil navegação, a documentação detalhada sobre arquitetura, modelo de domínio, guia de endpoints, segurança e roadmap está centralizada no Notion:
+
+👉 **[Acessar Central de Documentação no Notion 🚀](https://app.notion.com/p/cernesolution/Backend-Mahal-E-commerce-398700a17d79802a88eaca68efede4c4)**
+
+> **Conteúdos disponíveis no Notion:**
+> - 📐 Diagramas e fluxos de Arquitetura Hexagonal
+> - 💼 Modelo de Domínio (Vendas, Estoque, Logística, Financeiro, Compras)
+> - 🔐 Especificação detalhada de Segurança (JWT, Refresh Tokens, 2FA/TOTP, RBAC)
+> - 📡 Referência completa das APIs REST (OpenAPI / Swagger)
+> - 🗺️ Roadmap de desenvolvimento e backlog de tarefas
+
+---
+
+## 🏛️ Visão Geral da Arquitetura
+
+O sistema é dividido estritamente em portas e adaptadores, validado via **ArchUnit**:
+
+```text
+[ Adapter In (REST Controllers, DTOs) ]
+                │
+                ▼ (Use Cases)
+       [ Core (Domain & Business Logic) ]
+                ▲ (Ports & Repositories)
+                │
+[ Adapter Out (JPA/PostgreSQL, Redis, AWS S3, Mail) ]
+```
+
+* **Core isolado:** Não possui dependências do Spring Framework, JPA ou bibliotecas externas.
+* **Flexibilidade:** Substituição de infraestrutura (ex: trocar banco ou cache) sem alterar o código de negócio.
+
+---
+
+## 💼 Módulos do Sistema
+
+| Módulo | Descrição |
 |---|---|
-| Java 21 + Spring Boot 4.0.6 | Arquitetura hexagonal (Ports & Adapters) |
-| PostgreSQL 16 + Flyway | Redis 7 (cache + blocklist + rate limit) |
-| JWT (JJWT 0.12.6) | BCrypt + AES-256-GCM (secret TOTP) |
-| JUnit 5 + Mockito + Testcontainers | ArchUnit (regras arquiteturais em teste) |
-| Docker Compose | Prometheus + Grafana |
+| 🔐 **Security & Auth** | Autenticação JWT com refresh token opaco no Redis, 2FA TOTP, RBAC granular e Rate Limiting. |
+| 🛒 **E-Commerce & Vendas** | Carrinho de compras, checkout, gestão de catálogo e pedidos. |
+| 🏪 **Vendas Balcão** | Ponto de venda (PDV) e atendimento presencial. |
+| 📦 **Estoque & Logística** | Controle de inventário, movimentações, cálculo de frete e rastreio. |
+| 💰 **Financeiro & Compras** | Contas a pagar/receber, conciliação e pedidos de suprimentos junto a fornecedores. |
 
 ---
 
-## Arquitetura
+## 🛠️ Stack Tecnológica
 
-O `core/` não importa Spring, JPA, Redis nem HTTP — apenas interfaces. O ArchUnit garante isso em tempo de teste.
-
-```
-adapter/in  (Controllers, DTOs)
-    ↓  UseCase interface
-core/  (domain, ports, services)
-    ↑  Repository/Port interface
-adapter/out  (JPA, Redis, JWT, Email, S3)
-```
-
-Trocar PostgreSQL por outro banco, Redis por Caffeine, S3 por storage local — nada disso toca o `core/`.
+* **Core:** Java 21 | Spring Boot 4.0.6 | Spring Security
+* **Persistência & Cache:** PostgreSQL 16 | Flyway Migrations | Redis 7
+* **Segurança:** JJWT | BCrypt | AES-256-GCM (TOTP secrets)
+* **Resiliência & Ops:** ShedLock | Prometheus | Grafana | Docker Compose
+* **Qualidade & Testes:** JUnit 5 | Mockito | Testcontainers | ArchUnit
 
 ---
 
-## Rodar localmente
-
-Sem Docker, sem variáveis de ambiente — só Java 21:
-
-```bash
-./mvnw spring-boot:run
-```
-
-Sobe com H2 em memória. Swagger em `http://localhost:8080/swagger-ui.html`.
-
-Usuários criados automaticamente: `admin / Admin@dev1` e `user / User@dev1`.
-
----
-
-## Testes
-
-```bash
-./mvnw test
-```
-
-128 arquivos de teste — unitários, integração (H2), testes de segurança, ArchUnit e Testcontainers (PostgreSQL real, opcional).
-
----
-
-## Documentação detalhada
-
-A pasta `docs/` tem tudo mapeado: fluxos de autenticação, modelo de domínio, schema do banco, referência de API, configuração por ambiente e muito mais. Disponibilizo mediante contato.
-
----
-
-## Contato
+## 👨‍💻 Autor & Contato
 
 **Jeff Henryson**
-jeffhunbruey@gmail.com · (83) 99669-7177
+* **Email:** jeffhunbruey@gmail.com
+* **Telefone:** (83) 99669-7177
+* **GitHub:** [@jeffhenryson](https://github.com/jeffhenryson)

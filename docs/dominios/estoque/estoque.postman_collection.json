@@ -1,0 +1,1625 @@
+{
+  "info": {
+    "_postman_id": "7a25491b-1a27-5fb6-9c54-6506f6eb8ce6",
+    "name": "Mahal — Estoque",
+    "description": "Coleção de testes do módulo **Estoque** (`/estoque`) do mahal-backend.\n\nCobre o fluxo completo: login → depósito → produto → movimentações (entrada, saída, ajuste)\n→ ponto de reposição → alerta de estoque mínimo, mais os casos de erro (saldo insuficiente,\nSKU duplicado, depósito inexistente, validação e 401).\n\n**Como rodar:** importe, confira as variáveis `baseUrl`/`username`/`password` e use o\nCollection Runner na ordem das pastas. Cada execução gera um SKU e um código de depósito\nnovos (sufixo de timestamp), então a coleção pode ser rodada quantas vezes quiser.\n\nDocumentação do módulo: `docs/dominios/estoque/README.md`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8082",
+      "type": "string"
+    },
+    {
+      "key": "username",
+      "value": "admin",
+      "type": "string"
+    },
+    {
+      "key": "password",
+      "value": "Admin@dev1",
+      "type": "string"
+    },
+    {
+      "key": "totpCode",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "accessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "refreshToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "challengeToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "permissions",
+      "value": "[]",
+      "type": "string"
+    },
+    {
+      "key": "warehouseCode",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "warehouseName",
+      "value": "Depósito de testes Postman",
+      "type": "string"
+    },
+    {
+      "key": "sku",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "variantSku",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "00 — Autenticação",
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Autentica com usuário/senha e guarda o `accessToken` na coleção.\n\nSe o usuário tiver 2FA ativo a resposta é `PENDING_2FA`: preencha a variável `totpCode` e rode a requisição seguinte.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "",
+                  "if (json.status === 'PENDING_2FA') {",
+                  "    pm.collectionVariables.set('challengeToken', json.challengeToken);",
+                  "    console.warn('2FA ativo — preencha {{totpCode}} e rode \"Login 2FA — concluir\".');",
+                  "} else {",
+                  "    pm.test('Retorna accessToken e refreshToken', () => {",
+                  "        pm.expect(json.accessToken, 'accessToken').to.be.a('string').and.not.empty;",
+                  "        pm.expect(json.refreshToken, 'refreshToken').to.be.a('string').and.not.empty;",
+                  "    });",
+                  "    pm.test('tokenType = Bearer', () => pm.expect(json.tokenType).to.eql('Bearer'));",
+                  "    pm.collectionVariables.set('accessToken', json.accessToken);",
+                  "    pm.collectionVariables.set('refreshToken', json.refreshToken);",
+                  "    pm.collectionVariables.set('challengeToken', '');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login 2FA — concluir",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/2fa/verify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "2fa",
+                "verify"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"challengeToken\": \"{{challengeToken}}\",\n  \"code\": \"{{totpCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Só é necessária quando o login devolve `PENDING_2FA`. É ignorada automaticamente quando não há challenge pendente.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.collectionVariables.get('challengeToken')) {",
+                  "    console.log('Sem challenge de 2FA pendente — requisição ignorada.');",
+                  "    if (pm.execution && pm.execution.skipRequest) pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.collectionVariables.set('accessToken', json.accessToken);",
+                  "pm.collectionVariables.set('refreshToken', json.refreshToken);",
+                  "pm.collectionVariables.set('challengeToken', '');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Perfil e permissões do usuário logado",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "me"
+              ]
+            },
+            "description": "Confere se o token funciona e se o usuário tem as permissões exigidas por Estoque. Guarda a lista em `{{permissions}}` para as requisições que dependem de permissões DEV."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "const perms = json.permissions || [];",
+                  "pm.collectionVariables.set('permissions', JSON.stringify(perms));",
+                  "",
+                  "const required = [\"ESTOQUE_PRODUCT_READ\", \"ESTOQUE_PRODUCT_MANAGE\", \"ESTOQUE_WAREHOUSE_READ\", \"ESTOQUE_WAREHOUSE_MANAGE\", \"ESTOQUE_STOCK_MANAGE\"];",
+                  "pm.test('Usuário tem as permissões do módulo', () => {",
+                  "    const missing = required.filter(p => !perms.includes(p));",
+                  "    pm.expect(missing, 'permissões faltando: ' + missing.join(', ')).to.be.an('array').that.is.empty;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Rode esta pasta primeiro. O `accessToken` fica salvo na coleção e é reaproveitado por todas as outras requisições."
+    },
+    {
+      "name": "01 — Depósitos",
+      "item": [
+        {
+          "name": "Criar depósito",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/warehouses",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "warehouses"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"{{warehouseCode}}\",\n  \"name\": \"{{warehouseName}}\",\n  \"type\": \"LOJA_FISICA\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "`ESTOQUE_WAREHOUSE_MANAGE`. O código é gerado com timestamp no pre-request para a coleção poder rodar várias vezes. Tipos aceitos: `LOJA_FISICA`, `ECOMMERCE`."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('warehouseCode', 'PM-DEP-' + Date.now());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const json = pm.response.json();",
+                  "pm.test('Devolve o depósito criado, ativo', () => {",
+                  "    pm.expect(json.code).to.eql(pm.collectionVariables.get('warehouseCode'));",
+                  "    pm.expect(json.type).to.eql('LOJA_FISICA');",
+                  "    pm.expect(json.active).to.be.true;",
+                  "    pm.expect(json.id).to.be.a('number');",
+                  "});",
+                  "pm.test('Header Location aponta para o depósito', () => {",
+                  "    pm.expect(pm.response.headers.get('Location')).to.eql('/estoque/warehouses/' + json.code);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar depósitos",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/warehouses",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "warehouses"
+              ]
+            },
+            "description": "`ESTOQUE_WAREHOUSE_READ`. Retorna a lista completa — este endpoint não é paginado."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Resposta é uma lista', () => pm.expect(json).to.be.an('array'));",
+                  "pm.test('Contém o depósito criado', () => {",
+                  "    const code = pm.collectionVariables.get('warehouseCode');",
+                  "    pm.expect(json.map(w => w.code)).to.include(code);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Erro: código de depósito duplicado → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/warehouses",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "warehouses"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"{{warehouseCode}}\",\n  \"name\": \"Outro depósito\",\n  \"type\": \"ECOMMERCE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Reenvia o mesmo `code` da requisição anterior. O código de depósito é único no sistema."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 409', () => pm.response.to.have.status(409));",
+                  "pm.test('errorCode = WAREHOUSE_CODE_ALREADY_EXISTS',",
+                  "    () => pm.expect(pm.response.json().errorCode).to.eql('WAREHOUSE_CODE_ALREADY_EXISTS'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 — Produtos",
+      "item": [
+        {
+          "name": "Criar produto com variações",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/products",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "products"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"{{sku}}\",\n  \"name\": \"Essência Premium — teste Postman\",\n  \"category\": \"ESSENCIAS\",\n  \"variants\": [\n    {\n      \"sku\": \"{{variantSku}}\",\n      \"attributes\": [\n        {\n          \"type\": \"SABOR\",\n          \"value\": \"Menta\"\n        },\n        {\n          \"type\": \"TAMANHO\",\n          \"value\": \"50g\"\n        }\n      ]\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "`ESTOQUE_PRODUCT_MANAGE`. Cria o SKU pai com uma variação e dois atributos. SKU gerado com timestamp para permitir reexecução."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const sku = 'PM-SKU-' + Date.now();",
+                  "pm.collectionVariables.set('sku', sku);",
+                  "pm.collectionVariables.set('variantSku', sku + '-V1');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const json = pm.response.json();",
+                  "pm.test('Produto criado ativo, com a variação e os atributos', () => {",
+                  "    pm.expect(json.sku).to.eql(pm.collectionVariables.get('sku'));",
+                  "    pm.expect(json.active).to.be.true;",
+                  "    pm.expect(json.variants).to.have.lengthOf(1);",
+                  "    pm.expect(json.variants[0].sku).to.eql(pm.collectionVariables.get('variantSku'));",
+                  "    pm.expect(json.variants[0].attributes).to.have.lengthOf(2);",
+                  "});",
+                  "pm.test('Header Location aponta para o produto', () => {",
+                  "    pm.expect(pm.response.headers.get('Location')).to.eql('/estoque/products/' + json.sku);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar produtos (paginado)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/products?page=0&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "products"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "`ESTOQUE_PRODUCT_READ`. `size` é limitado a 100 pelo controller."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Estrutura de PageResult', () => {",
+                  "    pm.expect(json.content).to.be.an('array');",
+                  "    pm.expect(json.page).to.eql(0);",
+                  "    pm.expect(json.size).to.eql(20);",
+                  "    pm.expect(json.totalElements).to.be.a('number');",
+                  "    pm.expect(json.totalPages).to.be.a('number');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Erro: SKU duplicado → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/products",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "products"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"{{sku}}\",\n  \"name\": \"Produto repetido\",\n  \"category\": \"ESSENCIAS\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Reenvia o SKU já cadastrado. O SKU do produto é único no sistema."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 409', () => pm.response.to.have.status(409));",
+                  "pm.test('errorCode = SKU_ALREADY_EXISTS',",
+                  "    () => pm.expect(pm.response.json().errorCode).to.eql('SKU_ALREADY_EXISTS'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Erro: payload inválido → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/products",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "products"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"AB\",\n  \"name\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "`sku` tem mínimo de 3 caracteres e `name` é obrigatório — Bean Validation devolve 400."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('errorCode = VALIDATION_ERROR',",
+                  "    () => pm.expect(pm.response.json().errorCode).to.eql('VALIDATION_ERROR'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 — Saldo e movimentações",
+      "item": [
+        {
+          "name": "Consultar saldo antes de qualquer movimentação",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/stock-balance?sku={{sku}}&warehouseCode={{warehouseCode}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "stock-balance"
+              ],
+              "query": [
+                {
+                  "key": "sku",
+                  "value": "{{sku}}"
+                },
+                {
+                  "key": "warehouseCode",
+                  "value": "{{warehouseCode}}"
+                }
+              ]
+            },
+            "description": "`ESTOQUE_WAREHOUSE_READ`. Para um par SKU/depósito sem histórico o saldo volta zerado, sem que nenhuma linha seja persistida."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Saldo inicial é zero', () => pm.expect(Number(json.quantity)).to.eql(0));",
+                  "pm.test('Ecoa sku e warehouseCode', () => {",
+                  "    pm.expect(json.sku).to.eql(pm.collectionVariables.get('sku'));",
+                  "    pm.expect(json.warehouseCode).to.eql(pm.collectionVariables.get('warehouseCode'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "ENTRADA de 20 unidades",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/movements",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "movements"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"{{sku}}\",\n  \"warehouseCode\": \"{{warehouseCode}}\",\n  \"type\": \"ENTRADA\",\n  \"quantity\": 20,\n  \"reason\": \"Carga inicial — teste Postman\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "`ESTOQUE_STOCK_MANAGE`. Grava um `StockMovement` no ledger e devolve o saldo atualizado. Entrada sem saldo prévio parte de zero."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const json = pm.response.json();",
+                  "pm.test('Saldo passa a 20', () => pm.expect(Number(json.quantity)).to.eql(20));",
+                  "pm.test('Location aponta para a consulta de saldo', () => {",
+                  "    pm.expect(pm.response.headers.get('Location')).to.include('/estoque/stock-balance?sku=');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SAIDA de 5 unidades",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/movements",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "movements"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"{{sku}}\",\n  \"warehouseCode\": \"{{warehouseCode}}\",\n  \"type\": \"SAIDA\",\n  \"quantity\": 5,\n  \"reason\": \"Saída manual — teste Postman\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Saída subtrai do saldo. Saldo esperado: 20 − 5 = 15."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Saldo passa a 15',",
+                  "    () => pm.expect(Number(pm.response.json().quantity)).to.eql(15));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AJUSTE de 2 unidades",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/movements",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "movements"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"{{sku}}\",\n  \"warehouseCode\": \"{{warehouseCode}}\",\n  \"type\": \"AJUSTE\",\n  \"quantity\": 2,\n  \"reason\": \"Ajuste de inventário — teste Postman\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "`AJUSTE` **soma** ao saldo (ver EST-C009 no README do módulo: hoje não existe ajuste para baixo). Saldo esperado: 15 + 2 = 17."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Saldo passa a 17',",
+                  "    () => pm.expect(Number(pm.response.json().quantity)).to.eql(17));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Consultar saldo depois das movimentações",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/stock-balance?sku={{sku}}&warehouseCode={{warehouseCode}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "stock-balance"
+              ],
+              "query": [
+                {
+                  "key": "sku",
+                  "value": "{{sku}}"
+                },
+                {
+                  "key": "warehouseCode",
+                  "value": "{{warehouseCode}}"
+                }
+              ]
+            },
+            "description": "Confirma que o saldo persistido bate com a soma das movimentações."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Saldo consolidado é 17',",
+                  "    () => pm.expect(Number(pm.response.json().quantity)).to.eql(17));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Histórico de movimentações do SKU",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/movements?sku={{sku}}&warehouseCode={{warehouseCode}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "movements"
+              ],
+              "query": [
+                {
+                  "key": "sku",
+                  "value": "{{sku}}"
+                },
+                {
+                  "key": "warehouseCode",
+                  "value": "{{warehouseCode}}"
+                }
+              ]
+            },
+            "description": "Lê o ledger gravado pelas três movimentações anteriores (EST-F017). Mais recentes primeiro, então a ordem esperada é AJUSTE, SAIDA, ENTRADA."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Três movimentações registradas',",
+                  "    () => pm.expect(body.totalElements).to.eql(3));",
+                  "pm.test('Mais recentes primeiro (AJUSTE, SAIDA, ENTRADA)',",
+                  "    () => pm.expect(body.content.map(m => m.type)).to.eql(['AJUSTE', 'SAIDA', 'ENTRADA']));",
+                  "pm.test('Ledger carrega quem movimentou e o motivo', () => {",
+                  "    pm.expect(body.content[0].username).to.be.a('string').and.not.empty;",
+                  "    pm.expect(body.content[0].reason).to.be.a('string').and.not.empty;",
+                  "    pm.expect(body.content[0].createdAt).to.be.a('string');",
+                  "});",
+                  "pm.test('Depósito e SKU ecoam a consulta', () => {",
+                  "    pm.expect(body.content[0].sku).to.eql(pm.environment.get('sku'));",
+                  "    pm.expect(body.content[0].warehouseCode).to.eql(pm.environment.get('warehouseCode'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Histórico paginado — primeira página com 2 itens",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/movements?sku={{sku}}&warehouseCode={{warehouseCode}}&page=0&size=2",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "movements"
+              ],
+              "query": [
+                {
+                  "key": "sku",
+                  "value": "{{sku}}"
+                },
+                {
+                  "key": "warehouseCode",
+                  "value": "{{warehouseCode}}"
+                },
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "2"
+                }
+              ]
+            },
+            "description": "Confere a paginação do ledger: 3 movimentações em páginas de 2 → 2 páginas."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Página traz 2 de 3', () => {",
+                  "    pm.expect(body.content).to.have.lengthOf(2);",
+                  "    pm.expect(body.totalElements).to.eql(3);",
+                  "    pm.expect(body.totalPages).to.eql(2);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Erro: histórico sem warehouseCode → 400",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/movements?sku={{sku}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "movements"
+              ],
+              "query": [
+                {
+                  "key": "sku",
+                  "value": "{{sku}}"
+                }
+              ]
+            },
+            "description": "Parâmetro de query obrigatório ausente devolve 400 MISSING_PARAMETER (antes era 500)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('errorCode = MISSING_PARAMETER',",
+                  "    () => pm.expect(pm.response.json().errorCode).to.eql('MISSING_PARAMETER'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Erro: histórico em depósito inexistente → 404",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/movements?sku={{sku}}&warehouseCode=DEPOSITO-QUE-NAO-EXISTE",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "movements"
+              ],
+              "query": [
+                {
+                  "key": "sku",
+                  "value": "{{sku}}"
+                },
+                {
+                  "key": "warehouseCode",
+                  "value": "DEPOSITO-QUE-NAO-EXISTE"
+                }
+              ]
+            },
+            "description": "Depósito inexistente devolve 404, enquanto SKU sem movimentação devolve página vazia com 200."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));",
+                  "pm.test('errorCode = WAREHOUSE_NOT_FOUND',",
+                  "    () => pm.expect(pm.response.json().errorCode).to.eql('WAREHOUSE_NOT_FOUND'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Erro: saída maior que o saldo → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/movements",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "movements"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"{{sku}}\",\n  \"warehouseCode\": \"{{warehouseCode}}\",\n  \"type\": \"SAIDA\",\n  \"quantity\": 9999,\n  \"reason\": \"Saída inválida — teste Postman\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Saldo não pode ficar negativo. A operação é rejeitada e **nada** é persistido — nem o movimento, nem o saldo."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('errorCode = INSUFFICIENT_STOCK',",
+                  "    () => pm.expect(pm.response.json().errorCode).to.eql('INSUFFICIENT_STOCK'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Erro: quantidade negativa → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/movements",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "movements"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"{{sku}}\",\n  \"warehouseCode\": \"{{warehouseCode}}\",\n  \"type\": \"ENTRADA\",\n  \"quantity\": -1,\n  \"reason\": \"Quantidade inválida\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "A quantidade da movimentação deve ser estritamente maior que zero."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('errorCode = VALIDATION_ERROR',",
+                  "    () => pm.expect(pm.response.json().errorCode).to.eql('VALIDATION_ERROR'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Erro: depósito inexistente → 404",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/stock-balance?sku={{sku}}&warehouseCode=DEPOSITO-QUE-NAO-EXISTE",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "stock-balance"
+              ],
+              "query": [
+                {
+                  "key": "sku",
+                  "value": "{{sku}}"
+                },
+                {
+                  "key": "warehouseCode",
+                  "value": "DEPOSITO-QUE-NAO-EXISTE"
+                }
+              ]
+            },
+            "description": "Qualquer operação em depósito inexistente devolve 404."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));",
+                  "pm.test('errorCode = WAREHOUSE_NOT_FOUND',",
+                  "    () => pm.expect(pm.response.json().errorCode).to.eql('WAREHOUSE_NOT_FOUND'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 — Ponto de reposição e alerta",
+      "item": [
+        {
+          "name": "Definir ponto de reposição (mínimo 10)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/products/{{sku}}/reorder-point",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "products",
+                "{{sku}}",
+                "reorder-point"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"warehouseCode\": \"{{warehouseCode}}\",\n  \"minQuantity\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "`ESTOQUE_STOCK_MANAGE`. Upsert do mínimo por SKU/depósito — chamar de novo atualiza a linha existente. Responde 204 sem corpo."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 204', () => pm.response.to.have.status(204));",
+                  "pm.test('Sem corpo', () => pm.expect(pm.response.text()).to.be.empty);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SAIDA que ainda fica acima do mínimo (não alerta)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/movements",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "movements"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"{{sku}}\",\n  \"warehouseCode\": \"{{warehouseCode}}\",\n  \"type\": \"SAIDA\",\n  \"quantity\": 6,\n  \"reason\": \"Venda — acima do mínimo\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Saldo passa de 17 para 11, ainda acima do mínimo de 10. A comparação é estrita: saldo igual ao mínimo também não dispara alerta."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Saldo passa a 11',",
+                  "    () => pm.expect(Number(pm.response.json().quantity)).to.eql(11));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SAIDA que cruza o ponto de reposição (dispara alerta)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/movements",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "movements"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"{{sku}}\",\n  \"warehouseCode\": \"{{warehouseCode}}\",\n  \"type\": \"SAIDA\",\n  \"quantity\": 5,\n  \"reason\": \"Venda — cruza o mínimo\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Saldo cai para 6, abaixo do mínimo de 10. Isso notifica **todos** os usuários com a permissão `ESTOQUE_STOCK_MANAGE` — inclusive o usuário desta coleção."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Saldo passa a 6',",
+                  "    () => pm.expect(Number(pm.response.json().quantity)).to.eql(6));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Conferir a notificação de estoque mínimo",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notifications?unreadOnly=true&page=0&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notifications"
+              ],
+              "query": [
+                {
+                  "key": "unreadOnly",
+                  "value": "true"
+                },
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "A notificação é gravada dentro da transação da movimentação, então já deve estar disponível aqui. Título: *Estoque abaixo do ponto de reposição*."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const sku = pm.collectionVariables.get('sku');",
+                  "const alertas = pm.response.json().content.filter(",
+                  "    n => n.title === 'Estoque abaixo do ponto de reposição' && n.body.includes(sku));",
+                  "pm.test('Existe alerta para o SKU movimentado', () => pm.expect(alertas).to.not.be.empty);",
+                  "if (alertas.length) {",
+                  "    pm.test('Notificação é do tipo SYSTEM e não lida', () => {",
+                  "        pm.expect(alertas[0].type).to.eql('SYSTEM');",
+                  "        pm.expect(alertas[0].read).to.be.false;",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "05 — Segurança",
+      "item": [
+        {
+          "name": "Sem token → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/products",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "products"
+              ]
+            },
+            "description": "Confirma que o endpoint está protegido: sem `Authorization` a resposta é 401.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Token inválido → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/warehouses",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "warehouses"
+              ]
+            },
+            "description": "Token malformado é rejeitado pelo filtro JWT antes de chegar ao controller.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "token.invalido.aqui",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Os testes de 403 por falta de permissão estão em `docs/dominios/plataforma/plataforma.postman_collection.json`, que faz login com o usuário `user` (sem as permissões de estoque)."
+    },
+    {
+      "name": "99 — Encerramento",
+      "item": [
+        {
+          "name": "Logout (revoga o refresh token)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "logout"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Revoga o refresh token da sessão. O accessToken continua válido até expirar."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 204', () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set('refreshToken', '');"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -38,7 +38,13 @@ build/
 # Configuração de desenvolvimento local — use application-dev.properties.example como template
 src/main/resources/application-dev.properties
 
-/docs
+# Documentação: os .md da raiz de docs/, os READMEs de domínio (com as coleções Postman de
+# cada módulo) e o hub/environment do Postman são versionados;
+# o resto de /docs (rascunhos, exports) fica fora.
+/docs/*
+!/docs/*.md
+!/docs/dominios/
+!/docs/postman/
 
 /node_modules
 

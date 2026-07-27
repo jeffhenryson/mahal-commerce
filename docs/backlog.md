@@ -1,100 +1,65 @@
-# Backlog — Mahal Backend
-Última análise: 2026-07-25
+# Backlog — Mahal Backend (índice)
 
-> **Convenção de IDs (resíduo da mescla de duas gerações de planejamento):**
-> - `C001–C022` — Correções do sistema (segurança, infra, testes, docs), geração 2026-07-20.
-> - `F001–F009` — Features do módulo **CRM**, geração 2026-07-20.
-> - `EST-F001–EST-F016` — Roadmap de **Estoque** (geração original 2026-07-15), renumerado com prefixo de domínio para não colidir com o `F001–F009` do CRM.
+> **⚠️ Este arquivo deixou de ser o backlog em 2026-07-26.**
 >
-> O Notion (data source `cernecommerce`) usa nomes de card, não estes IDs — o mapeamento é convenção deste doc.
+> O backlog foi **descentralizado**: cada módulo agora é dono das suas próprias pendências, na
+> seção `## Backlog do Módulo` do seu README em `docs/dominios/<modulo>/README.md`, ao lado da
+> documentação do que já está implementado. O objetivo foi acabar com a duplicação entre o
+> backlog central e os READMEs, que haviam divergido.
+>
+> Este arquivo permanece apenas como **índice** e como registro do **histórico de sprints**.
+> Não adicione itens aqui.
 
-## Correções do Sistema
-| ID | Prioridade | Descrição | Arquivo:Linha | Domínio | Status |
-|---|---|---|---|---|---|
-| C001 | 🔴 Alta | Segredos reais (JWT_SECRET, TOTP_ENCRYPTION_KEY, RESEND_API_KEY, REDIS_PASSWORD, GOOGLE_CLIENT_ID) hardcoded e versionados em texto puro no `docker-compose.yml` — commitados no histórico do git. Mover para `.env` não versionado (já coberto pelo `.gitignore`, mas não usado aqui) e rotacionar todas as credenciais imediatamente. | docker-compose.yml:31,94-105 | security/infra | Concluído (parcial — ver nota) |
-| C002 | 🔴 Alta | `docker-compose.prod.yml` define um default hardcoded para `TOTP_ENCRYPTION_KEY` (`${TOTP_ENCRYPTION_KEY:-Vx74sQn7...}`) que passa despercebido pelo `ProdStartupValidator` (só rejeita valor vazio/curto) — anula silenciosamente a proteção da chave de criptografia AES-256 dos secrets TOTP em produção se a env var não for definida no deploy. | docker-compose.prod.yml:60 | security | Concluído (parcial — ver nota) |
-| C003 | 🔴 Alta | Cache `userDetails` (authorities do usuário) não é evictado quando `RoleService.assignPermission`/`removePermission` altera as permissões de uma role — usuários com aquela role mantêm a authority antiga até expirar o TTL de 60s, mesmo em resposta a um incidente de segurança que exija revogação imediata. Não há teste que detecte a lacuna. | core/service/RoleService.java:55-70 | rbac | Concluído |
-| C004 | 🟡 Importante | Os 5 controllers stub (`Compras`, `Ecommerce`, `Financeiro`, `Logistica`, `Pdv`) não têm `@PreAuthorize` nem nenhum teste de controller — hoje protegidos apenas pelo fallback genérico `anyRequest().authenticated()`; qualquer usuário autenticado, independente de role, acessará dados reais assim que a lógica de negócio for implementada, caso o TODO seja esquecido. | adapter/in/controller/ComprasController.java:38 (e equivalentes em Ecommerce/Financeiro/Logistica/Pdv) | rbac | Concluído |
-| C005 | 🟡 Importante | `seed.dev.password` (default `Dev@secure1!`) nunca é sobrescrito em `application-hml.properties`/`application-prod.properties` e não é validado por `ProdStartupValidator` nem `HmlStartupValidator` — se `DEV_EMAIL` for definido em produção sem `DEV_PASSWORD` explícito, cria-se um usuário `ROLE_DEV` (acesso a `/actuator/**`, gestão de roles/permissions) com senha hardcoded pública no repositório. | application.properties:42 | security | Concluído |
-| C006 | 🟡 Importante | Seeder de dev (`SeedConfig.ADMIN_PERMISSIONS`, perfil `dev`) desalinhado com `DevRoleBootstrapConfig` — falta `ESTOQUE_PRODUCT_READ/MANAGE` e `ESTOQUE_WAREHOUSE_READ/MANAGE` no conjunto de permissões do usuário `admin` de teste, causando 403 inesperado em `/estoque/**` durante desenvolvimento local. | core/config/SeedConfig.java:24-28 | estoque/rbac | Concluído |
-| C007 | 🟡 Importante | Nenhum teste de integração exercita RBAC de ponta a ponta com dados reais do banco (criar usuário → atribuir role via API → login real → JWT com authorities carregadas pelo `CustomUserDetailsService` → endpoint protegido). Todos os testes de RBAC injetam authorities manualmente via `SecurityMockMvcRequestPostProcessors`, nunca passando pelo pipeline completo. | RoleControllerSecurityTest.java, UserControllerSecurityTest.java | testes | Concluído |
-| C008 | 🟡 Importante | Falta teste de concorrência (race condition) para backup code TOTP, token de reset de senha, TOTP challenge token e dev challenge token — todos usam o mesmo padrão CAS via UPDATE condicional, mas só o código de verificação de email tem teste de concorrência real (`VerifyEmailConcurrencyIT`). Maior risco: bypass de 2FA ou reset de senha duplicado sob race real. | TotpBackupCodeJpaRepository.java:15-17, PasswordResetTokenJpaRepository.java:17-19 | testes/security | Concluído |
-| C009 | 🟡 Importante | Adapters de persistência (17 classes `*RepositoryImpl`) sem teste dedicado, notadamente `RefreshTokenRepositoryImpl.revokeByIdForUser` — a proteção contra revogação cruzada de sessão de outro usuário (IDOR) não tem nenhum teste unitário ou de integração direto, apenas cobertura mockada indireta. | adapter/out/persistence/repository/RefreshTokenRepositoryImpl.java:164-170 | testes/security | Concluído |
-| C010 | 🟡 Importante | Faltam índices em `email_verification_codes.username` e `password_reset_tokens.username`, colunas usadas em queries frequentes (`findFirstByUsernameOrderBy...`, `deleteByUsername`) — full table scan a cada operação de emissão/limpeza de código. | Migration V54 (`V54__add_username_indices.sql`) | persistence | Concluído |
-| C011 | 🟡 Importante | `V26__normalize_email_lowercase.sql` faz UPDATE em massa sem batching real (apenas um comentário sugerindo rodar em lotes) e sem plano de rollback documentado — risco de lock prolongado e de colisão de unique constraint em produção com base de usuários grande. | V26__normalize_email_lowercase.sql | persistence/migrations | Concluído (parcial — ver nota) |
-| C012 | 🟡 Importante | Pool HikariCP (10 conexões, default) dimensionado bem abaixo do pool HTTP padrão do Tomcat embutido (200 threads), sem nenhuma documentação da decisão de dimensionamento — risco de esgotamento de conexões sob pico de requisições concorrentes I/O-bound no banco. | application.properties:24-28 | performance | Concluído (parcial — ver nota) |
-| C013 | 🟡 Importante | Serviços de frontend `mahal-admin-ui` (porta 4201) e `mahal-market-ui` (porta 4300) ausentes do `docker-compose.yml` raiz, sem indicação clara se vivem em outro repositório/compose. | docker-compose.yml | infra | Concluído (parcial — ver nota) |
-| C014 | 🟡 Importante | Healthchecks ausentes nos serviços `prometheus-mahal` e `grafana-mahal` no `docker-compose.yml` (os demais serviços têm `interval`/`timeout`/`retries`). | docker-compose.yml:40-76 | infra | Concluído (parcial — ver nota) |
-| C015 | 🟡 Importante | Pipeline CI builda a imagem Docker duas vezes com tags inconsistentes: o job `build-test` builda e descarta `cerne-commerce:sha`/`:latest` (nunca usada), e o job `deploy-ecr` reconstrói do zero com a tag `$ECR_REPOSITORY` — sem garantia formal de paridade entre o que foi testado e o que vai para produção, além de desperdício de tempo de CI. | .github/workflows/ci.yml:35-37,73-83 | cicd | Concluído (parcial — ver nota) |
-| C016 | 🟡 Importante | `HmlStartupValidator` não valida `avatar.base-url` e aceita o placeholder `https://example.com` (default de CORS e de avatar em hml) sem falhar o boot — um deploy de hml pode subir "funcional" com URLs de avatar/CORS inválidas. | infra/config/startup/HmlStartupValidator.java | infra/security | Concluído |
-| C017 | 🟢 Melhoria | Resíduos de rebranding do template original (`security-spring`/`cerne-commerce` → `mahal-commerce`) espalhados pelo projeto: artifactId no `pom.xml` ainda é `cerne-commerce`; `docker-compose.yml` define `JWT_ISSUER`/`JWT_AUDIENCE` como `security-spring-hml`/`security-spring-api` (o validator só rejeita o valor exato antigo, então passa despercebido); `docs/architecture.md` referencia o pacote `com.securityspring` em vez do real `com.cernecommerce`. | pom.xml:13-14, docker-compose.yml:100-101, docs/architecture.md:27 | infra/docs | Concluído (parcial — ver nota) |
-| C018 | 🟢 Melhoria | Migrations de seed de permissões (V19, V45, V47) não usam `ON CONFLICT DO NOTHING`, inconsistente com o padrão adotado nas demais migrations de seed (V3, V4, V9, V36, V37, V38) — não quebra em uso normal, mas quebraria em cenário de `flyway repair`/baseline manual. | V19__audit_read_permission.sql, V45__estoque_product_permissions.sql, V47__estoque_warehouse_permissions.sql | persistence | Concluído (parcial — ver nota) |
-| C019 | 🟢 Melhoria | 8 jobs `@Scheduled` de limpeza concentrados entre 03:00–04:00 sem `spring.task.scheduling.pool.size` configurado (default de 1 thread) — jobs com o mesmo cron (ex.: 3 deles às 03:45) executam sequencialmente no mesmo thread, podendo atrasar uns aos outros. | infra/scheduler/*CleanupService.java | performance | Concluído |
-| C020 | 🟢 Melhoria | Nome do serviço da aplicação no `docker-compose.yml` é `app` (não `mahal-backend`), inconsistente com o padrão de nomenclatura `-mahal` dos demais serviços; comentário no topo do arquivo também está desatualizado quanto à porta real de scrape do Prometheus. | docker-compose.yml:6,82 | infra | Concluído |
-| C021 | 🟢 Melhoria | Documentação desatualizada/imprecisa: `docs/testing.md` cita "~82 arquivos de teste" contra 100 reais hoje; `docs/security.md` descreve o H2 console como liberado "com permissão exigida" quando o código faz `permitAll()` total (mitigado por só existir em `@Profile("dev")`). | docs/testing.md, docs/security.md:291 | docs | Concluído |
-| C022 | 🟡 Importante | `ChangePasswordRequest.totpCode` tem `@Size(min=6, max=8)`, mas o comentário do próprio campo diz aceitar "código TOTP (6 dígitos) ou backup code (8 chars)" — os backup codes reais gerados por `TotpService.generateBackupCodes()` têm formato `XXXX-XXXX-XXXX` (14 caracteres com hífens). Na prática, `PUT /users/me/password` **rejeita todo backup code real** com 400 de validação antes mesmo de chegar em `validateTotpCode` — a troca de senha com 2FA usando backup code está quebrada. | adapter/in/dtos/request/ChangePasswordRequest.java | security/auth | Concluído |
+## Onde está cada backlog
 
-> **Nota C001:** os 5 segredos foram movidos para `.env` (gitignored) e `docker-compose.yml` agora referencia `${VAR}` — nada sensível permanece no arquivo versionado. Decisão tomada com o usuário: **sem rotação** dos valores nesta etapa (os valores atuais continuam válidos, apenas já expostos no histórico do git de commits anteriores). `RESEND_API_KEY` e `GOOGLE_CLIENT_ID` são credenciais de terceiros — rotacioná-las exige ação nos consoles do Resend/Google, fora do escopo deste fluxo.
->
-> **Nota C002:** removido o fallback `:-Vx74sQn7...` de `docker-compose.prod.yml` (agora `${TOTP_ENCRYPTION_KEY}`, sem default — validado que `docker compose config` produz string vazia se a var não for definida, não mais o valor comprometido). `ProdStartupValidator` reforçado para rejeitar explicitamente esse valor default conhecido, mesmo que reapareça por outra via. **Sem rotação** do valor `Vx74sQn7...` nesta etapa — decisão tomada com o usuário, mesmo racional do C001, mas com risco adicional: se esse valor já estiver em uso real em produção, rotacioná-lo exigiria reencriptar os secrets TOTP já armazenados (fora do escopo desta correção).
->
-> **Nota C009:** o escopo real do card Notion cobre apenas `RefreshTokenRepositoryImpl.revokeByIdForUser` (o exemplo "notadamente" citado na descrição) — as outras ~16 classes `*RepositoryImpl` sem teste dedicado permanecem sem cobertura própria, não fazem parte deste card e não têm item de backlog dedicado ainda.
->
-> **Nota C011:** `V26__normalize_email_lowercase.sql` já foi aplicada em todos os ambientes — Flyway não permite reeditar uma migration histórica, então a correção não é uma mudança de código, e sim documentação de processo em `docs/persistence.md` (padrão de batching por lotes de id para futuros UPDATEs em massa, e o plano de rollback de V26 — que é explicitamente "impossível sem backup pré-migration", já que normalizar para lowercase é uma transformação com perda de informação).
->
-> **Nota C012:** `server.tomcat.threads.max` definido explicitamente em hml/prod (`${TOMCAT_MAX_THREADS:50}`, era o default implícito de 200) — proporção 5:1 com o `HIKARI_MAX_POOL_SIZE` padrão, em vez de 20:1. O valor do próprio pool HikariCP (`10`) **não foi alterado**: a fórmula de dimensionamento correta depende do número de vCPUs da instância real de banco em produção, informação que não existe no código (`docker-compose.prod.yml` não define requests/limits de CPU do Postgres) — documentado em `docs/persistence.md` como ação pendente para quando esse dado for conhecido.
->
-> **Nota C013:** confirmado (via inspeção dos repositórios sibling `mahal-commerce-ui`/`mahal-commerce-ui-market`, cada um com seu próprio `docker-compose.yml`) que os frontends já rodam via compose próprio em hml/local, conectando à network externa `cerne-commerce_default`; e que `docker-compose.prod.yml` (deste repo) já os unifica com build context relativo, esperando os repos de frontend clonados como sibling do backend no host de deploy. Não havia lacuna funcional, só documentação — resolvida com um comentário no topo de `docker-compose.yml` e uma seção nova em `docs/architecture.md` ("Topologia de deploy").
->
-> **Achado adicional (fora do escopo de C013, registrado para referência futura):** existe um **terceiro** `docker-compose.yml`, em `~/Documents/myprojects/mahaltabacaria/` (um nível acima deste repo, git próprio e separado) que unifica backend + `mahal-admin-ui` + `mahal-market-ui` num único arquivo com network `mahal-network` — e é esse arquivo, não o deste repo, que efetivamente cria os containers rodando no ambiente local hoje (confirmado via `docker inspect`, labels `com.docker.compose.project.config_files`). Esse arquivo pai ainda tem os segredos hardcoded originais (não recebeu o fix do C001) e não foi tocado nesta sessão — decisão do usuário foi manter o escopo só em `mahal-commerce/`. Se esse arquivo pai for a fonte de verdade real do ambiente, os fixes de C001/C002/C013/C014 (deste repo) não têm efeito prático até serem replicados lá.
->
-> **Nota C014:** healthchecks adicionados a `prometheus-mahal` (`wget -qO- http://localhost:9090/-/healthy`) e `grafana-mahal` (`wget -qO- http://localhost:3000/api/health`) — comandos confirmados via `docker run --entrypoint sh` que `wget` (busybox) existe em ambas as imagens oficiais. Validado apenas com `docker compose config` (parse estático) — **não** validado contra containers reais rodando (`docker compose ps` mostrando `healthy`), porque os containers ativos no ambiente pertencem ao compose pai (ver achado acima), não a este arquivo.
->
-> **Nota C015:** `build-test` agora builda a imagem Docker uma única vez, salva com `docker save | gzip` e sobe como artifact (`retention-days: 1`); `deploy-ecr` baixa esse artifact, `docker load`, e só faz `docker tag` + `docker push` para o ECR — nenhum rebuild. Removida também a etapa `Build JAR` de `deploy-ecr` (já era um desperdício pré-existente não citado no card: seu output nunca era usado, pois o `Dockerfile` faz seu próprio `mvn package` interno a partir do source, ignorando qualquer JAR pré-buildado no host) e o `Checkout`/`Set up JDK 21` que só existiam para suportá-la. Validado via parse YAML e revisão manual passo a passo — **não** executado de fato no GitHub Actions (exigiria um push real a `main`, fora do escopo desta sessão); a confirmação definitiva (`docker compose ps`/pipeline verde com tempo reduzido) só acontece no próximo push real.
->
-> **Nota C016:** `avatar.base-url` adicionado a `HmlStartupValidator` (campo não existia antes — rejeita ausente/`localhost`/`example.com`); `ProdStartupValidator.avatarBaseUrl` reforçado para também rejeitar `example.com` (antes só rejeitava `localhost`). Encerra a Sprint 2 (C004–C016, 13/13 itens).
->
-> **Nota C017:** renomeação completa `cerne-commerce` → `mahal-commerce` em 14 arquivos (decisão tomada com o usuário, escopo ampliado durante a implementação): `pom.xml` (artifactId/name/description/url/scm), `Dockerfile` (glob do JAR), `application.properties`/`application-hml.properties`/`application-prod.properties`/`application-dev.properties` (test), `JwtService` (default do issuer), `README.md`, `.github/workflows/ci.yml` (tags de imagem), `docker-compose.prod.yml` (nomes de container `postgres-mahal-prod`/`redis-mahal-prod`/`app-mahal-prod`, imagem `mahal-commerce-backend`), `docker-compose.yml` (JWT_ISSUER/AUDIENCE agora `mahaltabacaria-api`/`mahaltabacaria-ui`, mesmo padrão já usado em prod), `prometheus.yml` (job_name), `grafana/provisioning/alerting/alerts.yml` (nome do grupo) e `grafana/provisioning/dashboards/cerne-commerce.json` → renomeado para `mahal-commerce.json` (título, uid, tags, variável de template). `docs/architecture.md` corrigido para `com.cernecommerce`/`CerneCommerceApplication` (nome real do pacote — não faz parte da renomeação para mahal, é uma correção de doc desatualizada para refletir a realidade atual). **Groupid/pacote Java `com.cernecommerce` não foi alterado** (fora de escopo — tocaria centenas de arquivos). **Não alterados** (risco/ambiguidade): volumes Docker `external: true` em `docker-compose.yml` (`security-spring_pgdata_hml` etc. — renomear apontaria para volumes inexistentes, quebrando `docker compose up`); network `cerne-commerce_default` e serviço `cerne-commerce-ui` em `docker-compose.prod.yml` (acoplamento com os repositórios de frontend, fora deste repo). Build Maven e `docker build` completos validados de ponta a ponta com os novos nomes (JAR `mahal-commerce-0.0.1-SNAPSHOT.jar`, imagem Docker buildada com sucesso). Suíte completa: 910 testes, 0 falhas, 1 erro (flake pré-existente).
->
-> **Nota C018:** mesma situação do C011 (V26) — V19/V45/V47 já foram aplicadas, editar o arquivo histórico quebraria o checksum do Flyway em qualquer ambiente onde já rodaram (exigiria `flyway repair` coordenado com o deploy, fora do escopo de uma correção de código isolada). Documentado em `docs/persistence.md` (nova seção "Migrations de seed sem ON CONFLICT DO NOTHING"): o racional do problema, por que não foi editado diretamente, e um checklist para toda migration de seed futura sempre usar `ON CONFLICT DO NOTHING`. Sem mudança de código/migration.
+| Módulo | README | Séries de ID |
+|---|---|---|
+| estoque | [`dominios/estoque/README.md`](dominios/estoque/README.md) | `EST-F001+`, `EST-C001+` |
+| compras | [`dominios/compras/README.md`](dominios/compras/README.md) | `COM-F001+`, `COM-C001+` |
+| vendas-balcao (PDV) | [`dominios/vendas-balcao/README.md`](dominios/vendas-balcao/README.md) | `PDV-F001+`, `PDV-C001+` |
+| crm | [`dominios/crm/README.md`](dominios/crm/README.md) | `CRM-F001+`, `CRM-C001+` |
+| ecommerce | [`dominios/ecommerce/README.md`](dominios/ecommerce/README.md) | `ECM-F001+`, `ECM-C001+` |
+| financeiro | [`dominios/financeiro/README.md`](dominios/financeiro/README.md) | `FIN-F001+`, `FIN-C001+` |
+| logistica | [`dominios/logistica/README.md`](dominios/logistica/README.md) | `LOG-F001+`, `LOG-C001+` |
+| **plataforma** (transversal) | [`dominios/plataforma/README.md`](dominios/plataforma/README.md) | `PLAT-C023+` |
 
-## Novas Features — CRM
-| ID | Prioridade | Feature | Domínio | Descrição | Status |
-|---|---|---|---|---|---|
-| F001 | 🔴 Alta | crm/cadastro-cliente | crm | Entidade `Customer` (nome, contato, email, CPF, origem, cadastradoEm) + casos de uso de criar/buscar + permissões RBAC do domínio (`CUSTOMER_CREATE`, `CUSTOMER_READ`, ...) + migration inicial. Fundação de todo o módulo CRM. Ao concluir, trocar o guard `placeholder: true` de `/app/crm` no frontend pela permissão real `CUSTOMER_READ`. Destrava: dialog "Novo Cliente" e serve de base para todas as demais telas de CRM. | Concluído |
-| F002 | 🔴 Alta | crm/listagem-clientes-rfm | crm | Endpoint paginado/filtrável (busca por nome/telefone, filtro por segmento) retornando LTV, cashback, tags e segmento RFM calculado (VIP/Recorrente/Novo/Inativo/Em Risco). Destrava: tela "Base de Clientes". | Concluído |
-| F003 | 🔴 Alta | crm/perfil-cliente-360 | crm | Endpoints de histórico de pedidos, extrato de cashback e notas/interações por cliente. Destrava: dialog de Detalhe do Cliente (abas Visão Geral/Pedidos/Cashback/Notas). | Concluído |
-| F004 | 🟡 Média | crm/kanban-segmentacao | crm | Endpoint para mover cliente entre estágios/segmentos (drag-and-drop) com trilha de auditoria da transição. Destrava: tela Kanban (Funil de Atendimento). | Concluído |
-| F005 | 🟡 Média | crm/dashboard-overview | crm | Endpoint de agregação: total de clientes, ativos (30d), LTV médio, disparos WhatsApp/mês, contagem por segmento RFM. Destrava: tela Overview/Dashboard do CRM. | Concluído |
-| F006 | 🟡 Média | crm/automacoes-campanhas | crm | CRUD de regras de automação/campanha (gatilho, segmento-alvo, canal WhatsApp/E-mail/ambos, template de mensagem com placeholders `{nome}`/`{saldo}`, ativa/inativa) + log de envios/conversão. Destrava: tela Automações. | Concluído |
-| F007 | 🟢 Baixa | crm/tags-segmentos | crm | CRUD de tags + associação cliente↔tag + contagem de clientes por tag. Destrava: tela Segmentos/Tags. | Concluído |
-| F008 | 🟢 Baixa | crm/integracao-canal-envio | crm | Endpoint real de status de conexão do canal de envio (WhatsApp/E-mail), substituindo o badge fixo "API WhatsApp: Conectada" hoje hardcoded no frontend; reaproveitar `EmailAdapterConfig`/`MailpitEmailAdapter` já existente como base para o canal de e-mail. Destrava: badge de status na tela Automações. | Concluído |
-| F009 | 🟢 Baixa | crm/exportacao-csv-clientes | crm | Endpoint de exportação server-side da listagem de clientes (hoje o botão "Exportar CSV" monta o CSV no cliente a partir dos dados em memória). Destrava: botão "Exportar CSV" na Base de Clientes. | Concluído |
+`plataforma` é o módulo guarda-chuva das correções que não pertencem a nenhum domínio de
+negócio — segurança, infra, CI/CD, testes, migrations, performance, documentação.
 
-## Novas Features — Estoque (roadmap)
-> Renumerado com prefixo `EST-F` (geração original 2026-07-15). Status atual espelha o Notion; o roadmap restante ainda não foi re-sprintado após a Sprint 2.
+Domínios ainda sem README: `gestao-empresarial`, `auth`, `notification`, `relatorios`. Serão
+criados pelo `/1-analise <dominio>` na primeira análise de cada um.
 
-| ID | Prioridade | Feature | Domínio | Descrição | Status |
-|---|---|---|---|---|---|
-| EST-F001 | 🔴 Alta | cadastrar-produto | estoque | CRUD de produtos com grade: SKU pai (`Product`), variações (`ProductVariant`) e atributos (`ProductAttribute` — sabor/tamanho/cor). Base de todo o módulo. | Concluído |
-| EST-F002 | 🔴 Alta | controle-saldo-multi-deposito | estoque | `Warehouse` (loja física × e-commerce) + `StockBalance` por depósito. Consulta de saldo por SKU/depósito. | Concluído |
-| EST-F003 | 🔴 Alta | movimentacao-manual | estoque | `StockMovement` (entrada/saída/ajuste) com histórico auditável que atualiza o `StockBalance`. Núcleo transacional do estoque. | Concluído |
-| EST-F004 | 🟡 Média | alerta-estoque-minimo | estoque | Ponto de reposição por SKU/depósito + notificação automática quando saldo < mínimo (reusa domínio `notification`). | Concluído |
-| EST-F005 | 🟡 Média | importacao-nfe-xml | estoque | Entrada de mercadoria por XML de NF-e (`NfeXmlImportPort`) gerando `StockMovement` de entrada — diferencial operacional. | Backlog (Sprint 4) |
-| EST-F006 | 🟡 Média | inventario-contagem | estoque | Balanço/contagem cíclica com registro de divergências e ajuste automático de saldo. | Concluído |
-| EST-F007 | 🟡 Média | valorizacao-custo-medio | estoque↔financeiro | Custo médio ponderado por SKU e valor total de estoque — alimenta DRE do domínio `financeiro`. | Backlog (Sprint 3) |
-| EST-F008 | 🟡 Média | controle-lote-validade | estoque | Lote e validade para essências/perecíveis + alerta de vencimento próximo. | Backlog (Sprint 3) |
-| EST-F009 | 🟡 Média | recebimento-movimenta-saldo | compras↔estoque | `GoodsReceipt` do domínio compras gera `StockMovement` de entrada automaticamente. | Concluído |
-| EST-F010 | 🟡 Média | baixa-automatica-venda | vendas-balcao↔estoque | Venda registrada no PDV dá baixa no `StockBalance` do depósito loja. | Concluído |
-| EST-F011 | 🟢 Baixa | curva-abc-giro | estoque↔relatorios | Análise ABC e giro de produtos para priorização de compras (domínio `relatorios`). | Backlog (Sprint 6) |
-| EST-F012 | 🟡 Média | transferencia-entre-depositos | estoque | `StockMovement` do tipo TRANSFER: saída atômica de um `Warehouse` + entrada em outro (ex: loja física → e-commerce), distinto do ajuste manual simples (EST-F003). | Backlog (Sprint 4) |
-| EST-F013 | 🟡 Média | reserva-estoque-checkout | ecommerce↔estoque | `StockReservation` temporária ao adicionar item ao carrinho do e-commerce, liberada automaticamente se o checkout expirar — evita overselling em SKU com saldo baixo. | Pendente |
-| EST-F014 | 🟡 Média | estorno-devolucao-venda | estoque | Devolução de venda (PDV ou e-commerce) gera `StockMovement` de entrada estornando a baixa original, com rastreabilidade da venda de origem. | Backlog (Sprint 4) |
-| EST-F015 | 🟢 Baixa | kit-produto-composto | estoque | Produto "kit"/combo (ex: kit narguile = essência + carvão + descartável) que, ao ser vendido, dá baixa automática nos componentes conforme receita cadastrada. | Backlog (Sprint 6) |
-| EST-F016 | 🟢 Baixa | unidade-medida-conversao | estoque | Suporte a múltiplas unidades de medida por produto (ex: compra em kg, venda em porção/g) com fator de conversão aplicado nas movimentações. | Backlog (Sprint 6) |
+## Destino das séries de ID legadas
+
+Os IDs foram **preservados sem renumeração**, porque `docs/feature-registry.md` os embute no
+nome de cada feature (ex.: `cadastrar-produto (EST-F001)`) e os cards do Notion foram criados
+com esses nomes.
+
+| Série legada | Qtde | Onde foi parar |
+|---|---|---|
+| `C001–C022` — correções transversais, geração 2026-07-20 | 22 | [`plataforma`](dominios/plataforma/README.md), seção Histórico (todas concluídas). Os resíduos explicitamente deixados em aberto viraram `PLAT-C023`–`PLAT-C027`. `C006` também aparece no histórico de [`estoque`](dominios/estoque/README.md); `C018` tem sua parte de estoque rastreada como `EST-C006`. |
+| `F001–F009` — features de CRM, geração 2026-07-20 | 9 | [`crm`](dominios/crm/README.md), seção Histórico (todas concluídas) |
+| `EST-F001–EST-F016` — roadmap de Estoque, geração 2026-07-15 | 16 | [`estoque`](dominios/estoque/README.md). Concluídas (F001/F002/F003/F004) no Histórico; as 10 abertas no Backlog do Módulo. `EST-F009` e `EST-F010`, que são cruzamentos, também constam no histórico de [`compras`](dominios/compras/README.md) e [`vendas-balcao`](dominios/vendas-balcao/README.md). |
+
+Total migrado: **47 itens**.
+
+## Pipeline
+
+```
+/1-analise <dominio>   → grava pendências no README do módulo
+/2-sprint              → varre os READMEs e cria os cards no Notion
+/3-implementar         → implementa e move o item para o Histórico do README
+```
 
 ## Histórico de Sprints Criadas
-> Duas gerações de planejamento. As "Sprints 1–6 (plano de Estoque, 2026-07-15)" foram substituídas na prática pela nova numeração de sprints (Correções + CRM), executada a partir de 2026-07-20. O roadmap de Estoque restante (EST-F005/F007/F008/F011/F012/F013/F014/F015/F016) ainda **não foi re-sprintado**.
+
+Registro cronológico transversal — permanece aqui porque não pertence a nenhum módulo.
+O `/2-sprint` continua acrescentando linhas nesta seção.
+
+> Duas gerações de planejamento. As "Sprints 1–6 (plano de Estoque, 2026-07-15)" foram
+> substituídas na prática pela nova numeração de sprints (Correções + CRM), executada a partir
+> de 2026-07-20. O roadmap de Estoque restante (EST-F005/F007/F008/F011/F012/F013/F014/F015/F016)
+> ainda **não foi re-sprintado**.
 
 **Geração atual (Correções + CRM, a partir de 2026-07-20):**
 | Sprint | Data | Itens |

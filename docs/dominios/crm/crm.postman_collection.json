@@ -1,0 +1,1951 @@
+{
+  "info": {
+    "_postman_id": "c772471a-acb1-5700-8669-528c804b586a",
+    "name": "Mahal — CRM",
+    "description": "Coleção de testes do módulo **CRM** (`/crm`) do mahal-backend.\n\nCobre o ciclo completo do cadastro de clientes: criação, busca, listagem com filtro,\nexportação CSV, notas, Kanban de estágios com trilha de transições, tags, automações de\ncampanha (criação, disparo manual e log) e o dashboard.\n\n**Como rodar:** importe e use o Collection Runner na ordem das pastas. Cada execução cria um\ncliente e uma tag com sufixo de timestamp, então a coleção é reexecutável. O cliente criado\nnão é removido ao final (o domínio não tem endpoint de exclusão de cliente); a tag e a\nautomação de teste são apagadas.\n\nDocumentação do módulo: `docs/dominios/crm/README.md`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8082",
+      "type": "string"
+    },
+    {
+      "key": "username",
+      "value": "admin",
+      "type": "string"
+    },
+    {
+      "key": "password",
+      "value": "Admin@dev1",
+      "type": "string"
+    },
+    {
+      "key": "totpCode",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "accessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "refreshToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "challengeToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "permissions",
+      "value": "[]",
+      "type": "string"
+    },
+    {
+      "key": "customerId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "customerEmail",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "customerNome",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "noteId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "tagId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "tagNome",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "automationId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "00 — Autenticação",
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Autentica com usuário/senha e guarda o `accessToken` na coleção.\n\nSe o usuário tiver 2FA ativo a resposta é `PENDING_2FA`: preencha a variável `totpCode` e rode a requisição seguinte.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "",
+                  "if (json.status === 'PENDING_2FA') {",
+                  "    pm.collectionVariables.set('challengeToken', json.challengeToken);",
+                  "    console.warn('2FA ativo — preencha {{totpCode}} e rode \"Login 2FA — concluir\".');",
+                  "} else {",
+                  "    pm.test('Retorna accessToken e refreshToken', () => {",
+                  "        pm.expect(json.accessToken, 'accessToken').to.be.a('string').and.not.empty;",
+                  "        pm.expect(json.refreshToken, 'refreshToken').to.be.a('string').and.not.empty;",
+                  "    });",
+                  "    pm.test('tokenType = Bearer', () => pm.expect(json.tokenType).to.eql('Bearer'));",
+                  "    pm.collectionVariables.set('accessToken', json.accessToken);",
+                  "    pm.collectionVariables.set('refreshToken', json.refreshToken);",
+                  "    pm.collectionVariables.set('challengeToken', '');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login 2FA — concluir",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/2fa/verify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "2fa",
+                "verify"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"challengeToken\": \"{{challengeToken}}\",\n  \"code\": \"{{totpCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Só é necessária quando o login devolve `PENDING_2FA`. É ignorada automaticamente quando não há challenge pendente.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.collectionVariables.get('challengeToken')) {",
+                  "    console.log('Sem challenge de 2FA pendente — requisição ignorada.');",
+                  "    if (pm.execution && pm.execution.skipRequest) pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.collectionVariables.set('accessToken', json.accessToken);",
+                  "pm.collectionVariables.set('refreshToken', json.refreshToken);",
+                  "pm.collectionVariables.set('challengeToken', '');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Perfil e permissões do usuário logado",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "me"
+              ]
+            },
+            "description": "Confere se o token funciona e se o usuário tem as permissões exigidas por CRM. Guarda a lista em `{{permissions}}` para as requisições que dependem de permissões DEV."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "const perms = json.permissions || [];",
+                  "pm.collectionVariables.set('permissions', JSON.stringify(perms));",
+                  "",
+                  "const required = [\"CRM_CUSTOMER_READ\", \"CRM_CUSTOMER_MANAGE\"];",
+                  "pm.test('Usuário tem as permissões do módulo', () => {",
+                  "    const missing = required.filter(p => !perms.includes(p));",
+                  "    pm.expect(missing, 'permissões faltando: ' + missing.join(', ')).to.be.an('array').that.is.empty;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Rode esta pasta primeiro. O `accessToken` fica salvo na coleção e é reaproveitado por todas as outras requisições."
+    },
+    {
+      "name": "01 — Clientes",
+      "item": [
+        {
+          "name": "Criar cliente",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/customers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "customers"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nome\": \"{{customerNome}}\",\n  \"contato\": \"11988887777\",\n  \"email\": \"{{customerEmail}}\",\n  \"cpf\": \"12345678901\",\n  \"origem\": \"POSTMAN\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "`CRM_CUSTOMER_MANAGE`. Nome e email são gerados com timestamp para a coleção poder rodar várias vezes — o email é único no CRM. O cliente nasce no estágio `NOVO_LEAD`."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const stamp = Date.now();",
+                  "pm.collectionVariables.set('customerNome', 'Cliente Postman ' + stamp);",
+                  "pm.collectionVariables.set('customerEmail', 'postman.' + stamp + '@teste.local');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const json = pm.response.json();",
+                  "pm.test('Cliente criado em NOVO_LEAD', () => {",
+                  "    pm.expect(json.id).to.be.a('number');",
+                  "    pm.expect(json.email).to.eql(pm.collectionVariables.get('customerEmail'));",
+                  "    pm.expect(json.estagio).to.eql('NOVO_LEAD');",
+                  "    pm.expect(json.cadastradoEm).to.be.a('string');",
+                  "});",
+                  "pm.test('Header Location aponta para o cliente', () => {",
+                  "    pm.expect(pm.response.headers.get('Location')).to.eql('/crm/customers/' + json.id);",
+                  "});",
+                  "pm.collectionVariables.set('customerId', json.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Buscar cliente por id",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/customers/{{customerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "customers",
+                "{{customerId}}"
+              ]
+            },
+            "description": "`CRM_CUSTOMER_READ`. Traz também a lista de tags associadas (ainda vazia aqui)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('É o cliente criado', () => {",
+                  "    pm.expect(String(json.id)).to.eql(String(pm.collectionVariables.get('customerId')));",
+                  "    pm.expect(json.nome).to.eql(pm.collectionVariables.get('customerNome'));",
+                  "});",
+                  "pm.test('Ainda sem tags', () => pm.expect(json.tags).to.be.an('array').that.is.empty);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar clientes com filtro (search)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/customers?search=Postman&page=0&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "customers"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "Postman"
+                },
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "`search` casa por nome **ou** contato. `size` é limitado a 100 pelo controller."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Estrutura de PageResult', () => {",
+                  "    pm.expect(json.content).to.be.an('array');",
+                  "    pm.expect(json.page).to.eql(0);",
+                  "    pm.expect(json.size).to.eql(20);",
+                  "});",
+                  "pm.test('Encontra o cliente criado', () => {",
+                  "    const id = String(pm.collectionVariables.get('customerId'));",
+                  "    pm.expect(json.content.map(c => String(c.id))).to.include(id);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Exportar clientes em CSV",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "text/csv"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/customers/export?search=Postman",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "customers",
+                "export"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "Postman"
+                }
+              ]
+            },
+            "description": "Exportação não paginada, mesmo filtro da listagem. O corpo começa com BOM UTF-8 para o Excel não quebrar os acentos."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Content-Type text/csv',",
+                  "    () => pm.expect(pm.response.headers.get('Content-Type')).to.include('text/csv'));",
+                  "pm.test('Content-Disposition de anexo clientes.csv',",
+                  "    () => pm.expect(pm.response.headers.get('Content-Disposition')).to.include('clientes.csv'));",
+                  "const texto = pm.response.text();",
+                  "pm.test('Começa com BOM UTF-8', () => pm.expect(texto.charCodeAt(0)).to.eql(0xFEFF));",
+                  "pm.test('Contém o cliente criado',",
+                  "    () => pm.expect(texto).to.include(pm.collectionVariables.get('customerEmail')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Erro: email já cadastrado → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/customers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "customers"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nome\": \"Outro nome\",\n  \"contato\": \"11999996666\",\n  \"email\": \"{{customerEmail}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "O email do cliente é único no CRM."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 409', () => pm.response.to.have.status(409));",
+                  "pm.test('errorCode = CUSTOMER_EMAIL_ALREADY_EXISTS',",
+                  "    () => pm.expect(pm.response.json().errorCode).to.eql('CUSTOMER_EMAIL_ALREADY_EXISTS'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Erro: email inválido → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/customers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "customers"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nome\": \"Cliente inválido\",\n  \"contato\": \"11999996666\",\n  \"email\": \"nao-e-email\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "`nome`, `contato` e `email` são obrigatórios; `email` passa por `@Email`."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('errorCode = VALIDATION_ERROR',",
+                  "    () => pm.expect(pm.response.json().errorCode).to.eql('VALIDATION_ERROR'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Erro: cliente inexistente → 404",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/customers/999999",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "customers",
+                "999999"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));",
+                  "pm.test('errorCode = CUSTOMER_NOT_FOUND',",
+                  "    () => pm.expect(pm.response.json().errorCode).to.eql('CUSTOMER_NOT_FOUND'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 — Notas de atendimento",
+      "item": [
+        {
+          "name": "Criar nota no cliente",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/customers/{{customerId}}/notes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "customers",
+                "{{customerId}}",
+                "notes"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"texto\": \"Cliente pediu orçamento de narguilé completo — nota criada pelo Postman.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "`CRM_CUSTOMER_MANAGE`. O autor é o usuário autenticado, não vem no corpo."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const json = pm.response.json();",
+                  "pm.test('Nota criada com autor e data', () => {",
+                  "    pm.expect(json.id).to.be.a('number');",
+                  "    pm.expect(json.autor).to.eql(pm.collectionVariables.get('username'));",
+                  "    pm.expect(json.criadoEm).to.be.a('string');",
+                  "});",
+                  "pm.collectionVariables.set('noteId', json.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar notas do cliente",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/customers/{{customerId}}/notes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "customers",
+                "{{customerId}}",
+                "notes"
+              ]
+            },
+            "description": "Ordenadas da mais recente para a mais antiga."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Contém a nota criada', () => {",
+                  "    const id = String(pm.collectionVariables.get('noteId'));",
+                  "    pm.expect(json.map(n => String(n.id))).to.include(id);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Erro: nota vazia → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/customers/{{customerId}}/notes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "customers",
+                "{{customerId}}",
+                "notes"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"texto\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "`texto` é `@NotBlank` e limitado a 2000 caracteres."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('errorCode = VALIDATION_ERROR',",
+                  "    () => pm.expect(pm.response.json().errorCode).to.eql('VALIDATION_ERROR'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 — Kanban de estágios",
+      "item": [
+        {
+          "name": "Mover cliente para EM_ATENDIMENTO",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/customers/{{customerId}}/estagio",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "customers",
+                "{{customerId}}",
+                "estagio"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estagio\": \"EM_ATENDIMENTO\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "`CRM_CUSTOMER_MANAGE`. Estágios: `NOVO_LEAD`, `EM_ATENDIMENTO`, `QUALIFICADO`, `CLIENTE_ATIVO`, `INATIVO`. Cada movimentação grava uma transição na trilha."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Estágio atualizado',",
+                  "    () => pm.expect(pm.response.json().estagio).to.eql('EM_ATENDIMENTO'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Histórico de transições",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/customers/{{customerId}}/estagio/historico",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "customers",
+                "{{customerId}}",
+                "estagio",
+                "historico"
+              ]
+            },
+            "description": "Mais recentes primeiro. Cada item registra `de`, `para`, `autor` e data."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Registrou a transição NOVO_LEAD → EM_ATENDIMENTO', () => {",
+                  "    pm.expect(json).to.not.be.empty;",
+                  "    pm.expect(json[0].de).to.eql('NOVO_LEAD');",
+                  "    pm.expect(json[0].para).to.eql('EM_ATENDIMENTO');",
+                  "    pm.expect(json[0].autor).to.eql(pm.collectionVariables.get('username'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Erro: mover para o mesmo estágio → 400",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/customers/{{customerId}}/estagio",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "customers",
+                "{{customerId}}",
+                "estagio"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estagio\": \"EM_ATENDIMENTO\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "A trilha rejeita transição com `de` igual a `para`."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('errorCode = BAD_REQUEST',",
+                  "    () => pm.expect(pm.response.json().errorCode).to.eql('BAD_REQUEST'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Erro: estágio inexistente → 400",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/customers/{{customerId}}/estagio",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "customers",
+                "{{customerId}}",
+                "estagio"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estagio\": \"ESTAGIO_INVENTADO\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Valor fora do enum `CustomerStage`."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('errorCode indica enum/corpo inválido', () => {",
+                  "    pm.expect(['INVALID_ENUM_VALUE', 'UNREADABLE_BODY', 'VALIDATION_ERROR'])",
+                  "        .to.include(pm.response.json().errorCode);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 — Tags",
+      "item": [
+        {
+          "name": "Criar tag",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/tags",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "tags"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nome\": \"{{tagNome}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "`CRM_CUSTOMER_MANAGE`. O nome da tag é único."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('tagNome', 'postman-' + Date.now());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const json = pm.response.json();",
+                  "pm.test('Tag criada', () => {",
+                  "    pm.expect(json.id).to.be.a('number');",
+                  "    pm.expect(json.nome).to.eql(pm.collectionVariables.get('tagNome'));",
+                  "});",
+                  "pm.collectionVariables.set('tagId', json.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Erro: nome de tag duplicado → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/tags",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "tags"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nome\": \"{{tagNome}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 409', () => pm.response.to.have.status(409));",
+                  "pm.test('errorCode = TAG_ALREADY_EXISTS',",
+                  "    () => pm.expect(pm.response.json().errorCode).to.eql('TAG_ALREADY_EXISTS'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Associar tag ao cliente",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/customers/{{customerId}}/tags",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "customers",
+                "{{customerId}}",
+                "tags"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tagId\": \"{{tagId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar tags do cliente",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/customers/{{customerId}}/tags",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "customers",
+                "{{customerId}}",
+                "tags"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Contém a tag associada',",
+                  "    () => pm.expect(pm.response.json().map(t => t.nome))",
+                  "        .to.include(pm.collectionVariables.get('tagNome')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar tags com contagem de clientes",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/tags",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "tags"
+              ]
+            },
+            "description": "Cada tag vem com `clientesCount` — quantos clientes estão associados a ela."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const tag = pm.response.json().find(",
+                  "    t => String(t.id) === String(pm.collectionVariables.get('tagId')));",
+                  "pm.test('A tag criada aparece com 1 cliente', () => {",
+                  "    pm.expect(tag, 'tag não encontrada').to.not.be.undefined;",
+                  "    pm.expect(tag.clientesCount).to.eql(1);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Remover associação cliente ↔ tag",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/customers/{{customerId}}/tags/{{tagId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "customers",
+                "{{customerId}}",
+                "tags",
+                "{{tagId}}"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Erro: associar tag inexistente → 404",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/customers/{{customerId}}/tags",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "customers",
+                "{{customerId}}",
+                "tags"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tagId\": 999999\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));",
+                  "pm.test('errorCode = TAG_NOT_FOUND',",
+                  "    () => pm.expect(pm.response.json().errorCode).to.eql('TAG_NOT_FOUND'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Remover a tag de teste",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/tags/{{tagId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "tags",
+                "{{tagId}}"
+              ]
+            },
+            "description": "Apaga a tag e todas as suas associações — limpeza do cenário."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "05 — Automações de campanha",
+      "item": [
+        {
+          "name": "Criar automação (segmento EM_ATENDIMENTO)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/automacoes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "automacoes"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nome\": \"Follow-up Postman\",\n  \"gatilho\": \"MANUAL\",\n  \"segmentoAlvo\": \"EM_ATENDIMENTO\",\n  \"canal\": \"WHATSAPP\",\n  \"template\": \"Olá {nome}, tudo bem? Passando para saber se ficou alguma dúvida.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "`CRM_CUSTOMER_MANAGE`. Gatilhos: `MANUAL`, `ENTRADA_ESTAGIO` (só `MANUAL` dispara nesta versão). Canais: `WHATSAPP`, `EMAIL`, `AMBOS`. Nasce ativa.\n\nO segmento alvo é `EM_ATENDIMENTO` de propósito: é o estágio para onde a pasta 03 moveu o cliente de teste, então o disparo encontra pelo menos um destinatário."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const json = pm.response.json();",
+                  "pm.test('Automação criada e ativa', () => {",
+                  "    pm.expect(json.id).to.be.a('number');",
+                  "    pm.expect(json.ativa).to.be.true;",
+                  "    pm.expect(json.gatilho).to.eql('MANUAL');",
+                  "    pm.expect(json.canal).to.eql('WHATSAPP');",
+                  "});",
+                  "pm.collectionVariables.set('automationId', json.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar automações",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/automacoes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "automacoes"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Contém a automação criada',",
+                  "    () => pm.expect(pm.response.json().map(a => String(a.id)))",
+                  "        .to.include(String(pm.collectionVariables.get('automationId'))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Disparar automação manualmente",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/automacoes/{{automationId}}/disparar",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "automacoes",
+                "{{automationId}}",
+                "disparar"
+              ]
+            },
+            "description": "Cria uma entrada de log por cliente do segmento alvo. **Não envia mensagem real** — a integração com WhatsApp/e-mail ainda está no backlog (F008)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Gerou log para pelo menos um cliente do segmento', () => {",
+                  "    pm.expect(json).to.be.an('array').that.is.not.empty;",
+                  "    pm.expect(String(json[0].automationId))",
+                  "        .to.eql(String(pm.collectionVariables.get('automationId')));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Log de disparos da automação",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/automacoes/{{automationId}}/log",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "automacoes",
+                "{{automationId}}",
+                "log"
+              ]
+            },
+            "description": "Mais recentes primeiro, com `status` do disparo e data."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Log não está vazio',",
+                  "    () => pm.expect(pm.response.json()).to.be.an('array').that.is.not.empty);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Desativar automação",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/automacoes/{{automationId}}/ativa",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "automacoes",
+                "{{automationId}}",
+                "ativa"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ativa\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Automação desativada', () => pm.expect(pm.response.json().ativa).to.be.false);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Erro: automação inexistente → 404",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/automacoes/999999/disparar",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "automacoes",
+                "999999",
+                "disparar"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));",
+                  "pm.test('errorCode = CAMPAIGN_AUTOMATION_NOT_FOUND',",
+                  "    () => pm.expect(pm.response.json().errorCode).to.eql('CAMPAIGN_AUTOMATION_NOT_FOUND'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Remover a automação de teste",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/automacoes/{{automationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "automacoes",
+                "{{automationId}}"
+              ]
+            },
+            "description": "Apaga a automação e o log de disparos — limpeza do cenário."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "06 — Dashboard e canais",
+      "item": [
+        {
+          "name": "Overview do dashboard",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/dashboard/overview",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "dashboard",
+                "overview"
+              ]
+            },
+            "description": "`totalClientes`, `clientesAtivos` (estágio ≠ `INATIVO`) e `porEstagio` são dados reais; `ltvMedio` e `disparosWhatsappMes` ainda são placeholders."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Campos do overview presentes', () => {",
+                  "    pm.expect(json.totalClientes).to.be.a('number');",
+                  "    pm.expect(json.clientesAtivos).to.be.a('number');",
+                  "    pm.expect(json.porEstagio).to.be.an('object');",
+                  "    pm.expect(json.porSegmento).to.be.an('object');",
+                  "});",
+                  "pm.test('Conta pelo menos o cliente criado nesta execução',",
+                  "    () => pm.expect(json.totalClientes).to.be.above(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Status dos canais de envio",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/canais/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "canais",
+                "status"
+              ]
+            },
+            "description": "Badge da tela de Automações: conexão de WhatsApp/e-mail."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Resposta é uma lista de canais', () => {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json).to.be.an('array');",
+                  "    if (json.length) pm.expect(json[0]).to.have.property('conectado');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "07 — Placeholders (domínios ainda não implementados)",
+      "item": [
+        {
+          "name": "Histórico de pedidos do cliente",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/customers/{{customerId}}/orders",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "customers",
+                "{{customerId}}",
+                "orders"
+              ]
+            },
+            "description": "Sempre lista vazia até o domínio de pedidos existir — valida só o cliente."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Lista vazia', () => pm.expect(pm.response.json()).to.be.an('array').that.is.empty);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Extrato de cashback do cliente",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/customers/{{customerId}}/cashback",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "customers",
+                "{{customerId}}",
+                "cashback"
+              ]
+            },
+            "description": "Sempre lista vazia até o domínio de cashback existir."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Lista vazia', () => pm.expect(pm.response.json()).to.be.an('array').that.is.empty);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "08 — Segurança",
+      "item": [
+        {
+          "name": "Sem token → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/customers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "customers"
+              ]
+            },
+            "description": "Confirma que o endpoint está protegido: sem `Authorization` a resposta é 401.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "99 — Encerramento",
+      "item": [
+        {
+          "name": "Logout (revoga o refresh token)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "logout"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Revoga o refresh token da sessão. O accessToken continua válido até expirar."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 204', () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set('refreshToken', '');"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

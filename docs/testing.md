@@ -4,12 +4,17 @@
 
 | Categoria | Quantidade | Tecnologia principal |
 |-----------|-----------|----------------------|
-| Unit tests | ~54 | JUnit 5 + Mockito |
-| Integration tests (`*IT`) | 17 | JUnit 5 + Spring Boot Test + MockMvc |
-| Testcontainers (PostgreSQL real) | 1 | Testcontainers + `@EnabledIfEnvironmentVariable` |
+| Unit tests | ~57 | JUnit 5 + Mockito |
+| Integration tests (`*IT`) | 18 | JUnit 5 + Spring Boot Test + MockMvc |
+| Testcontainers (PostgreSQL real) | 2 | Testcontainers + `@EnabledIfEnvironmentVariable` |
 | ArchUnit (regras arquiteturais) | 1 | ArchUnit |
+| Coleções Postman (API rodando) | 1 por módulo | Postman / newman |
 
-Total: 128 arquivos de teste.
+Total: 132 arquivos de teste (128 com `@Test` + 4 helpers), 981 métodos `@Test`.
+
+As coleções Postman são a única categoria que exercita a aplicação **em execução**, de ponta a
+ponta pelo HTTP real (incluindo login, RBAC e integração entre domínios). Elas vivem junto da
+documentação de cada domínio — ver [Testes de API com Postman](#testes-de-api-com-postman).
 
 ---
 
@@ -24,9 +29,34 @@ ENABLE_TC=true ./mvnw test -Dtest=AuthFlowPostgresIT
 
 # Classe específica
 ./mvnw test -Dtest=AuthServiceTest
+
+# Coleção Postman de um módulo (com a aplicação no ar)
+npx newman run docs/dominios/estoque/estoque.postman_collection.json \
+  -e docs/postman/mahal-local.postman_environment.json
 ```
 
 > Os ITs (exceto `AuthFlowPostgresIT`) rodam com perfil `dev` — banco H2 in-memory, sem Redis, sem envio de email real.
+
+---
+
+## Testes de API com Postman
+
+Cada módulo tem uma coleção própria, guardada ao lado do README do domínio, que faz login e
+exercita os endpoints daquele módulo com asserções de status, corpo e regra de negócio:
+
+| Módulo | Coleção |
+|---|---|
+| Estoque | [`docs/dominios/estoque/estoque.postman_collection.json`](dominios/estoque/estoque.postman_collection.json) |
+| Compras | [`docs/dominios/compras/compras.postman_collection.json`](dominios/compras/compras.postman_collection.json) |
+| Vendas Balcão (PDV) | [`docs/dominios/vendas-balcao/vendas-balcao.postman_collection.json`](dominios/vendas-balcao/vendas-balcao.postman_collection.json) |
+| CRM | [`docs/dominios/crm/crm.postman_collection.json`](dominios/crm/crm.postman_collection.json) |
+| Plataforma | [`docs/dominios/plataforma/plataforma.postman_collection.json`](dominios/plataforma/plataforma.postman_collection.json) |
+| E-commerce | [`docs/dominios/ecommerce/ecommerce.postman_collection.json`](dominios/ecommerce/ecommerce.postman_collection.json) |
+| Financeiro | [`docs/dominios/financeiro/financeiro.postman_collection.json`](dominios/financeiro/financeiro.postman_collection.json) |
+| Logística | [`docs/dominios/logistica/logistica.postman_collection.json`](dominios/logistica/logistica.postman_collection.json) |
+
+Como importar, quais variáveis existem, o environment compartilhado e os pré-requisitos
+manuais de Compras e PDV estão em [`docs/postman/README.md`](postman/README.md).
 
 ---
 
@@ -48,7 +78,7 @@ Testam uma classe isolada com dependências mockadas via Mockito. Não sobem o c
 | `WarehouseTest` | Factory `create`/`of`, invariantes de domínio: `code`/`name` obrigatórios, `type` obrigatório |
 | `StockBalanceTest` | Factory `zero`/`of`, invariantes de domínio: `sku` obrigatório, `warehouseId` obrigatório, `quantity` não pode ser negativa; `apply()`: ENTRADA soma, SAIDA subtrai, SAIDA drena exatamente até zero é permitido, SAIDA insuficiente lança `InsufficientStockException`, AJUSTE soma |
 | `StockMovementTest` | Factory `create`/`of`, invariantes de domínio: `sku`/`warehouseId`/`type`/`reason`/`username` obrigatórios, `quantity` deve ser maior que zero |
-| `EstoqueServiceTest` | `createProduct` salva e retorna, lança `DuplicateSkuException` em SKU duplicado, permite produto sem variações; `listProducts` delega ao repositório; `createWarehouse` salva e retorna, lança `DuplicateWarehouseCodeException` em código duplicado; `listWarehouses` delega ao repositório; `getStockBalance` retorna saldo existente, retorna saldo zero quando ainda não há registro, lança `WarehouseNotFoundException` para código de depósito inexistente; `adjustStock` ENTRADA sem saldo prévio parte de zero e persiste ledger+saldo, SAIDA decrementa saldo existente, SAIDA com saldo insuficiente lança `InsufficientStockException` sem persistir nada, lança `WarehouseNotFoundException` para depósito inexistente |
+| `EstoqueServiceTest` | `createProduct` salva e retorna, lança `DuplicateSkuException` em SKU duplicado, permite produto sem variações; `listProducts` delega ao repositório; `createWarehouse` salva e retorna, lança `DuplicateWarehouseCodeException` em código duplicado; `listWarehouses` delega ao repositório; `getStockBalance` retorna saldo existente, retorna saldo zero quando ainda não há registro, lança `WarehouseNotFoundException` para código de depósito inexistente; `adjustStock` ENTRADA sem saldo prévio parte de zero e persiste ledger+saldo, SAIDA decrementa saldo existente, SAIDA com saldo insuficiente lança `InsufficientStockException` sem persistir nada, lança `WarehouseNotFoundException` para depósito inexistente; `listMovements` resolve o depósito por código e delega a paginação ao repositório, devolve página vazia para par SKU/depósito nunca movimentado, lança `WarehouseNotFoundException` sem tocar no `StockMovementRepository` |
 | `CustomerTest` | Factory `create`/`of`, invariantes de domínio: `nome`/`contato`/`email` obrigatórios, formato de email inválido rejeitado, `cpf`/`origem` opcionais |
 | `CustomerNoteTest` | Factory `create`/`of`, invariantes de domínio: `customerId`/`autor`/`texto` obrigatórios |
 | `StageTransitionTest` | Factory `create`/`of`, invariantes de domínio: `customerId`/`de`/`para`/`autor` obrigatórios, `de` não pode ser igual a `para` |
@@ -96,7 +126,8 @@ Testam uma classe isolada com dependências mockadas via Mockito. Não sobem o c
 | `NotificationEventListenerTest` | Dispatch completo (persist + SSE + email) para PASSWORD_CHANGED e ACCOUNT_LOCKED; in-app desabilitado pula persistência e SSE mas envia email; email desabilitado persiste e faz push SSE mas pula email; falha na lookup de preferência faz fallback para defaults (todos habilitados); role_assigned inclui nome do papel no corpo; tipo de evento não mapeado é ignorado |
 | `SseEmitterRegistryTest` | Register adiciona emitter; múltiplos emitters até o limite de 5; conexão além do limite é recusada; send para usuário sem emitters é no-op; remove diminui contagem; remove usuário inexistente é no-op; activeConnections retorna zero para usuário sem emitters |
 | `GoogleTokenVerifierAdapterTest` | Validação de id_token Google (assinatura, issuer, audience) |
-| `SeedConfigTest` | O `CommandLineRunner` de seed dev concede `ESTOQUE_PRODUCT_READ`/`MANAGE` e `ESTOQUE_WAREHOUSE_READ`/`MANAGE` ao `ROLE_ADMIN` — alinhado com `DevRoleBootstrapConfig` (C006), evita 403 inesperado em `/estoque/**` para o usuário `admin` de teste |
+| `SeedConfigTest` | O `CommandLineRunner` de seed dev concede `ESTOQUE_PRODUCT_READ`/`MANAGE` e `ESTOQUE_WAREHOUSE_READ`/`MANAGE` ao `ROLE_ADMIN` — alinhado com `DevRoleBootstrapConfig` (C006), evita 403 inesperado em `/estoque/**` para o usuário `admin` de teste; concede também `PDV_SALE_MANAGE` (EST-C001) |
+| `DevRoleBootstrapConfigTest` | O `CommandLineRunner` de bootstrap concede a `ROLE_DEV` as permissões de negócio (`ESTOQUE_*`, `PDV_READ` e `PDV_SALE_MANAGE`) e as `DEV_ONLY_*` (`DEV_ROLE_MANAGE`, `DEV_PERMISSION_MANAGE`); não cria usuário DEV quando `DEV_EMAIL` está em branco. O caso do `PDV_SALE_MANAGE` (EST-C001) é o que quebrou: a permissão existia só no controller e na migration V57, então o DEV tomava 403 em `POST /pdv/sessions/{id}/sales` |
 | `HmlStartupValidatorTest` | Boot fail em hml com variáveis ausentes; rejeita `seed.dev.email` (DEV_EMAIL) definido sem `seed.dev.password` (DEV_PASSWORD) real — vazio ou igual ao default `Dev@secure1!` (C005); aceita quando DEV_EMAIL está ausente, mesmo com a senha default; rejeita `avatar.base-url` ausente, `localhost` ou `example.com` (C016 — campo não existia antes) |
 | `ProdStartupValidatorTest` | Boot fail em prod com variáveis ausentes ou com valores padrão; rejeita explicitamente o valor default de `TOTP_ENCRYPTION_KEY` que esteve hardcoded em `docker-compose.prod.yml` (C002); mesma validação de `seed.dev.password` do C005; `avatar.base-url` agora também rejeita `example.com`, além de `localhost` (C016) |
 | `ActuatorSecurityTest` | Endpoints de actuator acessíveis apenas com auth |
@@ -113,7 +144,7 @@ Controladores (MockMvc com contexto parcial):
 | `UserControllerTest` | CRUD de usuários, atribuição de roles |
 | `RoleControllerTest` | CRUD de roles |
 | `PermissionControllerTest` | CRUD de permissions |
-| `EstoqueControllerTest` | Lista produtos paginados, cria produto (201), validação de campo obrigatório (400), SKU duplicado (409 `SKU_ALREADY_EXISTS`), criação sem variações; cria depósito (201), código duplicado (409 `WAREHOUSE_CODE_ALREADY_EXISTS`), campo obrigatório ausente (400), `type` inválido (400), lista depósitos, consulta saldo (200), depósito inexistente (404 `WAREHOUSE_NOT_FOUND`); registra movimentação (201 com saldo atualizado), `type` inválido (400), `quantity` ausente/negativa (400), depósito inexistente (404 `WAREHOUSE_NOT_FOUND`), saldo insuficiente (400 `INSUFFICIENT_STOCK`) |
+| `EstoqueControllerTest` | Lista produtos paginados, cria produto (201), validação de campo obrigatório (400), SKU duplicado (409 `SKU_ALREADY_EXISTS`), criação sem variações; cria depósito (201), código duplicado (409 `WAREHOUSE_CODE_ALREADY_EXISTS`), campo obrigatório ausente (400), `type` inválido (400), lista depósitos, consulta saldo (200), depósito inexistente (404 `WAREHOUSE_NOT_FOUND`); registra movimentação (201 com saldo atualizado), `type` inválido (400), `quantity` ausente/negativa (400), depósito inexistente (404 `WAREHOUSE_NOT_FOUND`), saldo insuficiente (400 `INSUFFICIENT_STOCK`); lista histórico de movimentações (200 com ledger ordenado, página vazia para SKU nunca movimentado, teto de 100 por página, 400 `MISSING_PARAMETER` sem `sku` ou sem `warehouseCode`, 404 `WAREHOUSE_NOT_FOUND`) |
 | `CrmControllerTest` | Cria cliente (201, com placeholders `ltv`/`cashback`/`segmento`/`tags`), campo obrigatório ausente (400), email inválido (400), email duplicado (409 `CUSTOMER_EMAIL_ALREADY_EXISTS`); busca por id (200, tags reais do use case), id inexistente (404 `CUSTOMER_NOT_FOUND`); lista paginada (200), filtro `search` repassado ao use case, `size` capado em 100; cria nota (201), sem `texto` (400), cliente inexistente (404); lista notas (200), cliente inexistente (404); histórico de pedidos e extrato de cashback retornam `[]` (200) com cliente existente, 404 com cliente inexistente; move estágio (200), sem `estagio` (400), valor de enum inválido (400), cliente inexistente (404), mesmo estágio (400); lista histórico de transições (200), cliente inexistente (404); dashboard overview retorna totais/ativos/porEstagio reais e placeholders de ltv/whatsapp/segmento (200); cria tag (201), sem `nome` (400), nome duplicado (409 `TAG_ALREADY_EXISTS`); lista tags com contagem (200); remove tag (204), tag inexistente (404 `TAG_NOT_FOUND`); associa/remove tag de cliente (204), sem `tagId` (400), cliente ou tag inexistentes (404); lista tags do cliente (200), cliente inexistente (404); exporta CSV com header `Content-Type: text/csv;charset=UTF-8` e `Content-Disposition: attachment` (200), filtro `search` repassado ao use case; cria automação (201), sem `nome` (400); lista automações (200); ativa/desativa automação (200), automação inexistente (404 `CAMPAIGN_AUTOMATION_NOT_FOUND`); remove automação (204), automação inexistente (404); dispara automação retornando 1 `CampaignLogResponse` por cliente-alvo com `convertidoEm` ausente (200), automação inexistente (404); lista log de disparos (200), automação inexistente (404); status dos canais retorna EMAIL e WHATSAPP com `canal`/`conectado`/`provedor` (200) |
 | `AuditLogControllerTest` | Listagem filtrada de audit logs |
 | `StatsControllerTest` | Endpoint de stats |
@@ -161,7 +192,9 @@ Sobem o contexto Spring completo com MockMvc contra H2 in-memory (perfil `dev`),
 
 ### Testcontainers (PostgreSQL real)
 
-`AuthFlowPostgresIT` é o único teste que sobe um container PostgreSQL real via Testcontainers. Ele valida que:
+Duas classes sobem um container PostgreSQL real via Testcontainers: `AuthFlowPostgresIT` (gated por `@EnabledIfEnvironmentVariable`) e `RefreshTokenServiceTest` (`@Testcontainers` + `@Container` com `postgres:16-alpine`).
+
+`AuthFlowPostgresIT` valida que:
 - As migrations Flyway executam sem erro contra PostgreSQL (não apenas H2)
 - O fluxo de login/refresh/logout funciona com o banco de produção
 
@@ -183,7 +216,7 @@ Testes que validam comportamento de autorização independentemente do fluxo de 
 | Arquivo | O que cobre |
 |---------|-------------|
 | `PermissionControllerSecurityTest` | 401 sem auth, 403 com role insuficiente, 200/201 com permission correta |
-| `EstoqueControllerSecurityTest` | 401 sem auth, 403 com `ROLE_USER` sem permissão, 403 sem `ESTOQUE_PRODUCT_MANAGE` no POST, 200/201 com `ESTOQUE_PRODUCT_READ`/`ESTOQUE_PRODUCT_MANAGE`; mesmos casos para `ESTOQUE_WAREHOUSE_READ`/`ESTOQUE_WAREHOUSE_MANAGE` nos endpoints de depósito e saldo; 401/403 em `POST /estoque/movements`, 201 com `ESTOQUE_STOCK_MANAGE` (cria um depósito no próprio teste e registra uma ENTRADA, que nunca falha por saldo insuficiente) |
+| `EstoqueControllerSecurityTest` | 401 sem auth, 403 com `ROLE_USER` sem permissão, 403 sem `ESTOQUE_PRODUCT_MANAGE` no POST, 200/201 com `ESTOQUE_PRODUCT_READ`/`ESTOQUE_PRODUCT_MANAGE`; mesmos casos para `ESTOQUE_WAREHOUSE_READ`/`ESTOQUE_WAREHOUSE_MANAGE` nos endpoints de depósito e saldo; 401/403 em `POST /estoque/movements`, 201 com `ESTOQUE_STOCK_MANAGE` (cria um depósito no próprio teste e registra uma ENTRADA, que nunca falha por saldo insuficiente); 401/403 em `GET /estoque/movements`, incluindo 403 para quem tem apenas `ESTOQUE_WAREHOUSE_READ` — ler o ledger expõe o `username` de cada movimentação e exige `ESTOQUE_STOCK_MANAGE` |
 | `CrmControllerSecurityTest` | 401 sem auth em POST/GET/PATCH (item, listagem, notas, estágio, dashboard, tags, exportação CSV, automações, status dos canais), 403 sem `CRM_CUSTOMER_MANAGE` no POST/PATCH/DELETE de cliente/nota/estágio/tags/automações, 403 sem `CRM_CUSTOMER_READ` no GET (item, listagem, notas, pedidos, cashback, histórico de estágio, dashboard, tags, exportação CSV, automações, log de disparos, status dos canais), 201 com `CRM_CUSTOMER_MANAGE`, 200/404 com `CRM_CUSTOMER_READ`/`CRM_CUSTOMER_MANAGE` |
 | `RoleControllerSecurityTest` | 401 sem auth, 403 sem permissão, guard DEV_ELEVATED em assign/removePermission para `DEV_ROLE_MANAGE`/`DEV_PERMISSION_MANAGE` |
 | `AuditLogControllerSecurityTest` | 401 sem auth, 403 sem `AUDIT_READ`, 200 com permissão correta |

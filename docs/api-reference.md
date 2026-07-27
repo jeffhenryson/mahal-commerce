@@ -59,6 +59,7 @@ Todos os erros retornam `ApiError`:
 | `INVALID_AVATAR_FORMAT` | 400 | Formato não suportado — aceito JPEG, PNG, WebP |
 | `VALIDATION_ERROR` | 400 | Campos inválidos (bean validation) |
 | `UNREADABLE_BODY` | 400 | Body ausente ou JSON malformado |
+| `MISSING_PARAMETER` | 400 | Parâmetro de query obrigatório ausente — a mensagem nomeia o parâmetro |
 | `EMAIL_DELIVERY_FAILED` | 503 | Falha ao enviar email |
 | `INTERNAL_ERROR` | 500 | Erro interno inesperado |
 
@@ -923,6 +924,142 @@ pelo cliente da API. ENTRADA e AJUSTE somam `quantity` ao saldo; SAIDA subtrai (
 
 ---
 
+### GET /estoque/movements — Permissão: ESTOQUE_STOCK_MANAGE
+
+```
+Query: sku (obrigatório), warehouseCode (obrigatório), page (default 0), size (default 20, teto 100)
+// Response 200 → PageResult<StockMovementResponse>
+// 404 WAREHOUSE_NOT_FOUND / 400 MISSING_PARAMETER (sku ou warehouseCode ausente)
+```
+
+```json
+// PageResult<StockMovementResponse> — mais recentes primeiro (created_at DESC)
+{
+  "content": [
+    {
+      "id": 9,
+      "sku": "NARG-001",
+      "warehouseCode": "LOJA-01",
+      "type": "SAIDA",
+      "quantity": 2.000,
+      "reason": "Venda balcão sessão #7",
+      "username": "gerente",
+      "createdAt": "2026-07-26T12:00:00Z"
+    }
+  ],
+  "page": 0,
+  "size": 20,
+  "totalElements": 1,
+  "totalPages": 1
+}
+```
+
+Histórico auditável do par SKU/depósito, incluindo as movimentações geradas automaticamente por
+`compras` (recebimento) e `vendas-balcao` (venda) — o `reason` identifica a origem. Par sem
+nenhuma movimentação devolve `content` vazio com `200`, não `404`; o `404` é reservado ao
+depósito inexistente. Exige `ESTOQUE_STOCK_MANAGE` (e não `ESTOQUE_WAREHOUSE_READ`) porque o
+ledger expõe **qual usuário** realizou cada movimentação.
+
+---
+
+### PUT /estoque/products/{sku}/reorder-point — Permissão: ESTOQUE_STOCK_MANAGE
+
+```json
+{
+  "warehouseCode": "LOJA-01",  // obrigatório
+  "minQuantity": 10.000         // obrigatório, >= 0
+}
+// Response 204 No Content (cria ou atualiza — upsert por (sku, warehouseCode))
+// 404 WAREHOUSE_NOT_FOUND / 400 VALIDATION_ERROR
+```
+
+Define o ponto de reposição do par SKU/depósito. A partir daí, **toda** movimentação que reduza
+o saldo abaixo de `minQuantity` — manual, recebimento de compras ou venda de PDV — notifica
+todos os usuários com `ESTOQUE_STOCK_MANAGE`. Sem ponto de reposição cadastrado, nenhuma
+notificação é disparada. Não há endpoint para ler ou remover um ponto de reposição.
+
+---
+
+## Compras — `/compras`
+
+### GET /compras/suppliers — Permissão: COMPRAS_READ
+
+Lista fornecedores paginados (`page` ≥ 0, `size` entre 1 e 100 — default 0/20). Retorna
+`PageResult<Supplier>`. **Não há endpoint de criação de fornecedor** — a inserção é feita via SQL
+ou repositório.
+
+### POST /compras/goods-receipts — Permissão: COMPRAS_RECEIPT_MANAGE
+
+```json
+{
+  "supplierId": 1,               // obrigatório
+  "warehouseCode": "LOJA-01",    // obrigatório
+  "items": [                      // obrigatório, não vazio
+    { "sku": "NARG-001", "quantity": 12.000 }  // quantity > 0
+  ]
+}
+// Response 201 → GoodsReceiptResponseDTO
+// 404 SUPPLIER_NOT_FOUND / WAREHOUSE_NOT_FOUND / 400 VALIDATION_ERROR
+```
+
+Registra o recebimento e **dá entrada automática no estoque na mesma transação**: cada item gera
+um `StockMovement` de `ENTRADA` via `EstoqueUseCase.adjustStock`, atualizando o `StockBalance`.
+`username` vem do JWT, nunca do corpo.
+
+```json
+// GoodsReceiptResponseDTO
+{
+  "id": 1,
+  "supplierId": 1,
+  "warehouseCode": "LOJA-01",
+  "username": "admin",
+  "receivedAt": "2026-07-23T14:02:11Z",
+  "items": [ { "sku": "NARG-001", "quantity": 12.000 } ]
+}
+```
+
+---
+
+## PDV (Vendas Balcão) — `/pdv`
+
+### GET /pdv/sessions — Permissão: PDV_READ
+
+Lista sessões de caixa paginadas (`page` ≥ 0, `size` entre 1 e 100 — default 0/20). Retorna
+`PageResult<CashRegisterSession>`. **Não há endpoint de abertura, sangria ou fechamento de caixa**
+— as sessões precisam ser criadas fora da API.
+
+### POST /pdv/sessions/{id}/sales — Permissão: PDV_SALE_MANAGE
+
+```json
+{
+  "warehouseCode": "LOJA-01",    // obrigatório
+  "items": [                      // obrigatório, não vazio
+    { "sku": "NARG-001", "quantity": 2.000, "unitPrice": 89.90 }
+  ]
+}
+// Response 201 → SaleResponseDTO
+// 400 INSUFFICIENT_STOCK (saldo insuficiente para algum item) / 400 VALIDATION_ERROR
+// 404 CASH_REGISTER_SESSION_NOT_FOUND / 409 sessão de caixa encerrada
+```
+
+Registra a venda e **dá baixa automática no estoque na mesma transação**: cada item gera um
+`StockMovement` de `SAIDA`. Se qualquer item não tiver saldo, a transação inteira é revertida.
+`quantity` > 0 e `unitPrice` ≥ 0.
+
+```json
+// SaleResponseDTO
+{
+  "id": 1,
+  "sessionId": 1,
+  "warehouseCode": "LOJA-01",
+  "soldAt": "2026-07-23T18:40:02Z",
+  "totalAmount": 179.80,
+  "items": [ { "sku": "NARG-001", "quantity": 2.000, "unitPrice": 89.90 } ]
+}
+```
+
+---
+
 ## CRM — `/crm`
 
 ### POST /crm/customers — Permissão: CRM_CUSTOMER_MANAGE
@@ -1743,11 +1880,18 @@ interface TotpConfirmResponse {
 | `AUDIT_READ` | Ver audit logs |
 | `ESTOQUE_PRODUCT_READ` | Listar produtos do estoque |
 | `ESTOQUE_PRODUCT_MANAGE` | Criar/gerenciar produtos do estoque |
-| `COMPRAS_READ` | Acesso ao endpoint stub `GET /compras/suppliers` |
+| `ESTOQUE_WAREHOUSE_READ` | Listar depósitos e consultar saldo |
+| `ESTOQUE_WAREHOUSE_MANAGE` | Criar/gerenciar depósitos |
+| `ESTOQUE_STOCK_MANAGE` | `POST`/`GET /estoque/movements` e `PUT /estoque/products/{sku}/reorder-point` |
+| `CRM_CUSTOMER_READ` | Leituras de `/crm/**` |
+| `CRM_CUSTOMER_MANAGE` | Escritas de `/crm/**` |
+| `COMPRAS_READ` | `GET /compras/suppliers` |
+| `COMPRAS_RECEIPT_MANAGE` | `POST /compras/goods-receipts` — recebimento de mercadoria |
+| `PDV_READ` | `GET /pdv/sessions` |
+| `PDV_SALE_MANAGE` | `POST /pdv/sessions/{id}/sales` — venda com baixa de estoque |
 | `ECOMMERCE_READ` | Acesso ao endpoint stub `GET /ecommerce/carts` |
 | `FINANCEIRO_READ` | Acesso ao endpoint stub `GET /financeiro/cash-flow` |
 | `LOGISTICA_READ` | Acesso ao endpoint stub `GET /logistica/shipments` |
-| `PDV_READ` | Acesso ao endpoint stub `GET /pdv/sessions` |
 
 ---
 
