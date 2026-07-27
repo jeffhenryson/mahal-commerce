@@ -17,7 +17,8 @@ Gerenciamento da grade de produtos e controle de inventário multi-depósito, co
 - **Movimentações:** entradas/saídas/ajustes com histórico auditável (`StockMovement`). ✅ Implementado (EST-F003), com consulta paginada do histórico (EST-F017).
 - **Ponto de reposição:** mínimo por SKU/depósito + notificação automática. ✅ Implementado (EST-F004).
 - **Entrada por XML de NF-e** (`NfeXmlImportPort`). 🟡 Pendente (EST-F005).
-- **Inventário, lote/validade, custo médio, transferência, reserva, kit, unidade de medida.** 🟡 Pendentes — ver [Backlog do Módulo](#backlog-do-módulo).
+- **Inventário/balanço:** contagem com sessão por depósito, divergência registrada e ajuste em lote no fechamento (`StockCount`). ✅ Implementado (EST-F006).
+- **Lote/validade, custo médio, transferência, reserva, kit, unidade de medida.** 🟡 Pendentes — ver [Backlog do Módulo](#backlog-do-módulo).
 
 ## Modelo de Domínio
 
@@ -33,14 +34,24 @@ compact constructor e o par de fábricas `create()` (entidade nova, sem `id`) / 
 | `Warehouse` | `id, code, name, type, active` | `code`, `name` e `type` obrigatórios; `create` nasce ativo |
 | `WarehouseType` | enum | `LOJA_FISICA`, `ECOMMERCE` |
 | `StockBalance` | `id, sku, warehouseId, quantity, version` | `quantity` **nunca negativa**; `zero(sku, warehouseId)` para saldo inicial; `version` suporta locking otimista |
-| `StockMovement` | `id, sku, warehouseId, type, quantity, reason, username, createdAt` | Todos obrigatórios; `quantity` **estritamente maior que zero**; `create()` carimba `Instant.now()` |
-| `MovementType` | enum | `ENTRADA`, `SAIDA`, `AJUSTE` |
+| `StockMovement` | `id, sku, warehouseId, type, quantity, reason, username, createdAt` | Todos obrigatórios; `quantity > 0` em `ENTRADA`/`SAIDA` e `>= 0` em `AJUSTE`; `create()` carimba `Instant.now()` |
+| `MovementType` | enum | `ENTRADA`, `SAIDA` (delta) e `AJUSTE` (**saldo-alvo**, EST-C009) |
+| `StockCount` | `id, warehouseId, status, username, createdAt, closedAt, items` | Balanço de um depósito; `withCountedItem` é upsert por SKU preservando a posição; `closed()`/`cancelled()` carimbam `closedAt` |
+| `StockCountStatus` | enum | `ABERTA`, `FECHADA`, `CANCELADA` |
+| `StockCountItem` | `id, sku, countedQuantity, expectedQuantity, difference` | `countedQuantity >= 0`; `expectedQuantity`/`difference` só no fechamento; `diverges()` decide se gera movimentação |
 | `ReorderPoint` | `id, sku, warehouseId, minQuantity` | `minQuantity >= 0`; `isBelow(qty)` é comparação **estrita** (`qty < minQuantity`) |
 
 **Ponto central do domínio — `StockBalance.apply(MovementType, BigDecimal)`:**
-`SAIDA` subtrai, `ENTRADA` e `AJUSTE` somam. Se o resultado ficaria negativo, lança
-`InsufficientStockException`. Zerar exatamente é permitido; negativar não. O `version` é
-preservado no record resultante, para que o merge no JPA acione o optimistic locking.
+`ENTRADA` soma e `SAIDA` subtrai — ambas tratam a quantidade como **delta**. Se o resultado
+ficaria negativo, lança `InsufficientStockException`; zerar exatamente é permitido, negativar não.
+
+`AJUSTE` é a exceção: a quantidade é o **saldo-alvo**, não um delta (EST-C009). O saldo passa a
+valer exatamente o valor informado, para cima ou para baixo, e zero é um alvo válido. Alvo
+negativo é `IllegalArgumentException`, não `InsufficientStockException` — não existe "saldo
+insuficiente" para uma contagem, o que há é um alvo inválido.
+
+O `version` é preservado no record resultante nos três casos, para que o merge no JPA acione o
+optimistic locking.
 
 **Exceções** (`core/domain/exception/estoque/`) e o mapeamento HTTP em
 `infra/handler/GlobalExceptionHandler.java`:
@@ -54,6 +65,11 @@ preservado no record resultante, para que o merge no JPA acione o optimistic loc
 | `WarehouseNotFoundException` | 404 | `WAREHOUSE_NOT_FOUND` |
 | `ProductNotFoundException` | 404 | `PRODUCT_NOT_FOUND` |
 | `InsufficientStockException` | 400 | `INSUFFICIENT_STOCK` |
+| `InactiveProductException` | 409 | `PRODUCT_INACTIVE` |
+| `InactiveWarehouseException` | 409 | `WAREHOUSE_INACTIVE` |
+| `StockCountNotFoundException` | 404 | `STOCK_COUNT_NOT_FOUND` |
+| `StockCountNotOpenException` | 409 | `STOCK_COUNT_NOT_OPEN` |
+| `StockCountAlreadyOpenException` | 409 | `STOCK_COUNT_ALREADY_OPEN` |
 | `ObjectOptimisticLockingFailureException` (Spring) | 409 | `STOCK_UPDATE_CONFLICT` |
 | `DataIntegrityViolationException` (Spring) | 409 | `DATA_INTEGRITY_VIOLATION` |
 
@@ -89,6 +105,25 @@ preservado no record resultante, para que o merge no JPA acione o optimistic loc
 | `sku` (3–50) e `warehouseCode` (2–50) em query e path são validados antes de chegar ao service | `@NotBlank`/`@Size` nos `@RequestParam`/`@PathVariable` | `EstoqueControllerValidationTest.getStockBalance_comParametroInvalido_returns_400`, `getStockBalance_comSkuAcimaDe50Caracteres_returns_400` |
 | Parâmetro **ausente** continua sendo 400 `MISSING_PARAMETER`, e não `VALIDATION_ERROR` | `GlobalExceptionHandler.handleMissingParam` vs. `handleHandlerMethodValidation` | `EstoqueControllerValidationTest.listMovements_semSku_continua_400_MISSING_PARAMETER` |
 | Listagem de depósitos é paginada e ordenada por id (paginação estável) | `WarehouseJpaRepository.findAllOrderById(Pageable)` | `EstoqueServiceTest.listWarehouses_delegatesPagingToRepository`, `EstoqueRepositoryIT.warehouse_paginaOrdenadoPorId` |
+| Edição de produto/depósito é parcial: campo ausente é mantido | `Product.withDetails`, `Warehouse.withDetails` (null = manter) | `ProductTest.withDetails_nullMantemOCampo`, `WarehouseTest.withDetails_nullMantemOCampo` |
+| Edição não altera `sku`, `code` nem as variações | `withDetails` preserva esses campos | `ProductTest.withDetails_preservaIdSkuActiveEVariacoes`, `EstoqueRepositoryIT.save_aposWithDetails_preservaVariacoesEAtributos` |
+| Edição parcial não burla os invariantes do modelo (nome em branco continua rejeitado) | compact constructor roda em cada `with*` | `ProductTest.withDetails_naoDeixaBurlarOsInvariantes`, `WarehouseTest.withDetails_naoDeixaBurlarOsInvariantes` |
+| Produto ou depósito **desativado recusa ENTRADA** (manual e por recebimento) | `EstoqueService.requireActiveForInbound` | `EstoqueServiceTest.adjustStock_entrada_emSkuDesativado_throwsAndDoesNotPersistAnything`, `adjustStock_entrada_emDepositoDesativado_throwsAndDoesNotPersistAnything` |
+| Desativado **continua aceitando SAIDA e AJUSTE** — não prende saldo nem impede correção de inventário | `requireActiveForInbound` só age em `ENTRADA` | `EstoqueServiceTest.adjustStock_saida_emSkuDesativado_continuaPermitida`, `adjustStock_ajuste_emSkuDesativado_continuaPermitido` |
+| SKU de variação só é "ativo" se a variação **e** o produto pai estiverem ativos | `ProductJpaRepository.isSkuActive` | `EstoqueRepositoryIT.isSkuActive_exigeProdutoPaiAtivo_inclusiveParaSkuDeVariacao` |
+| SKU inexistente (404) tem precedência sobre SKU desativado (409) | ordem de `requireKnownSku` antes de `requireActiveForInbound` | `EstoqueServiceTest.adjustStock_entrada_skuDesconhecido_temPrecedenciaSobreDesativado` |
+| Desativar não apaga: o SKU segue existindo, com histórico e saldo válidos | `active` é flag, não exclusão | `EstoqueRepositoryIT.isSkuActive_exigeProdutoPaiAtivo_inclusiveParaSkuDeVariacao` |
+| `AJUSTE` é saldo-alvo: substitui o saldo, para cima ou para baixo, e aceita zero | `StockBalance.apply` | `StockBalanceTest.apply_ajuste_substituiOSaldoParaBaixo`, `apply_ajuste_paraZeroEhValido` |
+| Baixar por `AJUSTE` nunca é `INSUFFICIENT_STOCK` — é substituição, não subtração | `StockBalance.apply` trata `AJUSTE` antes do cálculo de delta | `StockBalanceTest.apply_ajuste_abaixoDoSaldoAtual_naoLancaInsufficientStock` |
+| Movimento de quantidade zero só é aceito em `AJUSTE` | `StockMovement` (compact constructor) | `StockMovementTest.ajuste_aceitaQuantidadeZero`, `saida_continuaRecusandoQuantidadeZero` |
+| Só pode haver **um balanço aberto por depósito** | `EstoqueService.openStockCount` + `findOpenByWarehouseId` | `EstoqueServiceTest.openStockCount_recusaSegundoBalancoAbertoNoMesmoDeposito`, `EstoqueInventarioIT.balanco_segundoAbertoNoMesmoDeposito_returns_409` |
+| Recontar um SKU sobrescreve, não cria segunda linha | `StockCount.withCountedItem` + `uk_stock_count_item_count_sku` | `StockCountTest.withCountedItem_recontarSobrescreveEPreservaAPosicao`, `EstoqueRepositoryIT.stockCount_recontagemNaoDuplicaLinhaDoMesmoSku` |
+| Fechar aplica `AJUSTE` **só nos itens divergentes** — contagem que bateu não polui o ledger | `EstoqueService.closeStockCount` + `StockCountItem.diverges` | `EstoqueServiceTest.closeStockCount_aplicaAjusteApenasNosItensDivergentes`, `EstoqueInventarioIT.balanco_ajustaApenasOsDivergentesEDeixaTrilhaNoLedger` |
+| A divergência fica gravada (`expectedQuantity`/`difference`), não só o saldo corrigido | `StockCountItem.reconciledWith` persistido no fechamento | `EstoqueRepositoryIT.stockCount_fechamentoPersisteExpectedEDifference` |
+| SKU nunca movimentado é confrontado contra saldo zero | `closeStockCount` (`orElse(BigDecimal.ZERO)`) | `EstoqueServiceTest.closeStockCount_skuSemSaldoRegistrado_confrontaContraZero` |
+| Fechar duas vezes é 409, não ajuste em dobro | `requireOpenStockCount` | `EstoqueServiceTest.closeStockCount_balancoJaFechado_throwsAndDoesNotAdjust`, `EstoqueInventarioIT.balanco_fecharDuasVezes_returns_409` |
+| Cancelar não toca em saldo e libera o depósito para novo balanço | `StockCount.cancelled()` | `EstoqueServiceTest.cancelStockCount_naoTocaEmSaldo`, `EstoqueInventarioIT.balanco_cancelado_naoAjustaSaldoELiberaODeposito` |
+| Contar SKU fora do catálogo é 404 na hora, não no fechamento | `recordCountedItem` → `requireKnownSku` | `EstoqueServiceTest.recordCountedItem_throwsWhenSkuNotInCatalog`, `EstoqueInventarioIT.balanco_contarSkuForaDoCatalogo_returns_404` |
 | Movimentos com o mesmo `created_at` têm ordem determinística e paginação estável | desempate por `id` (BIGSERIAL) na ordenação do ledger | `EstoqueRepositoryIT.stockMovement_paginaDoMaisRecenteParaOMaisAntigo`, `stockMovement_paginacaoNaoRepeteNemPulaLinhaComCreatedAtIgual` |
 | Consultar histórico de par SKU/depósito nunca movimentado devolve página vazia (200), não 404 | `EstoqueService.listMovements` | `EstoqueServiceTest.listMovements_returnsEmptyPageWhenSkuNeverMoved`, `EstoqueControllerTest.listMovements_returns_200_withEmptyPageWhenNeverMoved` |
 | Histórico em depósito inexistente lança `WarehouseNotFoundException` (404) sem tocar no repositório de movimentações | `EstoqueService.listMovements` | `EstoqueServiceTest.listMovements_throwsWhenWarehouseNotFound` |
@@ -105,12 +140,22 @@ Todos exigem `bearerAuth`. Controller: `adapter/in/controller/EstoqueController.
 |---|---|---|---|
 | `GET` | `/estoque/products` | `ESTOQUE_PRODUCT_READ` | Lista produtos paginados (`page` = 0, `size` = 20, teto de 100) |
 | `POST` | `/estoque/products` | `ESTOQUE_PRODUCT_MANAGE` | Cria produto (SKU pai) com variações e atributos. `201` + `Location: /estoque/products/{sku}`; `409 SKU_ALREADY_EXISTS` |
+| `PATCH` | `/estoque/products/{sku}` | `ESTOQUE_PRODUCT_MANAGE` | Altera `name` e/ou `category`. Campo ausente é mantido; não altera SKU nem variações. `200`; `404 PRODUCT_NOT_FOUND` |
+| `PATCH` | `/estoque/products/{sku}/active` | `ESTOQUE_PRODUCT_MANAGE` | Ativa/desativa o produto (`{"active": false}`). `200`; `404 PRODUCT_NOT_FOUND`; `400` se `active` ausente |
 | `POST` | `/estoque/warehouses` | `ESTOQUE_WAREHOUSE_MANAGE` | Cria depósito (`LOJA_FISICA` ou `ECOMMERCE`). `201` + `Location`; `409 WAREHOUSE_CODE_ALREADY_EXISTS` |
+| `PATCH` | `/estoque/warehouses/{code}` | `ESTOQUE_WAREHOUSE_MANAGE` | Altera `name` e/ou `type`. Campo ausente é mantido; não altera o código. `200`; `404 WAREHOUSE_NOT_FOUND` |
+| `PATCH` | `/estoque/warehouses/{code}/active` | `ESTOQUE_WAREHOUSE_MANAGE` | Ativa/desativa o depósito. `200`; `404 WAREHOUSE_NOT_FOUND` |
 | `GET` | `/estoque/warehouses` | `ESTOQUE_WAREHOUSE_READ` | Lista depósitos paginados, ordenados por id (`page` = 0, `size` = 20, faixa 1–100) |
 | `GET` | `/estoque/stock-balance` | `ESTOQUE_WAREHOUSE_READ` | Consulta saldo por `sku` + `warehouseCode`. Retorna zero se nunca houve movimentação; `404 WAREHOUSE_NOT_FOUND`; `400 VALIDATION_ERROR` |
 | `POST` | `/estoque/movements` | `ESTOQUE_STOCK_MANAGE` | Registra movimentação manual (`ENTRADA`/`SAIDA`/`AJUSTE`) e devolve o saldo atualizado. `201` + `Location` para o saldo; `400 INSUFFICIENT_STOCK`; `404 WAREHOUSE_NOT_FOUND`; `409 STOCK_UPDATE_CONFLICT` |
 | `GET` | `/estoque/movements` | `ESTOQUE_STOCK_MANAGE` | Histórico paginado do ledger por `sku` + `warehouseCode` (`page` = 0, `size` = 20, teto de 100), mais recentes primeiro. Par nunca movimentado devolve página vazia com `200`; `404 WAREHOUSE_NOT_FOUND`; `400 MISSING_PARAMETER` |
 | `PUT` | `/estoque/products/{sku}/reorder-point` | `ESTOQUE_STOCK_MANAGE` | Define a quantidade mínima do SKU no depósito (upsert). `204 No Content`; `404 WAREHOUSE_NOT_FOUND` |
+| `POST` | `/estoque/stock-counts` | `ESTOQUE_STOCK_MANAGE` | Abre um balanço para o depósito. `201` + `Location`; `404 WAREHOUSE_NOT_FOUND`; `409 STOCK_COUNT_ALREADY_OPEN` |
+| `POST` | `/estoque/stock-counts/{id}/items` | `ESTOQUE_STOCK_MANAGE` | Registra a contagem física de um SKU (upsert por SKU; zero é válido). `200`; `404 PRODUCT_NOT_FOUND`/`STOCK_COUNT_NOT_FOUND`; `409 STOCK_COUNT_NOT_OPEN` |
+| `POST` | `/estoque/stock-counts/{id}/close` | `ESTOQUE_STOCK_MANAGE` | Fecha e aplica os `AJUSTE` dos itens divergentes. `200`; `409 STOCK_COUNT_NOT_OPEN` |
+| `POST` | `/estoque/stock-counts/{id}/cancel` | `ESTOQUE_STOCK_MANAGE` | Abandona o balanço sem tocar em saldo. `200`; `409 STOCK_COUNT_NOT_OPEN` |
+| `GET` | `/estoque/stock-counts/{id}` | `ESTOQUE_STOCK_MANAGE` | Consulta o balanço e seus itens. `200`; `404 STOCK_COUNT_NOT_FOUND` |
+| `GET` | `/estoque/stock-counts` | `ESTOQUE_STOCK_MANAGE` | Balanços do depósito por `warehouseCode`, mais recentes primeiro (`page`/`size` 1–100) |
 | `GET` | `/estoque/integrity/orphan-skus` | `ESTOQUE_STOCK_MANAGE` | Diagnóstico de EST-C011: pares SKU/depósito com saldo, movimentações ou ponto de reposição gravados cujo SKU não existe no catálogo (`page` = 0, `size` = 20, teto de 100). Base íntegra devolve página vazia com `200` |
 
 ## Segurança e Infraestrutura
@@ -167,7 +212,14 @@ Toda operação que altera saldo publica `AuditEvent`:
 | Operação | Controller | `EventType` |
 |---|---|---|
 | `POST /estoque/products` | `EstoqueController` | `PRODUCT_CREATED` |
+| `PATCH /estoque/products/{sku}` | `EstoqueController` | `PRODUCT_UPDATED` |
+| `PATCH /estoque/products/{sku}/active` | `EstoqueController` | `PRODUCT_ACTIVATED` / `PRODUCT_DEACTIVATED` |
 | `POST /estoque/warehouses` | `EstoqueController` | `WAREHOUSE_CREATED` |
+| `PATCH /estoque/warehouses/{code}` | `EstoqueController` | `WAREHOUSE_UPDATED` |
+| `PATCH /estoque/warehouses/{code}/active` | `EstoqueController` | `WAREHOUSE_ACTIVATED` / `WAREHOUSE_DEACTIVATED` |
+| `POST /estoque/stock-counts` | `EstoqueController` | `STOCK_COUNT_OPENED` |
+| `POST /estoque/stock-counts/{id}/close` | `EstoqueController` | `STOCK_COUNT_CLOSED` (com `itemCount` e `divergentCount`) |
+| `POST /estoque/stock-counts/{id}/cancel` | `EstoqueController` | `STOCK_COUNT_CANCELLED` |
 | `POST /estoque/movements` | `EstoqueController` | `STOCK_MOVEMENT_REGISTERED` |
 | `PUT /estoque/products/{sku}/reorder-point` | `EstoqueController` | `REORDER_POINT_SET` |
 | `POST /pdv/sessions/{id}/sales` | `PdvController` | `STOCK_MOVEMENT_REGISTERED` (`origin: PDV_SALE`) |
@@ -265,6 +317,11 @@ transação de venda não espera o envio, e uma venda revertida não notifica ni
 **V56 — `estoque_movement_permissions`**
 - Cria `ESTOQUE_STOCK_MANAGE` para `ROLE_ADMIN`, com `ON CONFLICT DO NOTHING`
 
+**V62 — `estoque_stock_count`**
+- `stock_count` (id, warehouse_id FK → `warehouse` ON DELETE CASCADE, status VARCHAR(20) [`ABERTA`|`FECHADA`|`CANCELADA`], username, created_at, closed_at NULL) — índice `idx_stock_count_warehouse_status`
+- `stock_count_item` (id, stock_count_id FK → `stock_count` ON DELETE CASCADE, sku, counted_quantity NUMERIC(14,3), expected_quantity NULL, difference NULL) — UNIQUE `uk_stock_count_item_count_sku (stock_count_id, sku)`; índice `idx_stock_count_item_count_id`
+- **Sem permissão nova:** o balanço reusa `ESTOQUE_STOCK_MANAGE`, a mesma que já autoriza movimentar saldo — fechar uma contagem é exatamente isso, em lote.
+
 **V61 — `stock_reorder_points`**
 - `stock_reorder_point` (id, sku, warehouse_id FK → `warehouse` ON DELETE CASCADE, min_quantity NUMERIC(14,3)) — UNIQUE `uk_stock_reorder_point_sku_warehouse (sku, warehouse_id)`
 
@@ -279,7 +336,7 @@ nem para `product_variant.sku`. Ver EST-C002.
 | `core/service/EstoqueServiceTest` | Unit (Mockito) | Todos os 8 casos de uso, incluindo os 3 cenários de alerta de reposição e os 3 de histórico de movimentações |
 | `core/domain/model/estoque/StockBalanceTest` | Unit de domínio | `zero`/`of`, invariantes, e os 5 cenários de `apply` (entrada, saída, drenar a zero, insuficiente, ajuste) |
 | `core/domain/model/estoque/StockMovementTest` | Unit de domínio | `create`/`of` e todas as invariantes |
-| `core/domain/model/estoque/WarehouseTest` | Unit de domínio | `create`/`of` e obrigatoriedade de code/name/type |
+| `core/domain/model/estoque/WarehouseTest` | Unit de domínio | `create`/`of`, obrigatoriedade de code/name/type e os `with*` de EST-F018 |
 | `adapter/in/controller/EstoqueControllerTest` | MockMvc standalone | 29 casos: 200/201/204/400/404/409 dos 8 endpoints |
 | `adapter/in/controller/EstoqueControllerValidationTest` | `@SpringBootTest` + MockMvc real | Bean Validation dos `@RequestParam`/`@PathVariable`: faixa de `page`/`size` nos 4 endpoints paginados, `sku`/`warehouseCode` em branco ou fora do tamanho, e a distinção entre `VALIDATION_ERROR` e `MISSING_PARAMETER`. **Não é standalone de propósito** — a validação de parâmetro de handler é aplicada pelo `RequestMappingHandlerAdapter`, não pelo controller |
 | `adapter/in/controller/EstoqueControllerSecurityTest` | MockMvc + Security | 401 sem auth / 403 sem authority / sucesso com a authority correta, endpoint a endpoint — inclui o 403 de `WAREHOUSE_READ` no histórico de movimentações |
@@ -291,6 +348,10 @@ nem para `product_variant.sku`. Ver EST-C002.
 | `core/service/StockBalanceConcurrencyIT` | `@SpringBootTest` (profile `dev`) | 8 escritas simultâneas no mesmo saldo: sem lost update, conflitos tratados; idem na primeira movimentação do par |
 | `adapter/out/persistence/repository/EstoqueRepositoryIT` | `@SpringBootTest` + `@Transactional` | Os 6 `*RepositoryImpl`: round-trip de produto com variações/atributos, `existsBySku` em SKU pai e de variação, paginação ID-first, propagação do `version`, ordem do ledger, upsert do ponto de reposição, e os 7 cenários da query nativa de SKU órfão |
 | `infra/transaction/TransactionAfterCommitExecutorTest` | Unit | Agregação por chave, despacho único no commit, silêncio no rollback, isolamento entre transações da mesma thread, falha de um lote não derruba o próximo |
+| `core/domain/model/estoque/ProductTest` | Unit de domínio | `create`/`of`, cópia defensiva das variações, e os `with*` de EST-F018: semântica de "null = manter", preservação de sku/active/variações e invariantes que continuam valendo |
+| `core/domain/model/estoque/StockCountTest` | Unit de domínio | Ciclo de vida do balanço, upsert de item preservando posição e id, contagem zero, `closed()`/`cancelled()` |
+| `core/domain/model/estoque/StockCountItemTest` | Unit de domínio | `reconciledWith` (falta, sobra e contagem que bateu) e `diverges()` |
+| `adapter/in/controller/EstoqueInventarioIT` | `@SpringBootTest` (profile `dev`) | E2E do balanço: abrir → contar 3 SKUs → fechar → conferir saldo e ledger; contagem zero, cancelamento, duplo fechamento, recontagem e SKU fora do catálogo |
 | `core/domain/model/estoque/OrphanSkuTest` | Unit de domínio | Invariantes do retrato de diagnóstico: obrigatoriedade de `sku`/`warehouseCode`, `quantity` nula vira zero, `movementCount` não-negativo, `lastMovementAt` nulo permitido |
 
 **Lacunas conhecidas:** o histórico de movimentações tem cobertura de service, controller e
@@ -315,10 +376,12 @@ npx newman run docs/dominios/estoque/estoque.postman_collection.json \
 |---|---|
 | `01 — Depósitos` | criação, listagem e o 409 de código duplicado |
 | `02 — Produtos` | criação com variações e atributos, listagem paginada, 409 de SKU duplicado e 400 de validação |
-| `03 — Saldo e movimentações` | saldo zerado inicial, `ENTRADA` → `SAIDA` → `AJUSTE` conferindo o saldo a cada passo, entrada no SKU de variação, e os erros `INSUFFICIENT_STOCK`, quantidade negativa, depósito inexistente e `PRODUCT_NOT_FOUND` |
+| `03 — Saldo e movimentações` | saldo zerado inicial, `ENTRADA` → `SAIDA` → `AJUSTE` conferindo o saldo a cada passo (o `AJUSTE` confere o **saldo-alvo**, não a soma), entrada no SKU de variação, e os erros `INSUFFICIENT_STOCK`, quantidade negativa, depósito inexistente e `PRODUCT_NOT_FOUND` |
 | `04 — Ponto de reposição e alerta` | upsert do mínimo, saída que **não** cruza o mínimo, saída que cruza, a conferência da notificação em `GET /notifications` e o `PRODUCT_NOT_FOUND` do mínimo em SKU fora do catálogo |
 | `05 — Segurança` | 401 sem token e com token inválido |
-| `06 — Integridade` | levantamento de SKU órfão conferindo que os SKUs cadastrados pela própria coleção **não** são acusados, o teto de 100 por página e o 401 sem token |
+| `06 — Integridade` | levantamento de SKU órfão conferindo que os SKUs cadastrados pela própria coleção **não** são acusados, o 400 de `size` acima do teto e o 401 sem token |
+| `08 — Balanço de inventário` | ciclo completo num depósito próprio: abrir, o 409 do segundo balanço, contar, recontagem que sobrescreve, SKU fora do catálogo, fechar conferindo `expectedQuantity`/`difference`, o saldo ajustado, o 409 do duplo fechamento e a listagem |
+| `07 — Edição e desativação` | PATCH parcial de produto e depósito (nome muda, categoria/tipo e SKU/código ficam), corpo vazio como no-op, os 400 de validação, e o ciclo desativar → `ENTRADA` 409 → `SAIDA` 201 → reativar |
 
 O SKU e o código de depósito são gerados com timestamp a cada execução, então a coleção é
 reexecutável sem limpeza manual.
@@ -331,7 +394,6 @@ Convenções, variáveis e o environment compartilhado estão em
 | ID | Prioridade | Tipo | Item | Descrição | Status |
 |---|---|---|---|---|---|
 | EST-F005 | 🟡 Média | Feature | importacao-nfe-xml | Entrada de mercadoria por XML de NF-e (`NfeXmlImportPort`) gerando `StockMovement` de entrada — diferencial operacional. | Backlog (Sprint 4) |
-| EST-F006 | 🟡 Média | Feature | inventario-contagem | Balanço/contagem cíclica com registro de divergências e ajuste automático de saldo. | Backlog (Sprint 3) |
 | EST-F007 | 🟡 Média | Feature | valorizacao-custo-medio | Custo médio ponderado por SKU e valor total de estoque — alimenta o DRE do domínio `financeiro`. | Backlog (Sprint 3) |
 | EST-F008 | 🟡 Média | Feature | controle-lote-validade | Lote e validade para essências/perecíveis + alerta de vencimento próximo. | Backlog (Sprint 3) |
 | EST-F011 | 🟢 Baixa | Feature | curva-abc-giro | Análise ABC e giro de produtos para priorização de compras (domínio `relatorios`). | Backlog (Sprint 6) |
@@ -340,9 +402,7 @@ Convenções, variáveis e o environment compartilhado estão em
 | EST-F014 | 🟡 Média | Feature | estorno-devolucao-venda | Devolução (PDV ou e-commerce) gera `StockMovement` de entrada estornando a baixa original, com rastreabilidade da venda de origem. | Backlog (Sprint 4) |
 | EST-F015 | 🟢 Baixa | Feature | kit-produto-composto | Produto "kit"/combo (ex.: kit narguilé = essência + carvão + descartável) que dá baixa nos componentes conforme receita cadastrada. | Backlog (Sprint 6) |
 | EST-F016 | 🟢 Baixa | Feature | unidade-medida-conversao | Múltiplas unidades por produto (compra em kg, venda em porção/g) com fator de conversão nas movimentações. | Backlog (Sprint 6) |
-| EST-F018 | 🟡 Média | Feature | atualizar-desativar-produto-deposito | Só existem `create` e `list` para produto e depósito. Falta `PUT`/`PATCH` e desativação — o campo `active` de `Product` e `Warehouse` nunca muda depois da criação. | Pendente |
 | EST-C006 | 🟢 Melhoria | Correção | migrations-v45-v47-sem-on-conflict | V45 e V47 inserem permissões sem `ON CONFLICT DO NOTHING`, ao contrário de V56/V57/V60. Re-execução em base parcialmente populada quebra. Herdado do antigo C018. | Pendente |
-| EST-C009 | 🟢 Melhoria | Correção | ajuste-de-inventario-so-incrementa | `StockBalance.apply` trata tudo que não é `SAIDA` como soma, então `AJUSTE` só aumenta saldo. Um ajuste de inventário para baixo hoje precisa ser lançado como `SAIDA`, o que polui a semântica do ledger. Depende da decisão de modelagem de EST-F006. | Pendente |
 
 ## Histórico de Implementações
 
@@ -364,21 +424,23 @@ Convenções, variáveis e o environment compartilhado estão em
 - **2026-07-27** — `lacunas-de-teste-persistencia-e-concorrencia` (EST-C007): `StockBalanceConcurrencyIT` prova que o `@Version` de `stock_balance` impede lost update sob 8 escritas simultâneas (saldo final == baixas confirmadas) e que o perdedor da corrida vira conflito tratado, não 500; cobre também a corrida de primeira movimentação. `EstoqueRepositoryIT` cobre os cinco `*RepositoryImpl` do módulo — round-trip de produto com variações e atributos, `existsBySku` achando SKU pai e de variação, paginação ID-first, propagação do `version`, ordem do ledger e upsert do ponto de reposição.
 - **2026-07-27** — `package-info-obsoletos` (EST-C008): os `package-info` de `core/domain/model/estoque` e `core/ports/out/estoque` descreviam o módulo como "esqueleto (TODO)" e listavam como previstos modelos e adapters existentes desde EST-F001/F002; o comentário equivalente em `CoreBeanConfig` também foi corrigido. O único TODO que sobrou é o `NfeXmlImportPort` (EST-F005).
 
+- **2026-07-27** — `inventario-contagem` + `ajuste-de-inventario-so-incrementa` (EST-F006 + EST-C009, feitos juntos porque a semântica de `AJUSTE` era a modelagem do balanço): **EST-C009** — `StockBalance.apply` tratava tudo que não era `SAIDA` como soma, então `AJUSTE` só aumentava saldo e um acerto para baixo precisava virar `SAIDA` falsa, poluindo o ledger. `AJUSTE` passou a ser **saldo-alvo**: a quantidade é o valor contado na prateleira, o saldo passa a valer exatamente aquilo, e zero é alvo válido. O ledger continua replayável — um `AJUSTE` grava o alvo, e reaplicá-lo dá o mesmo resultado. `StockMovement` agora aceita `quantity == 0` **só** em `AJUSTE`, e o `@DecimalMin` do request virou inclusivo (zero em `ENTRADA`/`SAIDA` continua barrado, pelo invariante do domínio → 400 `BAD_REQUEST`). PDV e Compras não foram afetados: usam `SAIDA` e `ENTRADA`, e nada no main consumia `AJUSTE`. **EST-F006** — `StockCount` como sessão de balanço por depósito (`ABERTA` → `FECHADA`/`CANCELADA`), com `StockCountItem` guardando o contado e, no fechamento, o `expectedQuantity` e a `difference`. Escolheu-se sessão em vez de ajuste avulso porque o balanço é o evento que a operação reconhece: dá para contar aos poucos, conferir antes de mexer no saldo, e auditar depois quem contou o quê e quanto faltava. Fechar aplica um `AJUSTE` por item **divergente** — contagem que bateu não gera movimentação —, tudo na mesma transação, e os alertas de ponto de reposição saem agregados após o commit (EST-C003). Um balanço aberto por depósito, porque dois simultâneos contariam o mesmo saldo e se sobrescreveriam. Não há estado "em contagem": uma contagem aberta já está sendo contada; `CANCELADA` resolve o caso real de abandonar o balanço sem aplicar nada. Migration V62; sem permissão nova — reusa `ESTOQUE_STOCK_MANAGE`, já que fechar um balanço é movimentar saldo em lote.
+- **2026-07-27** — `atualizar-desativar-produto-deposito` (EST-F018): produto e depósito só tinham `create` e `list` — o campo `active` nascia `true` e nunca mudava. Agora há `PATCH /estoque/products/{sku}`, `PATCH /estoque/warehouses/{code}` e os respectivos `/active`. **PATCH parcial** (`null` = manter) em vez de `PUT`: não existe `GET` de produto por SKU, então um cliente não teria como ler o recurso inteiro antes de reescrevê-lo, e um `PUT` apagaria por omissão. `sku` e `code` ficaram fora da edição — são identidade, e o SKU em especial é referenciado como texto livre por `stock_balance`/`stock_movement`/`stock_reorder_point`: renomeá-lo transformaria todo o histórico do produto em órfão (EST-C011). As variações também ficaram fora, porque mexer na grade altera o espaço de nomes de SKU e exigiria a validação de duplicidade de `createProduct`. **Desativação em endpoint próprio**, não como campo do PATCH, para render `PRODUCT_DEACTIVATED`/`WAREHOUSE_DEACTIVATED` na auditoria em vez de se confundir com uma correção de nome; `active` é `Boolean` com `@NotNull`, para corpo vazio não virar um "desativar" silencioso vindo do default `false`. **Efeito no saldo:** desativado recusa `ENTRADA` (409 `PRODUCT_INACTIVE`/`WAREHOUSE_INACTIVE`) mas continua aceitando `SAIDA` — desativar quer dizer "não reponho mais", e bloquear a saída deixaria preso o saldo que ainda está na prateleira. `AJUSTE` também passa, porque é o caminho de correção de inventário. Novo `ProductRepository.isSkuActive`, que exige produto pai ativo inclusive para SKU de variação: desativar o pai tira a grade inteira de circulação de uma vez. Sem migration — as colunas `active` já existiam desde a V44/V46. Limitação conhecida: com `null` significando "manter", não há como **limpar** a `category`, só trocá-la.
 - **2026-07-27** — `validacao-e-paginacao-nos-endpoints-de-leitura` (EST-C005): `EstoqueController` recebeu `@Validated` e os `@RequestParam`/`@PathVariable` ganharam constraints — `page >= 0`, `size` entre 1 e 100, `sku` 3–50 e `warehouseCode` 2–50, espelhando os DTOs de escrita. O `Math.min(size, 100)` silencioso saiu: `size` fora da faixa agora é **400 `VALIDATION_ERROR`**, alinhando `/estoque` com `/compras` e `/pdv`. `GET /estoque/warehouses` passou a ser paginado (`WarehouseRepository.findAll(page, size)` → `PageResult`, ordenado por `id`), o que é **mudança de contrato**: os depósitos saíram da raiz do JSON para `content`. Sem migration. Junto veio a correção de uma ponta de infra que valia para o projeto inteiro: desde o Spring Framework 6.1 a validação de parâmetro de handler é nativa do `RequestMappingHandlerAdapter` e lança `HandlerMethodValidationException`, não `ConstraintViolationException` — sem handler para ela, o `GlobalExceptionHandler` a jogava no catch-all de `Exception` e devolvia **500**. Era o comportamento real de `GET /compras/suppliers?size=200`, cujos `@Min`/`@Max` existiam desde COM-F001 e nunca tinham sido exercitados por teste. Nova `EstoqueControllerValidationTest` com contexto real (o standalone de `EstoqueControllerTest` não reproduz essa montagem).
 - **2026-07-27** — `saldo-orfao-ja-existente-na-base` (EST-C011): EST-C002 fechou a porta para novos órfãos, mas o passivo anterior seguia invisível na base — e é ele que contaminaria os relatórios de EST-F006 e EST-F007. Entregue o **levantamento**, não a limpeza: novo port `StockIntegrityRepository` (`core/ports/out/estoque`), query nativa em `StockIntegrityJpaRepository` e `GET /estoque/integrity/orphan-skus` paginado sob `ESTOQUE_STOCK_MANAGE`, mais o script avulso [`scripts/estoque-orphan-skus.sql`](../../../scripts/estoque-orphan-skus.sql) para o caminho DBA. O retrato é o record `OrphanSku` — uma linha por par SKU/depósito, com saldo, contagem e data do último movimento e presença de ponto de reposição, que é o contexto de que a decisão humana precisa. **Nenhum expurgo automático, de propósito:** os dois destinos possíveis (cadastrar o produto que faltava × apagar a digitação errada) são incompatíveis e a consulta não os distingue, então apagar em massa destruiria histórico legítimo — o script traz o bloco de `DELETE` comentado, com lista de SKUs a preencher à mão. Query nativa porque a origem é o `UNION` de três tabelas e JPQL não tem `UNION`; sem migration, e sem permissão nova. Cobertura na `EstoqueRepositoryIT` (7 cenários, incluindo SKU de variação, órfão só com ledger e paginação estável).
 - **2026-07-27** — `ordenacao-instavel-do-ledger` (EST-C012): o histórico ordenava só por `created_at DESC`, chave não-única — uma venda com N itens grava N movimentos no mesmo loop e na mesma transação, com `created_at` idêntico. Além da ordem de exibição arbitrária, a paginação de `GET /estoque/movements` ficava instável: com chave de ordenação não-única o banco não garante ordem consistente entre consultas, então a mesma linha podia voltar em duas páginas ou não aparecer em nenhuma. Corrigido com desempate por `id` (`findBySkuAndWarehouseIdOrderByCreatedAtDescIdDesc`); `id` é BIGSERIAL monotônico e dá ordem total. Sem migration — o índice `idx_stock_movement_sku_warehouse_created` continua servindo ao filtro e ao prefixo da ordenação. Achado ao escrever o `EstoqueRepositoryIT` do EST-C007, que reproduziu o cenário de venda multi-item.
 
 ## Próximos passos
 
-A sprint de integridade de 2026-07-27 fechou C002, C003, C004, C005, C007, C008, C010, C011 e C012.
+A sprint de 2026-07-27 fechou C002, C003, C004, C005, C007, C008, C009, C010, C011, C012, F006 e F018.
 
 O roteiro completo para fechar o módulo — ordem de execução de todos os itens restantes, as
 dependências entre eles e os dois que não cabem em estoque — está em
 [`proximos-passos.md`](proximos-passos.md). Resumo da prioridade imediata:
 
-1. **EST-F018** — `PUT`/`PATCH` e desativação de produto e depósito. O campo `active` de `Product` e `Warehouse` nunca muda depois da criação.
-2. **EST-F006 + EST-C009** — inventário/contagem junto com a semântica de `AJUSTE`; o backlog registra que C009 depende da modelagem de F006, então não vale separar.
-3. **EST-F007** (custo médio) — destrava o DRE do domínio `financeiro`, mas vem depois de EST-F008 no roteiro, porque o custo entra por lote.
+1. **EST-F012** — transferência entre depósitos (`MovementType.TRANSFER`). Mexe nos mesmos pontos que F006/C009 acabaram de tocar (`MovementType` e `StockBalance.apply`), então é o momento natural.
+2. **EST-F014** — estorno/devolução de venda, com rastreabilidade da venda de origem.
+3. **EST-F008** (lote e validade) e depois **EST-F007** (custo médio) — o custo entra por lote, e F007 destrava o DRE do `financeiro`.
 
 Fora do roteiro de código, EST-C011 deixou uma **pendência operacional**: rodar
 `GET /estoque/integrity/orphan-skus` (ou o script) contra a base de produção e decidir o destino

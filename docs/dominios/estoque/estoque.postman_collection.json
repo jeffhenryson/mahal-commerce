@@ -75,6 +75,14 @@
       "key": "variantSku",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "countWarehouseCode",
+      "value": ""
+    },
+    {
+      "key": "stockCountId",
+      "value": ""
     }
   ],
   "item": [
@@ -825,7 +833,7 @@
           ]
         },
         {
-          "name": "AJUSTE de 2 unidades",
+          "name": "AJUSTE leva o saldo a 12 (saldo-alvo)",
           "request": {
             "method": "POST",
             "header": [
@@ -850,14 +858,14 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"sku\": \"{{sku}}\",\n  \"warehouseCode\": \"{{warehouseCode}}\",\n  \"type\": \"AJUSTE\",\n  \"quantity\": 2,\n  \"reason\": \"Ajuste de inventário — teste Postman\"\n}",
+              "raw": "{\n  \"sku\": \"{{sku}}\",\n  \"warehouseCode\": \"{{warehouseCode}}\",\n  \"type\": \"AJUSTE\",\n  \"quantity\": 12,\n  \"reason\": \"Ajuste de inventario - teste Postman\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             },
-            "description": "`AJUSTE` **soma** ao saldo (ver EST-C009 no README do módulo: hoje não existe ajuste para baixo). Saldo esperado: 15 + 2 = 17."
+            "description": "Desde o EST-C009 a quantidade de um AJUSTE é o **saldo-alvo**, não um delta: o saldo passa a valer exatamente 12, viesse de onde viesse. É o que permite corrigir inventário para baixo sem lançar uma SAIDA falsa."
           },
           "response": [],
           "event": [
@@ -867,8 +875,8 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('Status 201', () => pm.response.to.have.status(201));",
-                  "pm.test('Saldo passa a 17',",
-                  "    () => pm.expect(Number(pm.response.json().quantity)).to.eql(17));"
+                  "pm.test('Saldo passa a valer exatamente 12 (alvo, nao 15 + 2)',",
+                  "    () => pm.expect(Number(pm.response.json().quantity)).to.eql(12));"
                 ]
               }
             }
@@ -1884,6 +1892,1087 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('Status 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "07 — Edição e desativação",
+      "description": "EST-F018: PATCH parcial de produto e depósito, e o efeito da desativação sobre a movimentação — entrada é recusada com 409, saída continua permitida.",
+      "item": [
+        {
+          "name": "Renomear produto (PATCH parcial)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/products/{{sku}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "products",
+                "{{sku}}"
+              ]
+            },
+            "description": "`ESTOQUE_PRODUCT_MANAGE`. Só `name` vai no corpo; `category` fica como estava.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Produto Renomeado\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Nome atualizado', () => pm.expect(json.name).to.eql('Produto Renomeado'));",
+                  "pm.test('SKU inalterado', () => pm.expect(json.sku).to.eql(pm.collectionVariables.get('sku')));",
+                  "pm.test('Categoria preservada (null = manter)', () => pm.expect(json.category).to.not.be.null);",
+                  "pm.test('Continua ativo', () => pm.expect(json.active).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Corpo vazio é no-op",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/products/{{sku}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "products",
+                "{{sku}}"
+              ]
+            },
+            "description": "Nenhum campo informado: nada muda, e ainda assim é 200.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Nome continua o mesmo', () => pm.expect(pm.response.json().name).to.eql('Produto Renomeado'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Nome vazio → 400",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/products/{{sku}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "products",
+                "{{sku}}"
+              ]
+            },
+            "description": "`@Size(min = 1)`: se o campo vier, tem que ser válido.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Desativar produto",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/products/{{sku}}/active",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "products",
+                "{{sku}}",
+                "active"
+              ]
+            },
+            "description": "`ESTOQUE_PRODUCT_MANAGE`. Endpoint próprio, para render `PRODUCT_DEACTIVATED` na auditoria.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"active\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Ficou inativo', () => pm.expect(pm.response.json().active).to.be.false);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Sem o campo active → 400",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/products/{{sku}}/active",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "products",
+                "{{sku}}",
+                "active"
+              ]
+            },
+            "description": "`Boolean` com `@NotNull`: corpo vazio não pode virar um 'desativar' silencioso.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "ENTRADA em produto desativado → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/movements",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "movements"
+              ]
+            },
+            "description": "O efeito operacional da desativação: não se compra mais este item.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"{{sku}}\",\n  \"warehouseCode\": \"{{warehouseCode}}\",\n  \"type\": \"ENTRADA\",\n  \"quantity\": 5.000,\n  \"reason\": \"Tentativa de reposicao\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 409', () => pm.response.to.have.status(409));",
+                  "pm.test('errorCode PRODUCT_INACTIVE', () => pm.expect(pm.response.json().errorCode).to.eql('PRODUCT_INACTIVE'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SAIDA em produto desativado continua permitida",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/movements",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "movements"
+              ]
+            },
+            "description": "Desativar quer dizer 'não reponho mais', não 'prenda o que está na prateleira'.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"{{sku}}\",\n  \"warehouseCode\": \"{{warehouseCode}}\",\n  \"type\": \"SAIDA\",\n  \"quantity\": 1.000,\n  \"reason\": \"Escoando saldo remanescente\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reativar produto",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/products/{{sku}}/active",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "products",
+                "{{sku}}",
+                "active"
+              ]
+            },
+            "description": "Deixa a coleção reexecutável e devolve o SKU ao estado ativo.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"active\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Voltou a ficar ativo', () => pm.expect(pm.response.json().active).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Renomear depósito",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/warehouses/{{warehouseCode}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "warehouses",
+                "{{warehouseCode}}"
+              ]
+            },
+            "description": "`ESTOQUE_WAREHOUSE_MANAGE`. O `code` não muda — é a identidade pública do depósito.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Deposito Renomeado\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Nome atualizado', () => pm.expect(json.name).to.eql('Deposito Renomeado'));",
+                  "pm.test('Code inalterado', () => pm.expect(json.code).to.eql(pm.collectionVariables.get('warehouseCode')));",
+                  "pm.test('Tipo preservado (null = manter)', () => pm.expect(json.type).to.eql('LOJA_FISICA'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tipo desconhecido → 400",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/warehouses/{{warehouseCode}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "warehouses",
+                "{{warehouseCode}}"
+              ]
+            },
+            "description": "Só `LOJA_FISICA` e `ECOMMERCE` são aceitos.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"GALPAO\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "08 — Balanço de inventário",
+      "description": "EST-F006: abre um balanço, conta um SKU faltando e outro que bate, fecha e confere que só o divergente moveu saldo. Usa um depósito próprio para não interferir nas outras pastas.",
+      "item": [
+        {
+          "name": "Criar depósito do balanço",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/warehouses",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "warehouses"
+              ]
+            },
+            "description": "Depósito exclusivo do balanço, para o fechamento não mexer no saldo das outras pastas.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"{{countWarehouseCode}}\",\n  \"name\": \"Deposito Balanco\",\n  \"type\": \"LOJA_FISICA\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Depósito próprio do balanço, com timestamp — a coleção é reexecutável sem limpeza.",
+                  "pm.collectionVariables.set('countWarehouseCode', 'PM-CNT-' + Date.now());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Carga inicial: 10 unidades",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/movements",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "movements"
+              ]
+            },
+            "description": "Saldo de partida para o balanço encontrar divergência.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"{{sku}}\",\n  \"warehouseCode\": \"{{countWarehouseCode}}\",\n  \"type\": \"ENTRADA\",\n  \"quantity\": 10,\n  \"reason\": \"Carga inicial do balanco\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Saldo 10', () => pm.expect(Number(pm.response.json().quantity)).to.eql(10));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Abrir balanço",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/stock-counts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "stock-counts"
+              ]
+            },
+            "description": "`ESTOQUE_STOCK_MANAGE`. Guarda o id em `stockCountId` para os próximos passos.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"warehouseCode\": \"{{countWarehouseCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const json = pm.response.json();",
+                  "pm.test('Nasce ABERTA e vazia', () => {",
+                  "    pm.expect(json.status).to.eql('ABERTA');",
+                  "    pm.expect(json.items).to.be.an('array').that.is.empty;",
+                  "    pm.expect(json.closedAt).to.be.null;",
+                  "});",
+                  "pm.collectionVariables.set('stockCountId', json.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Segundo balanço no mesmo depósito → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/stock-counts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "stock-counts"
+              ]
+            },
+            "description": "Dois balanços simultâneos contariam o mesmo saldo e se sobrescreveriam no fechamento.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"warehouseCode\": \"{{countWarehouseCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 409', () => pm.response.to.have.status(409));",
+                  "pm.test('errorCode STOCK_COUNT_ALREADY_OPEN',",
+                  "    () => pm.expect(pm.response.json().errorCode).to.eql('STOCK_COUNT_ALREADY_OPEN'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Contar 8 (faltam 2)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/stock-counts/{{stockCountId}}/items",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "stock-counts",
+                "{{stockCountId}}",
+                "items"
+              ]
+            },
+            "description": "A prateleira tem 8, o sistema acha que tem 10 — divergência de -2.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"{{sku}}\",\n  \"countedQuantity\": 8\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const item = pm.response.json().items.find(i => i.sku === pm.collectionVariables.get('sku'));",
+                  "pm.test('Contagem registrada', () => pm.expect(Number(item.countedQuantity)).to.eql(8));",
+                  "pm.test('Ainda sem confronto (so o fechamento confronta)',",
+                  "    () => pm.expect(item.expectedQuantity).to.be.null);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Recontar o mesmo SKU sobrescreve",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/stock-counts/{{stockCountId}}/items",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "stock-counts",
+                "{{stockCountId}}",
+                "items"
+              ]
+            },
+            "description": "Upsert por SKU: recontar não cria uma segunda linha (uk_stock_count_item_count_sku).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"{{sku}}\",\n  \"countedQuantity\": 8\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const sku = pm.collectionVariables.get('sku');",
+                  "pm.test('Continua com uma linha para o SKU',",
+                  "    () => pm.expect(pm.response.json().items.filter(i => i.sku === sku).length).to.eql(1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Contar SKU fora do catálogo → 404",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/stock-counts/{{stockCountId}}/items",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "stock-counts",
+                "{{stockCountId}}",
+                "items"
+              ]
+            },
+            "description": "O SKU é validado na hora de contar, não só no fechamento.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"SKU-FANTASMA-999\",\n  \"countedQuantity\": 3\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));",
+                  "pm.test('errorCode PRODUCT_NOT_FOUND',",
+                  "    () => pm.expect(pm.response.json().errorCode).to.eql('PRODUCT_NOT_FOUND'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Fechar o balanço",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/stock-counts/{{stockCountId}}/close",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "stock-counts",
+                "{{stockCountId}}",
+                "close"
+              ]
+            },
+            "description": "Aplica um AJUSTE por item divergente, levando o saldo ao valor contado."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Ficou FECHADA e carimbou closedAt', () => {",
+                  "    pm.expect(json.status).to.eql('FECHADA');",
+                  "    pm.expect(json.closedAt).to.not.be.null;",
+                  "});",
+                  "const item = json.items.find(i => i.sku === pm.collectionVariables.get('sku'));",
+                  "pm.test('Divergencia registrada', () => {",
+                  "    pm.expect(Number(item.expectedQuantity)).to.eql(10);",
+                  "    pm.expect(Number(item.difference)).to.eql(-2);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Saldo foi para 8",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/stock-balance?sku={{sku}}&warehouseCode={{countWarehouseCode}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "stock-balance"
+              ],
+              "query": [
+                {
+                  "key": "sku",
+                  "value": "{{sku}}"
+                },
+                {
+                  "key": "warehouseCode",
+                  "value": "{{countWarehouseCode}}"
+                }
+              ]
+            },
+            "description": "O fechamento levou o saldo ao valor contado — para baixo, o que antes exigia SAIDA falsa."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Saldo ajustado para 8',",
+                  "    () => pm.expect(Number(pm.response.json().quantity)).to.eql(8));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Fechar de novo → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/stock-counts/{{stockCountId}}/close",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "stock-counts",
+                "{{stockCountId}}",
+                "close"
+              ]
+            },
+            "description": "Fechar duas vezes aplicaria o mesmo ajuste em dobro."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 409', () => pm.response.to.have.status(409));",
+                  "pm.test('errorCode STOCK_COUNT_NOT_OPEN',",
+                  "    () => pm.expect(pm.response.json().errorCode).to.eql('STOCK_COUNT_NOT_OPEN'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar balanços do depósito",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/stock-counts?warehouseCode={{countWarehouseCode}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "stock-counts"
+              ],
+              "query": [
+                {
+                  "key": "warehouseCode",
+                  "value": "{{countWarehouseCode}}"
+                }
+              ]
+            },
+            "description": "Mais recentes primeiro, paginado (teto de 100)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Contem o balanco fechado', () => {",
+                  "    const id = Number(pm.collectionVariables.get('stockCountId'));",
+                  "    pm.expect(pm.response.json().content.map(c => c.id)).to.include(id);",
+                  "});"
                 ]
               }
             }

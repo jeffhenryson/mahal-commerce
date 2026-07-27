@@ -22,8 +22,8 @@ Leia o README inteiro antes de começar: ele documenta o modelo de domínio, as 
 já implementadas, as integrações com compras/vendas-balcao e o histórico.
 
 ESTADO ATUAL
-A sprint de integridade de 2026-07-27 fechou EST-C002, C003, C004, C005, C007, C008,
-C010, C011 e C012. O núcleo transacional está protegido e provado: SKU é validado antes
+A sprint de 2026-07-27 fechou EST-C002, C003, C004, C005, C007, C008, C009, C010, C011,
+C012, F006 e F018. O núcleo transacional está protegido e provado: SKU é validado antes
 de qualquer escrita, o @Version tem teste de concorrência, o ledger tem paginação estável,
 venda/recebimento deixam trilha de auditoria e o passivo de SKU órfão anterior à
 validação já tem ferramenta de levantamento (GET /estoque/integrity/orphan-skus e
@@ -38,19 +38,17 @@ linha. Se eu for solicitado a "terminar o C011", o que cabe é apresentar a list
 apagar nada.
 
 ORDEM SUGERIDA (respeita as dependências reais entre os itens)
- 1. EST-F018  PUT/PATCH e desativação de produto e depósito (o campo `active` nunca muda hoje).
- 2. EST-F006 + EST-C009  inventário/contagem JUNTO com a semântica de AJUSTE.
-              O próprio backlog diz que C009 depende da modelagem de F006 — não separe.
- 3. EST-F012  transferência entre depósitos (MovementType.TRANSFER). Depois de 2,
-              porque ambos mexem em MovementType e em StockBalance.apply.
- 4. EST-F014  estorno/devolução de venda, com rastreabilidade da venda de origem.
- 5. EST-F008  lote e validade. Muda a granularidade do saldo — trate como mudança
+ 1. EST-F012  transferência entre depósitos (MovementType.TRANSFER). Mexe nos mesmos
+              pontos que F006/C009 acabaram de tocar: o enum MovementType e
+              StockBalance.apply — cuidado para não quebrar o AJUSTE de saldo-alvo.
+ 2. EST-F014  estorno/devolução de venda, com rastreabilidade da venda de origem.
+ 3. EST-F008  lote e validade. Muda a granularidade do saldo — trate como mudança
               de modelagem, não como campo novo.
- 6. EST-F007  custo médio ponderado. Vem depois de F008 (o custo entra por lote) e
+ 4. EST-F007  custo médio ponderado. Vem depois de F008 (o custo entra por lote) e
               destrava o DRE do domínio financeiro.
- 7. EST-F016  unidade de medida e conversão — mexe na semântica de quantity em todo lugar.
- 8. EST-F015  kit/produto composto.
- 9. EST-F005  entrada por XML de NF-e (NfeXmlImportPort). Por último entre as features
+ 5. EST-F016  unidade de medida e conversão — mexe na semântica de quantity em todo lugar.
+ 6. EST-F015  kit/produto composto.
+ 7. EST-F005  entrada por XML de NF-e (NfeXmlImportPort). Por último entre as features
               de entrada, porque o XML traz lote e custo — depende de F008 e F007.
 
 NÃO CABEM EM ESTOQUE — me traga a decisão em vez de implementar:
@@ -62,8 +60,8 @@ NÃO CABEM EM ESTOQUE — me traga a decisão em vez de implementar:
   se edita sem flyway repair. Confirme que fica como documentação de processo.
 
 COMO TRABALHAR
-- Um item (ou o par 4) por vez. Ao terminar cada um, PARE e me mostre o resultado
-  antes de seguir para o próximo.
+- Um item por vez. Ao terminar cada um, PARE e me mostre o resultado antes de seguir
+  para o próximo.
 - TDD, na ordem domínio → service → persistência → controller → migration.
   Teste primeiro, sempre.
 - NÃO execute ./mvnw. Não há JDK no WSL — eu rodo os testes no PowerShell e te reporto.
@@ -80,14 +78,14 @@ ARMADILHAS DESTE PROJETO (já me custaram build quebrado)
 - HexagonalArchitectureTest (ArchUnit) barra qualquer import de framework em core/domain
   e core/ports, e em core/service só libera org.springframework.transaction.*.
   ApplicationEventPublisher e TransactionSynchronizationManager ficam em adapter/infra.
-- Migrations: a próxima é V62. Seeds de permissão precisam de ON CONFLICT DO NOTHING.
+- Migrations: a próxima é V63. Seeds de permissão precisam de ON CONFLICT DO NOTHING.
   O perfil dev NÃO roda Flyway (ddl-auto=create-drop), então permissão nova também tem
   que entrar em SeedConfig e DevRoleBootstrapConfig, senão dá 403 em dev.
 - Todo endpoint novo precisa de @PreAuthorize.
 - Testes de contexto real que escrevem estoque precisam cadastrar o SKU antes —
   desde EST-C002 movimentar SKU inexistente é 404.
 
-Comece lendo o README do módulo e me apresentando o plano para o EST-F018.
+Comece lendo o README do módulo e me apresentando o plano para o EST-F012.
 ```
 
 ---
@@ -99,10 +97,9 @@ Os itens não são independentes, e a ordem abaixo evita refazer trabalho:
 | Agrupamento | Razão |
 |---|---|
 | ~~C011 primeiro~~ ✅ | Feito em 2026-07-27: a ferramenta de levantamento existe. Sobrou só a conferência humana da base real, que não bloqueia os itens de código abaixo. |
-| ~~C005~~ ✅ | Feito em 2026-07-27. |
-| F018 antes das features grandes | É barato e mexe na superfície CRUD. Fazer depois significaria reabrir controller e DTOs já modificados pelas features. |
-| F006 **com** C009 | O próprio backlog registra que a semântica de `AJUSTE` depende da modelagem de inventário. Separar obriga a decidir duas vezes a mesma coisa. |
-| F012 depois de F006/C009 | `MovementType.TRANSFER` e a correção de `AJUSTE` mexem nos mesmos pontos: o enum e `StockBalance.apply`. |
+| ~~C005 e F018~~ ✅ | Feitos em 2026-07-27, antes das features grandes justamente para não reabrir controller e DTOs depois. |
+| ~~F006 **com** C009~~ ✅ | Feitos juntos em 2026-07-27, como previsto: a semântica de `AJUSTE` **era** a modelagem do balanço. `AJUSTE` virou saldo-alvo e o fechamento da contagem é quem o usa em lote. |
+| F012 logo depois de F006/C009 | `MovementType.TRANSFER` mexe no enum e em `StockBalance.apply`, que acabaram de mudar — fazer agora evita reabrir a mesma decisão. Cuidado para não quebrar o `AJUSTE` de saldo-alvo. |
 | F008 antes de F007 | O custo entra por lote. Fazer custo médio primeiro e depois introduzir lote significa recalcular a modelagem de custo. |
 | F005 por último entre as entradas | O XML de NF-e traz lote e custo prontos. Implementar o import antes de F008 e F007 seria importar campos que ainda não têm onde ser guardados. |
 
@@ -123,6 +120,6 @@ o que se perde é controle de perecível e venda fracionada, não a integridade 
 
 ## O que "módulo fechado" significa aqui
 
-Fechar os 9 itens que restam no roteiro, mais uma decisão registrada sobre os três que não cabem
+Fechar os 7 itens que restam no roteiro, mais uma decisão registrada sobre os três que não cabem
 em estoque (F013, F011, C006). Com isso o backlog do módulo zera e `financeiro` fica destravado
 para o DRE, que hoje espera o custo médio de F007.

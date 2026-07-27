@@ -847,6 +847,40 @@ Query: page (default 0, >= 0), size (default 20, 1..100)
 
 ---
 
+### PATCH /estoque/products/{sku} — Permissão: ESTOQUE_PRODUCT_MANAGE
+
+```json
+{
+  "name": "Narguilé Aladin 2.0",  // opcional, 1–255 — ausente ou null = manter
+  "category": "narguile-premium"   // opcional, até 100 — ausente ou null = manter
+}
+// Response 200 → ProductResponse / 404 PRODUCT_NOT_FOUND / 400 VALIDATION_ERROR
+```
+
+Alteração **parcial**: corpo `{}` é um no-op válido. Não altera `sku` nem as variações — o SKU é
+referenciado como texto livre por `stock_balance`, `stock_movement` e `stock_reorder_point`, sem
+FK, então renomeá-lo tornaria órfão todo o histórico do produto. Limitação da semântica
+"null = manter": não há como **limpar** a `category`, só trocá-la.
+
+---
+
+### PATCH /estoque/products/{sku}/active — Permissão: ESTOQUE_PRODUCT_MANAGE
+
+```json
+{ "active": false }   // obrigatório — corpo sem o campo é 400, não um "desativar" implícito
+// Response 200 → ProductResponse / 404 PRODUCT_NOT_FOUND / 400 VALIDATION_ERROR
+```
+
+Desativar **não apaga**: o SKU continua existindo, com saldo e histórico válidos. O efeito é
+sobre a movimentação — produto inativo recusa `ENTRADA` (manual ou por recebimento de Compras)
+com `409 PRODUCT_INACTIVE`, mas continua aceitando `SAIDA` e venda no PDV, para escoar o saldo
+remanescente, e `AJUSTE`, que é o caminho de correção de inventário.
+
+Desativar um SKU **pai** tira também as variações de circulação: um SKU de variação só conta como
+ativo se ele e o produto pai estiverem ativos.
+
+---
+
 ### POST /estoque/warehouses — Permissão: ESTOQUE_WAREHOUSE_MANAGE
 
 ```json
@@ -868,6 +902,32 @@ Query: page (default 0, >= 0), size (default 20, 1..100)
   "active": true
 }
 ```
+
+---
+
+### PATCH /estoque/warehouses/{code} — Permissão: ESTOQUE_WAREHOUSE_MANAGE
+
+```json
+{
+  "name": "Loja Centro Reformada",  // opcional — ausente ou null = manter
+  "type": "ECOMMERCE"                // opcional — LOJA_FISICA | ECOMMERCE; valor desconhecido é 400
+}
+// Response 200 → WarehouseResponse / 404 WAREHOUSE_NOT_FOUND / 400 VALIDATION_ERROR
+```
+
+Não altera o `code`: é a identidade pública do depósito, usada como `warehouseCode` em toda a API.
+
+---
+
+### PATCH /estoque/warehouses/{code}/active — Permissão: ESTOQUE_WAREHOUSE_MANAGE
+
+```json
+{ "active": false }   // obrigatório
+// Response 200 → WarehouseResponse / 404 WAREHOUSE_NOT_FOUND / 400 VALIDATION_ERROR
+```
+
+Mesma regra do produto: depósito inativo recusa `ENTRADA` com `409 WAREHOUSE_INACTIVE` e continua
+despachando `SAIDA`.
 
 ---
 
@@ -911,7 +971,7 @@ Query: sku (obrigatório, 3..50), warehouseCode (obrigatório, 2..50)
   "sku": "NARG-001",           // 3–50 chars, obrigatório
   "warehouseCode": "LOJA-01",   // obrigatório
   "type": "ENTRADA",            // obrigatório — ENTRADA | SAIDA | AJUSTE
-  "quantity": 5.000,             // obrigatório, > 0
+  "quantity": 5.000,             // obrigatório; > 0 em ENTRADA/SAIDA, >= 0 em AJUSTE
   "reason": "Recebimento de fornecedor" // obrigatório, máx. 255 chars
 }
 // Response 201 + Location → StockBalanceResponse (saldo já atualizado)
@@ -922,8 +982,20 @@ Query: sku (obrigatório, 3..50), warehouseCode (obrigatório, 2..50)
 ```
 
 `username` **não** é enviado no corpo — é sempre o usuário autenticado (JWT), nunca informado
-pelo cliente da API. ENTRADA e AJUSTE somam `quantity` ao saldo; SAIDA subtrai (rejeitada com
-400 se o resultado ficaria negativo — saldo zerado é permitido).
+pelo cliente da API.
+
+⚠️ **`quantity` tem significado diferente por tipo** (EST-C009). Em `ENTRADA` e `SAIDA` é o
+**delta**: soma e subtrai, respectivamente — a saída é rejeitada com 400 se o resultado ficaria
+negativo, e zerar exatamente é permitido. Em `AJUSTE` é o **saldo-alvo**: o saldo passa a valer
+exatamente o valor informado, para cima ou para baixo, e zero é um alvo válido (item que acabou).
+É o que permite corrigir inventário para baixo sem lançar uma `SAIDA` falsa. Baixar por `AJUSTE`
+nunca devolve `INSUFFICIENT_STOCK` — é substituição, não subtração.
+
+Além do lançamento manual, `AJUSTE` é o tipo usado pelo fechamento de um
+[balanço de inventário](#balanço-de-inventário--estoquestock-counts--permissão-estoque_stock_manage).
+
+`ENTRADA` é recusada com 409 se o produto ou o depósito estiver **desativado** (EST-F018);
+`SAIDA` e `AJUSTE` continuam permitidos.
 
 O `sku` precisa existir no catálogo, como SKU pai ou como SKU de variação; caso contrário a
 movimentação é recusada com 404 `PRODUCT_NOT_FOUND` e nada é gravado. Isso vale igualmente para
@@ -1001,6 +1073,60 @@ notificação é disparada. Não há endpoint para ler ou remover um ponto de re
 A notificação é enviada **depois** do commit da operação e **agregada por operação**: uma venda
 que derruba vários SKUs abaixo do mínimo gera um único aviso listando todos eles, não um por SKU.
 Operação revertida não notifica ninguém.
+
+---
+
+### Balanço de inventário — `/estoque/stock-counts` — Permissão: ESTOQUE_STOCK_MANAGE
+
+O balanço (EST-F006) é uma **sessão**: abre-se para um depósito, contam-se os SKUs aos poucos, e o
+fechamento aplica os ajustes de uma vez. Só pode haver **um balanço aberto por depósito** — dois
+simultâneos contariam o mesmo saldo e se sobrescreveriam.
+
+```
+POST   /estoque/stock-counts            { "warehouseCode": "LOJA-01" }
+POST   /estoque/stock-counts/{id}/items { "sku": "NARG-001", "countedQuantity": 37.000 }
+POST   /estoque/stock-counts/{id}/close
+POST   /estoque/stock-counts/{id}/cancel
+GET    /estoque/stock-counts/{id}
+GET    /estoque/stock-counts?warehouseCode=LOJA-01&page=0&size=20
+```
+
+```json
+// StockCountResponse — após o fechamento
+{
+  "id": 50,
+  "warehouseCode": "LOJA-01",
+  "status": "FECHADA",            // ABERTA | FECHADA | CANCELADA
+  "username": "gerente",
+  "createdAt": "2026-07-27T09:00:00Z",
+  "closedAt": "2026-07-27T18:00:00Z",
+  "items": [
+    {
+      "id": 1,
+      "sku": "NARG-001",
+      "countedQuantity": 8.000,   // o que se contou na prateleira
+      "expectedQuantity": 10.000, // saldo do sistema no fechamento — null enquanto ABERTA
+      "difference": -2.000        // negativo é falta, positivo é sobra
+    }
+  ]
+}
+```
+
+**Registrar item** é upsert por SKU: recontar sobrescreve o valor anterior em vez de criar uma
+segunda linha. `countedQuantity` aceita **zero** — é o item que acabou ou sumiu, e é justamente o
+que o balanço precisa registrar. SKU fora do catálogo é `404 PRODUCT_NOT_FOUND` na hora, não no
+fechamento.
+
+**Fechar** grava um `AJUSTE` (saldo-alvo, ver EST-C009) para cada item cuja contagem **divirja** do
+saldo do sistema, levando o saldo ao valor contado. Item que bateu não gera movimentação — contagem
+certa não polui o ledger. Tudo na mesma transação: se um SKU falhar, nenhum ajuste é aplicado e o
+balanço continua aberto. Os alertas de ponto de reposição disparados pelos ajustes saem agregados
+depois do commit. Fechar duas vezes é `409 STOCK_COUNT_NOT_OPEN`, não ajuste em dobro.
+
+**Cancelar** abandona o balanço sem tocar em saldo nenhum e libera o depósito para um novo.
+
+Erros: `404 STOCK_COUNT_NOT_FOUND`, `404 WAREHOUSE_NOT_FOUND`, `404 PRODUCT_NOT_FOUND`,
+`409 STOCK_COUNT_ALREADY_OPEN`, `409 STOCK_COUNT_NOT_OPEN`.
 
 ---
 
@@ -1952,7 +2078,9 @@ interface TotpConfirmResponse {
 | `ESTOQUE_PRODUCT_MANAGE` | Criar/gerenciar produtos do estoque |
 | `ESTOQUE_WAREHOUSE_READ` | Listar depósitos e consultar saldo |
 | `ESTOQUE_WAREHOUSE_MANAGE` | Criar/gerenciar depósitos |
-| `ESTOQUE_STOCK_MANAGE` | `POST`/`GET /estoque/movements`, `PUT /estoque/products/{sku}/reorder-point` e `GET /estoque/integrity/orphan-skus` |
+| `ESTOQUE_STOCK_MANAGE` | `POST`/`GET /estoque/movements`, `PUT /estoque/products/{sku}/reorder-point`, `GET /estoque/integrity/orphan-skus` e todo o `/estoque/stock-counts` (balanço de inventário) |
+| `ESTOQUE_PRODUCT_MANAGE` | `POST /estoque/products`, `PATCH /estoque/products/{sku}` e `.../active` |
+| `ESTOQUE_WAREHOUSE_MANAGE` | `POST /estoque/warehouses`, `PATCH /estoque/warehouses/{code}` e `.../active` |
 | `CRM_CUSTOMER_READ` | Leituras de `/crm/**` |
 | `CRM_CUSTOMER_MANAGE` | Escritas de `/crm/**` |
 | `COMPRAS_READ` | `GET /compras/suppliers` |
