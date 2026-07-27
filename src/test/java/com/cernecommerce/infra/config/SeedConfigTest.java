@@ -42,4 +42,24 @@ class SeedConfigTest {
         verify(roleUseCase).assignPermission("ROLE_ADMIN", "ESTOQUE_WAREHOUSE_READ");
         verify(roleUseCase).assignPermission("ROLE_ADMIN", "ESTOQUE_WAREHOUSE_MANAGE");
     }
+
+    /**
+     * {@code PDV_SALE_MANAGE} protege {@code POST /pdv/sessions/{id}/sales}, que é o caminho de
+     * baixa automática de estoque. Sem ele no seed, o admin de dev toma 403 ao registrar venda
+     * e o fluxo PDV → estoque fica inalcançável localmente (EST-C001).
+     */
+    @Test
+    void seedAll_grantsPdvSaleManageToRoleAdmin() throws Exception {
+        UserUseCase userUseCase = mock(UserUseCase.class);
+        RoleUseCase roleUseCase = mock(RoleUseCase.class);
+        PermissionUseCase permissionUseCase = mock(PermissionUseCase.class);
+        when(userUseCase.findByUsername(anyString())).thenReturn(Optional.empty());
+
+        CommandLineRunner runner = seedConfig.seedAll(userUseCase, roleUseCase, permissionUseCase,
+                "Admin@dev1", "User@dev1");
+        runner.run();
+
+        verify(permissionUseCase).createPermission("PDV_SALE_MANAGE");
+        verify(roleUseCase).assignPermission("ROLE_ADMIN", "PDV_SALE_MANAGE");
+    }
 }

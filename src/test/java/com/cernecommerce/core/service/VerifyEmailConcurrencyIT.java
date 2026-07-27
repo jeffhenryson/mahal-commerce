@@ -1,5 +1,6 @@
 package com.cernecommerce.core.service;
 
+import com.cernecommerce.core.domain.exception.email.EmailAlreadyVerifiedException;
 import com.cernecommerce.core.domain.exception.email.EmailVerificationCodeExpiredException;
 import com.cernecommerce.core.domain.exception.email.EmailVerificationCodeNotFoundException;
 import com.cernecommerce.core.ports.in.UserUseCase;
@@ -66,8 +67,12 @@ class VerifyEmailConcurrencyIT {
                     start.await(); // espera o sinal para disparar todas ao mesmo tempo
                     userUseCase.verifyEmail(code);
                     successes.incrementAndGet();
-                } catch (EmailVerificationCodeNotFoundException | EmailVerificationCodeExpiredException e) {
-                    // Esperado para as threads que chegaram depois do CAS ser ganho pela primeira
+                } catch (EmailVerificationCodeNotFoundException
+                       | EmailVerificationCodeExpiredException
+                       | EmailAlreadyVerifiedException e) {
+                    // Esperado para as threads que chegaram depois do CAS ser ganho pela primeira.
+                    // Qual das exceções chega depende de timing: quem lê o usuário antes do commit
+                    // da vencedora perde no CAS (expirado); quem lê depois já vê o email verificado.
                     failures.incrementAndGet();
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
@@ -86,7 +91,7 @@ class VerifyEmailConcurrencyIT {
                 .as("Exatamente uma requisição deve ativar a conta")
                 .isEqualTo(1);
         assertThat(failures.get())
-                .as("As demais requisições devem receber código inválido/expirado")
+                .as("As demais requisições devem receber código inválido/expirado ou email já verificado")
                 .isEqualTo(threads - 1);
 
         // A conta deve estar ativa após a verificação bem-sucedida
