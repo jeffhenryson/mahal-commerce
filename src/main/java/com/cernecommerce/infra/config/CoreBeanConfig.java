@@ -18,6 +18,7 @@ import com.cernecommerce.core.ports.in.RoleUseCase;
 import com.cernecommerce.core.ports.in.StatsUseCase;
 import com.cernecommerce.core.ports.in.SystemConfigUseCase;
 import com.cernecommerce.core.ports.in.UserUseCase;
+import com.cernecommerce.core.ports.out.AfterCommitExecutor;
 import com.cernecommerce.core.ports.out.SystemConfigPort;
 import com.cernecommerce.core.ports.out.token.AccessTokenPort;
 import com.cernecommerce.core.ports.out.credential.CredentialVerifierPort;
@@ -186,9 +187,10 @@ class CoreBeanConfig {
         return new StatsService(userRepository, roleRepository, permissionRepository);
     }
 
-    // ── Domínios de negócio (esqueletos) ────────────────────────────────────────
-    // Wiring sem dependências enquanto os adapters de saída (ports/out) não existem.
-    // Ao implementar cada domínio, injetar aqui o(s) repository/port correspondente.
+    // ── Domínios de negócio ─────────────────────────────────────────────────────
+    // Estoque, compras e vendas-balcao já têm adapters de saída próprios. Ecommerce, financeiro
+    // e logistica seguem como esqueletos, com wiring sem dependências até que os ports/out
+    // correspondentes ganhem implementação.
 
     @Bean
     PdvUseCase pdvUseCase(CashRegisterRepository cashRegisterRepository, SaleRepository saleRepository,
@@ -200,9 +202,10 @@ class CoreBeanConfig {
     EstoqueUseCase estoqueUseCase(ProductRepository productRepository, WarehouseRepository warehouseRepository,
             StockBalanceRepository stockBalanceRepository, StockMovementRepository stockMovementRepository,
             ReorderPointRepository reorderPointRepository, NotificationUseCase notificationUseCase,
-            UserRepository userRepository) {
+            UserRepository userRepository, AfterCommitExecutor afterCommitExecutor) {
         return new EstoqueService(productRepository, warehouseRepository, stockBalanceRepository,
-                stockMovementRepository, reorderPointRepository, notificationUseCase, userRepository);
+                stockMovementRepository, reorderPointRepository, notificationUseCase, userRepository,
+                afterCommitExecutor);
     }
 
     @Bean

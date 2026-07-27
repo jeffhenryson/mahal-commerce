@@ -3,7 +3,10 @@ package com.cernecommerce.adapter.in.controller;
 import com.cernecommerce.adapter.in.converter.SaleDTOConverter;
 import com.cernecommerce.adapter.in.dtos.request.SaleRequest;
 import com.cernecommerce.adapter.in.dtos.response.SaleResponseDTO;
+import com.cernecommerce.core.domain.event.AuditEvent;
+import com.cernecommerce.core.domain.event.AuditEvent.EventType;
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.pdv.CashRegisterSession;
 import com.cernecommerce.core.domain.model.pdv.Sale;
 import com.cernecommerce.core.domain.model.pdv.SaleItem;
@@ -18,6 +21,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -31,6 +35,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Controller do domínio <b>vendas-balcao (PDV)</b>.
@@ -47,10 +52,13 @@ public class PdvController {
 
     private final PdvUseCase pdvUseCase;
     private final SaleDTOConverter saleConverter;
+    private final ApplicationEventPublisher publisher;
 
-    public PdvController(PdvUseCase pdvUseCase, SaleDTOConverter saleConverter) {
+    public PdvController(PdvUseCase pdvUseCase, SaleDTOConverter saleConverter,
+            ApplicationEventPublisher publisher) {
         this.pdvUseCase = pdvUseCase;
         this.saleConverter = saleConverter;
+        this.publisher = publisher;
     }
 
     @Operation(summary = "Lista sessões de caixa")
@@ -76,6 +84,16 @@ public class PdvController {
             @Valid @RequestBody SaleRequest request, Authentication authentication) {
         List<SaleItem> items = saleConverter.toItems(request.getItems());
         Sale sale = pdvUseCase.registerSale(sessionId, request.getWarehouseCode(), items, authentication.getName());
+        // EST-C004: a venda é o caminho de maior volume de movimentação de estoque. Sem este
+        // evento, só a movimentação manual do EstoqueController deixava trilha. É um evento por
+        // operação (não por item) para não inundar a trilha numa venda com muitos itens.
+        publisher.publishEvent(AuditEvent.of(EventType.STOCK_MOVEMENT_REGISTERED, authentication.getName(),
+                Map.of("origin", "PDV_SALE",
+                        "sessionId", sessionId,
+                        "warehouseCode", request.getWarehouseCode(),
+                        "type", MovementType.SAIDA.name(),
+                        "skus", items.stream().map(SaleItem::sku).toList(),
+                        "itemCount", items.size())));
         return ResponseEntity.status(201).body(saleConverter.toResponse(sale));
     }
 }

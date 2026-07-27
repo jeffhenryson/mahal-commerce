@@ -34,6 +34,7 @@ class EstoqueAlertaIT {
     private static final SimpleGrantedAuthority ROLE_ADMIN = new SimpleGrantedAuthority("ROLE_ADMIN");
     private static final SimpleGrantedAuthority STOCK_MANAGE = new SimpleGrantedAuthority("ESTOQUE_STOCK_MANAGE");
     private static final SimpleGrantedAuthority WAREHOUSE_MANAGE = new SimpleGrantedAuthority("ESTOQUE_WAREHOUSE_MANAGE");
+    private static final SimpleGrantedAuthority PRODUCT_MANAGE = new SimpleGrantedAuthority("ESTOQUE_PRODUCT_MANAGE");
 
     @Autowired
     private WebApplicationContext context;
@@ -49,6 +50,18 @@ class EstoqueAlertaIT {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"code\":\"" + code + "\",\"name\":\"Depósito IT\",\"type\":\"LOJA_FISICA\"}")
                 .with(user("admin").authorities(ROLE_ADMIN, WAREHOUSE_MANAGE)))
+                .andExpect(status().isCreated());
+    }
+
+    /**
+     * Desde EST-C002 o SKU precisa existir no catálogo antes de qualquer movimentação — sem isso
+     * o {@code POST /estoque/movements} responde 404 {@code PRODUCT_NOT_FOUND}.
+     */
+    private void createProduct(MockMvc mvc, String sku) throws Exception {
+        mvc.perform(post("/estoque/products")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"sku\":\"" + sku + "\",\"name\":\"Produto IT\",\"category\":\"testes\"}")
+                .with(user("admin").authorities(ROLE_ADMIN, PRODUCT_MANAGE)))
                 .andExpect(status().isCreated());
     }
 
@@ -83,6 +96,7 @@ class EstoqueAlertaIT {
         String sku = "REORDER_IT_" + suffix;
         String warehouseCode = "REORDER_WH_IT_" + suffix;
 
+        createProduct(mvc, sku);
         createWarehouse(mvc, warehouseCode);
         registerMovement(mvc, sku, warehouseCode, "ENTRADA", "20");
 
@@ -107,6 +121,7 @@ class EstoqueAlertaIT {
         String sku = "NOREORDER_IT_" + suffix;
         String warehouseCode = "NOREORDER_WH_IT_" + suffix;
 
+        createProduct(mvc, sku);
         createWarehouse(mvc, warehouseCode);
         registerMovement(mvc, sku, warehouseCode, "ENTRADA", "5");
         registerMovement(mvc, sku, warehouseCode, "SAIDA", "3");
