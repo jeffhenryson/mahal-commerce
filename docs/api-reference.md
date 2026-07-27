@@ -996,6 +996,52 @@ Operação revertida não notifica ninguém.
 
 ---
 
+### GET /estoque/integrity/orphan-skus — Permissão: ESTOQUE_STOCK_MANAGE
+
+```
+Query: page (default 0), size (default 20, teto 100)
+// Response 200 → PageResult<OrphanSkuResponse>
+```
+
+```json
+// PageResult<OrphanSkuResponse> — uma linha por par SKU/depósito, ordenado por (sku, warehouseCode)
+{
+  "content": [
+    {
+      "sku": "NARG-DIGITADO-ERRADO",
+      "warehouseCode": "LOJA-01",
+      "quantity": 0.000,
+      "movementCount": 4,
+      "hasReorderPoint": false,
+      "lastMovementAt": "2026-02-14T09:12:00Z"
+    }
+  ],
+  "page": 0,
+  "size": 20,
+  "totalElements": 1,
+  "totalPages": 1
+}
+```
+
+Diagnóstico de integridade (EST-C011): lista os pares SKU/depósito que têm saldo, movimentações
+ou ponto de reposição gravados mas cujo `sku` **não existe no catálogo** — nem como SKU pai nem
+como SKU de variação. As três tabelas de estoque guardam `sku` como texto livre, sem FK para
+`product`, então até EST-C002 um SKU digitado errado criava esses registros em silêncio.
+
+**Somente leitura, e não há endpoint de expurgo.** O destino de cada órfão — cadastrar o produto
+que faltava (`POST /estoque/products`, e o SKU deixa de ser órfão) ou apagar as linhas — é
+decisão humana, porque a consulta não distingue os dois casos e apagar em massa destruiria
+histórico legítimo. Para o caminho DBA há o script
+[`scripts/estoque-orphan-skus.sql`](../scripts/estoque-orphan-skus.sql), com o bloco de `DELETE`
+comentado e a lista de SKUs a preencher à mão.
+
+`quantity` é zero quando o órfão só tem movimentações ou só ponto de reposição, e
+`lastMovementAt` é `null` quando o par nunca foi movimentado. Base íntegra devolve `content`
+vazio com `200`. Exige `ESTOQUE_STOCK_MANAGE` pela mesma régua do ledger: `ESTOQUE_WAREHOUSE_READ`
+não basta.
+
+---
+
 ## Compras — `/compras`
 
 ### GET /compras/suppliers — Permissão: COMPRAS_READ
@@ -1898,7 +1944,7 @@ interface TotpConfirmResponse {
 | `ESTOQUE_PRODUCT_MANAGE` | Criar/gerenciar produtos do estoque |
 | `ESTOQUE_WAREHOUSE_READ` | Listar depósitos e consultar saldo |
 | `ESTOQUE_WAREHOUSE_MANAGE` | Criar/gerenciar depósitos |
-| `ESTOQUE_STOCK_MANAGE` | `POST`/`GET /estoque/movements` e `PUT /estoque/products/{sku}/reorder-point` |
+| `ESTOQUE_STOCK_MANAGE` | `POST`/`GET /estoque/movements`, `PUT /estoque/products/{sku}/reorder-point` e `GET /estoque/integrity/orphan-skus` |
 | `CRM_CUSTOMER_READ` | Leituras de `/crm/**` |
 | `CRM_CUSTOMER_MANAGE` | Escritas de `/crm/**` |
 | `COMPRAS_READ` | `GET /compras/suppliers` |

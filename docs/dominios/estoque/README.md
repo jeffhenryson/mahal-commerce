@@ -3,7 +3,7 @@
 **Status:** 🟢 Operacional — grade de produtos, saldo multi-depósito, ledger de movimentações (gravação e consulta) e alerta de ponto de reposição em produção
 **Pacote Java:** `com.cernecommerce.core.domain.model.estoque`
 **Rota HTTP base:** `/estoque`
-**Última atualização deste doc:** 2026-07-27 (sprint de integridade: EST-C002, C003, C004, C007, C008, C010)
+**Última atualização deste doc:** 2026-07-27 (sprint de integridade: EST-C002, C003, C004, C007, C008, C010, C011, C012)
 
 ## Objetivo
 
@@ -88,6 +88,9 @@ preservado no record resultante, para que o merge no JPA acione o optimistic loc
 | Consultar histórico de par SKU/depósito nunca movimentado devolve página vazia (200), não 404 | `EstoqueService.listMovements` | `EstoqueServiceTest.listMovements_returnsEmptyPageWhenSkuNeverMoved`, `EstoqueControllerTest.listMovements_returns_200_withEmptyPageWhenNeverMoved` |
 | Histórico em depósito inexistente lança `WarehouseNotFoundException` (404) sem tocar no repositório de movimentações | `EstoqueService.listMovements` | `EstoqueServiceTest.listMovements_throwsWhenWarehouseNotFound` |
 | `sku` e `warehouseCode` ausentes na query devolvem 400 `MISSING_PARAMETER` (não 500) | `GlobalExceptionHandler.handleMissingParam` | `EstoqueControllerTest.listMovements_withoutSku_returns_400`, `listMovements_withoutWarehouseCode_returns_400`, `GlobalExceptionHandlerTest.missingRequestParameter_returns400_namingTheParameter` |
+| SKU órfão é diagnosticado por par SKU/depósito, considerando SKU pai **e** de variação como conhecidos | `StockIntegrityJpaRepository.findOrphanSkus` (anti-join `NOT EXISTS` contra `product` e `product_variant`) | `EstoqueRepositoryIT.orphanSkus_naoAcusaSkuPaiNemSkuDeVariacaoCadastrados`, `orphanSkus_acusaSkuForaDoCatalogoComSaldo` |
+| Par presente nas três tabelas de estoque vira **uma** linha do diagnóstico, não três | `UNION` (não `UNION ALL`) na origem da query | `EstoqueRepositoryIT.orphanSkus_naoDuplicaQuandoOParEstaNasTresTabelas` |
+| O diagnóstico de integridade é somente leitura — nenhum expurgo automático | `StockIntegrityRepository` sem operação de escrita | `EstoqueServiceTest.listOrphanSkus_doesNotTouchAnyWriteRepository` |
 
 ## API — Endpoints
 
@@ -103,6 +106,7 @@ Todos exigem `bearerAuth`. Controller: `adapter/in/controller/EstoqueController.
 | `POST` | `/estoque/movements` | `ESTOQUE_STOCK_MANAGE` | Registra movimentação manual (`ENTRADA`/`SAIDA`/`AJUSTE`) e devolve o saldo atualizado. `201` + `Location` para o saldo; `400 INSUFFICIENT_STOCK`; `404 WAREHOUSE_NOT_FOUND`; `409 STOCK_UPDATE_CONFLICT` |
 | `GET` | `/estoque/movements` | `ESTOQUE_STOCK_MANAGE` | Histórico paginado do ledger por `sku` + `warehouseCode` (`page` = 0, `size` = 20, teto de 100), mais recentes primeiro. Par nunca movimentado devolve página vazia com `200`; `404 WAREHOUSE_NOT_FOUND`; `400 MISSING_PARAMETER` |
 | `PUT` | `/estoque/products/{sku}/reorder-point` | `ESTOQUE_STOCK_MANAGE` | Define a quantidade mínima do SKU no depósito (upsert). `204 No Content`; `404 WAREHOUSE_NOT_FOUND` |
+| `GET` | `/estoque/integrity/orphan-skus` | `ESTOQUE_STOCK_MANAGE` | Diagnóstico de EST-C011: pares SKU/depósito com saldo, movimentações ou ponto de reposição gravados cujo SKU não existe no catálogo (`page` = 0, `size` = 20, teto de 100). Base íntegra devolve página vazia com `200` |
 
 ## Segurança e Infraestrutura
 
@@ -189,8 +193,8 @@ notificação por item (EST-C003). Não há fila: se a entrega falhar, não há 
 
 ### Limites operacionais
 
-- `GET /estoque/products` e `GET /estoque/movements`: `size` default 20, teto **100**
-  (`Math.min(size, 100)` no controller).
+- `GET /estoque/products`, `GET /estoque/movements` e `GET /estoque/integrity/orphan-skus`:
+  `size` default 20, teto **100** (`Math.min(size, 100)` no controller).
 - `GET /estoque/warehouses`: **sem paginação** — devolve a lista inteira (EST-C005).
 - `GET /estoque/stock-balance`: `sku` e `warehouseCode` chegam **sem Bean Validation** — o
   controller não é `@Validated`, diferente de `ComprasController` e `PdvController` (EST-C005).
@@ -199,11 +203,12 @@ notificação por item (EST-C003). Não há fila: se a entrega falhar, não há 
 
 ### Riscos conhecidos
 
-- **EST-C002** — `sku` é texto livre sem FK nem validação: dá para movimentar saldo de um SKU
-  inexistente.
-- **EST-C004** — venda e recebimento não deixam trilha de auditoria.
-- **EST-C007** — o `@Version` que protege o saldo não tem teste de concorrência.
-- **PLAT-C030** — sem rate limit em nenhum endpoint do módulo.
+- **PLAT-C030** — sem rate limit em nenhum endpoint do módulo, inclusive
+  `GET /estoque/integrity/orphan-skus`, cuja query nativa é a mais cara do módulo.
+- O passivo de SKU órfão anterior a EST-C002 **continua na base até alguém decidir o destino de
+  cada SKU**. `GET /estoque/integrity/orphan-skus` e
+  [`scripts/estoque-orphan-skus.sql`](../../../scripts/estoque-orphan-skus.sql) levantam a lista;
+  a limpeza é manual, por decisão (ver EST-C011 no Histórico).
 
 ## Integrações entre Domínios
 
@@ -278,8 +283,9 @@ nem para `product_variant.sku`. Ver EST-C002.
 | `core/service/ComprasServiceTest` | Unit | Recebimento ajusta estoque por item; falha do estoque (saldo, depósito ou SKU desconhecido) propaga e não salva o receipt |
 | `core/service/PdvServiceTest` | Unit | Venda dá baixa por item; `InsufficientStockException` e `ProductNotFoundException` revertem a venda inteira |
 | `core/service/StockBalanceConcurrencyIT` | `@SpringBootTest` (profile `dev`) | 8 escritas simultâneas no mesmo saldo: sem lost update, conflitos tratados; idem na primeira movimentação do par |
-| `adapter/out/persistence/repository/EstoqueRepositoryIT` | `@SpringBootTest` + `@Transactional` | Os 5 `*RepositoryImpl`: round-trip de produto com variações/atributos, `existsBySku` em SKU pai e de variação, paginação ID-first, propagação do `version`, ordem do ledger, upsert do ponto de reposição |
+| `adapter/out/persistence/repository/EstoqueRepositoryIT` | `@SpringBootTest` + `@Transactional` | Os 6 `*RepositoryImpl`: round-trip de produto com variações/atributos, `existsBySku` em SKU pai e de variação, paginação ID-first, propagação do `version`, ordem do ledger, upsert do ponto de reposição, e os 7 cenários da query nativa de SKU órfão |
 | `infra/transaction/TransactionAfterCommitExecutorTest` | Unit | Agregação por chave, despacho único no commit, silêncio no rollback, isolamento entre transações da mesma thread, falha de um lote não derruba o próximo |
+| `core/domain/model/estoque/OrphanSkuTest` | Unit de domínio | Invariantes do retrato de diagnóstico: obrigatoriedade de `sku`/`warehouseCode`, `quantity` nula vira zero, `movementCount` não-negativo, `lastMovementAt` nulo permitido |
 
 **Lacunas conhecidas:** o histórico de movimentações tem cobertura de service, controller e
 segurança, mas ainda não tem um IT end-to-end que grave movimentações reais e as releia pelo
@@ -306,6 +312,7 @@ npx newman run docs/dominios/estoque/estoque.postman_collection.json \
 | `03 — Saldo e movimentações` | saldo zerado inicial, `ENTRADA` → `SAIDA` → `AJUSTE` conferindo o saldo a cada passo, entrada no SKU de variação, e os erros `INSUFFICIENT_STOCK`, quantidade negativa, depósito inexistente e `PRODUCT_NOT_FOUND` |
 | `04 — Ponto de reposição e alerta` | upsert do mínimo, saída que **não** cruza o mínimo, saída que cruza, a conferência da notificação em `GET /notifications` e o `PRODUCT_NOT_FOUND` do mínimo em SKU fora do catálogo |
 | `05 — Segurança` | 401 sem token e com token inválido |
+| `06 — Integridade` | levantamento de SKU órfão conferindo que os SKUs cadastrados pela própria coleção **não** são acusados, o teto de 100 por página e o 401 sem token |
 
 O SKU e o código de depósito são gerados com timestamp a cada execução, então a coleção é
 reexecutável sem limpeza manual.
@@ -331,7 +338,6 @@ Convenções, variáveis e o environment compartilhado estão em
 | EST-C005 | 🟢 Melhoria | Correção | validacao-e-paginacao-nos-endpoints-de-leitura | `GET /estoque/stock-balance` recebe `sku` e `warehouseCode` sem Bean Validation (o controller não é `@Validated`, diferente de `ComprasController` e `PdvController`); `GET /estoque/warehouses` retorna a lista inteira sem paginação. | Pendente |
 | EST-C006 | 🟢 Melhoria | Correção | migrations-v45-v47-sem-on-conflict | V45 e V47 inserem permissões sem `ON CONFLICT DO NOTHING`, ao contrário de V56/V57/V60. Re-execução em base parcialmente populada quebra. Herdado do antigo C018. | Pendente |
 | EST-C009 | 🟢 Melhoria | Correção | ajuste-de-inventario-so-incrementa | `StockBalance.apply` trata tudo que não é `SAIDA` como soma, então `AJUSTE` só aumenta saldo. Um ajuste de inventário para baixo hoje precisa ser lançado como `SAIDA`, o que polui a semântica do ledger. Depende da decisão de modelagem de EST-F006. | Pendente |
-| EST-C011 | 🟡 Importante | Correção | saldo-orfao-ja-existente-na-base | EST-C002 barra SKU desconhecido daqui para frente, mas não limpa o que já foi gravado antes da correção. Falta levantar os `stock_balance`/`stock_movement`/`stock_reorder_point` cujo SKU não existe em `product`/`product_variant` e decidir o destino de cada um (cadastrar o produto faltante ou expurgar). Precisa de conferência humana — não dá para automatizar o expurgo sem risco de apagar histórico legítimo. | Pendente |
 
 ## Histórico de Implementações
 
@@ -353,18 +359,22 @@ Convenções, variáveis e o environment compartilhado estão em
 - **2026-07-27** — `lacunas-de-teste-persistencia-e-concorrencia` (EST-C007): `StockBalanceConcurrencyIT` prova que o `@Version` de `stock_balance` impede lost update sob 8 escritas simultâneas (saldo final == baixas confirmadas) e que o perdedor da corrida vira conflito tratado, não 500; cobre também a corrida de primeira movimentação. `EstoqueRepositoryIT` cobre os cinco `*RepositoryImpl` do módulo — round-trip de produto com variações e atributos, `existsBySku` achando SKU pai e de variação, paginação ID-first, propagação do `version`, ordem do ledger e upsert do ponto de reposição.
 - **2026-07-27** — `package-info-obsoletos` (EST-C008): os `package-info` de `core/domain/model/estoque` e `core/ports/out/estoque` descreviam o módulo como "esqueleto (TODO)" e listavam como previstos modelos e adapters existentes desde EST-F001/F002; o comentário equivalente em `CoreBeanConfig` também foi corrigido. O único TODO que sobrou é o `NfeXmlImportPort` (EST-F005).
 
+- **2026-07-27** — `saldo-orfao-ja-existente-na-base` (EST-C011): EST-C002 fechou a porta para novos órfãos, mas o passivo anterior seguia invisível na base — e é ele que contaminaria os relatórios de EST-F006 e EST-F007. Entregue o **levantamento**, não a limpeza: novo port `StockIntegrityRepository` (`core/ports/out/estoque`), query nativa em `StockIntegrityJpaRepository` e `GET /estoque/integrity/orphan-skus` paginado sob `ESTOQUE_STOCK_MANAGE`, mais o script avulso [`scripts/estoque-orphan-skus.sql`](../../../scripts/estoque-orphan-skus.sql) para o caminho DBA. O retrato é o record `OrphanSku` — uma linha por par SKU/depósito, com saldo, contagem e data do último movimento e presença de ponto de reposição, que é o contexto de que a decisão humana precisa. **Nenhum expurgo automático, de propósito:** os dois destinos possíveis (cadastrar o produto que faltava × apagar a digitação errada) são incompatíveis e a consulta não os distingue, então apagar em massa destruiria histórico legítimo — o script traz o bloco de `DELETE` comentado, com lista de SKUs a preencher à mão. Query nativa porque a origem é o `UNION` de três tabelas e JPQL não tem `UNION`; sem migration, e sem permissão nova. Cobertura na `EstoqueRepositoryIT` (7 cenários, incluindo SKU de variação, órfão só com ledger e paginação estável).
 - **2026-07-27** — `ordenacao-instavel-do-ledger` (EST-C012): o histórico ordenava só por `created_at DESC`, chave não-única — uma venda com N itens grava N movimentos no mesmo loop e na mesma transação, com `created_at` idêntico. Além da ordem de exibição arbitrária, a paginação de `GET /estoque/movements` ficava instável: com chave de ordenação não-única o banco não garante ordem consistente entre consultas, então a mesma linha podia voltar em duas páginas ou não aparecer em nenhuma. Corrigido com desempate por `id` (`findBySkuAndWarehouseIdOrderByCreatedAtDescIdDesc`); `id` é BIGSERIAL monotônico e dá ordem total. Sem migration — o índice `idx_stock_movement_sku_warehouse_created` continua servindo ao filtro e ao prefixo da ordenação. Achado ao escrever o `EstoqueRepositoryIT` do EST-C007, que reproduziu o cenário de venda multi-item.
 
 ## Próximos passos
 
-A sprint de integridade de 2026-07-27 fechou C002, C003, C004, C007, C008, C010 e C012.
+A sprint de integridade de 2026-07-27 fechou C002, C003, C004, C007, C008, C010, C011 e C012.
 
 O roteiro completo para fechar o módulo — ordem de execução de todos os itens restantes, as
 dependências entre eles e os dois que não cabem em estoque — está em
 [`proximos-passos.md`](proximos-passos.md). Resumo da prioridade imediata:
 
-1. **EST-C011** — levantar o saldo órfão que já existe na base. A validação nova impede novos casos, mas o passivo anterior segue lá, e é ele que vai contaminar EST-F006/F007 quando forem implementados.
-2. **EST-C005** — `@Validated` no controller e paginação em `GET /estoque/warehouses`. Barato, e mexer nele depois obrigaria a reabrir controller já alterado pelas features.
-3. **EST-F018** — `PUT`/`PATCH` e desativação de produto e depósito.
-4. **EST-F006 + EST-C009** — inventário/contagem junto com a semântica de `AJUSTE`; o backlog registra que C009 depende da modelagem de F006, então não vale separar.
-5. **EST-F007** (custo médio) — destrava o DRE do domínio `financeiro`, mas vem depois de EST-F008 no roteiro, porque o custo entra por lote.
+1. **EST-C005** — `@Validated` no controller e paginação em `GET /estoque/warehouses`. Barato, e mexer nele depois obrigaria a reabrir controller já alterado pelas features.
+2. **EST-F018** — `PUT`/`PATCH` e desativação de produto e depósito.
+3. **EST-F006 + EST-C009** — inventário/contagem junto com a semântica de `AJUSTE`; o backlog registra que C009 depende da modelagem de F006, então não vale separar.
+4. **EST-F007** (custo médio) — destrava o DRE do domínio `financeiro`, mas vem depois de EST-F008 no roteiro, porque o custo entra por lote.
+
+Fora do roteiro de código, EST-C011 deixou uma **pendência operacional**: rodar
+`GET /estoque/integrity/orphan-skus` (ou o script) contra a base de produção e decidir o destino
+de cada SKU levantado. É trabalho de conferência humana, não de implementação.

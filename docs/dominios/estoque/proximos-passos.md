@@ -22,29 +22,34 @@ Leia o README inteiro antes de começar: ele documenta o modelo de domínio, as 
 já implementadas, as integrações com compras/vendas-balcao e o histórico.
 
 ESTADO ATUAL
-A sprint de integridade de 2026-07-27 fechou EST-C002, C003, C004, C007, C008, C010 e C012.
-Suíte em 1032 testes, verde. O núcleo transacional está protegido e provado:
-SKU é validado antes de qualquer escrita, o @Version tem teste de concorrência,
-o ledger tem paginação estável e venda/recebimento deixam trilha de auditoria.
+A sprint de integridade de 2026-07-27 fechou EST-C002, C003, C004, C007, C008, C010,
+C011 e C012. O núcleo transacional está protegido e provado: SKU é validado antes de
+qualquer escrita, o @Version tem teste de concorrência, o ledger tem paginação estável,
+venda/recebimento deixam trilha de auditoria e o passivo de SKU órfão anterior à
+validação já tem ferramenta de levantamento (GET /estoque/integrity/orphan-skus e
+scripts/estoque-orphan-skus.sql).
+
+PENDÊNCIA OPERACIONAL (não é código)
+EST-C011 entregou o levantamento, não a limpeza. Falta alguém rodar o diagnóstico contra
+a base real e decidir, SKU a SKU, entre cadastrar o produto que faltava e expurgar a
+linha. Se eu for solicitado a "terminar o C011", o que cabe é apresentar a lista — não
+apagar nada.
 
 ORDEM SUGERIDA (respeita as dependências reais entre os itens)
- 1. EST-C011  saldo órfão já existente na base — ponta solta da sprint anterior.
-              Precisa de conferência humana antes de qualquer expurgo: levante e
-              apresente, não apague por conta própria.
- 2. EST-C005  @Validated no EstoqueController + paginação em GET /estoque/warehouses.
- 3. EST-F018  PUT/PATCH e desativação de produto e depósito (o campo `active` nunca muda hoje).
- 4. EST-F006 + EST-C009  inventário/contagem JUNTO com a semântica de AJUSTE.
+ 1. EST-C005  @Validated no EstoqueController + paginação em GET /estoque/warehouses.
+ 2. EST-F018  PUT/PATCH e desativação de produto e depósito (o campo `active` nunca muda hoje).
+ 3. EST-F006 + EST-C009  inventário/contagem JUNTO com a semântica de AJUSTE.
               O próprio backlog diz que C009 depende da modelagem de F006 — não separe.
- 5. EST-F012  transferência entre depósitos (MovementType.TRANSFER). Depois de 4,
+ 4. EST-F012  transferência entre depósitos (MovementType.TRANSFER). Depois de 3,
               porque ambos mexem em MovementType e em StockBalance.apply.
- 6. EST-F014  estorno/devolução de venda, com rastreabilidade da venda de origem.
- 7. EST-F008  lote e validade. Muda a granularidade do saldo — trate como mudança
+ 5. EST-F014  estorno/devolução de venda, com rastreabilidade da venda de origem.
+ 6. EST-F008  lote e validade. Muda a granularidade do saldo — trate como mudança
               de modelagem, não como campo novo.
- 8. EST-F007  custo médio ponderado. Vem depois de F008 (o custo entra por lote) e
+ 7. EST-F007  custo médio ponderado. Vem depois de F008 (o custo entra por lote) e
               destrava o DRE do domínio financeiro.
- 9. EST-F016  unidade de medida e conversão — mexe na semântica de quantity em todo lugar.
-10. EST-F015  kit/produto composto.
-11. EST-F005  entrada por XML de NF-e (NfeXmlImportPort). Por último entre as features
+ 8. EST-F016  unidade de medida e conversão — mexe na semântica de quantity em todo lugar.
+ 9. EST-F015  kit/produto composto.
+10. EST-F005  entrada por XML de NF-e (NfeXmlImportPort). Por último entre as features
               de entrada, porque o XML traz lote e custo — depende de F008 e F007.
 
 NÃO CABEM EM ESTOQUE — me traga a decisão em vez de implementar:
@@ -81,7 +86,7 @@ ARMADILHAS DESTE PROJETO (já me custaram build quebrado)
 - Testes de contexto real que escrevem estoque precisam cadastrar o SKU antes —
   desde EST-C002 movimentar SKU inexistente é 404.
 
-Comece lendo o README do módulo e me apresentando o plano para o EST-C011.
+Comece lendo o README do módulo e me apresentando o plano para o EST-C005.
 ```
 
 ---
@@ -92,7 +97,7 @@ Os itens não são independentes, e a ordem abaixo evita refazer trabalho:
 
 | Agrupamento | Razão |
 |---|---|
-| C011 primeiro | É a ponta solta da sprint de integridade: a validação de SKU impede novos órfãos, mas não limpa o passivo. Quanto mais tempo passa, mais dado sujo entra nos relatórios de F007 e F011. |
+| ~~C011 primeiro~~ ✅ | Feito em 2026-07-27: a ferramenta de levantamento existe. Sobrou só a conferência humana da base real, que não bloqueia os itens de código abaixo. |
 | C005 e F018 antes das features grandes | São baratos e mexem na superfície CRUD. Fazer depois significaria reabrir controller e DTOs já modificados pelas features. |
 | F006 **com** C009 | O próprio backlog registra que a semântica de `AJUSTE` depende da modelagem de inventário. Separar obriga a decidir duas vezes a mesma coisa. |
 | F012 depois de F006/C009 | `MovementType.TRANSFER` e a correção de `AJUSTE` mexem nos mesmos pontos: o enum e `StockBalance.apply`. |
@@ -116,6 +121,6 @@ o que se perde é controle de perecível e venda fracionada, não a integridade 
 
 ## O que "módulo fechado" significa aqui
 
-Fechar os 11 itens do roteiro, mais uma decisão registrada sobre os três que não cabem em estoque
-(F013, F011, C006). Com isso o backlog do módulo zera e `financeiro` fica destravado para o DRE,
-que hoje espera o custo médio de F007.
+Fechar os 10 itens que restam no roteiro, mais uma decisão registrada sobre os três que não cabem
+em estoque (F013, F011, C006). Com isso o backlog do módulo zera e `financeiro` fica destravado
+para o DRE, que hoje espera o custo médio de F007.
