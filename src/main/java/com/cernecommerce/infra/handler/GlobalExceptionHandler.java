@@ -65,10 +65,12 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.validation.FieldError;
+import org.springframework.validation.method.ParameterValidationResult;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.util.Arrays;
@@ -360,6 +362,35 @@ public class GlobalExceptionHandler {
                 .map(cv -> cv.getPropertyPath() + ": " + cv.getMessage())
                 .collect(Collectors.joining(", "));
         return error(HttpStatus.BAD_REQUEST, message, "VALIDATION_ERROR", req);
+    }
+
+    /**
+     * Constraint violada em {@code @RequestParam}/{@code @PathVariable} de controller anotado com
+     * {@code @Validated} (EST-C005).
+     *
+     * <p>Não é o mesmo caminho do {@link ConstraintViolationException} acima: desde o Spring
+     * Framework 6.1 a validação de parâmetros de handler é <b>nativa</b> do
+     * {@code RequestMappingHandlerAdapter}, sem proxy AOP, e lança
+     * {@link HandlerMethodValidationException}. Sem este handler ela cairia no catch-all de
+     * {@link Exception} e viraria 500 — que era o comportamento real de
+     * {@code GET /compras/suppliers?size=200}, cujos {@code @Min}/{@code @Max} nunca tinham sido
+     * exercitados por teste.</p>
+     */
+    @ExceptionHandler(HandlerMethodValidationException.class)
+    public ResponseEntity<ApiError> handleHandlerMethodValidation(HandlerMethodValidationException ex,
+            HttpServletRequest req) {
+        String message = ex.getParameterValidationResults().stream()
+                .flatMap(result -> result.getResolvableErrors().stream()
+                        .map(err -> parameterName(result) + ": " + err.getDefaultMessage()))
+                .collect(Collectors.joining(", "));
+        return error(HttpStatus.BAD_REQUEST,
+                message.isBlank() ? "Parâmetro de requisição inválido" : message, "VALIDATION_ERROR", req);
+    }
+
+    /** {@code getParameterName()} depende do flag {@code -parameters} do compilador. */
+    private String parameterName(ParameterValidationResult result) {
+        String name = result.getMethodParameter().getParameterName();
+        return name == null ? "parâmetro" : name;
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)

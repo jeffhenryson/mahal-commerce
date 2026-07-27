@@ -1,12 +1,14 @@
 package com.cernecommerce.adapter.out.persistence.repository;
 
 import com.cernecommerce.adapter.out.persistence.entity.WarehouseEntity;
+import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.Warehouse;
 import com.cernecommerce.core.ports.out.estoque.WarehouseRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.List;
 import java.util.Optional;
 
 @Repository
@@ -38,8 +40,10 @@ public class WarehouseRepositoryImpl implements WarehouseRepository {
 
     @Override
     @Transactional(readOnly = true)
-    public List<Warehouse> findAll() {
-        return warehouseJpaRepository.findAllOrderById().stream().map(this::toDomain).toList();
+    public PageResult<Warehouse> findAll(int page, int size) {
+        Page<WarehouseEntity> result = warehouseJpaRepository.findAllOrderById(PageRequest.of(page, size));
+        return new PageResult<>(result.getContent().stream().map(this::toDomain).toList(),
+                page, size, result.getTotalElements(), result.getTotalPages());
     }
 
     private Warehouse toDomain(WarehouseEntity e) {

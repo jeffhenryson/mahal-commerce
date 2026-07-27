@@ -106,8 +106,8 @@ public class EstoqueService implements EstoqueUseCase {
 
     @Override
     @Transactional(readOnly = true)
-    public List<Warehouse> listWarehouses() {
-        return warehouseRepository.findAll();
+    public PageResult<Warehouse> listWarehouses(int page, int size) {
+        return warehouseRepository.findAll(page, size);
     }
 
     @Override

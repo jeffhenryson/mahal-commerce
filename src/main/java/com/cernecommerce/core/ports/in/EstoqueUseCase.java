@@ -36,7 +36,8 @@ public interface EstoqueUseCase {
     Warehouse createWarehouse(String code, String name, WarehouseType type);
 
     /** Lista todos os depósitos cadastrados. */
-    List<Warehouse> listWarehouses();
+    /** Lista depósitos paginados, ordenados por id. */
+    PageResult<Warehouse> listWarehouses(int page, int size);
 
     /**
      * Consulta o saldo de um SKU em um depósito. Retorna saldo zero se ainda não houve

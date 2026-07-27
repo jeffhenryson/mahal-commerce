@@ -1,8 +1,8 @@
 package com.cernecommerce.core.ports.out.estoque;
 
+import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.Warehouse;
 
-import java.util.List;
 import java.util.Optional;
 
 /**
@@ -14,5 +14,6 @@ public interface WarehouseRepository {
 
     Optional<Warehouse> findByCode(String code);
 
-    List<Warehouse> findAll();
+    /** Depósitos paginados, ordenados por id. */
+    PageResult<Warehouse> findAll(int page, int size);
 }

@@ -30,10 +30,15 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
@@ -48,6 +53,7 @@ import java.util.Map;
 @RequestMapping("/estoque")
 @Tag(name = "Estoque", description = "Grade de produtos e inventário")
 @SecurityRequirement(name = "bearerAuth")
+@Validated
 public class EstoqueController {
 
     private final EstoqueUseCase estoqueUseCase;
@@ -74,9 +80,9 @@ public class EstoqueController {
     @GetMapping("/products")
     @PreAuthorize("hasAuthority('ESTOQUE_PRODUCT_READ')")
     public ResponseEntity<PageResult<ProductResponseDTO>> listProducts(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
-        PageResult<Product> result = estoqueUseCase.listProducts(page, Math.min(size, 100));
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+        PageResult<Product> result = estoqueUseCase.listProducts(page, size);
         PageResult<ProductResponseDTO> response = new PageResult<>(
                 result.content().stream().map(converter::toResponse).toList(),
                 result.page(), result.size(), result.totalElements(), result.totalPages());
@@ -119,16 +125,21 @@ public class EstoqueController {
                 .body(warehouseConverter.toResponse(created));
     }
 
-    @Operation(summary = "Lista todos os depósitos cadastrados")
+    @Operation(summary = "Lista depósitos paginados")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "400", description = "Parâmetro de paginação inválido", content = @Content),
             @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
     })
     @GetMapping("/warehouses")
     @PreAuthorize("hasAuthority('ESTOQUE_WAREHOUSE_READ')")
-    public ResponseEntity<List<WarehouseResponseDTO>> listWarehouses() {
-        List<WarehouseResponseDTO> response = estoqueUseCase.listWarehouses().stream()
-                .map(warehouseConverter::toResponse).toList();
+    public ResponseEntity<PageResult<WarehouseResponseDTO>> listWarehouses(
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+        PageResult<Warehouse> result = estoqueUseCase.listWarehouses(page, size);
+        PageResult<WarehouseResponseDTO> response = new PageResult<>(
+                result.content().stream().map(warehouseConverter::toResponse).toList(),
+                result.page(), result.size(), result.totalElements(), result.totalPages());
         return ResponseEntity.ok(response);
     }
 
@@ -140,8 +151,9 @@ public class EstoqueController {
     })
     @GetMapping("/stock-balance")
     @PreAuthorize("hasAuthority('ESTOQUE_WAREHOUSE_READ')")
-    public ResponseEntity<StockBalanceResponseDTO> getStockBalance(@RequestParam String sku,
-            @RequestParam String warehouseCode) {
+    public ResponseEntity<StockBalanceResponseDTO> getStockBalance(
+            @RequestParam @NotBlank @Size(min = 3, max = 50) String sku,
+            @RequestParam @NotBlank @Size(min = 2, max = 50) String warehouseCode) {
         StockBalance balance = estoqueUseCase.getStockBalance(sku, warehouseCode);
         return ResponseEntity.ok(warehouseConverter.toResponse(balance, warehouseCode));
     }
@@ -177,11 +189,11 @@ public class EstoqueController {
     @GetMapping("/movements")
     @PreAuthorize("hasAuthority('ESTOQUE_STOCK_MANAGE')")
     public ResponseEntity<PageResult<StockMovementResponseDTO>> listMovements(
-            @RequestParam String sku,
-            @RequestParam String warehouseCode,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
-        PageResult<StockMovement> result = estoqueUseCase.listMovements(sku, warehouseCode, page, Math.min(size, 100));
+            @RequestParam @NotBlank @Size(min = 3, max = 50) String sku,
+            @RequestParam @NotBlank @Size(min = 2, max = 50) String warehouseCode,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+        PageResult<StockMovement> result = estoqueUseCase.listMovements(sku, warehouseCode, page, size);
         PageResult<StockMovementResponseDTO> response = new PageResult<>(
                 result.content().stream().map(m -> movementConverter.toResponse(m, warehouseCode)).toList(),
                 result.page(), result.size(), result.totalElements(), result.totalPages());
@@ -196,7 +208,8 @@ public class EstoqueController {
     })
     @PutMapping("/products/{sku}/reorder-point")
     @PreAuthorize("hasAuthority('ESTOQUE_STOCK_MANAGE')")
-    public ResponseEntity<Void> setReorderPoint(@PathVariable String sku,
+    public ResponseEntity<Void> setReorderPoint(
+            @PathVariable @NotBlank @Size(min = 3, max = 50) String sku,
             @Valid @RequestBody ReorderPointRequest request, Authentication authentication) {
         estoqueUseCase.setReorderPoint(sku, request.getWarehouseCode(), request.getMinQuantity());
         publisher.publishEvent(AuditEvent.of(EventType.REORDER_POINT_SET, authentication.getName(),
@@ -220,9 +233,9 @@ public class EstoqueController {
     @GetMapping("/integrity/orphan-skus")
     @PreAuthorize("hasAuthority('ESTOQUE_STOCK_MANAGE')")
     public ResponseEntity<PageResult<OrphanSkuResponseDTO>> listOrphanSkus(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
-        PageResult<OrphanSku> result = estoqueUseCase.listOrphanSkus(page, Math.min(size, 100));
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+        PageResult<OrphanSku> result = estoqueUseCase.listOrphanSkus(page, size);
         PageResult<OrphanSkuResponseDTO> response = new PageResult<>(
                 result.content().stream().map(movementConverter::toResponse).toList(),
                 result.page(), result.size(), result.totalElements(), result.totalPages());
