@@ -12,6 +12,14 @@ public class WarehouseDTOConverter {
         return WarehouseType.valueOf(type);
     }
 
+    /**
+     * Variante para o PATCH (EST-F018), onde ausência do campo significa "não mexer": {@code null}
+     * atravessa em vez de estourar {@link NullPointerException} em {@code valueOf}.
+     */
+    public WarehouseType toTypeOrNull(String type) {
+        return type == null ? null : WarehouseType.valueOf(type);
+    }
+
     public WarehouseResponseDTO toResponse(Warehouse warehouse) {
         WarehouseResponseDTO dto = new WarehouseResponseDTO();
         dto.setId(warehouse.id());

@@ -27,4 +27,22 @@ public record Warehouse(Long id, String code, String name, WarehouseType type, b
     public static Warehouse of(Long id, String code, String name, WarehouseType type, boolean active) {
         return new Warehouse(id, code, name, type, active);
     }
+
+    /**
+     * Alteração parcial (EST-F018): argumento nulo significa <b>não mexer neste campo</b>.
+     *
+     * <p>{@code code} não entra: é a identidade pública do depósito, usada como chave em toda a
+     * API (`?warehouseCode=`) e resolvida por {@code findByCode} antes de cada escrita de saldo.</p>
+     */
+    public Warehouse withDetails(String newName, WarehouseType newType) {
+        return new Warehouse(id, code,
+                newName == null ? name : newName,
+                newType == null ? type : newType,
+                active);
+    }
+
+    /** Ativa ou desativa o depósito, preservando o resto. */
+    public Warehouse withActive(boolean newActive) {
+        return new Warehouse(id, code, name, type, newActive);
+    }
 }

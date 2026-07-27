@@ -40,6 +40,12 @@ public class WarehouseRepositoryImpl implements WarehouseRepository {
 
     @Override
     @Transactional(readOnly = true)
+    public Optional<Warehouse> findById(Long id) {
+        return warehouseJpaRepository.findById(id).map(this::toDomain);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public PageResult<Warehouse> findAll(int page, int size) {
         Page<WarehouseEntity> result = warehouseJpaRepository.findAllOrderById(PageRequest.of(page, size));
         return new PageResult<>(result.getContent().stream().map(this::toDomain).toList(),

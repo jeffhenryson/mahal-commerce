@@ -21,5 +21,14 @@ public interface ProductRepository {
      */
     boolean existsBySku(String sku);
 
+    /**
+     * Indica se o SKU está <b>ativo</b> e, portanto, pode receber entrada de estoque (EST-F018).
+     * SKU de variação exige que a variação e o produto pai estejam ativos.
+     *
+     * <p>Distinto de {@link #existsBySku(String)}: um SKU desativado continua existindo — o
+     * histórico e o saldo dele seguem válidos, e a saída continua permitida.</p>
+     */
+    boolean isSkuActive(String sku);
+
     Product save(Product product);
 }

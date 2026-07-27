@@ -20,8 +20,14 @@ public record StockMovement(Long id, String sku, Long warehouseId, MovementType 
         if (type == null) {
             throw new IllegalArgumentException("type é obrigatório");
         }
-        if (quantity == null || quantity.signum() <= 0) {
-            throw new IllegalArgumentException("quantity deve ser maior que zero");
+        // AJUSTE grava o saldo contado, não um delta (EST-C009), e contar zero é legítimo:
+        // item que acabou ou sumiu. Para ENTRADA e SAIDA, movimento de quantidade zero
+        // continua sem sentido.
+        if (quantity == null || quantity.signum() < 0
+                || (quantity.signum() == 0 && type != MovementType.AJUSTE)) {
+            throw new IllegalArgumentException(type == MovementType.AJUSTE
+                    ? "quantity de AJUSTE não pode ser negativa"
+                    : "quantity deve ser maior que zero");
         }
         if (reason == null || reason.isBlank()) {
             throw new IllegalArgumentException("reason é obrigatório");

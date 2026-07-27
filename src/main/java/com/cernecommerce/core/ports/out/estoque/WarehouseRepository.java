@@ -14,6 +14,12 @@ public interface WarehouseRepository {
 
     Optional<Warehouse> findByCode(String code);
 
+    /**
+     * Busca por id. Necessária porque {@code StockCount} e {@code StockBalance} guardam
+     * {@code warehouseId}, enquanto a API trabalha com {@code code}.
+     */
+    Optional<Warehouse> findById(Long id);
+
     /** Depósitos paginados, ordenados por id. */
     PageResult<Warehouse> findAll(int page, int size);
 }

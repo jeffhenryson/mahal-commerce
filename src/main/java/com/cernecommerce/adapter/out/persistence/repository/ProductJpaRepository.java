@@ -19,6 +19,14 @@ public interface ProductJpaRepository extends JpaRepository<ProductEntity, Long>
             + "LEFT JOIN p.variants v WHERE p.sku = :sku OR v.sku = :sku")
     boolean existsBySkuOrVariantSku(String sku);
 
+    // EST-F018: um SKU só conta como ativo se o produto pai estiver ativo. Para SKU de variação
+    // exige-se as duas pontas — desativar o pai tira a grade inteira de circulação, sem precisar
+    // percorrer variação por variação.
+    @Query("SELECT CASE WHEN COUNT(p) > 0 THEN TRUE ELSE FALSE END FROM ProductEntity p "
+            + "LEFT JOIN p.variants v WHERE p.active = TRUE "
+            + "AND (p.sku = :sku OR (v.sku = :sku AND v.active = TRUE))")
+    boolean isSkuActive(String sku);
+
     // Padrão ID-first: pagina apenas os ids, depois faz JOIN FETCH das variações
     // pelos ids já resolvidos — evita LIMIT/OFFSET junto de fetch de coleção (bug clássico de paginação com JOIN FETCH).
     @Query("SELECT p.id FROM ProductEntity p ORDER BY p.id")

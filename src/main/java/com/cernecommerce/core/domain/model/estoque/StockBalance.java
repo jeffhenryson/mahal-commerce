@@ -33,12 +33,27 @@ public record StockBalance(Long id, String sku, Long warehouseId, BigDecimal qua
     }
 
     /**
-     * Aplica uma movimentação (entrada, saída ou ajuste) e retorna o saldo resultante.
-     * {@code ENTRADA} e {@code AJUSTE} somam a quantidade; {@code SAIDA} subtrai. Lança
-     * {@link InsufficientStockException} se o resultado ficaria negativo — saldo zerado é
-     * permitido, negativo não.
+     * Aplica uma movimentação e retorna o saldo resultante.
+     *
+     * <ul>
+     *   <li>{@code ENTRADA} — soma {@code movementQuantity} ao saldo.</li>
+     *   <li>{@code SAIDA} — subtrai. Lança {@link InsufficientStockException} se o resultado
+     *       ficaria negativo; zerar exatamente é permitido.</li>
+     *   <li>{@code AJUSTE} — <b>substitui</b> o saldo por {@code movementQuantity}, que é o valor
+     *       contado na prateleira, não um delta (EST-C009). Sobe ou desce, e zero é válido.</li>
+     * </ul>
+     *
+     * <p>Um {@code AJUSTE} negativo é {@link IllegalArgumentException}, e não
+     * {@code InsufficientStockException}: não existe saldo insuficiente para uma contagem — o que
+     * há é um alvo inválido.</p>
      */
     public StockBalance apply(MovementType type, BigDecimal movementQuantity) {
+        if (type == MovementType.AJUSTE) {
+            if (movementQuantity == null || movementQuantity.signum() < 0) {
+                throw new IllegalArgumentException("quantidade de AJUSTE não pode ser negativa");
+            }
+            return new StockBalance(id, sku, warehouseId, movementQuantity, version);
+        }
         BigDecimal newQuantity = type == MovementType.SAIDA
                 ? quantity.subtract(movementQuantity)
                 : quantity.add(movementQuantity);
