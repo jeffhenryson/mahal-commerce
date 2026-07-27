@@ -3,7 +3,7 @@
 **Status:** 🟢 Operacional — grade de produtos, saldo multi-depósito, ledger de movimentações (gravação e consulta) e alerta de ponto de reposição em produção
 **Pacote Java:** `com.cernecommerce.core.domain.model.estoque`
 **Rota HTTP base:** `/estoque`
-**Última atualização deste doc:** 2026-07-27 (EST-F017 + EST-C001 + seção de Segurança e Infraestrutura)
+**Última atualização deste doc:** 2026-07-27 (sprint de integridade: EST-C002, C003, C004, C007, C008, C010)
 
 ## Objetivo
 
@@ -51,14 +51,16 @@ preservado no record resultante, para que o merge no JPA acione o optimistic loc
 | `MissingServletRequestParameterException` (Spring) | 400 | `MISSING_PARAMETER` |
 | `DuplicateWarehouseCodeException` | 409 | `WAREHOUSE_CODE_ALREADY_EXISTS` |
 | `WarehouseNotFoundException` | 404 | `WAREHOUSE_NOT_FOUND` |
+| `ProductNotFoundException` | 404 | `PRODUCT_NOT_FOUND` |
 | `InsufficientStockException` | 400 | `INSUFFICIENT_STOCK` |
 | `ObjectOptimisticLockingFailureException` (Spring) | 409 | `STOCK_UPDATE_CONFLICT` |
+| `DataIntegrityViolationException` (Spring) | 409 | `DATA_INTEGRITY_VIOLATION` |
 
 ## Regras de Negócio Implementadas
 
 | Regra | Onde | Teste |
 |---|---|---|
-| SKU do produto é único no sistema | `EstoqueService.createProduct` | `EstoqueServiceTest.createProduct_throwsWhenSkuAlreadyExists` |
+| SKU é único no sistema, e o espaço de nomes é compartilhado entre SKU pai e SKUs de variação | `EstoqueService.createProduct` | `EstoqueServiceTest.createProduct_throwsWhenSkuAlreadyExists`, `createProduct_throwsWhenVariantSkuEqualsParentSku` |
 | Produto pode ser criado sem variações (produto simples) | `Product.create` | `EstoqueServiceTest.createProduct_allowsProductWithoutVariants` |
 | Variação exige SKU próprio; atributo exige tipo e valor | `ProductVariant`, `ProductAttribute` (compact constructors) | `@Valid` em `ProductVariantRequest` / `ProductAttributeRequest` |
 | Listagem de produtos é paginada (máx. 100 por página) | `EstoqueController.listProducts` (`Math.min(size, 100)`) | `EstoqueControllerTest.list_returns_200_with_products` |
@@ -71,12 +73,18 @@ preservado no record resultante, para que o merge no JPA acione o optimistic loc
 | Entrada sem saldo prévio parte de zero e cria a linha de saldo | `EstoqueService.adjustStock` (`orElseGet(StockBalance::zero)`) | `EstoqueServiceTest.adjustStock_entrada_withoutPriorBalance_startsFromZeroAndPersists` |
 | Toda movimentação grava um `StockMovement` (ledger auditável) com motivo e usuário | `EstoqueService.adjustStock` | `EstoqueServiceTest.adjustStock_saida_decreasesExistingBalance` |
 | Quantidade de movimentação deve ser estritamente maior que zero | `StockMovement` (compact constructor) + `@DecimalMin(inclusive=false)` no request | `StockMovementTest`, `EstoqueControllerTest.registerMovement_withNegativeQuantity_returns_400` |
-| Escritas concorrentes no mesmo saldo resultam em 409, não em saldo corrompido | `@Version` em `StockBalanceEntity` + handler global | — (sem teste de concorrência; ver EST-C007) |
+| Escritas concorrentes no mesmo saldo resultam em 409, não em saldo corrompido | `@Version` em `StockBalanceEntity` + handler global | `StockBalanceConcurrencyIT.saidas_concorrentes_nao_perdem_baixa_de_estoque` |
+| Primeira movimentação concorrente do mesmo par também resulta em 409, não em 500 | `uk_stock_balance_sku_warehouse` + `GlobalExceptionHandler.handleDataIntegrityViolation` | `StockBalanceConcurrencyIT.primeira_movimentacao_concorrente_do_mesmo_par_nao_duplica_saldo` |
+| Movimentar ou definir mínimo exige SKU existente no catálogo (pai ou variação) | `EstoqueService.requireKnownSku` → `ProductNotFoundException` | `EstoqueServiceTest.adjustStock_throwsWhenSkuNotInCatalog`, `adjustStock_acceptsVariantSkuNotJustParentSku`, `setReorderPoint_throwsWhenSkuNotInCatalog`, `EstoqueRepositoryIT.existsBySku_encontraTantoSkuPaiQuantoSkuDeVariacao` |
+| SKU desconhecido vindo de venda ou recebimento reverte a operação inteira | propagação de `ProductNotFoundException` por `PdvService`/`ComprasService` | `PdvServiceTest.registerSale_propagatesUnknownSkuAndDoesNotSaveSale`, `ComprasServiceTest.receiveGoods_propagatesUnknownSkuAndDoesNotSaveReceipt` |
+| SKU de variação duplicado é 409, não 500 | `EstoqueService.createProduct` valida pai e variações | `EstoqueServiceTest.createProduct_throwsWhenVariantSkuAlreadyExists`, `createProduct_throwsWhenPayloadRepeatsTheSameVariantSku`, `createProduct_throwsWhenVariantSkuEqualsParentSku` |
 | Definir ponto de reposição é upsert: reaproveita o `id` existente do par SKU/depósito | `EstoqueService.setReorderPoint` | `EstoqueServiceTest.setReorderPoint_createsNewWhenNoneExists`, `setReorderPoint_updatesExisting` |
 | Saldo abaixo do mínimo notifica todos os usuários com `ESTOQUE_STOCK_MANAGE` | `EstoqueService.notifyIfBelowReorderPoint` | `EstoqueServiceTest.adjustStock_saida_belowReorderPoint_notifiesUsersWithStockManagePermission`, `EstoqueAlertaIT` |
+| Alerta é agregado por operação e só sai depois do commit | `AfterCommitExecutor` + `EstoqueService.dispatchReorderAlerts` | `TransactionAfterCommitExecutorTest.comTransacaoAtiva_agrega_e_despacha_uma_unica_vez_no_commit`, `em_rollback_nao_despacha_nada` |
 | Saldo igual ao mínimo **não** dispara alerta (comparação estrita) | `ReorderPoint.isBelow` | `EstoqueServiceTest.adjustStock_saida_aboveReorderPoint_doesNotNotify` |
 | Sem ponto de reposição configurado, nenhuma notificação é enviada | `EstoqueService.notifyIfBelowReorderPoint` | `EstoqueServiceTest.adjustStock_withoutReorderPointConfigured_doesNotNotify` |
-| Histórico de movimentações é paginado (máx. 100) e ordenado do mais recente para o mais antigo | `EstoqueController.listMovements` (`Math.min(size, 100)`) + `findBySkuAndWarehouseIdOrderByCreatedAtDesc` | `EstoqueControllerTest.listMovements_capsPageSizeAt100`, `listMovements_returns_200_with_ledger` |
+| Histórico de movimentações é paginado (máx. 100) e ordenado do mais recente para o mais antigo | `EstoqueController.listMovements` (`Math.min(size, 100)`) + `findBySkuAndWarehouseIdOrderByCreatedAtDescIdDesc` | `EstoqueControllerTest.listMovements_capsPageSizeAt100`, `listMovements_returns_200_with_ledger` |
+| Movimentos com o mesmo `created_at` têm ordem determinística e paginação estável | desempate por `id` (BIGSERIAL) na ordenação do ledger | `EstoqueRepositoryIT.stockMovement_paginaDoMaisRecenteParaOMaisAntigo`, `stockMovement_paginacaoNaoRepeteNemPulaLinhaComCreatedAtIgual` |
 | Consultar histórico de par SKU/depósito nunca movimentado devolve página vazia (200), não 404 | `EstoqueService.listMovements` | `EstoqueServiceTest.listMovements_returnsEmptyPageWhenSkuNeverMoved`, `EstoqueControllerTest.listMovements_returns_200_withEmptyPageWhenNeverMoved` |
 | Histórico em depósito inexistente lança `WarehouseNotFoundException` (404) sem tocar no repositório de movimentações | `EstoqueService.listMovements` | `EstoqueServiceTest.listMovements_throwsWhenWarehouseNotFound` |
 | `sku` e `warehouseCode` ausentes na query devolvem 400 `MISSING_PARAMETER` (não 500) | `GlobalExceptionHandler.handleMissingParam` | `EstoqueControllerTest.listMovements_withoutSku_returns_400`, `listMovements_withoutWarehouseCode_returns_400`, `GlobalExceptionHandlerTest.missingRequestParameter_returns400_namingTheParameter` |
@@ -145,19 +153,23 @@ vínculo usuário↔depósito — é a limitação a resolver antes de operar co
 
 ### Auditoria
 
-O `EstoqueController` publica `AuditEvent` em quatro operações:
+Toda operação que altera saldo publica `AuditEvent`:
 
-| Operação | `EventType` |
-|---|---|
-| `POST /estoque/products` | `PRODUCT_CREATED` |
-| `POST /estoque/warehouses` | `WAREHOUSE_CREATED` |
-| `POST /estoque/movements` | `STOCK_MOVEMENT_REGISTERED` |
-| `PUT /estoque/products/{sku}/reorder-point` | `REORDER_POINT_SET` |
+| Operação | Controller | `EventType` |
+|---|---|---|
+| `POST /estoque/products` | `EstoqueController` | `PRODUCT_CREATED` |
+| `POST /estoque/warehouses` | `EstoqueController` | `WAREHOUSE_CREATED` |
+| `POST /estoque/movements` | `EstoqueController` | `STOCK_MOVEMENT_REGISTERED` |
+| `PUT /estoque/products/{sku}/reorder-point` | `EstoqueController` | `REORDER_POINT_SET` |
+| `POST /pdv/sessions/{id}/sales` | `PdvController` | `STOCK_MOVEMENT_REGISTERED` (`origin: PDV_SALE`) |
+| `POST /compras/goods-receipts` | `ComprasController` | `STOCK_MOVEMENT_REGISTERED` (`origin: GOODS_RECEIPT`) |
 
-Leituras (incluindo `GET /estoque/movements`) não geram evento. Movimentações originadas de
-venda ou recebimento **também não** — e são a maioria em volume (EST-C004). O ledger
-`stock_movement` continua registrando `username` e `reason` nesses casos, então há rastro de
-domínio, mas não trilha de auditoria.
+Venda e recebimento emitem **um evento por operação**, não por item, com os campos `origin`,
+`warehouseCode`, `type`, `skus` e `itemCount` — o detalhamento item a item continua no ledger
+`stock_movement`. A publicação fica nos controllers (adapter), e não nos services, porque
+`HexagonalArchitectureTest` só libera `org.springframework.transaction.*` dentro de `core/service`.
+
+Leituras (incluindo `GET /estoque/movements`) não geram evento.
 
 Retenção dos `audit_logs`: 365 dias (`AuditLogCleanupService`); leitura por `GET /audit-logs`
 com `AUDIT_READ`.
@@ -209,8 +221,16 @@ Em ambos os casos o ajuste de estoque acontece **antes** de persistir o document
 — tipicamente `InsufficientStockException` na venda — a operação inteira é revertida e nem o
 documento nem os movimentos anteriores do mesmo lote são gravados.
 
-O alerta de reposição (`notifyIfBelowReorderPoint`) roda por movimentação, dentro da transação
-de escrita, integrando com o domínio `notification` via `NotificationUseCase.notify`.
+Antes de qualquer escrita, `adjustStock` e `setReorderPoint` exigem que o SKU exista no catálogo
+— como SKU pai ou como SKU de variação (`ProductRepository.existsBySku`). Vale para as três
+portas de entrada: movimentação manual, venda e recebimento. SKU desconhecido responde 404
+`PRODUCT_NOT_FOUND` e reverte a operação inteira, em vez de criar saldo órfão (EST-C002).
+
+O alerta de reposição (`notifyIfBelowReorderPoint`) **acumula** os SKUs que cruzaram o mínimo
+durante a operação e despacha **uma notificação por destinatário depois do commit**, via o port
+`AfterCommitExecutor` (implementado em `infra/transaction/TransactionAfterCommitExecutor`). Assim
+uma venda com N itens abaixo do mínimo gera um aviso listando os N SKUs — não N avisos —, a
+transação de venda não espera o envio, e uma venda revertida não notifica ninguém (EST-C003).
 
 ## Schema de Banco (Migrations)
 
@@ -255,13 +275,16 @@ nem para `product_variant.sku`. Ver EST-C002.
 | `infra/config/DevRoleBootstrapConfigTest` | Unit (Mockito) | 4 casos: `ROLE_DEV` recebe as permissões de negócio (incl. `PDV_SALE_MANAGE`), as `DEV_ONLY_*`, e não cria usuário sem `DEV_EMAIL` |
 | `infra/config/SeedConfigTest` | Unit (Mockito) | `ROLE_ADMIN` recebe as permissões `ESTOQUE_*` e `PDV_SALE_MANAGE` no seed de dev |
 | `adapter/in/controller/EstoqueAlertaIT` | `@SpringBootTest` (profile `dev`) | E2E do alerta: depósito → ENTRADA 20 → mínimo 10 → SAIDA 12 → notificação em `GET /notifications` |
-| `core/service/ComprasServiceTest` | Unit | Recebimento ajusta estoque por item; falha do estoque propaga e não salva o receipt |
-| `core/service/PdvServiceTest` | Unit | Venda dá baixa por item; `InsufficientStockException` reverte a venda inteira |
+| `core/service/ComprasServiceTest` | Unit | Recebimento ajusta estoque por item; falha do estoque (saldo, depósito ou SKU desconhecido) propaga e não salva o receipt |
+| `core/service/PdvServiceTest` | Unit | Venda dá baixa por item; `InsufficientStockException` e `ProductNotFoundException` revertem a venda inteira |
+| `core/service/StockBalanceConcurrencyIT` | `@SpringBootTest` (profile `dev`) | 8 escritas simultâneas no mesmo saldo: sem lost update, conflitos tratados; idem na primeira movimentação do par |
+| `adapter/out/persistence/repository/EstoqueRepositoryIT` | `@SpringBootTest` + `@Transactional` | Os 5 `*RepositoryImpl`: round-trip de produto com variações/atributos, `existsBySku` em SKU pai e de variação, paginação ID-first, propagação do `version`, ordem do ledger, upsert do ponto de reposição |
+| `infra/transaction/TransactionAfterCommitExecutorTest` | Unit | Agregação por chave, despacho único no commit, silêncio no rollback, isolamento entre transações da mesma thread, falha de um lote não derruba o próximo |
 
-**Lacunas conhecidas:** nenhum `@DataJpaTest` dos repositórios de estoque e nenhum teste de
-concorrência exercitando o `@Version`. Ver EST-C007. O histórico de movimentações tem cobertura
-de service, controller e segurança, mas ainda não tem um IT end-to-end que grave movimentações
-reais e as releia pelo endpoint.
+**Lacunas conhecidas:** o histórico de movimentações tem cobertura de service, controller e
+segurança, mas ainda não tem um IT end-to-end que grave movimentações reais e as releia pelo
+endpoint. `EstoqueRepositoryIT` roda contra H2 em modo PostgreSQL, como os demais ITs
+do projeto — divergências específicas do Postgres continuam fora de cobertura automatizada.
 
 ## Testes no Postman
 
@@ -280,8 +303,8 @@ npx newman run docs/dominios/estoque/estoque.postman_collection.json \
 |---|---|
 | `01 — Depósitos` | criação, listagem e o 409 de código duplicado |
 | `02 — Produtos` | criação com variações e atributos, listagem paginada, 409 de SKU duplicado e 400 de validação |
-| `03 — Saldo e movimentações` | saldo zerado inicial, `ENTRADA` → `SAIDA` → `AJUSTE` conferindo o saldo a cada passo, e os erros `INSUFFICIENT_STOCK`, quantidade negativa e depósito inexistente |
-| `04 — Ponto de reposição e alerta` | upsert do mínimo, saída que **não** cruza o mínimo, saída que cruza, e a conferência da notificação em `GET /notifications` |
+| `03 — Saldo e movimentações` | saldo zerado inicial, `ENTRADA` → `SAIDA` → `AJUSTE` conferindo o saldo a cada passo, entrada no SKU de variação, e os erros `INSUFFICIENT_STOCK`, quantidade negativa, depósito inexistente e `PRODUCT_NOT_FOUND` |
+| `04 — Ponto de reposição e alerta` | upsert do mínimo, saída que **não** cruza o mínimo, saída que cruza, a conferência da notificação em `GET /notifications` e o `PRODUCT_NOT_FOUND` do mínimo em SKU fora do catálogo |
 | `05 — Segurança` | 401 sem token e com token inválido |
 
 O SKU e o código de depósito são gerados com timestamp a cada execução, então a coleção é
@@ -305,14 +328,10 @@ Convenções, variáveis e o environment compartilhado estão em
 | EST-F015 | 🟢 Baixa | Feature | kit-produto-composto | Produto "kit"/combo (ex.: kit narguilé = essência + carvão + descartável) que dá baixa nos componentes conforme receita cadastrada. | Backlog (Sprint 6) |
 | EST-F016 | 🟢 Baixa | Feature | unidade-medida-conversao | Múltiplas unidades por produto (compra em kg, venda em porção/g) com fator de conversão nas movimentações. | Backlog (Sprint 6) |
 | EST-F018 | 🟡 Média | Feature | atualizar-desativar-produto-deposito | Só existem `create` e `list` para produto e depósito. Falta `PUT`/`PATCH` e desativação — o campo `active` de `Product` e `Warehouse` nunca muda depois da criação. | Pendente |
-| EST-C002 | 🟡 Importante | Correção | validar-existencia-do-sku | `adjustStock` e `setReorderPoint` não verificam que o SKU existe em `product`/`product_variant`, e não há FK no banco. É possível movimentar saldo e definir mínimo para um SKU inexistente ou digitado errado. | Pendente |
-| EST-C003 | 🟡 Importante | Correção | notificacao-reposicao-em-loop-e-na-transacao | `notifyIfBelowReorderPoint` roda por movimentação e dentro da transação de escrita: uma venda com N itens abaixo do mínimo gera N notificações por destinatário, e o envio prolonga a transação. Agregar por operação e mover para depois do commit. | Pendente |
-| EST-C004 | 🟡 Importante | Correção | audit-event-ausente-em-venda-e-recebimento | Só o `EstoqueController` publica `AuditEvent`. Movimentações vindas de `PdvService` e `ComprasService` — a maioria em volume — não deixam rastro na trilha de auditoria. | Pendente |
 | EST-C005 | 🟢 Melhoria | Correção | validacao-e-paginacao-nos-endpoints-de-leitura | `GET /estoque/stock-balance` recebe `sku` e `warehouseCode` sem Bean Validation (o controller não é `@Validated`, diferente de `ComprasController` e `PdvController`); `GET /estoque/warehouses` retorna a lista inteira sem paginação. | Pendente |
 | EST-C006 | 🟢 Melhoria | Correção | migrations-v45-v47-sem-on-conflict | V45 e V47 inserem permissões sem `ON CONFLICT DO NOTHING`, ao contrário de V56/V57/V60. Re-execução em base parcialmente populada quebra. Herdado do antigo C018. | Pendente |
-| EST-C007 | 🟡 Importante | Correção | lacunas-de-teste-persistencia-e-concorrencia | Não há `@DataJpaTest` para os repositórios de estoque nem teste que exercite o `@Version` do `stock_balance` sob escrita concorrente — justamente o mecanismo que protege o saldo contra corrupção. | Pendente |
-| EST-C008 | 🟢 Melhoria | Correção | package-info-obsoletos | `core/domain/model/estoque/package-info.java` e `core/ports/out/estoque/package-info.java` descrevem o módulo como "esqueleto (TODO)" e listam como previstos modelos e adapters que já existem há várias sprints. | Pendente |
 | EST-C009 | 🟢 Melhoria | Correção | ajuste-de-inventario-so-incrementa | `StockBalance.apply` trata tudo que não é `SAIDA` como soma, então `AJUSTE` só aumenta saldo. Um ajuste de inventário para baixo hoje precisa ser lançado como `SAIDA`, o que polui a semântica do ledger. Depende da decisão de modelagem de EST-F006. | Pendente |
+| EST-C011 | 🟡 Importante | Correção | saldo-orfao-ja-existente-na-base | EST-C002 barra SKU desconhecido daqui para frente, mas não limpa o que já foi gravado antes da correção. Falta levantar os `stock_balance`/`stock_movement`/`stock_reorder_point` cujo SKU não existe em `product`/`product_variant` e decidir o destino de cada um (cadastrar o produto faltante ou expurgar). Precisa de conferência humana — não dá para automatizar o expurgo sem risco de apagar histórico legítimo. | Pendente |
 
 ## Histórico de Implementações
 
@@ -327,12 +346,25 @@ Convenções, variáveis e o environment compartilhado estão em
 - **2026-07-27** — `permissao-pdv-sale-manage-ausente-no-seed` (EST-C001): `PDV_SALE_MANAGE` acrescentada aos arrays `ADMIN_PERMISSIONS` de `SeedConfig` e `DevRoleBootstrapConfig`, eliminando o 403 de `ROLE_DEV` em `POST /pdv/sessions/{id}/sales` que bloqueava o caminho de baixa automática de estoque em dev. Sem migration — a V57 já cria a permissão e a concede a `ROLE_ADMIN`; o furo era só no bootstrap de runtime. Cobertura nova em `DevRoleBootstrapConfigTest` e `SeedConfigTest`.
 - **2026-07-27** — `historico-movimentacoes-endpoint` (EST-F017): `GET /estoque/movements?sku=&warehouseCode=&page=&size=` liga o `StockMovementRepository.findBySkuAndWarehouseId`, que estava órfão desde EST-F003. Novo `EstoqueUseCase.listMovements` (`@Transactional(readOnly = true)`, resolve o depósito por código antes de paginar), `StockMovementResponseDTO` e `StockMovementDTOConverter.toResponse`; RBAC `ESTOQUE_STOCK_MANAGE`; sem migration (o índice `idx_stock_movement_sku_warehouse_created` da V55 já servia à consulta). Junto veio a correção de `GlobalExceptionHandler`, que não tratava `MissingServletRequestParameterException` e devolvia 500 em vez de 400 `MISSING_PARAMETER` para qualquer `@RequestParam` obrigatório ausente — afetava também o `GET /estoque/stock-balance` já existente.
 
+- **2026-07-27** — `validar-existencia-do-sku` (EST-C002): novo `ProductRepository.existsBySku`, resolvido por uma consulta só que cobre SKU pai e SKU de variação (`ProductJpaRepository.existsBySkuOrVariantSku`, apoiada nos índices únicos já existentes da V44 — sem migration). `adjustStock` e `setReorderPoint` passam a exigir SKU conhecido antes de qualquer escrita, lançando `ProductNotFoundException` → 404 `PRODUCT_NOT_FOUND`. Cobre as três portas de escrita de uma vez: movimentação manual, venda no PDV e recebimento em Compras. Optou-se por validação na aplicação em vez de FK no banco, porque `stock_movement` é histórico imutável e uma FK impediria arquivar ou renomear produto. O passivo de saldo órfão anterior à correção ficou registrado como EST-C011.
+- **2026-07-27** — `violacao-de-constraint-retornava-500` (EST-C010): `createProduct` só checava o SKU pai, então SKU de variação duplicado batia em `uk_product_variant_sku` e virava 500 com a mensagem do driver no corpo — o javadoc de `EstoqueUseCase` já prometia 409 desde EST-F001. Agora valida SKU pai e de variações (inclusive repetição dentro do próprio payload). Somado a isso, handler de rede de segurança para `DataIntegrityViolationException` → 409 `DATA_INTEGRITY_VIOLATION` com mensagem genérica, que também cobre a corrida de primeira movimentação simultânea do mesmo par SKU/depósito (sem linha anterior não há `version` para conferir; quem protege é a unique constraint).
+- **2026-07-27** — `notificacao-reposicao-em-loop-e-na-transacao` (EST-C003): novo port `AfterCommitExecutor` (`core/ports/out`) com implementação em `infra/transaction/TransactionAfterCommitExecutor` sobre `TransactionSynchronizationManager`. O alerta passa a ser acumulado durante a operação e despachado uma única vez após o commit: venda com N SKUs abaixo do mínimo gera um aviso listando os N, a transação de venda não espera o envio, e venda revertida não notifica ninguém. Cobertura em `TransactionAfterCommitExecutorTest` (agregação, commit, rollback, isolamento entre transações da mesma thread).
+- **2026-07-27** — `audit-event-ausente-em-venda-e-recebimento` (EST-C004): `PdvController` e `ComprasController` passam a publicar `STOCK_MOVEMENT_REGISTERED`, um evento por operação com `origin`, `warehouseCode`, `type`, `skus` e `itemCount`. A publicação ficou nos controllers porque `HexagonalArchitectureTest` barra `ApplicationEventPublisher` em `core/service`. Fecha também as contrapartes COM-C003 e PDV-C003.
+- **2026-07-27** — `lacunas-de-teste-persistencia-e-concorrencia` (EST-C007): `StockBalanceConcurrencyIT` prova que o `@Version` de `stock_balance` impede lost update sob 8 escritas simultâneas (saldo final == baixas confirmadas) e que o perdedor da corrida vira conflito tratado, não 500; cobre também a corrida de primeira movimentação. `EstoqueRepositoryIT` cobre os cinco `*RepositoryImpl` do módulo — round-trip de produto com variações e atributos, `existsBySku` achando SKU pai e de variação, paginação ID-first, propagação do `version`, ordem do ledger e upsert do ponto de reposição.
+- **2026-07-27** — `package-info-obsoletos` (EST-C008): os `package-info` de `core/domain/model/estoque` e `core/ports/out/estoque` descreviam o módulo como "esqueleto (TODO)" e listavam como previstos modelos e adapters existentes desde EST-F001/F002; o comentário equivalente em `CoreBeanConfig` também foi corrigido. O único TODO que sobrou é o `NfeXmlImportPort` (EST-F005).
+
+- **2026-07-27** — `ordenacao-instavel-do-ledger` (EST-C012): o histórico ordenava só por `created_at DESC`, chave não-única — uma venda com N itens grava N movimentos no mesmo loop e na mesma transação, com `created_at` idêntico. Além da ordem de exibição arbitrária, a paginação de `GET /estoque/movements` ficava instável: com chave de ordenação não-única o banco não garante ordem consistente entre consultas, então a mesma linha podia voltar em duas páginas ou não aparecer em nenhuma. Corrigido com desempate por `id` (`findBySkuAndWarehouseIdOrderByCreatedAtDescIdDesc`); `id` é BIGSERIAL monotônico e dá ordem total. Sem migration — o índice `idx_stock_movement_sku_warehouse_created` continua servindo ao filtro e ao prefixo da ordenação. Achado ao escrever o `EstoqueRepositoryIT` do EST-C007, que reproduziu o cenário de venda multi-item.
+
 ## Próximos passos
 
-Prioridade sugerida, na ordem:
+A sprint de integridade de 2026-07-27 fechou C002, C003, C004, C007, C008, C010 e C012.
 
-1. **EST-C002** — validar SKU antes que a base acumule saldo órfão.
-2. **EST-C003** — notificação de reposição em loop e dentro da transação de escrita.
-3. **EST-C004** — `AuditEvent` ausente nas movimentações de venda e recebimento, que são a maioria em volume. Agora que o ledger é legível pelo endpoint, a lacuna de trilha fica mais visível.
-4. **EST-F006** (inventário/contagem) — resolvendo junto a semântica de `AJUSTE` (EST-C009).
-5. **EST-C007** — `@DataJpaTest` dos repositórios e teste de concorrência do `@Version`.
+O roteiro completo para fechar o módulo — ordem de execução de todos os itens restantes, as
+dependências entre eles e os dois que não cabem em estoque — está em
+[`proximos-passos.md`](proximos-passos.md). Resumo da prioridade imediata:
+
+1. **EST-C011** — levantar o saldo órfão que já existe na base. A validação nova impede novos casos, mas o passivo anterior segue lá, e é ele que vai contaminar EST-F006/F007 quando forem implementados.
+2. **EST-C005** — `@Validated` no controller e paginação em `GET /estoque/warehouses`. Barato, e mexer nele depois obrigaria a reabrir controller já alterado pelas features.
+3. **EST-F018** — `PUT`/`PATCH` e desativação de produto e depósito.
+4. **EST-F006 + EST-C009** — inventário/contagem junto com a semântica de `AJUSTE`; o backlog registra que C009 depende da modelagem de F006, então não vale separar.
+5. **EST-F007** (custo médio) — destrava o DRE do domínio `financeiro`, mas vem depois de EST-F008 no roteiro, porque o custo entra por lote.

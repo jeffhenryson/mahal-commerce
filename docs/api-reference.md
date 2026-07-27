@@ -3,7 +3,8 @@
 **Base URL (dev):** `http://localhost:8080` 
 **Auth:** `Authorization: Bearer <accessToken>` em todos os endpoints, exceto os marcados como **Público**.
 
-> Swagger UI disponível em `http://localhost:8080/swagger-ui.html`
+> Swagger UI disponível em `http://localhost:8080/swagger-ui.html` — em `dev` e `hml` apenas.
+> Em `prod` o springdoc é desabilitado (PLAT-C029), e nem a UI nem `/v3/api-docs/**` são servidos.
 
 ---
 
@@ -53,7 +54,9 @@ Todos os erros retornam `ApiError`:
 | `SESSION_NOT_FOUND` | 404 | Sessão não encontrada |
 | `ROLE_ALREADY_EXISTS` | 409 | Role já existe |
 | `PERMISSION_ALREADY_EXISTS` | 409 | Permissão já existe |
-| `SKU_ALREADY_EXISTS` | 409 | SKU de produto já cadastrado |
+| `SKU_ALREADY_EXISTS` | 409 | SKU já cadastrado — vale para o SKU pai e para os de variação, que dividem o mesmo espaço de nomes |
+| `PRODUCT_NOT_FOUND` | 404 | SKU não existe no catálogo (nem como SKU pai, nem como SKU de variação). Barra movimentação e ponto de reposição para SKU inexistente ou digitado errado |
+| `DATA_INTEGRITY_VIOLATION` | 409 | Conflito com um registro já existente que escapou da validação de aplicação — tipicamente uma corrida entre duas requisições simultâneas. Refazer a operação costuma resolver |
 | `OAUTH_TOKEN_INVALID` | 401 | Token Google inválido, expirado ou audience incorreto |
 | `AVATAR_TOO_LARGE` | 400 | Arquivo de avatar excede 2 MB |
 | `INVALID_AVATAR_FORMAT` | 400 | Formato não suportado — aceito JPEG, PNG, WebP |
@@ -905,13 +908,20 @@ Query: sku (obrigatório), warehouseCode (obrigatório)
   "reason": "Recebimento de fornecedor" // obrigatório, máx. 255 chars
 }
 // Response 201 + Location → StockBalanceResponse (saldo já atualizado)
-// 404 WAREHOUSE_NOT_FOUND / 400 INSUFFICIENT_STOCK (SAIDA deixaria o saldo negativo) / 400 VALIDATION_ERROR
+// 404 PRODUCT_NOT_FOUND (SKU não existe no catálogo) / 404 WAREHOUSE_NOT_FOUND
+// 400 INSUFFICIENT_STOCK (SAIDA deixaria o saldo negativo) / 400 VALIDATION_ERROR
 // 409 STOCK_UPDATE_CONFLICT (conflito de concorrência otimista — tente novamente)
+// 409 DATA_INTEGRITY_VIOLATION (corrida na primeira movimentação do par — refazer resolve)
 ```
 
 `username` **não** é enviado no corpo — é sempre o usuário autenticado (JWT), nunca informado
 pelo cliente da API. ENTRADA e AJUSTE somam `quantity` ao saldo; SAIDA subtrai (rejeitada com
 400 se o resultado ficaria negativo — saldo zerado é permitido).
+
+O `sku` precisa existir no catálogo, como SKU pai ou como SKU de variação; caso contrário a
+movimentação é recusada com 404 `PRODUCT_NOT_FOUND` e nada é gravado. Isso vale igualmente para
+as movimentações originadas de `POST /pdv/sessions/{id}/sales` e `POST /compras/goods-receipts`,
+onde um SKU desconhecido reverte a venda ou o recebimento inteiro.
 
 ```json
 // StockBalanceResponse (mesmo shape de GET /estoque/stock-balance)
@@ -933,7 +943,9 @@ Query: sku (obrigatório), warehouseCode (obrigatório), page (default 0), size 
 ```
 
 ```json
-// PageResult<StockMovementResponse> — mais recentes primeiro (created_at DESC)
+// PageResult<StockMovementResponse> — mais recentes primeiro (created_at DESC, id DESC)
+// O desempate por id garante paginação estável: movimentos de uma mesma venda compartilham
+// created_at, e sem ele a mesma linha poderia repetir entre páginas.
 {
   "content": [
     {
@@ -970,13 +982,17 @@ ledger expõe **qual usuário** realizou cada movimentação.
   "minQuantity": 10.000         // obrigatório, >= 0
 }
 // Response 204 No Content (cria ou atualiza — upsert por (sku, warehouseCode))
-// 404 WAREHOUSE_NOT_FOUND / 400 VALIDATION_ERROR
+// 404 PRODUCT_NOT_FOUND / 404 WAREHOUSE_NOT_FOUND / 400 VALIDATION_ERROR
 ```
 
 Define o ponto de reposição do par SKU/depósito. A partir daí, **toda** movimentação que reduza
 o saldo abaixo de `minQuantity` — manual, recebimento de compras ou venda de PDV — notifica
 todos os usuários com `ESTOQUE_STOCK_MANAGE`. Sem ponto de reposição cadastrado, nenhuma
 notificação é disparada. Não há endpoint para ler ou remover um ponto de reposição.
+
+A notificação é enviada **depois** do commit da operação e **agregada por operação**: uma venda
+que derruba vários SKUs abaixo do mínimo gera um único aviso listando todos eles, não um por SKU.
+Operação revertida não notifica ninguém.
 
 ---
 

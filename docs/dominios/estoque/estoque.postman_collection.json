@@ -861,6 +861,56 @@
           ]
         },
         {
+          "name": "ENTRADA no SKU de variação (aceito)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/movements",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "movements"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"{{variantSku}}\",\n  \"warehouseCode\": \"{{warehouseCode}}\",\n  \"type\": \"ENTRADA\",\n  \"quantity\": 3,\n  \"reason\": \"Entrada na variação\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "A validação de SKU aceita tanto o SKU pai quanto o de variação — a variação é a unidade efetivamente vendida."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Saldo da variação = 3',",
+                  "    () => pm.expect(Number(pm.response.json().quantity)).to.eql(3));"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Consultar saldo depois das movimentações",
           "request": {
             "method": "GET",
@@ -1216,6 +1266,56 @@
           ]
         },
         {
+          "name": "Erro: SKU fora do catálogo → 404",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/movements",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "movements"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"SKU-QUE-NAO-EXISTE\",\n  \"warehouseCode\": \"{{warehouseCode}}\",\n  \"type\": \"ENTRADA\",\n  \"quantity\": 5,\n  \"reason\": \"SKU inexistente\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "EST-C002: movimentar exige que o SKU exista no catálogo, como SKU pai ou como SKU de variação. Antes desta validação a movimentação era aceita e criava saldo órfão, sem produto correspondente. Vale igualmente para venda no PDV e recebimento em Compras."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));",
+                  "pm.test('errorCode = PRODUCT_NOT_FOUND',",
+                  "    () => pm.expect(pm.response.json().errorCode).to.eql('PRODUCT_NOT_FOUND'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Erro: depósito inexistente → 404",
           "request": {
             "method": "GET",
@@ -1471,6 +1571,58 @@
                   "        pm.expect(alertas[0].read).to.be.false;",
                   "    });",
                   "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Erro: ponto de reposição em SKU fora do catálogo → 404",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/products/SKU-QUE-NAO-EXISTE/reorder-point",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "products",
+                "SKU-QUE-NAO-EXISTE",
+                "reorder-point"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"warehouseCode\": \"{{warehouseCode}}\",\n  \"minQuantity\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "EST-C002: definir mínimo também exige SKU conhecido."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));",
+                  "pm.test('errorCode = PRODUCT_NOT_FOUND',",
+                  "    () => pm.expect(pm.response.json().errorCode).to.eql('PRODUCT_NOT_FOUND'));"
                 ]
               }
             }

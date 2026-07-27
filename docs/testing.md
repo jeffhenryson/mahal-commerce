@@ -4,13 +4,18 @@
 
 | Categoria | Quantidade | Tecnologia principal |
 |-----------|-----------|----------------------|
-| Unit tests | ~57 | JUnit 5 + Mockito |
-| Integration tests (`*IT`) | 18 | JUnit 5 + Spring Boot Test + MockMvc |
+| Unit tests | ~59 | JUnit 5 + Mockito |
+| Integration tests (`*IT`) | 20 | JUnit 5 + Spring Boot Test + MockMvc |
 | Testcontainers (PostgreSQL real) | 2 | Testcontainers + `@EnabledIfEnvironmentVariable` |
 | ArchUnit (regras arquiteturais) | 1 | ArchUnit |
 | Coleções Postman (API rodando) | 1 por módulo | Postman / newman |
 
-Total: 132 arquivos de teste (128 com `@Test` + 4 helpers), 981 métodos `@Test`.
+**Não há slice tests (`@DataJpaTest`, `@WebMvcTest`) neste projeto, e não é por descuido.** No
+Spring Boot 4 as slices saíram do `spring-boot-test-autoconfigure` — que ficou com 22 classes —
+para módulos por tecnologia, e o artefato que traz `@DataJpaTest`/`@AutoConfigureTestDatabase`
+não está no classpath. Teste de repositório aqui se escreve como `@SpringBootTest` +
+`@Transactional`, como em `EstoqueRepositoryIT` e `RefreshTokenRepositoryImplIT`. Tentar usar a
+anotação de slice falha no `testCompile` com `cannot find symbol: class DataJpaTest`.
 
 As coleções Postman são a única categoria que exercita a aplicação **em execução**, de ponta a
 ponta pelo HTTP real (incluindo login, RBAC e integração entre domínios). Elas vivem junto da
@@ -187,6 +192,8 @@ Sobem o contexto Spring completo com MockMvc contra H2 in-memory (perfil `dev`),
 | `SystemConfigFlowIT` | GET /system/config/public (sem auth → 200); GET /system/config sem auth → 401, com DEV_ELEVATED → 200; PUT chave inválida → 400, sem auth → 401; PUT chave pública persiste e aparece no getPublicConfig; toggle maintenance mode via `SystemConfigPort` direto (bypassa whitelist de PUBLIC_KEYS) evicta `@CacheEvict(allEntries=true)` → `MaintenanceModeFilter` retorna 503 em paths não-allowlistados; `/system/config/public` permanece acessível durante manutenção. |
 | `RbacEndToEndIT` | RBAC de ponta a ponta pelo pipeline real (C007): `POST /users` (USER_CREATE) → `POST /roles/{role}/permissions/{perm}` (ROLE_MANAGE_PERMISSIONS) → `POST /users/{username}/roles/{role}` (USER_ROLE_ASSIGN) → `POST /auth/login` real (sem authorities injetadas) → JWT emitido usado via header `Authorization` em `GET /pdv/sessions` (`PDV_READ`) retorna 200; usuário sem a role/permissão retorna 403 com o mesmo JWT real |
 | `RefreshTokenRepositoryImplIT` | Primeiro teste dedicado a uma classe `*RepositoryImpl` do projeto (C009), contra o banco real: `revokeByIdForUser` — usuário A tentando revogar sessão de B lança `SessionNotFoundException` e a sessão de B continua ativa (prova o isolamento IDOR de `findActiveByIdAndUsername`); dono revogando a própria sessão tem sucesso e ela some de `findActiveSessions`; id inexistente lança `SessionNotFoundException` |
+| `EstoqueRepositoryIT` | Os 5 `*RepositoryImpl` de estoque contra banco real (EST-C007): round-trip de produto com variações/atributos, `existsBySku` em SKU pai e de variação, paginação ID-first, propagação do `version`, ordem do ledger e upsert do ponto de reposição. Usa `flush()` + `clear()` explícitos para não ler do cache de primeiro nível |
+| `StockBalanceConcurrencyIT` | Optimistic locking do saldo de estoque (EST-C007): 8 threads dando `SAIDA` no mesmo par SKU/depósito — o saldo final tem que bater exatamente com as baixas confirmadas (sem lost update) e os perdedores da corrida têm que falhar como conflito tratado, não 500. Segundo teste cobre a corrida na *primeira* movimentação do par, onde não existe `version` ainda e quem protege é a unique constraint |
 
 ---
 

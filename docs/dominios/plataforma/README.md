@@ -119,7 +119,7 @@ Definidas em `SecurityConfig.java:74-114`. A **ordem importa**: as regras de `/a
 | `GET /avatars/*` | `permitAll` |
 | `/actuator/health/**`, `/actuator/info` | `permitAll` |
 | `/actuator/**` | `permitAll` em `hml`/`prod` (porta 8081 isolada por rede); `DEV_ELEVATED` em `dev` |
-| `/v3/api-docs/**`, `/swagger-ui/**` | `permitAll` **em todos os ambientes** quando `springdoc.swagger-ui.enabled=true` — ver PLAT-C029 |
+| `/v3/api-docs/**`, `/swagger-ui/**` | `permitAll` em `dev`/`hml`; **desabilitado em `prod`** (`springdoc.*.enabled=false`), então nenhuma regra é registrada — PLAT-C029 |
 
 ### Cadeia de filtros
 
@@ -234,9 +234,11 @@ entrar em escopo, isso vira trabalho de domínio próprio, não ajuste pontual.
 ### Riscos conhecidos
 
 Todos rastreados no [Backlog do Módulo](#backlog-do-módulo): PLAT-C023 (segredos não
-rotacionados), PLAT-C024 (compose pai fora do repo), PLAT-C028 (chave TOTP versionada),
-PLAT-C029 (spec pública em prod), PLAT-C030 (sem rate limit no negócio), PLAT-C031 (Grafana
-anônimo), PLAT-C032 (profile default `dev`), PLAT-C033 (permissões órfãs).
+rotacionados), PLAT-C024 (compose pai fora do repo), PLAT-C030 (sem rate limit no negócio),
+PLAT-C031 (Grafana anônimo), PLAT-C033 (permissões órfãs).
+
+PLAT-C028 (chave TOTP versionada), PLAT-C029 (spec pública em prod) e PLAT-C032 (profile
+default `dev`) foram resolvidos na Sprint 3 — ver o Histórico.
 
 ## Testes no Postman
 
@@ -286,11 +288,11 @@ deles tinha item de backlog próprio até agora.
 | PLAT-C025 | 🟡 Importante | Correção | dimensionar-pool-hikaricp | C012 ajustou `server.tomcat.threads.max` para 50 (proporção 5:1), mas o pool HikariCP continua em 10 — a fórmula correta depende do número de vCPUs da instância real de Postgres em produção, dado que não existe no código (`docker-compose.prod.yml` não define requests/limits de CPU). Registrado como ação pendente em `docs/persistence.md`. | Pendente |
 | PLAT-C026 | 🟡 Importante | Correção | testes-dedicados-nos-repository-impl | C009 cobriu apenas `RefreshTokenRepositoryImpl.revokeByIdForUser`. As outras ~16 classes `*RepositoryImpl` seguem sem teste dedicado — a Nota C009 registra explicitamente que não havia item de backlog para elas. Sobrepõe-se parcialmente a `EST-C007` (repositórios de estoque). | Pendente |
 | PLAT-C027 | 🟢 Melhoria | Correção | validar-pipeline-ci-refatorado | A refatoração de C015 (build único + artifact entre `build-test` e `deploy-ecr`) foi validada só por parse YAML e revisão manual — nunca executada de fato no GitHub Actions. A confirmação (pipeline verde, tempo reduzido) depende do próximo push real a `main`. | Pendente |
-| PLAT-C028 | 🔴 Alta | Correção | fallback-totp-key-reintroduzido-no-compose-prod | `docker-compose.prod.yml:60` voltou a ter fallback hardcoded: `${TOTP_ENCRYPTION_KEY:-zNEtKjyPPpEkAIBZBZ29nixcQCcAcA19ExgMgaQVRjg=}` (commit `ca2ee50`). É regressão de **C002**, que removeu exatamente esse padrão. Pior: `ProdStartupValidator.java:22` só conhece a chave antiga (`Vx74sQn7…`), então o boot **não** bloqueia esta — produção sobe silenciosamente com uma chave AES versionada no repositório, e é ela que cifra os secrets TOTP. Distinto de PLAT-C023, que trata da rotação dos valores já expostos. | Pendente |
-| PLAT-C029 | 🟡 Importante | Correção | swagger-spec-publico-em-prod-contradiz-doc | `SecurityConfig.java:75-80` dá `permitAll()` a `/v3/api-docs/**` e `/swagger-ui/**` em todos os ambientes, com comentário afirmando que é intencional. `application-prod.properties:54` afirma o contrário: "spec (`/v3/api-docs/**`) exige ROLE_DEV". Uma das duas está errada e hoje o spec completo da API é público em produção. Decidir e alinhar código, comentário e `docs/api-reference.md`. | Pendente |
+| PLAT-C028 | 🔴 Alta | Correção | fallback-totp-key-reintroduzido-no-compose-prod | `docker-compose.prod.yml:60` voltou a ter fallback hardcoded: `${TOTP_ENCRYPTION_KEY:-zNEtKjyPPpEkAIBZBZ29nixcQCcAcA19ExgMgaQVRjg=}` (commit `ca2ee50`). É regressão de **C002**, que removeu exatamente esse padrão. Pior: `ProdStartupValidator.java:22` só conhece a chave antiga (`Vx74sQn7…`), então o boot **não** bloqueia esta — produção sobe silenciosamente com uma chave AES versionada no repositório, e é ela que cifra os secrets TOTP. Distinto de PLAT-C023, que trata da rotação dos valores já expostos. | ✅ Concluído (Sprint 3) |
+| PLAT-C029 | 🟡 Importante | Correção | swagger-spec-publico-em-prod-contradiz-doc | `SecurityConfig.java:75-80` dá `permitAll()` a `/v3/api-docs/**` e `/swagger-ui/**` em todos os ambientes, com comentário afirmando que é intencional. `application-prod.properties:54` afirma o contrário: "spec (`/v3/api-docs/**`) exige ROLE_DEV". Uma das duas está errada e hoje o spec completo da API é público em produção. Decidir e alinhar código, comentário e `docs/api-reference.md`. | ✅ Concluído (Sprint 3) |
 | PLAT-C030 | 🟡 Importante | Correção | sem-rate-limit-em-endpoints-de-negocio | `LoginRateLimitingFilter.shouldNotFilter` (linhas 42-77) cobre apenas rotas de `/auth/**` e 2 de notificação. Nenhum endpoint de negócio é limitado — inclusive `GET /crm/customers/export`, que devolve a base inteira de clientes **sem paginação**, e `GET /estoque/movements`. Um token válido pode drenar a base em loop sem nenhum freio. | Pendente |
 | PLAT-C031 | 🟢 Melhoria | Correção | grafana-anonimo-e-embedding-no-compose-hml | `docker-compose.yml` sobe o Grafana com `GF_AUTH_ANONYMOUS_ENABLED: true` (papel Viewer) e `GF_SECURITY_ALLOW_EMBEDDING: true`, publicado em `localhost:3002`. Qualquer um com acesso à rede vê as métricas operacionais sem autenticar. | Pendente |
-| PLAT-C032 | 🟢 Melhoria | Correção | profile-default-dev-sem-bloqueio | `application.properties:10` — `spring.profiles.active=${SPRING_PROFILES_ACTIVE:dev}`. Um deploy que esqueça a variável sobe em `dev`: H2 em memória, CORS `*`, CSP vazio, H2 console aberto e seed com senha do repositório. Há comentário de aviso, mas nenhum mecanismo impede. | Pendente |
+| PLAT-C032 | 🟢 Melhoria | Correção | profile-default-dev-sem-bloqueio | `application.properties:10` — `spring.profiles.active=${SPRING_PROFILES_ACTIVE:dev}`. Um deploy que esqueça a variável sobe em `dev`: H2 em memória, CORS `*`, CSP vazio, H2 console aberto e seed com senha do repositório. Há comentário de aviso, mas nenhum mecanismo impede. | ✅ Concluído (Sprint 3) |
 | PLAT-C033 | 🟢 Melhoria | Correção | permissoes-orfas-role-e-permission-crud | `ROLE_CREATE`, `ROLE_DELETE`, `PERMISSION_CREATE` e `PERMISSION_DELETE` são criadas em V9/V36 mas **nenhum `@PreAuthorize` as usa** — o CRUD de role/permissão migrou para `DEV_ROLE_MANAGE`/`DEV_PERMISSION_MANAGE`. Também não constam de `ADMIN_PERMISSIONS` em `SeedConfig`/`DevRoleBootstrapConfig`. Ou são concedidas e não fazem nada, ou poluem a listagem de `GET /permissions`. Decidir entre remover ou voltar a usar. | Pendente |
 
 ## Histórico de Implementações
@@ -325,3 +327,11 @@ deles tinha item de backlog próprio até agora.
 - **C020** 🟢 `renomear-servico-app-no-compose` — serviço `app` alinhado ao padrão `-mahal` dos demais; comentário de porta de scrape do Prometheus corrigido.
 - **C021** 🟢 `corrigir-docs-desatualizadas` — `docs/testing.md` (contagem real de arquivos de teste) e `docs/security.md` (H2 console é `permitAll()` total, mitigado por existir só em `@Profile("dev")`).
 - **C022** 🟡 `aceitar-backup-code-no-change-password` — `ChangePasswordRequest.totpCode` tinha `@Size(min=6, max=8)` enquanto os backup codes reais têm formato `XXXX-XXXX-XXXX` (14 caracteres): `PUT /users/me/password` rejeitava **todo** backup code com 400 antes de chegar na validação. Corrigido.
+
+### Sprint 3 — 2026-07-27 (segurança de produção)
+
+- **PLAT-C028** 🔴 `fallback-totp-key-reintroduzido-no-compose-prod` — removido o fallback de `docker-compose.prod.yml:60`; a variável agora é obrigatória. O `ProdStartupValidator` passou a manter um **conjunto** de chaves comprometidas (`KNOWN_COMPROMISED_TOTP_KEYS`) em vez de uma só, cobrindo tanto a chave de C002 quanto a reintroduzida em `ca2ee50` — remover do compose não bastava, já que o valor permanece recuperável no histórico do git. No mesmo ponto, o mínimo da chave subiu de 32 para 44 caracteres (32 aceitava Base64 de 192 bits, abaixo do exigido por AES-256) e o placeholder de zeros (`AAAA...`) passou a ser rejeitado, paridade que o `HmlStartupValidator` já tinha.
+- **PLAT-C029** 🟡 `swagger-spec-publico-em-prod-contradiz-doc` — resolvido **desabilitando** o springdoc em prod (`springdoc.swagger-ui.enabled=false`, `springdoc.api-docs.enabled=false`), não restringindo por role como o card supunha: com `SessionCreationPolicy.STATELESS` e `httpBasic` desabilitado, o navegador não tem como enviar o Bearer token nem na navegação até a UI nem no `fetch` do spec — gatear por `ROLE_DEV` deixaria a página quebrada para todos. Com as flags em `false`, o bloco `if (swaggerEnabled)` do `SecurityConfig` não registra `permitAll` algum. Documentação segue disponível em dev e hml.
+- **PLAT-C032** 🟢 `profile-default-dev-sem-bloqueio` — criado `DevStartupValidator` (`@Profile("dev")`), contraparte do validador de prod. Em vez de tentar provar "isto é produção", ele detecta **variáveis de infra remota que o perfil dev ignoraria em silêncio** — `DB_URL` apontando para banco não-local enquanto a datasource efetiva é outra (tipicamente H2), e `CORS_ALLOWED_ORIGINS` com origem remota. Esse é o cenário perigoso: o operador crê ter configurado o banco real e a aplicação sobe sobre um H2 vazio. Escape hatch `DEV_ALLOW_REMOTE_INFRA=true` para quem aponta o ambiente local a um banco compartilhado de propósito.
+
+> **Nota sobre PLAT-C023 (rotação):** confirmado com o usuário que produção ainda não subiu, portanto não há secret TOTP cifrado no banco. Enquanto isso valer, `JWT_SECRET`, `TOTP_ENCRYPTION_KEY` e `REDIS_PASSWORD` podem ser rotacionados ao custo de gerar novos valores e reiniciar. Depois que existirem usuários com 2FA ativo, trocar `TOTP_ENCRYPTION_KEY` passa a exigir reencriptação. O card segue **Pendente** porque a rotação acontece no `.env` (gitignored, fora deste repositório) e `RESEND_API_KEY`/`GOOGLE_CLIENT_ID` dependem dos consoles de terceiros.

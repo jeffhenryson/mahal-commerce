@@ -14,8 +14,12 @@ Infraestrutura` do seu README em [`docs/dominios/`](dominios/).
 ## Ambientes e profiles
 
 Três profiles Spring. O default é `dev` (`application.properties:10`,
-`spring.profiles.active=${SPRING_PROFILES_ACTIVE:dev}`) — deploy sem `SPRING_PROFILES_ACTIVE`
-sobe permissivo, sem bloqueio. Ver PLAT-C032.
+`spring.profiles.active=${SPRING_PROFILES_ACTIVE:dev}`). Um deploy sem `SPRING_PROFILES_ACTIVE`
+ainda sobe em `dev`, mas não mais em silêncio: `DevStartupValidator` aborta o boot se o perfil
+`dev` for ativado sobre sinais de infraestrutura remota — `DB_URL` apontando para um banco
+não-local que o perfil `dev` ignoraria, ou `CORS_ALLOWED_ORIGINS` com origem remota. O escape
+hatch `DEV_ALLOW_REMOTE_INFRA=true` cobre quem aponta o ambiente local para um banco
+compartilhado de propósito. Resolvido em PLAT-C032.
 
 | | `dev` | `hml` | `prod` |
 |---|---|---|---|
@@ -87,8 +91,10 @@ publicadas**. O edge é **Traefik** (network `traefik-public`), com TLS via
 
 Não há nginx no projeto — todo roteamento e terminação TLS é do Traefik.
 
-> ⚠️ `docker-compose.prod.yml:60` traz `TOTP_ENCRYPTION_KEY` com **valor default versionado no
-> repositório**. Ver PLAT-C028.
+`docker-compose.prod.yml` exige `TOTP_ENCRYPTION_KEY` sem fallback — o default versionado no
+repositório foi removido em PLAT-C028, e ambas as chaves que já estiveram hardcoded estão
+blacklistadas no `ProdStartupValidator`, de modo que copiá-las do histórico do git de volta
+para o `.env` também não sobe.
 
 ## Datastores
 
@@ -208,7 +214,7 @@ Referência em `.env.example` (o `.env` real é gitignored). As sensíveis:
 |---|---|---|
 | `JWT_SECRET` | `jwt.secret` → `JwtService` | ✅ `prod`: rejeita < 44 chars, `dev-secret`, `troque-para` |
 | `JWT_ISSUER` / `JWT_AUDIENCE` | `JwtService` (`requireIssuer`/`requireAudience`) | ✅ `prod`: rejeita os defaults |
-| `TOTP_ENCRYPTION_KEY` | `AesEncryptionAdapter` (AES-256-GCM) | ✅ ausência, tamanho e **uma** chave comprometida conhecida — mas não a do compose de prod (PLAT-C028) |
+| `TOTP_ENCRYPTION_KEY` | `AesEncryptionAdapter` (AES-256-GCM) | ✅ `prod`: rejeita ausência, placeholders, < 44 chars e **as duas** chaves já hardcoded no repositório |
 | `DB_URL` / `DB_USERNAME` / `DB_PASSWORD` | datasource | ✅ `prod`: rejeita `localhost` e `h2:mem` |
 | `REDIS_PASSWORD` / `REDIS_HOST` | Redis | — |
 | `RESEND_API_KEY` / `RESEND_FROM` | `ResendEmailAdapter` | ✅ `prod`: rejeita placeholder |
@@ -223,3 +229,10 @@ Em AWS, os valores vêm de Secrets Manager (`terraform/`) ou SSM Parameter Store
 
 > ⚠️ Os 5 segredos movidos para `.env` em C001 **não foram rotacionados** — continuam no
 > histórico do git. Ver PLAT-C023.
+>
+> Enquanto produção não subir, `JWT_SECRET`, `TOTP_ENCRYPTION_KEY` e `REDIS_PASSWORD` podem ser
+> rotacionados ao custo de gerar novos valores (`openssl rand -base64 32`) e reiniciar — não há
+> dado cifrado a migrar. Depois que existirem usuários com 2FA ativo, trocar
+> `TOTP_ENCRYPTION_KEY` passa a exigir reencriptação dos secrets TOTP, senão todos perdem o
+> segundo fator. `RESEND_API_KEY` e `GOOGLE_CLIENT_ID` dependem dos consoles de terceiros em
+> qualquer cenário.

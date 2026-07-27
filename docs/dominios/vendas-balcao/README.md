@@ -76,12 +76,11 @@ isso faz parte de PDV-F001.
 
 ### Auditoria
 
-❌ **Nenhum `AuditEvent` é publicado por este módulo** — nem no registro de venda. O rastro é
-indireto, pelo `stock_movement` com `reason = "Venda balcão sessão #{id}"` e o `username` de
-quem chamou. Rastreado como **PDV-C003** (contraparte de `EST-C004`).
-
-Para um domínio que movimenta dinheiro, essa é a lacuna mais relevante da seção: não existe
-trilha de auditoria de venda hoje.
+✅ `POST /pdv/sessions/{id}/sales` publica `AuditEvent` do tipo `STOCK_MOVEMENT_REGISTERED`, com
+`origin: PDV_SALE`, `sessionId`, `warehouseCode`, `type` e a lista de `skus` vendidos — um evento
+por venda, não por item. O rastro item a item continua no `stock_movement`, com
+`reason = "Venda balcão sessão #{id}"` e o `username` de quem chamou. Resolvido em PDV-C003 /
+`EST-C004` (2026-07-27).
 
 ### Infraestrutura utilizada
 
@@ -105,7 +104,6 @@ venda inteira, e nada é persistido.
 
 ### Riscos conhecidos
 
-- **PDV-C003** — venda sem trilha de auditoria.
 - **PDV-F001** — sem ciclo de caixa: sessões abertas fora do sistema, sem conferência.
 - **PDV-C002** — `GET /pdv/sessions` devolve o record de domínio direto, sem DTO.
 - **PLAT-C030** — sem rate limit.
@@ -154,7 +152,6 @@ Convenções, variáveis e o environment compartilhado estão em
 | PDV-F002 | 🟡 Média | Feature | modelos-de-movimento-de-caixa | `CashMovement` (sangria/suprimento) e `CashRegisterClosure`; dar regras de negócio ao stub `CashRegisterSession` (`core/domain/model/pdv/CashRegisterSession.java:10`). | Pendente |
 | PDV-C001 | 🟡 Importante | Correção | auditar-e-documentar-o-modulo | Preencher Regras de Negócio, Schema (V57) e Cobertura de Testes no padrão de `estoque`. | Pendente |
 | PDV-C002 | 🟢 Melhoria | Correção | expor-dto-em-vez-de-record-de-dominio | `GET /pdv/sessions` retorna `PageResult<CashRegisterSession>` — record de domínio direto na API, sem DTO. | Pendente |
-| PDV-C003 | 🟢 Melhoria | Correção | audit-event-na-venda | `POST /pdv/sessions/{id}/sales` não publica `AuditEvent`. Contraparte de `EST-C004`. | Pendente |
 
 > A permissão `PDV_SALE_MANAGE` está ausente dos seeders de dev — rastreado como
 > **EST-C001** em [`estoque`](../estoque/README.md#backlog-do-módulo), porque o sintoma

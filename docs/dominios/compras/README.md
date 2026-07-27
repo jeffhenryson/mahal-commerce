@@ -71,9 +71,10 @@ usuário↔fornecedor nem usuário↔depósito.
 
 ### Auditoria
 
-❌ **Nenhum `AuditEvent` é publicado por este módulo** — nem no recebimento, que é uma escrita
-com efeito financeiro e de estoque. O rastro existente é indireto: o `stock_movement` gerado
-guarda `username` e `reason`. Rastreado como **COM-C003** (contraparte de `EST-C004`).
+✅ `POST /compras/goods-receipts` publica `AuditEvent` do tipo `STOCK_MOVEMENT_REGISTERED`, com
+`origin: GOODS_RECEIPT`, `supplierId`, `warehouseCode`, `type` e a lista de `skus` recebidos — um
+evento por recebimento, não por item; o detalhamento item a item segue no ledger `stock_movement`,
+que também guarda `username` e `reason`. Resolvido em COM-C003 / `EST-C004` (2026-07-27).
 
 ### Infraestrutura utilizada
 
@@ -96,7 +97,6 @@ compartilham a **mesma transação**: falha em qualquer item reverte tudo.
 
 ### Riscos conhecidos
 
-- **COM-C003** — recebimento sem trilha de auditoria.
 - **COM-C002** — `GET /compras/suppliers` devolve o record de domínio direto, sem DTO.
 - **PLAT-C030** — sem rate limit.
 
@@ -142,7 +142,6 @@ Convenções, variáveis e o environment compartilhado estão em
 | COM-F002 | 🟡 Média | Feature | pedido-de-compra | `PurchaseOrder` e `createPurchaseOrder`, fechando o ciclo pedido → recebimento. TODO em `core/domain/model/compras/package-info.java:7`. | Pendente |
 | COM-C001 | 🟡 Importante | Correção | auditar-e-documentar-o-modulo | Preencher Regras de Negócio, Schema (V58/V59/V60) e Cobertura de Testes no padrão de `estoque`. | Pendente |
 | COM-C002 | 🟢 Melhoria | Correção | expor-dto-em-vez-de-record-de-dominio | `GET /compras/suppliers` retorna `PageResult<Supplier>` — o record de domínio vaza direto na API, sem DTO de resposta. | Pendente |
-| COM-C003 | 🟢 Melhoria | Correção | audit-event-no-recebimento | `POST /compras/goods-receipts` não publica `AuditEvent`, diferente dos endpoints de estoque. Contraparte de `EST-C004`. | Pendente |
 
 ## Histórico de Implementações
 
