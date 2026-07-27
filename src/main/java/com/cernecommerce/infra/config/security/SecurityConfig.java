@@ -72,9 +72,13 @@ public class SecurityConfig {
                         "camera=(), microphone=(), geolocation=(), payment=(), usb=()"));
             })
             .authorizeHttpRequests(auth -> {
-                // Swagger UI e spec são públicos em todos os ambientes — a segurança real
-                // está em cada endpoint individual (@PreAuthorize). Para fazer chamadas,
-                // o usuário precisa clicar em Authorize e inserir o Bearer token.
+                // Onde o Swagger está habilitado (dev e hml), UI e spec são públicos — a
+                // segurança real está em cada endpoint individual (@PreAuthorize); para fazer
+                // chamadas, o usuário precisa clicar em Authorize e inserir o Bearer token.
+                // Em prod, springdoc.*.enabled=false (PLAT-C029): este bloco não registra nada
+                // e o spec não é servido. Gatear por role não funcionaria aqui — com
+                // SessionCreationPolicy.STATELESS e httpBasic desabilitado, o navegador não tem
+                // como enviar o Bearer token ao carregar a UI nem ao buscar o spec via fetch.
                 if (swaggerEnabled) {
                     auth.requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll();
                 }

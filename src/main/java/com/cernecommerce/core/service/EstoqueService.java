@@ -2,11 +2,13 @@ package com.cernecommerce.core.service;
 
 import com.cernecommerce.core.domain.exception.estoque.DuplicateSkuException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateWarehouseCodeException;
+import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
+import com.cernecommerce.core.domain.model.estoque.ReorderAlert;
 import com.cernecommerce.core.domain.model.estoque.ReorderPoint;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
 import com.cernecommerce.core.domain.model.estoque.StockMovement;
@@ -15,6 +17,7 @@ import com.cernecommerce.core.domain.model.estoque.WarehouseType;
 import com.cernecommerce.core.domain.model.notification.NotificationType;
 import com.cernecommerce.core.ports.in.EstoqueUseCase;
 import com.cernecommerce.core.ports.in.NotificationUseCase;
+import com.cernecommerce.core.ports.out.AfterCommitExecutor;
 import com.cernecommerce.core.ports.out.estoque.ProductRepository;
 import com.cernecommerce.core.ports.out.estoque.ReorderPointRepository;
 import com.cernecommerce.core.ports.out.estoque.StockBalanceRepository;
@@ -24,11 +27,16 @@ import com.cernecommerce.core.ports.out.user.UserRepository;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 public class EstoqueService implements EstoqueUseCase {
 
     private static final String STOCK_MANAGE_PERMISSION = "ESTOQUE_STOCK_MANAGE";
+    private static final String REORDER_ALERT_BATCH = "estoque.reorder-alerts";
 
     private final ProductRepository productRepository;
     private final WarehouseRepository warehouseRepository;
@@ -37,11 +45,12 @@ public class EstoqueService implements EstoqueUseCase {
     private final ReorderPointRepository reorderPointRepository;
     private final NotificationUseCase notificationUseCase;
     private final UserRepository userRepository;
+    private final AfterCommitExecutor afterCommitExecutor;
 
     public EstoqueService(ProductRepository productRepository, WarehouseRepository warehouseRepository,
             StockBalanceRepository stockBalanceRepository, StockMovementRepository stockMovementRepository,
             ReorderPointRepository reorderPointRepository, NotificationUseCase notificationUseCase,
-            UserRepository userRepository) {
+            UserRepository userRepository, AfterCommitExecutor afterCommitExecutor) {
         this.productRepository = productRepository;
         this.warehouseRepository = warehouseRepository;
         this.stockBalanceRepository = stockBalanceRepository;
@@ -49,15 +58,29 @@ public class EstoqueService implements EstoqueUseCase {
         this.reorderPointRepository = reorderPointRepository;
         this.notificationUseCase = notificationUseCase;
         this.userRepository = userRepository;
+        this.afterCommitExecutor = afterCommitExecutor;
     }
 
     @Override
     @Transactional
     public Product createProduct(String sku, String name, String category, List<ProductVariant> variants) {
-        productRepository.findBySku(sku).ifPresent(p -> {
-            throw new DuplicateSkuException(sku);
-        });
-        Product product = Product.create(sku, name, category, variants);
+        List<ProductVariant> safeVariants = variants == null ? List.of() : variants;
+        // O SKU pai e os das variações compartilham o mesmo espaço de nomes: uk_product_sku e
+        // uk_product_variant_sku. Checar os dois aqui evita que a violação de constraint escape
+        // como DataIntegrityViolationException, que o contrato do use case não prevê.
+        Set<String> candidates = new LinkedHashSet<>();
+        candidates.add(sku);
+        for (ProductVariant variant : safeVariants) {
+            if (!candidates.add(variant.sku())) {
+                throw new DuplicateSkuException(variant.sku());
+            }
+        }
+        for (String candidate : candidates) {
+            if (productRepository.existsBySku(candidate)) {
+                throw new DuplicateSkuException(candidate);
+            }
+        }
+        Product product = Product.create(sku, name, category, safeVariants);
         return productRepository.save(product);
     }
 
@@ -95,6 +118,7 @@ public class EstoqueService implements EstoqueUseCase {
     @Transactional
     public StockBalance adjustStock(String sku, String warehouseCode, MovementType type, BigDecimal quantity,
             String reason, String username) {
+        requireKnownSku(sku);
         Warehouse warehouse = warehouseRepository.findByCode(warehouseCode)
                 .orElseThrow(() -> new WarehouseNotFoundException(warehouseCode));
         StockBalance current = stockBalanceRepository.findBySkuAndWarehouseId(sku, warehouse.id())
@@ -117,6 +141,7 @@ public class EstoqueService implements EstoqueUseCase {
     @Override
     @Transactional
     public void setReorderPoint(String sku, String warehouseCode, BigDecimal minQuantity) {
+        requireKnownSku(sku);
         Warehouse warehouse = warehouseRepository.findByCode(warehouseCode)
                 .orElseThrow(() -> new WarehouseNotFoundException(warehouseCode));
         Long existingId = reorderPointRepository.findBySkuAndWarehouseId(sku, warehouse.id())
@@ -125,16 +150,47 @@ public class EstoqueService implements EstoqueUseCase {
         reorderPointRepository.save(new ReorderPoint(existingId, sku, warehouse.id(), minQuantity));
     }
 
+    /**
+     * Barra SKU que não existe no catálogo antes de qualquer escrita. Sem isso — e não há FK de
+     * {@code stock_balance}/{@code stock_movement} para {@code product} — um SKU digitado errado
+     * vindo do PDV ou de Compras cria saldo e ledger órfãos silenciosamente.
+     */
+    private void requireKnownSku(String sku) {
+        if (!productRepository.existsBySku(sku)) {
+            throw new ProductNotFoundException(sku);
+        }
+    }
+
+    /**
+     * Acumula o alerta em vez de enviá-lo na hora. Uma venda que derruba N SKUs abaixo do mínimo
+     * registra N alertas, mas gera <b>uma</b> notificação por destinatário, despachada depois do
+     * commit — nem a transação de venda espera o envio, nem alguém é avisado sobre uma venda que
+     * acabou revertida.
+     */
     private void notifyIfBelowReorderPoint(StockBalance balance) {
         reorderPointRepository.findBySkuAndWarehouseId(balance.sku(), balance.warehouseId())
                 .filter(reorderPoint -> reorderPoint.isBelow(balance.quantity()))
-                .ifPresent(reorderPoint -> {
-                    String title = "Estoque abaixo do ponto de reposição";
-                    String body = "O SKU " + balance.sku() + " está com saldo de " + balance.quantity()
-                            + ", abaixo do ponto de reposição de " + reorderPoint.minQuantity() + ".";
-                    userRepository.findUsernamesByPermission(STOCK_MANAGE_PERMISSION)
-                            .forEach(username -> notificationUseCase.notify(username, NotificationType.SYSTEM,
-                                    title, body));
-                });
+                .ifPresent(reorderPoint -> afterCommitExecutor.accumulate(REORDER_ALERT_BATCH,
+                        new ReorderAlert(balance.sku(), balance.quantity(), reorderPoint.minQuantity()),
+                        this::dispatchReorderAlerts));
+    }
+
+    private void dispatchReorderAlerts(List<ReorderAlert> alerts) {
+        // O mesmo SKU pode aparecer mais de uma vez na operação (dois itens do mesmo produto na
+        // venda); vale o último saldo observado.
+        Map<String, ReorderAlert> bySku = new LinkedHashMap<>();
+        alerts.forEach(alert -> bySku.put(alert.sku(), alert));
+
+        String title = "Estoque abaixo do ponto de reposição";
+        StringBuilder body = new StringBuilder(bySku.size() == 1
+                ? "O SKU a seguir está abaixo do ponto de reposição:"
+                : bySku.size() + " SKUs estão abaixo do ponto de reposição:");
+        bySku.values().forEach(alert -> body.append("\n- ").append(alert.sku())
+                .append(": saldo ").append(alert.quantity())
+                .append(", mínimo ").append(alert.minQuantity()));
+
+        userRepository.findUsernamesByPermission(STOCK_MANAGE_PERMISSION)
+                .forEach(username -> notificationUseCase.notify(username, NotificationType.SYSTEM,
+                        title, body.toString()));
     }
 }

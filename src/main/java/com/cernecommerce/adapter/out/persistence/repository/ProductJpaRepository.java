@@ -13,6 +13,12 @@ public interface ProductJpaRepository extends JpaRepository<ProductEntity, Long>
 
     Optional<ProductEntity> findBySku(String sku);
 
+    // Cobre SKU pai e SKU de variação numa consulta só. Ambas as colunas já têm índice único
+    // (uk_product_sku e uk_product_variant_sku, da V44), então o LEFT JOIN não custa varredura.
+    @Query("SELECT CASE WHEN COUNT(p) > 0 THEN TRUE ELSE FALSE END FROM ProductEntity p "
+            + "LEFT JOIN p.variants v WHERE p.sku = :sku OR v.sku = :sku")
+    boolean existsBySkuOrVariantSku(String sku);
+
     // Padrão ID-first: pagina apenas os ids, depois faz JOIN FETCH das variações
     // pelos ids já resolvidos — evita LIMIT/OFFSET junto de fetch de coleção (bug clássico de paginação com JOIN FETCH).
     @Query("SELECT p.id FROM ProductEntity p ORDER BY p.id")

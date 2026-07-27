@@ -33,6 +33,7 @@ import com.cernecommerce.core.domain.exception.compras.SupplierNotFoundException
 import com.cernecommerce.core.domain.exception.estoque.DuplicateSkuException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateWarehouseCodeException;
 import com.cernecommerce.core.domain.exception.estoque.InsufficientStockException;
+import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException;
 import com.cernecommerce.core.domain.exception.crm.CampaignAutomationNotFoundException;
 import com.cernecommerce.core.domain.exception.crm.CustomerNotFoundException;
@@ -56,6 +57,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.DisabledException;
@@ -122,6 +124,11 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(WarehouseNotFoundException.class)
     public ResponseEntity<ApiError> handleWarehouseNotFound(WarehouseNotFoundException ex, HttpServletRequest req) {
         return error(HttpStatus.NOT_FOUND, ex.getMessage(), "WAREHOUSE_NOT_FOUND", req);
+    }
+
+    @ExceptionHandler(ProductNotFoundException.class)
+    public ResponseEntity<ApiError> handleProductNotFound(ProductNotFoundException ex, HttpServletRequest req) {
+        return error(HttpStatus.NOT_FOUND, ex.getMessage(), "PRODUCT_NOT_FOUND", req);
     }
 
     @ExceptionHandler(InsufficientStockException.class)
@@ -400,6 +407,22 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(org.springframework.web.servlet.resource.NoResourceFoundException.class)
     public ResponseEntity<ApiError> handleNoResource(HttpServletRequest req) {
         return error(HttpStatus.NOT_FOUND, "Recurso não encontrado", "NOT_FOUND", req);
+    }
+
+    /**
+     * Rede de segurança para violação de constraint que escape das checagens de aplicação —
+     * tipicamente uma corrida entre duas requisições que passaram na mesma validação antes de
+     * qualquer uma gravar (ex.: a primeira movimentação simultânea do mesmo par SKU/depósito,
+     * que colide em {@code uk_stock_balance_sku_warehouse}). É conflito de concorrência, não erro
+     * do servidor, então responde 409. A mensagem é genérica de propósito: o texto do driver
+     * expõe nome de tabela, de constraint e valores da linha.
+     */
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ApiError> handleDataIntegrityViolation(DataIntegrityViolationException ex,
+            HttpServletRequest req) {
+        log.warn("Violação de integridade em {}", req.getRequestURI(), ex);
+        return error(HttpStatus.CONFLICT, "A operação conflita com um registro já existente, tente novamente",
+                "DATA_INTEGRITY_VIOLATION", req);
     }
 
     @ExceptionHandler(Exception.class)

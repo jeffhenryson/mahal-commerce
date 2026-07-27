@@ -38,7 +38,7 @@ public class StockMovementRepositoryImpl implements StockMovementRepository {
     @Transactional(readOnly = true)
     public PageResult<StockMovement> findBySkuAndWarehouseId(String sku, Long warehouseId, int page, int size) {
         Page<StockMovementEntity> result = stockMovementJpaRepository
-                .findBySkuAndWarehouseIdOrderByCreatedAtDesc(sku, warehouseId, PageRequest.of(page, size));
+                .findBySkuAndWarehouseIdOrderByCreatedAtDescIdDesc(sku, warehouseId, PageRequest.of(page, size));
         return new PageResult<>(result.getContent().stream().map(this::toDomain).toList(),
                 page, size, result.getTotalElements(), result.getTotalPages());
     }

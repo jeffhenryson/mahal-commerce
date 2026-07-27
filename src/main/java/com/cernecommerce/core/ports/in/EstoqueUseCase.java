@@ -48,7 +48,9 @@ public interface EstoqueUseCase {
     /**
      * Registra uma movimentação manual de estoque (entrada, saída ou ajuste) e atualiza o
      * {@link StockBalance} correspondente na mesma transação. Retorna o saldo atualizado.
-     * Lança {@link com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException}
+     * Lança {@link com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException} se o
+     * SKU não existir no catálogo (nem como SKU pai, nem como SKU de variação),
+     * {@link com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException}
      * se o código do depósito não existir, ou
      * {@link com.cernecommerce.core.domain.exception.estoque.InsufficientStockException} se
      * uma SAIDA deixaria o saldo negativo.
@@ -68,6 +70,8 @@ public interface EstoqueUseCase {
      * Define (cria ou atualiza) o ponto de reposição de um SKU em um depósito. A partir dessa
      * chamada, toda movimentação que deixe o saldo abaixo de {@code minQuantity} dispara uma
      * notificação para os usuários com permissão {@code ESTOQUE_STOCK_MANAGE}. Lança
+     * {@link com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException} se o SKU
+     * não existir no catálogo, ou
      * {@link com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException} se o
      * código do depósito não existir.
      */

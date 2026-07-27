@@ -57,6 +57,12 @@ public class ProductRepositoryImpl implements ProductRepository {
 
     @Override
     @Transactional(readOnly = true)
+    public boolean existsBySku(String sku) {
+        return productJpaRepository.existsBySkuOrVariantSku(sku);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public PageResult<Product> findAll(int page, int size) {
         Page<Long> idPage = productJpaRepository.findAllIds(PageRequest.of(page, size));
         List<ProductEntity> entities = productJpaRepository.findAllByIdsWithVariants(idPage.getContent());
