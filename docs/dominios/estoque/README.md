@@ -3,7 +3,7 @@
 **Status:** 🟢 Operacional — grade de produtos, saldo multi-depósito, ledger de movimentações (gravação e consulta) e alerta de ponto de reposição em produção
 **Pacote Java:** `com.cernecommerce.core.domain.model.estoque`
 **Rota HTTP base:** `/estoque`
-**Última atualização deste doc:** 2026-07-27 (EST-F017 + EST-C001)
+**Última atualização deste doc:** 2026-07-27 (EST-F017 + EST-C001 + seção de Segurança e Infraestrutura)
 
 ## Objetivo
 
@@ -96,16 +96,102 @@ Todos exigem `bearerAuth`. Controller: `adapter/in/controller/EstoqueController.
 | `GET` | `/estoque/movements` | `ESTOQUE_STOCK_MANAGE` | Histórico paginado do ledger por `sku` + `warehouseCode` (`page` = 0, `size` = 20, teto de 100), mais recentes primeiro. Par nunca movimentado devolve página vazia com `200`; `404 WAREHOUSE_NOT_FOUND`; `400 MISSING_PARAMETER` |
 | `PUT` | `/estoque/products/{sku}/reorder-point` | `ESTOQUE_STOCK_MANAGE` | Define a quantidade mínima do SKU no depósito (upsert). `204 No Content`; `404 WAREHOUSE_NOT_FOUND` |
 
-**Auditoria:** o `EstoqueController` publica `AuditEvent` em quatro operações —
-`PRODUCT_CREATED`, `WAREHOUSE_CREATED`, `STOCK_MOVEMENT_REGISTERED` e `REORDER_POINT_SET`.
-Movimentações originadas de venda ou recebimento **não** geram `AuditEvent` (ver EST-C004).
-Leituras (incluindo `GET /estoque/movements`) não geram `AuditEvent`.
+## Segurança e Infraestrutura
+
+> Mecanismos transversais (JWT, filtros, CORS, headers, rate limit de login, lockout) estão em
+> [`docs/security.md`](../../security.md); ambientes, containers e datastores em
+> [`docs/infrastructure.md`](../../infrastructure.md); o modelo RBAC completo em
+> [`plataforma`](../plataforma/README.md#segurança-e-infraestrutura). Aqui fica só o recorte
+> deste domínio.
+
+### Permissões RBAC
+
+| Permissão | Libera | Migration | Semeada em `dev`? |
+|---|---|---|---|
+| `ESTOQUE_PRODUCT_READ` | `GET /estoque/products` | V45 | ✅ `SeedConfig` + `DevRoleBootstrapConfig` |
+| `ESTOQUE_PRODUCT_MANAGE` | `POST /estoque/products` | V45 | ✅ |
+| `ESTOQUE_WAREHOUSE_READ` | `GET /estoque/warehouses`, `GET /estoque/stock-balance` | V47 | ✅ |
+| `ESTOQUE_WAREHOUSE_MANAGE` | `POST /estoque/warehouses` | V47 | ✅ |
+| `ESTOQUE_STOCK_MANAGE` | `POST`/`GET /estoque/movements`, `PUT .../reorder-point` | V56 | ✅ |
+
+Concedidas a `ROLE_ADMIN` pelas migrations (`hml`/`prod`) e a `ROLE_ADMIN`/`ROLE_DEV` em runtime
+por `SeedConfig`/`DevRoleBootstrapConfig` — necessário porque `dev` não roda Flyway. V45 e V47
+inserem **sem** `ON CONFLICT DO NOTHING` (EST-C006).
 
 **Por que o histórico exige `ESTOQUE_STOCK_MANAGE` e não `ESTOQUE_WAREHOUSE_READ`:** o ledger
 carrega o `username` de quem realizou cada movimentação. Quem só precisa saber *quanto* existe
 usa `GET /estoque/stock-balance` (`WAREHOUSE_READ`); ver *quem* mexeu é privilégio de quem
 gerencia estoque. `EstoqueControllerSecurityTest.list_movements_with_warehouse_read_only_returns_403`
 fixa essa decisão.
+
+As escritas vindas de Compras e PDV **não passam por `@PreAuthorize` de estoque** — elas entram
+por `EstoqueUseCase.adjustStock`, chamado de dentro de `ComprasService`/`PdvService`. Quem tem
+`COMPRAS_RECEIPT_MANAGE` ou `PDV_SALE_MANAGE` movimenta saldo sem ter nenhuma permissão
+`ESTOQUE_*`. É intencional (o port é a fronteira do domínio), mas significa que a permissão de
+estoque não é o único caminho para alterar saldo.
+
+### Rate limiting
+
+❌ **Nenhum endpoint deste módulo é limitado.** O `LoginRateLimitingFilter`
+(`infra/security/LoginRateLimitingFilter.java:42-77`) cobre apenas `/auth/**` e duas rotas de
+notificação. `GET /estoque/movements` pode ser varrido em loop por qualquer token válido com
+`ESTOQUE_STOCK_MANAGE`. Ver PLAT-C030.
+
+### Isolamento de dados
+
+Sistema single-tenant: quem tem `ESTOQUE_WAREHOUSE_READ` enxerga **todos** os depósitos, e quem
+tem `ESTOQUE_STOCK_MANAGE` movimenta **qualquer** SKU em **qualquer** depósito. Não existe
+vínculo usuário↔depósito — é a limitação a resolver antes de operar com mais de uma loja.
+
+### Auditoria
+
+O `EstoqueController` publica `AuditEvent` em quatro operações:
+
+| Operação | `EventType` |
+|---|---|
+| `POST /estoque/products` | `PRODUCT_CREATED` |
+| `POST /estoque/warehouses` | `WAREHOUSE_CREATED` |
+| `POST /estoque/movements` | `STOCK_MOVEMENT_REGISTERED` |
+| `PUT /estoque/products/{sku}/reorder-point` | `REORDER_POINT_SET` |
+
+Leituras (incluindo `GET /estoque/movements`) não geram evento. Movimentações originadas de
+venda ou recebimento **também não** — e são a maioria em volume (EST-C004). O ledger
+`stock_movement` continua registrando `username` e `reason` nesses casos, então há rastro de
+domínio, mas não trilha de auditoria.
+
+Retenção dos `audit_logs`: 365 dias (`AuditLogCleanupService`); leitura por `GET /audit-logs`
+com `AUDIT_READ`.
+
+### Infraestrutura utilizada
+
+| Recurso | Uso neste módulo | Se cair |
+|---|---|---|
+| Postgres 16 (H2 em `dev`) | `product`, `product_variant`, `warehouse`, `stock_balance`, `stock_movement`, `stock_reorder_point` | módulo indisponível |
+| Cache de authorities (Redis/Caffeine, TTL 60s) | checagem de `@PreAuthorize` | latência maior, sem perda de função |
+| `UserRepository.findUsernamesByPermission` | destinatários do alerta de reposição | alerta não sai |
+| `NotificationUseCase` + SSE (`SseEmitterRegistry`) | entrega do alerta de ponto de reposição | notificação fica só no banco |
+| Optimistic locking (`@Version` em `stock_balance`) | protege o saldo sob escrita concorrente | — |
+
+O alerta roda **dentro** da transação de escrita, o que prolonga a transação e gera uma
+notificação por item (EST-C003). Não há fila: se a entrega falhar, não há retry.
+
+### Limites operacionais
+
+- `GET /estoque/products` e `GET /estoque/movements`: `size` default 20, teto **100**
+  (`Math.min(size, 100)` no controller).
+- `GET /estoque/warehouses`: **sem paginação** — devolve a lista inteira (EST-C005).
+- `GET /estoque/stock-balance`: `sku` e `warehouseCode` chegam **sem Bean Validation** — o
+  controller não é `@Validated`, diferente de `ComprasController` e `PdvController` (EST-C005).
+- Sem upload de arquivo neste módulo. A importação de XML de NF-e (EST-F005) vai introduzir o
+  primeiro — e vai precisar de limite de tamanho e validação de conteúdo próprios.
+
+### Riscos conhecidos
+
+- **EST-C002** — `sku` é texto livre sem FK nem validação: dá para movimentar saldo de um SKU
+  inexistente.
+- **EST-C004** — venda e recebimento não deixam trilha de auditoria.
+- **EST-C007** — o `@Version` que protege o saldo não tem teste de concorrência.
+- **PLAT-C030** — sem rate limit em nenhum endpoint do módulo.
 
 ## Integrações entre Domínios
 

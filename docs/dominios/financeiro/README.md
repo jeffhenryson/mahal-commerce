@@ -3,6 +3,7 @@
 **Status:** 🟡 Esqueleto criado — implementação pendente
 **Pacote Java:** `com.cernecommerce...financeiro`
 **Rota HTTP base:** `/financeiro`
+**Última atualização deste doc:** 2026-07-27 (seção de Segurança e Infraestrutura)
 
 ## Objetivo
 
@@ -24,6 +25,36 @@ Gestão financeira integrada do lounge físico e do e-commerce.
 | ports/out | `core/ports/out/financeiro/LedgerRepository` |
 | service | `core/service/FinanceiroService` (stub, wired em `CoreBeanConfig`) |
 | adapter/in | `adapter/in/controller/FinanceiroController` → `GET /financeiro/cash-flow?page&size` (stub, retorna `PageResult<CashFlowEntry>` vazio) |
+
+## Segurança e Infraestrutura
+
+> Transversal em [`docs/security.md`](../../security.md) e
+> [`docs/infrastructure.md`](../../infrastructure.md); modelo RBAC completo em
+> [`plataforma`](../plataforma/README.md#segurança-e-infraestrutura).
+
+**O que já existe.** `FINANCEIRO_READ` (criada na V53 com `ON CONFLICT DO NOTHING`, concedida a
+`ROLE_ADMIN`; semeada em `dev` por `SeedConfig`/`DevRoleBootstrapConfig`) protege o único
+endpoint do módulo, `GET /financeiro/cash-flow`. O `@PreAuthorize` foi acrescentado em **C004**,
+que tirou os controllers stub do fallback genérico `anyRequest().authenticated()`. Não há tabela,
+auditoria nem infra própria — o service devolve página vazia.
+
+**O que este módulo vai precisar quando sair do esqueleto.** É o domínio de maior sensibilidade
+do sistema: consolida resultado, custo e repasse de gateway.
+
+- [ ] Permissões separando leitura de DRE, lançamento manual e conciliação — um único `*_READ`
+      não serve para dado financeiro consolidado.
+- [ ] `AuditEvent` em **toda** escrita (lançamento, ajuste, conciliação). Hoje `compras` e
+      `vendas-balcao`, que são as origens do dado financeiro, não publicam evento algum
+      (`COM-C003`, `PDV-C003`) — a trilha precisa existir antes de o financeiro consumi-los.
+- [ ] Imutabilidade dos lançamentos: estorno como novo lançamento, nunca `UPDATE`/`DELETE`, no
+      mesmo espírito do ledger `stock_movement` do [`estoque`](../estoque/README.md).
+- [ ] Rate limit nos relatórios agregados, que serão as consultas mais caras do backend
+      (PLAT-C030).
+- [ ] Credenciais de gateway no fluxo de `.env` + validadores de startup
+      ([`docs/infrastructure.md`](../../infrastructure.md#variáveis-de-ambiente-e-segredos)) e
+      importação de repasses com verificação de origem.
+- [ ] Retenção fiscal própria: os `audit_logs` expiram em 365 dias
+      (`AuditLogCleanupService`), prazo insuficiente para obrigação contábil.
 
 ## Testes no Postman
 

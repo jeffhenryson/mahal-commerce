@@ -3,7 +3,7 @@
 **Status:** 🟢 Operacional — roadmap inicial `F001–F009` entregue por completo
 **Pacote Java:** `com.cernecommerce.core.domain.model.crm`
 **Rota HTTP base:** `/crm`
-**Última atualização deste doc:** 2026-07-26
+**Última atualização deste doc:** 2026-07-27 (seção de Segurança e Infraestrutura)
 
 > ⚠️ **Este README ainda não passou por auditoria de código.** Ele foi criado em 2026-07-26 na
 > descentralização do `docs/backlog.md` para receber os itens `F001–F009`, que estavam órfãos.
@@ -30,6 +30,109 @@ por WhatsApp/e-mail e tags.
 - **Automações e campanhas:** regras por gatilho/segmento/canal com template e log de envios. ✅ Implementado (F006).
 - **Tags e exportação.** ✅ Implementado (F007, F009).
 - **Status de canal de envio.** ✅ Implementado (F008).
+
+## Segurança e Infraestrutura
+
+> Mecanismos transversais em [`docs/security.md`](../../security.md); ambientes e containers em
+> [`docs/infrastructure.md`](../../infrastructure.md); o modelo RBAC completo em
+> [`plataforma`](../plataforma/README.md#segurança-e-infraestrutura). Aqui fica só o recorte
+> deste domínio.
+
+Este é o domínio com **mais dado pessoal** do backend — nome, telefone, e-mail e CPF de clientes
+reais. As decisões abaixo pesam mais aqui do que em qualquer outro módulo.
+
+### Permissões RBAC
+
+Só duas permissões cobrem os **28 endpoints** do `CrmController`, criadas na V48 (com
+`ON CONFLICT DO NOTHING`) e concedidas a `ROLE_ADMIN`; semeadas em `dev` por `SeedConfig` e
+`DevRoleBootstrapConfig`.
+
+| Permissão | Libera | Endpoints |
+|---|---|---|
+| `CRM_CUSTOMER_READ` | toda leitura: clientes, notas, pedidos, cashback, histórico de estágio, dashboard, tags, automações, log de disparos, status de canal e **o export CSV** | 13 |
+| `CRM_CUSTOMER_MANAGE` | toda escrita: criar cliente e nota, mover estágio, CRUD de tags e associações, CRUD de automações e disparo manual | 11 |
+
+**Granularidade insuficiente:** não há como separar "consultar um cliente" de "exportar a base
+inteira", nem "criar nota" de "disparar campanha". Quem atende no balcão precisa de
+`CRM_CUSTOMER_READ` e leva junto o export completo com CPF.
+
+> Os nomes `CUSTOMER_CREATE`/`CUSTOMER_READ` que aparecem na descrição legada de F001 no
+> [Histórico](#histórico-de-implementações) nunca existiram no código — as permissões reais
+> sempre foram `CRM_CUSTOMER_*`.
+
+### Rate limiting
+
+❌ Nenhum endpoint deste módulo é limitado — o `LoginRateLimitingFilter`
+(`infra/security/LoginRateLimitingFilter.java:42-77`) cobre apenas `/auth/**` e duas rotas de
+notificação.
+
+O caso mais sensível é `GET /crm/customers/export`: devolve a **base inteira sem paginação**
+(`listCustomersForExport`), monta o CSV em memória e não deixa registro de auditoria. Um token
+com `CRM_CUSTOMER_READ` pode baixar toda a base de clientes, repetidamente, sem nenhum freio nem
+rastro. Ver **CRM-C002** e PLAT-C030.
+
+### Isolamento de dados e dado pessoal
+
+Single-tenant, sem carteira por vendedor: quem tem `CRM_CUSTOMER_READ` vê **todos** os clientes.
+
+`customers` (V48) guarda `nome`, `contato`, `email` e `cpf` — **tudo em texto claro**, sem
+criptografia em repouso nem mascaramento na API ou no CSV. Não há registro de consentimento,
+anonimização, exportação por titular nem exclusão de cliente (o domínio não tem endpoint de
+delete). Sobre LGPD no backend como um todo, ver
+[`plataforma`](../plataforma/README.md#conformidade-lgpd).
+
+### Auditoria
+
+O `CrmController` publica `AuditEvent` em 10 operações de escrita:
+
+| Operação | `EventType` |
+|---|---|
+| `POST /crm/customers` | `CUSTOMER_CREATED` |
+| `POST /crm/customers/{id}/notes` | `CUSTOMER_NOTE_ADDED` |
+| `PATCH /crm/customers/{id}/estagio` | `CUSTOMER_STAGE_CHANGED` |
+| `POST` / `DELETE /crm/tags` | `TAG_CREATED` / `TAG_DELETED` |
+| `POST` / `DELETE /crm/customers/{id}/tags` | `CUSTOMER_TAG_ADDED` / `CUSTOMER_TAG_REMOVED` |
+| `POST` / `DELETE /crm/automacoes` | `CAMPAIGN_AUTOMATION_CREATED` / `CAMPAIGN_AUTOMATION_DELETED` |
+| `POST /crm/automacoes/{id}/disparar` | `CAMPAIGN_AUTOMATION_DISPATCHED` |
+
+É a melhor cobertura de auditoria entre os domínios de negócio. **Lacunas:**
+`PATCH /crm/automacoes/{id}/ativa` (ativar/desativar campanha) não gera evento, e nenhuma
+leitura gera — inclusive o export CSV, que é justamente a leitura que deveria deixar rastro
+(**CRM-C002**).
+
+A trilha de movimentação no kanban tem registro próprio de domínio em
+`customer_stage_transitions` (V50), independente dos `audit_logs`.
+
+### Infraestrutura utilizada
+
+| Recurso | Uso neste módulo | Se cair |
+|---|---|---|
+| Postgres 16 (H2 em `dev`) | `customers` (V48), `customer_notes` (V49), `customer_stage_transitions` (V50), `tags` + `customer_tags` (V51), `campaign_automations` + `campaign_log` (V52) | módulo indisponível |
+| Cache de authorities (Redis/Caffeine, TTL 60s) | checagem de `@PreAuthorize` | latência maior |
+| `EmailPort` (Resend em `hml`/`prod`, `logging` em `dev`) | **apenas** o status do canal em `GET /crm/canais/status` | badge de canal reporta desconectado |
+
+Sem fila, sem storage de arquivo e **sem integração de WhatsApp** — `getChannelStatus` devolve
+`conectado = false` com o texto fixo "Integração de WhatsApp ainda não implementada".
+
+⚠️ **`POST /crm/automacoes/{id}/disparar` não envia nada.** `CrmService.dispatchAutomation`
+busca os clientes do segmento-alvo e grava uma linha em `campaign_log` por cliente — nenhuma
+mensagem sai por e-mail ou WhatsApp. O `EmailPort` injetado no service só é usado para o status
+do canal.
+
+### Limites operacionais
+
+- `GET /crm/customers`: paginado, com filtro por `search` e segmento.
+- `GET /crm/customers/export`: **não paginado** — a base inteira em memória, com BOM UTF-8 e
+  `Content-Disposition: attachment; filename="clientes.csv"`.
+- `POST /crm/automacoes/{id}/disparar`: sem teto de destinatários; uma linha de log por cliente
+  do segmento, tudo em uma transação.
+- Validação: `@Valid` nos requests (e-mail, tamanhos, enums), com erros no formato `ApiError`.
+
+### Riscos conhecidos
+
+- **CRM-C002** — export da base sem auditoria, sem paginação e sem rate limit.
+- **CRM-C001** — README ainda sem Modelo de Domínio, Regras, API, Schema e Testes.
+- **PLAT-C030** — sem rate limit em endpoint de negócio.
 
 ## Testes no Postman
 
@@ -66,6 +169,9 @@ Convenções, variáveis e o environment compartilhado estão em
 | ID | Prioridade | Tipo | Item | Descrição | Status |
 |---|---|---|---|---|---|
 | CRM-C001 | 🟡 Importante | Correção | auditar-e-documentar-o-modulo | Este README não tem Modelo de Domínio, Regras de Negócio, API, Schema nem Cobertura de Testes — as 9 features foram entregues sem que a documentação de domínio fosse criada. Auditar o código e preencher no padrão de `estoque`. | Pendente |
+| CRM-C002 | 🔴 Alta | Correção | export-da-base-sem-auditoria-nem-limite | `GET /crm/customers/export` (`CrmController.java:150`) devolve **toda** a base de clientes — nome, telefone, e-mail e CPF em texto claro — sem paginação, sem rate limit e **sem publicar `AuditEvent`**. Qualquer token com `CRM_CUSTOMER_READ` (a permissão de leitura mais básica do módulo) pode drenar a base em loop sem deixar rastro. No mínimo: publicar evento de auditoria no export, e avaliar permissão dedicada + limite. O rate limit em si é transversal (PLAT-C030). | Pendente |
+| CRM-C003 | 🟢 Melhoria | Correção | disparo-de-campanha-nao-envia-nada | `CrmService.dispatchAutomation` (linha 215) grava uma linha em `campaign_log` por cliente do segmento e **não envia mensagem alguma** — o `EmailPort` injetado só serve ao `getChannelStatus`. A tela de Automações reporta disparo bem-sucedido para um envio que nunca aconteceu. Ou o envio é implementado, ou a resposta/documentação precisa deixar claro que é simulação. | Pendente |
+| CRM-C004 | 🟢 Melhoria | Correção | audit-event-ausente-em-ativar-desativar-automacao | `PATCH /crm/automacoes/{id}/ativa` é a única escrita do módulo sem `AuditEvent` — ligar ou desligar uma campanha não deixa rastro, enquanto criar e apagar deixam. | Pendente |
 
 Novas features e correções do CRM seguem as séries `CRM-F001+` e `CRM-C002+`. A série legada
 `F001–F009` está congelada (todos concluídos, ver histórico).
@@ -89,4 +195,6 @@ em [`docs/feature-registry.md`](../../feature-registry.md), seção `crm`.
 
 ## Próximos passos
 
+- [ ] **CRM-C002** — auditoria no export da base; é o maior risco aberto do módulo.
 - [ ] **CRM-C001** — auditar o código e completar este README (Modelo de Domínio, Regras, API, Schema, Testes).
+- [ ] **CRM-C003** — decidir entre implementar o envio de campanha ou explicitar que é simulação.

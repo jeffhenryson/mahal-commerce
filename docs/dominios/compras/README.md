@@ -3,6 +3,7 @@
 **Status:** 🟡 Parcial — recebimento de mercadoria operacional; fornecedores e pedidos de compra ainda em esqueleto
 **Pacote Java:** `com.cernecommerce...compras`
 **Rota HTTP base:** `/compras`
+**Última atualização deste doc:** 2026-07-27 (seção de Segurança e Infraestrutura)
 
 > ⚠️ **Auditoria de código pendente.** Este README foi atualizado em 2026-07-26 apenas para
 > refletir a entrega de `EST-F009` e receber o backlog do módulo. As seções de Regras de
@@ -36,6 +37,68 @@ Reposição de estoque via fornecedores e entradas de mercadorias.
 |---|---|---|---|
 | `GET` | `/compras/suppliers` | `COMPRAS_READ` | Lista fornecedores paginados (`page` ≥ 0, `size` 1–100) |
 | `POST` | `/compras/goods-receipts` | `COMPRAS_RECEIPT_MANAGE` | Registra recebimento e **dá entrada no estoque** item a item. `404 SUPPLIER_NOT_FOUND` |
+
+## Segurança e Infraestrutura
+
+> Mecanismos transversais em [`docs/security.md`](../../security.md); ambientes e containers em
+> [`docs/infrastructure.md`](../../infrastructure.md); o modelo RBAC completo em
+> [`plataforma`](../plataforma/README.md#segurança-e-infraestrutura). Aqui fica só o recorte
+> deste domínio.
+
+### Permissões RBAC
+
+| Permissão | Libera | Migration | Semeada em `dev`? |
+|---|---|---|---|
+| `COMPRAS_READ` | `GET /compras/suppliers` | V53 | ✅ `SeedConfig` + `DevRoleBootstrapConfig` |
+| `COMPRAS_RECEIPT_MANAGE` | `POST /compras/goods-receipts` | V60 (com `ON CONFLICT DO NOTHING`) | ✅ |
+
+⚠️ **`COMPRAS_RECEIPT_MANAGE` movimenta estoque sem exigir nenhuma permissão `ESTOQUE_*`.**
+`ComprasService.receiveGoods` chama `EstoqueUseCase.adjustStock` diretamente, e o
+`@PreAuthorize` só existe na borda HTTP. Quem pode receber mercadoria pode aumentar o saldo de
+qualquer SKU em qualquer depósito, com o motivo `Recebimento de mercadoria - fornecedor #{id}`.
+É o desenho pretendido (o port é a fronteira), mas precisa ser considerado ao conceder a
+permissão.
+
+### Rate limiting
+
+❌ Nenhum endpoint deste módulo é limitado — o `LoginRateLimitingFilter` cobre apenas
+`/auth/**` e duas rotas de notificação. Ver PLAT-C030.
+
+### Isolamento de dados
+
+Single-tenant: quem tem `COMPRAS_READ` vê todos os fornecedores; não há vínculo
+usuário↔fornecedor nem usuário↔depósito.
+
+### Auditoria
+
+❌ **Nenhum `AuditEvent` é publicado por este módulo** — nem no recebimento, que é uma escrita
+com efeito financeiro e de estoque. O rastro existente é indireto: o `stock_movement` gerado
+guarda `username` e `reason`. Rastreado como **COM-C003** (contraparte de `EST-C004`).
+
+### Infraestrutura utilizada
+
+| Recurso | Uso neste módulo | Se cair |
+|---|---|---|
+| Postgres 16 (H2 em `dev`) | `supplier`, `goods_receipt`, `goods_receipt_item` (V58/V59) | módulo indisponível |
+| Cache de authorities (Redis/Caffeine, TTL 60s) | checagem de `@PreAuthorize` | latência maior |
+| `EstoqueUseCase` (chamada síncrona in-process) | entrada de saldo por item | recebimento inteiro falha e reverte |
+
+Sem fila, sem outbox e sem storage de arquivos. O recebimento e os movimentos de estoque
+compartilham a **mesma transação**: falha em qualquer item reverte tudo.
+
+### Limites operacionais
+
+- `GET /compras/suppliers`: `page` ≥ 0 e `size` entre 1 e 100, validados via Bean Validation
+  (o controller é `@Validated`).
+- `POST /compras/goods-receipts`: itens obrigatórios e quantidade > 0 via `@Valid` nos requests;
+  **não há teto para o número de itens** de um recebimento — cada item vira uma escrita de saldo
+  na mesma transação.
+
+### Riscos conhecidos
+
+- **COM-C003** — recebimento sem trilha de auditoria.
+- **COM-C002** — `GET /compras/suppliers` devolve o record de domínio direto, sem DTO.
+- **PLAT-C030** — sem rate limit.
 
 ## Integração com estoque
 

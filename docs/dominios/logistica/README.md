@@ -3,6 +3,7 @@
 **Status:** 🟡 Esqueleto criado — implementação pendente
 **Pacote Java:** `com.cernecommerce...logistica`
 **Rota HTTP base:** `/logistica`
+**Última atualização deste doc:** 2026-07-27 (seção de Segurança e Infraestrutura)
 
 ## Objetivo
 
@@ -24,6 +25,35 @@ Controle de expedição e entregas dos pedidos.
 | ports/out | `core/ports/out/logistica/ShipmentRepository` |
 | service | `core/service/LogisticaService` (stub, wired em `CoreBeanConfig`) |
 | adapter/in | `adapter/in/controller/LogisticaController` → `GET /logistica/shipments?page&size` (stub, retorna `PageResult<Shipment>` vazio) |
+
+## Segurança e Infraestrutura
+
+> Transversal em [`docs/security.md`](../../security.md) e
+> [`docs/infrastructure.md`](../../infrastructure.md); modelo RBAC completo em
+> [`plataforma`](../plataforma/README.md#segurança-e-infraestrutura).
+
+**O que já existe.** `LOGISTICA_READ` (criada na V53 com `ON CONFLICT DO NOTHING`, concedida a
+`ROLE_ADMIN`; semeada em `dev` por `SeedConfig`/`DevRoleBootstrapConfig`) protege o único
+endpoint do módulo, `GET /logistica/shipments`. O `@PreAuthorize` foi acrescentado em **C004**,
+que tirou os controllers stub do fallback genérico `anyRequest().authenticated()`. Não há tabela,
+auditoria nem infra própria — o service devolve página vazia.
+
+**O que este módulo vai precisar quando sair do esqueleto.** É o domínio que mais vai lidar com
+endereço de cliente e com atores externos (motoboy, transportadora):
+
+- [ ] Permissões separando consulta de expedição, atualização de status e roteirização — um
+      motoboy não deve ver a base inteira de entregas.
+- [ ] Escopo por entregador: hoje não existe isolamento por usuário fora de auth
+      ([`plataforma`](../plataforma/README.md#isolamento-de-dados)); qualquer um com a permissão
+      vê tudo.
+- [ ] Rastreio para o cliente final: se a consulta de status for pública, precisa de token
+      opaco por pedido (não id sequencial) e rate limit — hoje nenhuma rota de negócio é
+      limitada (PLAT-C030).
+- [ ] `AuditEvent` nas mudanças de status (é o registro de quem despachou e quem entregou).
+- [ ] Endereço de entrega é dado pessoal: entra no mesmo escopo de LGPD do
+      [`crm`](../crm/README.md#isolamento-de-dados-e-dado-pessoal).
+- [ ] Credenciais da transportadora (`CarrierPort`) no fluxo de `.env` + validadores de startup
+      ([`docs/infrastructure.md`](../../infrastructure.md#variáveis-de-ambiente-e-segredos)).
 
 ## Testes no Postman
 

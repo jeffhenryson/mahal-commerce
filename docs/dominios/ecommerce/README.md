@@ -3,6 +3,7 @@
 **Status:** 🟡 Esqueleto criado — implementação pendente
 **Pacote Java:** `com.cernecommerce...ecommerce`
 **Rota HTTP base:** `/ecommerce`
+**Última atualização deste doc:** 2026-07-27 (seção de Segurança e Infraestrutura)
 
 ## Objetivo
 
@@ -24,6 +25,36 @@ Loja online: catálogo, carrinho, promoções e pagamentos.
 | ports/out | `core/ports/out/ecommerce/CartRepository` |
 | service | `core/service/EcommerceService` (stub, wired em `CoreBeanConfig`) |
 | adapter/in | `adapter/in/controller/EcommerceController` → `GET /ecommerce/carts?page&size` (stub, retorna `PageResult<Cart>` vazio) |
+
+## Segurança e Infraestrutura
+
+> Transversal em [`docs/security.md`](../../security.md) e
+> [`docs/infrastructure.md`](../../infrastructure.md); modelo RBAC completo em
+> [`plataforma`](../plataforma/README.md#segurança-e-infraestrutura).
+
+**O que já existe.** `ECOMMERCE_READ` (criada na V53 com `ON CONFLICT DO NOTHING`, concedida a
+`ROLE_ADMIN`; semeada em `dev` por `SeedConfig`/`DevRoleBootstrapConfig`) protege o único
+endpoint do módulo, `GET /ecommerce/carts`. O `@PreAuthorize` foi acrescentado em **C004**, que
+tirou os controllers stub do fallback genérico `anyRequest().authenticated()`. Não há tabela,
+auditoria, rate limit nem infra própria — o service devolve página vazia.
+
+**O que este módulo vai precisar quando sair do esqueleto.** É o único domínio que expõe
+superfície a usuário **não autenticado da loja** — hoje toda rota fora de `/auth/**` exige token,
+e o modelo de identidade atual só conhece usuários internos:
+
+- [ ] Permissões separando o que é do cliente final e o que é do operador (`ECOMMERCE_MANAGE`,
+      checkout, cupons), em vez de um único `*_READ`.
+- [ ] Identidade do comprador: carrinho e checkout precisam de dono, e o sistema não tem
+      isolamento por usuário fora de auth ([`plataforma`](../plataforma/README.md#isolamento-de-dados)).
+- [ ] **Rate limit obrigatório** em checkout, cupom e criação de carrinho — hoje o
+      `LoginRateLimitingFilter` só cobre `/auth/**` (PLAT-C030).
+- [ ] `AuditEvent` para checkout e aplicação de cupom (valor financeiro).
+- [ ] Reserva de estoque para evitar overselling — `EST-F013`, cruzamento com `estoque`.
+- [ ] Segredos do gateway de pagamento no fluxo de `.env` + validadores de startup, e webhook de
+      pagamento com verificação de assinatura (o backend não tem hoje nenhum endpoint que
+      autentique por assinatura HMAC).
+- [ ] Dado pessoal do comprador entra em escopo de LGPD — ver
+      [`plataforma`](../plataforma/README.md#conformidade-lgpd).
 
 ## Testes no Postman
 

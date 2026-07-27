@@ -21,25 +21,6 @@ Para manter o repositório enxuto e de fácil navegação, a documentação deta
 
 ---
 
-## 🏛️ Visão Geral da Arquitetura
-
-O sistema é dividido estritamente em portas e adaptadores, validado via **ArchUnit**:
-
-```text
-[ Adapter In (REST Controllers, DTOs) ]
-                │
-                ▼ (Use Cases)
-       [ Core (Domain & Business Logic) ]
-                ▲ (Ports & Repositories)
-                │
-[ Adapter Out (JPA/PostgreSQL, Redis, AWS S3, Mail) ]
-```
-
-* **Core isolado:** Não possui dependências do Spring Framework, JPA ou bibliotecas externas.
-* **Flexibilidade:** Substituição de infraestrutura (ex: trocar banco ou cache) sem alterar o código de negócio.
-
----
-
 ## 💼 Módulos do Sistema
 
 | Módulo | Descrição |

@@ -3,6 +3,7 @@
 **Status:** 🟡 Parcial — registro de venda com baixa de estoque operacional; ciclo de caixa (abertura/sangria/fechamento) ainda em esqueleto
 **Pacote Java:** `com.cernecommerce...pdv` (packages não aceitam hífen; `pdv` ↔ `vendas-balcao`)
 **Rota HTTP base:** `/pdv`
+**Última atualização deste doc:** 2026-07-27 (seção de Segurança e Infraestrutura)
 
 > ⚠️ **Auditoria de código pendente.** Este README foi atualizado em 2026-07-26 apenas para
 > refletir a entrega de `EST-F010` e receber o backlog do módulo. As seções de Regras de
@@ -38,6 +39,76 @@ registro de vendas no balcão.
 |---|---|---|---|
 | `GET` | `/pdv/sessions` | `PDV_READ` | Lista sessões de caixa paginadas (`page` ≥ 0, `size` 1–100) |
 | `POST` | `/pdv/sessions/{id}/sales` | `PDV_SALE_MANAGE` | Registra venda na sessão e **dá baixa no estoque** item a item. Exige sessão `OPEN`; `400 INSUFFICIENT_STOCK` se faltar saldo |
+
+## Segurança e Infraestrutura
+
+> Mecanismos transversais em [`docs/security.md`](../../security.md); ambientes e containers em
+> [`docs/infrastructure.md`](../../infrastructure.md); o modelo RBAC completo em
+> [`plataforma`](../plataforma/README.md#segurança-e-infraestrutura). Aqui fica só o recorte
+> deste domínio.
+
+### Permissões RBAC
+
+| Permissão | Libera | Migration | Semeada em `dev`? |
+|---|---|---|---|
+| `PDV_READ` | `GET /pdv/sessions` | V53 | ✅ `SeedConfig` + `DevRoleBootstrapConfig` |
+| `PDV_SALE_MANAGE` | `POST /pdv/sessions/{id}/sales` | V57 | ✅ desde **EST-C001** (antes faltava, e o endpoint respondia 403 em `dev`) |
+
+⚠️ **`PDV_SALE_MANAGE` movimenta estoque sem exigir nenhuma permissão `ESTOQUE_*`.**
+`PdvService.registerSale` chama `EstoqueUseCase.adjustStock` diretamente; o `@PreAuthorize` só
+existe na borda HTTP. Quem registra venda dá baixa em qualquer SKU de qualquer depósito. É a
+contrapartida esperada de um PDV, mas convém saber ao conceder a permissão.
+
+O PDV é o módulo que mais expõe a lacuna do ciclo de caixa: **não há endpoint de abertura de
+sessão** (PDV-F001), então hoje o operador registra venda em sessões criadas manualmente no
+banco — sem controle de quem abriu, quando, nem com qual fundo de troco.
+
+### Rate limiting
+
+❌ Nenhum endpoint deste módulo é limitado. Ver PLAT-C030.
+
+### Isolamento de dados
+
+Single-tenant e **sem vínculo operador↔caixa**: qualquer usuário com `PDV_SALE_MANAGE` registra
+venda em **qualquer** sessão de caixa aberta, inclusive na de outro operador. O `username` fica
+no `stock_movement` gerado pela baixa, mas a `Sale` em si não amarra a autoria à sessão. Fechar
+isso faz parte de PDV-F001.
+
+### Auditoria
+
+❌ **Nenhum `AuditEvent` é publicado por este módulo** — nem no registro de venda. O rastro é
+indireto, pelo `stock_movement` com `reason = "Venda balcão sessão #{id}"` e o `username` de
+quem chamou. Rastreado como **PDV-C003** (contraparte de `EST-C004`).
+
+Para um domínio que movimenta dinheiro, essa é a lacuna mais relevante da seção: não existe
+trilha de auditoria de venda hoje.
+
+### Infraestrutura utilizada
+
+| Recurso | Uso neste módulo | Se cair |
+|---|---|---|
+| Postgres 16 (H2 em `dev`) | `cash_register_session`, `cash_register_sale`, `sale_item` (V57) | módulo indisponível |
+| Cache de authorities (Redis/Caffeine, TTL 60s) | checagem de `@PreAuthorize` | latência maior |
+| `EstoqueUseCase` (chamada síncrona in-process) | baixa de saldo por item + alerta de reposição | venda inteira falha e reverte |
+
+Sem fila, sem impressora fiscal, sem integração de pagamento. Venda e baixa de estoque
+compartilham a **mesma transação**: `InsufficientStockException` em qualquer item reverte a
+venda inteira, e nada é persistido.
+
+### Limites operacionais
+
+- `GET /pdv/sessions`: `page` ≥ 0 e `size` entre 1 e 100, via Bean Validation (`@Validated` no
+  controller).
+- `POST /pdv/sessions/{id}/sales`: itens obrigatórios e quantidade > 0 via `@Valid`; **sem teto
+  de itens por venda**. O total é calculado no servidor (`SaleItem.subtotal()`), nunca aceito
+  do cliente.
+
+### Riscos conhecidos
+
+- **PDV-C003** — venda sem trilha de auditoria.
+- **PDV-F001** — sem ciclo de caixa: sessões abertas fora do sistema, sem conferência.
+- **PDV-C002** — `GET /pdv/sessions` devolve o record de domínio direto, sem DTO.
+- **PLAT-C030** — sem rate limit.
 
 ## Integração com estoque
 
