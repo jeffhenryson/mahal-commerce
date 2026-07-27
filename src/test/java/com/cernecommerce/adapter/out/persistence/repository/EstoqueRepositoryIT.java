@@ -8,6 +8,9 @@ import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.ReorderPoint;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
+import com.cernecommerce.core.domain.model.estoque.StockCount;
+import com.cernecommerce.core.domain.model.estoque.StockCountItem;
+import com.cernecommerce.core.domain.model.estoque.StockCountStatus;
 import com.cernecommerce.core.domain.model.estoque.StockMovement;
 import com.cernecommerce.core.domain.model.estoque.Warehouse;
 import com.cernecommerce.core.domain.model.estoque.WarehouseType;
@@ -57,6 +60,7 @@ class EstoqueRepositoryIT {
     @Autowired StockMovementRepositoryImpl stockMovementRepository;
     @Autowired ReorderPointRepositoryImpl reorderPointRepository;
     @Autowired StockIntegrityRepositoryImpl stockIntegrityRepository;
+    @Autowired StockCountRepositoryImpl stockCountRepository;
 
     @PersistenceContext EntityManager em;
 
@@ -100,6 +104,68 @@ class EstoqueRepositoryIT {
         assertThat(productRepository.existsBySku("EX-001")).as("SKU pai").isTrue();
         assertThat(productRepository.existsBySku("EX-001-UVA")).as("SKU de variação").isTrue();
         assertThat(productRepository.existsBySku("EX-999")).as("SKU inexistente").isFalse();
+    }
+
+    /**
+     * EST-F018: {@code isSkuActive} é distinto de {@code existsBySku} — o SKU continua existindo
+     * depois de desativado, e a diferença entre os dois é o que separa 404 de 409.
+     */
+    @Test
+    void isSkuActive_exigeProdutoPaiAtivo_inclusiveParaSkuDeVariacao() {
+        Product saved = productRepository.save(Product.create("AT-001", "Essência", "essencia",
+                List.of(ProductVariant.create("AT-001-UVA", List.of(new ProductAttribute("sabor", "uva"))))));
+        flushAndClear();
+
+        assertThat(productRepository.isSkuActive("AT-001")).as("pai ativo").isTrue();
+        assertThat(productRepository.isSkuActive("AT-001-UVA")).as("variação de pai ativo").isTrue();
+
+        productRepository.save(saved.withActive(false));
+        flushAndClear();
+
+        assertThat(productRepository.existsBySku("AT-001"))
+                .as("desativar não apaga: o SKU continua existindo").isTrue();
+        assertThat(productRepository.isSkuActive("AT-001")).as("pai desativado").isFalse();
+        assertThat(productRepository.isSkuActive("AT-001-UVA"))
+                .as("desativar o pai tira a grade inteira de circulação").isFalse();
+    }
+
+    @Test
+    void isSkuActive_falseParaSkuInexistente() {
+        assertThat(productRepository.isSkuActive("NAO-EXISTE-999")).isFalse();
+    }
+
+    /** O PATCH carrega o produto inteiro e regrava: as variações não podem sumir no caminho. */
+    @Test
+    void save_aposWithDetails_preservaVariacoesEAtributos() {
+        Product saved = productRepository.save(Product.create("UP-001", "Nome Antigo", "cat-antiga",
+                List.of(ProductVariant.create("UP-001-M", List.of(new ProductAttribute("sabor", "menta"))))));
+        flushAndClear();
+
+        Product carregado = productRepository.findBySku("UP-001").orElseThrow();
+        productRepository.save(carregado.withDetails("Nome Novo", null));
+        flushAndClear();
+
+        assertThat(productRepository.findBySku("UP-001")).get().satisfies(p -> {
+            assertThat(p.id()).isEqualTo(saved.id());
+            assertThat(p.name()).isEqualTo("Nome Novo");
+            assertThat(p.category()).as("null mantém").isEqualTo("cat-antiga");
+            assertThat(p.variants()).singleElement().satisfies(v -> {
+                assertThat(v.sku()).isEqualTo("UP-001-M");
+                assertThat(v.attributes()).containsExactly(new ProductAttribute("sabor", "menta"));
+            });
+        });
+    }
+
+    @Test
+    void warehouse_saveAposWithActive_persisteADesativacao() {
+        Warehouse warehouse = givenWarehouse("WH-OFF");
+        flushAndClear();
+
+        warehouseRepository.save(warehouse.withActive(false));
+        flushAndClear();
+
+        assertThat(warehouseRepository.findByCode("WH-OFF")).get()
+                .satisfies(w -> assertThat(w.active()).isFalse());
     }
 
     @Test
@@ -276,6 +342,105 @@ class EstoqueRepositoryIT {
                             .isEqualTo(created.id());
                     assertThat(rp.minQuantity()).isEqualByComparingTo("12.000");
                 });
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // EST-F006 — persistência do balanço de inventário.
+    // ------------------------------------------------------------------------------------------
+
+    @Test
+    void stockCount_roundTripPreservaItensEDivergencias() {
+        Warehouse warehouse = givenWarehouse("WH-CNT-RT");
+        StockCount aberta = stockCountRepository.save(StockCount.open(warehouse.id(), "gerente")
+                .withCountedItem("CNT-001", new BigDecimal("8.000"))
+                .withCountedItem("CNT-002", new BigDecimal("0.000")));
+        flushAndClear();
+
+        assertThat(aberta.id()).isNotNull();
+        assertThat(stockCountRepository.findById(aberta.id())).get().satisfies(c -> {
+            assertThat(c.status()).isEqualTo(StockCountStatus.ABERTA);
+            assertThat(c.username()).isEqualTo("gerente");
+            assertThat(c.closedAt()).isNull();
+            assertThat(c.items()).hasSize(2);
+            assertThat(c.items()).allSatisfy(item -> {
+                assertThat(item.id()).isNotNull();
+                assertThat(item.expectedQuantity()).as("aberta ainda não confrontou").isNull();
+            });
+        });
+    }
+
+    @Test
+    void stockCount_fechamentoPersisteExpectedEDifference() {
+        Warehouse warehouse = givenWarehouse("WH-CNT-CLOSE");
+        StockCount aberta = stockCountRepository.save(StockCount.open(warehouse.id(), "gerente")
+                .withCountedItem("CNT-010", new BigDecimal("8.000")));
+        flushAndClear();
+
+        StockCount carregada = stockCountRepository.findById(aberta.id()).orElseThrow();
+        List<StockCountItem> reconciliados = carregada.items().stream()
+                .map(i -> i.reconciledWith(new BigDecimal("10.000")))
+                .toList();
+        stockCountRepository.save(carregada.withReconciledItems(reconciliados).closed());
+        flushAndClear();
+
+        assertThat(stockCountRepository.findById(aberta.id())).get().satisfies(c -> {
+            assertThat(c.status()).isEqualTo(StockCountStatus.FECHADA);
+            assertThat(c.closedAt()).isNotNull();
+            assertThat(c.items()).singleElement().satisfies(item -> {
+                assertThat(item.expectedQuantity()).isEqualByComparingTo("10.000");
+                assertThat(item.difference()).isEqualByComparingTo("-2.000");
+            });
+        });
+    }
+
+    /** A regra de um balanço aberto por depósito depende desta consulta. */
+    @Test
+    void stockCount_findOpenByWarehouseId_soEnxergaAAberta() {
+        Warehouse warehouse = givenWarehouse("WH-CNT-OPEN");
+        StockCount aberta = stockCountRepository.save(StockCount.open(warehouse.id(), "gerente"));
+        flushAndClear();
+
+        assertThat(stockCountRepository.findOpenByWarehouseId(warehouse.id()))
+                .get().satisfies(c -> assertThat(c.id()).isEqualTo(aberta.id()));
+
+        stockCountRepository.save(stockCountRepository.findById(aberta.id()).orElseThrow().closed());
+        flushAndClear();
+
+        assertThat(stockCountRepository.findOpenByWarehouseId(warehouse.id()))
+                .as("fechada não conta como aberta").isEmpty();
+    }
+
+    @Test
+    void stockCount_recontagemNaoDuplicaLinhaDoMesmoSku() {
+        Warehouse warehouse = givenWarehouse("WH-CNT-DUP");
+        StockCount aberta = stockCountRepository.save(StockCount.open(warehouse.id(), "gerente")
+                .withCountedItem("CNT-020", new BigDecimal("3.000")));
+        flushAndClear();
+
+        StockCount carregada = stockCountRepository.findById(aberta.id()).orElseThrow();
+        stockCountRepository.save(carregada.withCountedItem("CNT-020", new BigDecimal("9.000")));
+        flushAndClear();
+
+        assertThat(stockCountRepository.findById(aberta.id())).get().satisfies(c ->
+                assertThat(c.items()).as("uk_stock_count_item_count_sku").singleElement()
+                        .satisfies(item -> assertThat(item.countedQuantity()).isEqualByComparingTo("9.000")));
+    }
+
+    @Test
+    void stockCount_listaDoMaisRecenteParaOMaisAntigo() {
+        Warehouse warehouse = givenWarehouse("WH-CNT-PAG");
+        for (int i = 0; i < 3; i++) {
+            StockCount c = stockCountRepository.save(StockCount.open(warehouse.id(), "gerente"));
+            stockCountRepository.save(stockCountRepository.findById(c.id()).orElseThrow().closed());
+        }
+        flushAndClear();
+
+        PageResult<StockCount> page = stockCountRepository.findByWarehouseId(warehouse.id(), 0, 2);
+
+        assertThat(page.content()).hasSize(2);
+        assertThat(page.totalElements()).isEqualTo(3);
+        assertThat(page.content().get(0).id())
+                .as("mais recente primeiro, com desempate por id").isGreaterThan(page.content().get(1).id());
     }
 
     // ------------------------------------------------------------------------------------------

@@ -85,12 +85,63 @@ class StockBalanceTest {
                 .isInstanceOf(InsufficientStockException.class);
     }
 
+    // EST-C009: AJUSTE deixou de ser delta e passou a ser o saldo contado na prateleira.
+
     @Test
-    void apply_ajuste_increasesQuantity() {
+    void apply_ajuste_substituiOSaldoParaCima() {
         StockBalance balance = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("5.000"), 0L);
 
-        StockBalance result = balance.apply(MovementType.AJUSTE, new BigDecimal("1.000"));
+        StockBalance result = balance.apply(MovementType.AJUSTE, new BigDecimal("8.000"));
 
-        assertThat(result.quantity()).isEqualByComparingTo("6.000");
+        assertThat(result.quantity()).as("vira o alvo, não 5 + 8").isEqualByComparingTo("8.000");
+    }
+
+    /** É o caso que o EST-C009 existia para resolver: antes só dava para baixar com SAIDA falsa. */
+    @Test
+    void apply_ajuste_substituiOSaldoParaBaixo() {
+        StockBalance balance = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("10.000"), 0L);
+
+        StockBalance result = balance.apply(MovementType.AJUSTE, new BigDecimal("3.000"));
+
+        assertThat(result.quantity()).isEqualByComparingTo("3.000");
+    }
+
+    @Test
+    void apply_ajuste_paraZeroEhValido() {
+        StockBalance balance = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("10.000"), 0L);
+
+        assertThat(balance.apply(MovementType.AJUSTE, BigDecimal.ZERO).quantity())
+                .isEqualByComparingTo("0.000");
+    }
+
+    /** Baixar por AJUSTE nunca é "saldo insuficiente" — é substituição, não subtração. */
+    @Test
+    void apply_ajuste_abaixoDoSaldoAtual_naoLancaInsufficientStock() {
+        StockBalance balance = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("2.000"), 0L);
+
+        assertThat(balance.apply(MovementType.AJUSTE, new BigDecimal("50.000")).quantity())
+                .isEqualByComparingTo("50.000");
+        assertThat(balance.apply(MovementType.AJUSTE, new BigDecimal("1.000")).quantity())
+                .isEqualByComparingTo("1.000");
+    }
+
+    @Test
+    void apply_ajuste_negativo_lancaIllegalArgument() {
+        StockBalance balance = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("5.000"), 0L);
+
+        assertThatThrownBy(() -> balance.apply(MovementType.AJUSTE, new BigDecimal("-1.000")))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void apply_ajuste_preservaIdSkuEVersion() {
+        StockBalance balance = StockBalance.of(7L, "NARG-001", 3L, new BigDecimal("5.000"), 4L);
+
+        StockBalance result = balance.apply(MovementType.AJUSTE, new BigDecimal("9.000"));
+
+        assertThat(result.id()).isEqualTo(7L);
+        assertThat(result.sku()).isEqualTo("NARG-001");
+        assertThat(result.warehouseId()).isEqualTo(3L);
+        assertThat(result.version()).as("version preservado para o optimistic locking").isEqualTo(4L);
     }
 }

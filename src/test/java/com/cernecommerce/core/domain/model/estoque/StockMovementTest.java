@@ -67,6 +67,29 @@ class StockMovementTest {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
+    /** EST-C009: em AJUSTE a quantidade é o saldo contado, e contar zero é legítimo. */
+    @Test
+    void ajuste_aceitaQuantidadeZero() {
+        StockMovement movement = StockMovement.create("NARG-001", 1L, MovementType.AJUSTE,
+                BigDecimal.ZERO, "Balanço: item sumiu", "gerente");
+
+        assertThat(movement.quantity()).isEqualByComparingTo("0");
+    }
+
+    @Test
+    void ajuste_aindaRecusaQuantidadeNegativa() {
+        assertThatThrownBy(() -> StockMovement.create("NARG-001", 1L, MovementType.AJUSTE,
+                new BigDecimal("-1"), "motivo", "gerente"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void saida_continuaRecusandoQuantidadeZero() {
+        assertThatThrownBy(() -> StockMovement.create("NARG-001", 1L, MovementType.SAIDA,
+                BigDecimal.ZERO, "motivo", "gerente"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
     @Test
     void throwsWhenReasonIsBlank() {
         assertThatThrownBy(() -> StockMovement.create("NARG-001", 1L, MovementType.ENTRADA,

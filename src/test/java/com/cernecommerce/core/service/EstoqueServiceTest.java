@@ -2,8 +2,13 @@ package com.cernecommerce.core.service;
 
 import com.cernecommerce.core.domain.exception.estoque.DuplicateSkuException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateWarehouseCodeException;
+import com.cernecommerce.core.domain.exception.estoque.InactiveProductException;
+import com.cernecommerce.core.domain.exception.estoque.InactiveWarehouseException;
 import com.cernecommerce.core.domain.exception.estoque.InsufficientStockException;
 import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
+import com.cernecommerce.core.domain.exception.estoque.StockCountAlreadyOpenException;
+import com.cernecommerce.core.domain.exception.estoque.StockCountNotFoundException;
+import com.cernecommerce.core.domain.exception.estoque.StockCountNotOpenException;
 import com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
@@ -13,6 +18,9 @@ import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.ReorderPoint;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
+import com.cernecommerce.core.domain.model.estoque.StockCount;
+import com.cernecommerce.core.domain.model.estoque.StockCountItem;
+import com.cernecommerce.core.domain.model.estoque.StockCountStatus;
 import com.cernecommerce.core.domain.model.estoque.StockMovement;
 import com.cernecommerce.core.domain.model.estoque.Warehouse;
 import com.cernecommerce.core.domain.model.estoque.WarehouseType;
@@ -22,6 +30,7 @@ import com.cernecommerce.core.ports.out.AfterCommitExecutor;
 import com.cernecommerce.core.ports.out.estoque.ProductRepository;
 import com.cernecommerce.core.ports.out.estoque.ReorderPointRepository;
 import com.cernecommerce.core.ports.out.estoque.StockBalanceRepository;
+import com.cernecommerce.core.ports.out.estoque.StockCountRepository;
 import com.cernecommerce.core.ports.out.estoque.StockIntegrityRepository;
 import com.cernecommerce.core.ports.out.estoque.StockMovementRepository;
 import com.cernecommerce.core.ports.out.estoque.WarehouseRepository;
@@ -29,6 +38,7 @@ import com.cernecommerce.core.ports.out.user.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -41,6 +51,7 @@ import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
@@ -55,6 +66,7 @@ class EstoqueServiceTest {
     @Mock StockMovementRepository stockMovementRepository;
     @Mock ReorderPointRepository reorderPointRepository;
     @Mock StockIntegrityRepository stockIntegrityRepository;
+    @Mock StockCountRepository stockCountRepository;
     @Mock NotificationUseCase notificationUseCase;
     @Mock UserRepository userRepository;
 
@@ -75,12 +87,15 @@ class EstoqueServiceTest {
     @BeforeEach
     void setUp() {
         estoqueService = new EstoqueService(productRepository, warehouseRepository, stockBalanceRepository,
-                stockMovementRepository, reorderPointRepository, stockIntegrityRepository, notificationUseCase,
-                userRepository, immediateExecutor);
+                stockMovementRepository, reorderPointRepository, stockIntegrityRepository, stockCountRepository,
+                notificationUseCase, userRepository, immediateExecutor);
         lenient().when(reorderPointRepository.findBySkuAndWarehouseId(any(), any())).thenReturn(Optional.empty());
         // Padrão dos testes: o SKU existe no catálogo, que é a pré-condição das movimentações.
         // Os testes de createProduct e os de SKU desconhecido sobrescrevem este stub.
         lenient().when(productRepository.existsBySku(any())).thenReturn(true);
+        // E está ativo, pré-condição só da ENTRADA desde EST-F018. Os testes de produto
+        // desativado sobrescrevem.
+        lenient().when(productRepository.isSkuActive(any())).thenReturn(true);
     }
 
     private List<ProductVariant> oneVariant() {
@@ -455,6 +470,178 @@ class EstoqueServiceTest {
         verify(notificationUseCase, never()).notify(any(), any(), any(), any());
     }
 
+    // ------------------------------------------------------------------------------------
+    // EST-F018 — edição e desativação de produto e depósito
+    // ------------------------------------------------------------------------------------
+
+    private Product existingProduct() {
+        return Product.of(1L, "NARG-001", "Narguile Aladin", "narguile", true, oneVariant());
+    }
+
+    @Test
+    void updateProduct_alteraApenasOsCamposInformados() {
+        when(productRepository.findBySku("NARG-001")).thenReturn(Optional.of(existingProduct()));
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Product updated = estoqueService.updateProduct("NARG-001", "Narguilé Aladin 2.0", null);
+
+        assertThat(updated.name()).isEqualTo("Narguilé Aladin 2.0");
+        assertThat(updated.category()).as("category nula significa manter").isEqualTo("narguile");
+        assertThat(updated.sku()).isEqualTo("NARG-001");
+        assertThat(updated.active()).isTrue();
+    }
+
+    /** PATCH não pode derrubar a grade: as variações têm que sobreviver à edição. */
+    @Test
+    void updateProduct_preservaVariacoes() {
+        when(productRepository.findBySku("NARG-001")).thenReturn(Optional.of(existingProduct()));
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Product updated = estoqueService.updateProduct("NARG-001", null, "narguile-premium");
+
+        assertThat(updated.name()).as("name nulo significa manter").isEqualTo("Narguile Aladin");
+        assertThat(updated.category()).isEqualTo("narguile-premium");
+        assertThat(updated.variants()).extracting(ProductVariant::sku).containsExactly("NARG-M-001");
+    }
+
+    @Test
+    void updateProduct_throwsWhenSkuNotFound() {
+        when(productRepository.findBySku("SKU-FANTASMA")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.updateProduct("SKU-FANTASMA", "Novo nome", null))
+                .isInstanceOf(ProductNotFoundException.class);
+
+        verify(productRepository, never()).save(any());
+    }
+
+    @Test
+    void setProductActive_desativaPreservandoORestante() {
+        when(productRepository.findBySku("NARG-001")).thenReturn(Optional.of(existingProduct()));
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Product updated = estoqueService.setProductActive("NARG-001", false);
+
+        assertThat(updated.active()).isFalse();
+        assertThat(updated.name()).isEqualTo("Narguile Aladin");
+        assertThat(updated.variants()).hasSize(1);
+    }
+
+    @Test
+    void setProductActive_throwsWhenSkuNotFound() {
+        when(productRepository.findBySku("SKU-FANTASMA")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.setProductActive("SKU-FANTASMA", false))
+                .isInstanceOf(ProductNotFoundException.class);
+
+        verify(productRepository, never()).save(any());
+    }
+
+    @Test
+    void updateWarehouse_alteraApenasOsCamposInformados() {
+        Warehouse current = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(current));
+        when(warehouseRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Warehouse updated = estoqueService.updateWarehouse("LOJA-01", "Loja Centro Reformada", null);
+
+        assertThat(updated.name()).isEqualTo("Loja Centro Reformada");
+        assertThat(updated.type()).as("type nulo significa manter").isEqualTo(WarehouseType.LOJA_FISICA);
+        assertThat(updated.code()).isEqualTo("LOJA-01");
+    }
+
+    @Test
+    void updateWarehouse_throwsWhenNotFound() {
+        when(warehouseRepository.findByCode("INEXISTENTE")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.updateWarehouse("INEXISTENTE", "Nome", null))
+                .isInstanceOf(WarehouseNotFoundException.class);
+
+        verify(warehouseRepository, never()).save(any());
+    }
+
+    @Test
+    void setWarehouseActive_desativa() {
+        Warehouse current = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(current));
+        when(warehouseRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        assertThat(estoqueService.setWarehouseActive("LOJA-01", false).active()).isFalse();
+    }
+
+    // ---- Efeito da desativação sobre a movimentação ----
+
+    @Test
+    void adjustStock_entrada_emSkuDesativado_throwsAndDoesNotPersistAnything() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(productRepository.isSkuActive("NARG-001")).thenReturn(false);
+
+        assertThatThrownBy(() -> estoqueService.adjustStock("NARG-001", "LOJA-01", MovementType.ENTRADA,
+                new BigDecimal("5.000"), "Recebimento", "gerente"))
+                .isInstanceOf(InactiveProductException.class);
+
+        verify(stockMovementRepository, never()).save(any());
+        verify(stockBalanceRepository, never()).save(any());
+    }
+
+    @Test
+    void adjustStock_entrada_emDepositoDesativado_throwsAndDoesNotPersistAnything() {
+        Warehouse inativo = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, false);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(inativo));
+
+        assertThatThrownBy(() -> estoqueService.adjustStock("NARG-001", "LOJA-01", MovementType.ENTRADA,
+                new BigDecimal("5.000"), "Recebimento", "gerente"))
+                .isInstanceOf(InactiveWarehouseException.class);
+
+        verify(stockMovementRepository, never()).save(any());
+        verify(stockBalanceRepository, never()).save(any());
+    }
+
+    /** O ponto da decisão: desativar não pode prender o saldo que ainda está na prateleira. */
+    @Test
+    void adjustStock_saida_emSkuDesativado_continuaPermitida() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("NARG-001", 1L))
+                .thenReturn(Optional.of(StockBalance.of(7L, "NARG-001", 1L, new BigDecimal("10.000"), 3L)));
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        StockBalance result = estoqueService.adjustStock("NARG-001", "LOJA-01", MovementType.SAIDA,
+                new BigDecimal("4.000"), "Venda", "gerente");
+
+        assertThat(result.quantity()).isEqualByComparingTo("6.000");
+        verify(productRepository, never()).isSkuActive(any());
+    }
+
+    /** AJUSTE é o caminho de correção de inventário — não pode ser barrado por desativação. */
+    @Test
+    void adjustStock_ajuste_emSkuDesativado_continuaPermitido() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("NARG-001", 1L))
+                .thenReturn(Optional.of(StockBalance.of(7L, "NARG-001", 1L, new BigDecimal("10.000"), 3L)));
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        StockBalance result = estoqueService.adjustStock("NARG-001", "LOJA-01", MovementType.AJUSTE,
+                new BigDecimal("2.000"), "Contagem", "gerente");
+
+        assertThat(result.quantity()).as("EST-C009: AJUSTE é saldo-alvo, não delta")
+                .isEqualByComparingTo("2.000");
+        verify(productRepository, never()).isSkuActive(any());
+    }
+
+    /** SKU inexistente tem precedência: 404 antes de qualquer checagem de estado. */
+    @Test
+    void adjustStock_entrada_skuDesconhecido_temPrecedenciaSobreDesativado() {
+        when(productRepository.existsBySku("SKU-FANTASMA")).thenReturn(false);
+
+        assertThatThrownBy(() -> estoqueService.adjustStock("SKU-FANTASMA", "LOJA-01", MovementType.ENTRADA,
+                new BigDecimal("5.000"), "Recebimento", "gerente"))
+                .isInstanceOf(ProductNotFoundException.class);
+
+        verify(productRepository, never()).isSkuActive(any());
+    }
+
     @Test
     void listOrphanSkus_delegatesPagingToTheIntegrityRepository() {
         OrphanSku orphan = OrphanSku.of("SKU-FANTASMA", "LOJA-01", new BigDecimal("3.000"), 2L, false,
@@ -494,5 +681,261 @@ class EstoqueServiceTest {
         verify(stockMovementRepository, never()).save(any());
         verify(reorderPointRepository, never()).save(any());
         verify(warehouseRepository, never()).findByCode(any());
+    }
+
+    // ------------------------------------------------------------------------------------
+    // EST-F006 — balanço de inventário
+    // ------------------------------------------------------------------------------------
+
+    private static final Warehouse LOJA =
+            Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+
+    private StockCount openCount(List<StockCountItem> items) {
+        return StockCount.of(50L, 1L, StockCountStatus.ABERTA, "gerente",
+                Instant.parse("2026-07-27T09:00:00Z"), null, items);
+    }
+
+    @Test
+    void openStockCount_criaBalancoAbertoParaODeposito() {
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(LOJA));
+        when(stockCountRepository.findOpenByWarehouseId(1L)).thenReturn(Optional.empty());
+        when(stockCountRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        StockCount opened = estoqueService.openStockCount("LOJA-01", "gerente");
+
+        assertThat(opened.status()).isEqualTo(StockCountStatus.ABERTA);
+        assertThat(opened.warehouseId()).isEqualTo(1L);
+        assertThat(opened.username()).isEqualTo("gerente");
+        assertThat(opened.items()).isEmpty();
+        assertThat(opened.closedAt()).isNull();
+    }
+
+    /** Dois balanços no mesmo depósito contariam o mesmo saldo e se sobrescreveriam no fechamento. */
+    @Test
+    void openStockCount_recusaSegundoBalancoAbertoNoMesmoDeposito() {
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(LOJA));
+        when(stockCountRepository.findOpenByWarehouseId(1L)).thenReturn(Optional.of(openCount(List.of())));
+
+        assertThatThrownBy(() -> estoqueService.openStockCount("LOJA-01", "gerente"))
+                .isInstanceOf(StockCountAlreadyOpenException.class);
+
+        verify(stockCountRepository, never()).save(any());
+    }
+
+    @Test
+    void openStockCount_throwsWhenWarehouseNotFound() {
+        when(warehouseRepository.findByCode("INEXISTENTE")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.openStockCount("INEXISTENTE", "gerente"))
+                .isInstanceOf(WarehouseNotFoundException.class);
+
+        verify(stockCountRepository, never()).save(any());
+    }
+
+    @Test
+    void recordCountedItem_registraOContado() {
+        when(stockCountRepository.findById(50L)).thenReturn(Optional.of(openCount(List.of())));
+        when(stockCountRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        StockCount updated = estoqueService.recordCountedItem(50L, "NARG-001", new BigDecimal("37.000"));
+
+        assertThat(updated.items()).singleElement().satisfies(item -> {
+            assertThat(item.sku()).isEqualTo("NARG-001");
+            assertThat(item.countedQuantity()).isEqualByComparingTo("37.000");
+            assertThat(item.expectedQuantity()).as("só o fechamento confronta").isNull();
+        });
+    }
+
+    /** Recontagem é o caso normal num balanço: sobrescreve, não vira segunda linha. */
+    @Test
+    void recordCountedItem_recontarSobrescreve() {
+        when(stockCountRepository.findById(50L)).thenReturn(Optional.of(
+                openCount(List.of(StockCountItem.of(9L, "NARG-001", new BigDecimal("30.000"), null, null)))));
+        when(stockCountRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        StockCount updated = estoqueService.recordCountedItem(50L, "NARG-001", new BigDecimal("37.000"));
+
+        assertThat(updated.items()).singleElement().satisfies(item -> {
+            assertThat(item.countedQuantity()).isEqualByComparingTo("37.000");
+            assertThat(item.id()).as("reaproveita a linha existente").isEqualTo(9L);
+        });
+    }
+
+    @Test
+    void recordCountedItem_throwsWhenSkuNotInCatalog() {
+        when(stockCountRepository.findById(50L)).thenReturn(Optional.of(openCount(List.of())));
+        when(productRepository.existsBySku("SKU-FANTASMA")).thenReturn(false);
+
+        assertThatThrownBy(() -> estoqueService.recordCountedItem(50L, "SKU-FANTASMA", BigDecimal.TEN))
+                .isInstanceOf(ProductNotFoundException.class);
+
+        verify(stockCountRepository, never()).save(any());
+    }
+
+    @Test
+    void recordCountedItem_throwsWhenCountNotFound() {
+        when(stockCountRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.recordCountedItem(99L, "NARG-001", BigDecimal.TEN))
+                .isInstanceOf(StockCountNotFoundException.class);
+    }
+
+    @Test
+    void recordCountedItem_throwsWhenCountAlreadyClosed() {
+        StockCount fechado = StockCount.of(50L, 1L, StockCountStatus.FECHADA, "gerente",
+                Instant.now(), Instant.now(), List.of());
+        when(stockCountRepository.findById(50L)).thenReturn(Optional.of(fechado));
+
+        assertThatThrownBy(() -> estoqueService.recordCountedItem(50L, "NARG-001", BigDecimal.TEN))
+                .isInstanceOf(StockCountNotOpenException.class);
+
+        verify(stockCountRepository, never()).save(any());
+    }
+
+    /** O coração do F006: divergência vira AJUSTE levando o saldo ao valor contado. */
+    @Test
+    void closeStockCount_aplicaAjusteApenasNosItensDivergentes() {
+        StockCount count = openCount(List.of(
+                StockCountItem.of(1L, "SKU-FALTA", new BigDecimal("8.000"), null, null),
+                StockCountItem.of(2L, "SKU-BATEU", new BigDecimal("5.000"), null, null),
+                StockCountItem.of(3L, "SKU-SOBRA", new BigDecimal("12.000"), null, null)));
+        when(stockCountRepository.findById(50L)).thenReturn(Optional.of(count));
+        when(warehouseRepository.findById(1L)).thenReturn(Optional.of(LOJA));
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(LOJA));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("SKU-FALTA", 1L))
+                .thenReturn(Optional.of(StockBalance.of(1L, "SKU-FALTA", 1L, new BigDecimal("10.000"), 0L)));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("SKU-BATEU", 1L))
+                .thenReturn(Optional.of(StockBalance.of(2L, "SKU-BATEU", 1L, new BigDecimal("5.000"), 0L)));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("SKU-SOBRA", 1L))
+                .thenReturn(Optional.of(StockBalance.of(3L, "SKU-SOBRA", 1L, new BigDecimal("9.000"), 0L)));
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(stockCountRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        StockCount closed = estoqueService.closeStockCount(50L, "gerente");
+
+        assertThat(closed.status()).isEqualTo(StockCountStatus.FECHADA);
+        assertThat(closed.closedAt()).isNotNull();
+        assertThat(closed.items()).extracting(StockCountItem::sku, StockCountItem::expectedQuantity,
+                        StockCountItem::difference)
+                .containsExactly(
+                        tuple("SKU-FALTA", new BigDecimal("10.000"), new BigDecimal("-2.000")),
+                        tuple("SKU-BATEU", new BigDecimal("5.000"), new BigDecimal("0.000")),
+                        tuple("SKU-SOBRA", new BigDecimal("9.000"), new BigDecimal("3.000")));
+
+        // Contagem que bateu não polui o ledger: só dois movimentos, não três.
+        ArgumentCaptor<StockMovement> captor = ArgumentCaptor.forClass(StockMovement.class);
+        verify(stockMovementRepository, times(2)).save(captor.capture());
+        assertThat(captor.getAllValues()).allSatisfy(m ->
+                assertThat(m.type()).isEqualTo(MovementType.AJUSTE));
+        assertThat(captor.getAllValues()).extracting(StockMovement::sku, StockMovement::quantity)
+                .containsExactly(
+                        tuple("SKU-FALTA", new BigDecimal("8.000")),
+                        tuple("SKU-SOBRA", new BigDecimal("12.000")));
+        assertThat(captor.getAllValues()).allSatisfy(m ->
+                assertThat(m.reason()).contains("Balanço de inventário #50"));
+    }
+
+    /** SKU nunca movimentado tem saldo zero implícito — contar 4 ali é sobra de 4. */
+    @Test
+    void closeStockCount_skuSemSaldoRegistrado_confrontaContraZero() {
+        when(stockCountRepository.findById(50L)).thenReturn(Optional.of(openCount(
+                List.of(StockCountItem.of(1L, "SKU-NOVO", new BigDecimal("4.000"), null, null)))));
+        when(warehouseRepository.findById(1L)).thenReturn(Optional.of(LOJA));
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(LOJA));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("SKU-NOVO", 1L)).thenReturn(Optional.empty());
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(stockCountRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        StockCount closed = estoqueService.closeStockCount(50L, "gerente");
+
+        assertThat(closed.items()).singleElement().satisfies(item -> {
+            assertThat(item.expectedQuantity()).isEqualByComparingTo("0");
+            assertThat(item.difference()).isEqualByComparingTo("4.000");
+        });
+    }
+
+    /** Contar zero é o caso do item que sumiu — e o AJUSTE tem que conseguir zerar o saldo. */
+    @Test
+    void closeStockCount_contagemZero_zeraOSaldo() {
+        when(stockCountRepository.findById(50L)).thenReturn(Optional.of(openCount(
+                List.of(StockCountItem.of(1L, "SKU-SUMIU", BigDecimal.ZERO, null, null)))));
+        when(warehouseRepository.findById(1L)).thenReturn(Optional.of(LOJA));
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(LOJA));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("SKU-SUMIU", 1L))
+                .thenReturn(Optional.of(StockBalance.of(1L, "SKU-SUMIU", 1L, new BigDecimal("6.000"), 0L)));
+        when(stockCountRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        ArgumentCaptor<StockBalance> captor = ArgumentCaptor.forClass(StockBalance.class);
+        when(stockBalanceRepository.save(captor.capture())).thenAnswer(inv -> inv.getArgument(0));
+
+        estoqueService.closeStockCount(50L, "gerente");
+
+        assertThat(captor.getValue().quantity()).isEqualByComparingTo("0");
+    }
+
+    @Test
+    void closeStockCount_semItens_fechaSemMovimentar() {
+        when(stockCountRepository.findById(50L)).thenReturn(Optional.of(openCount(List.of())));
+        when(warehouseRepository.findById(1L)).thenReturn(Optional.of(LOJA));
+        when(stockCountRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        assertThat(estoqueService.closeStockCount(50L, "gerente").status())
+                .isEqualTo(StockCountStatus.FECHADA);
+
+        verify(stockMovementRepository, never()).save(any());
+    }
+
+    /** Fechar duas vezes aplicaria o mesmo ajuste em dobro. */
+    @Test
+    void closeStockCount_balancoJaFechado_throwsAndDoesNotAdjust() {
+        StockCount fechado = StockCount.of(50L, 1L, StockCountStatus.FECHADA, "gerente",
+                Instant.now(), Instant.now(), List.of());
+        when(stockCountRepository.findById(50L)).thenReturn(Optional.of(fechado));
+
+        assertThatThrownBy(() -> estoqueService.closeStockCount(50L, "gerente"))
+                .isInstanceOf(StockCountNotOpenException.class);
+
+        verify(stockBalanceRepository, never()).save(any());
+        verify(stockMovementRepository, never()).save(any());
+    }
+
+    @Test
+    void cancelStockCount_naoTocaEmSaldo() {
+        when(stockCountRepository.findById(50L)).thenReturn(Optional.of(openCount(
+                List.of(StockCountItem.of(1L, "NARG-001", new BigDecimal("3.000"), null, null)))));
+        when(stockCountRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        StockCount cancelled = estoqueService.cancelStockCount(50L);
+
+        assertThat(cancelled.status()).isEqualTo(StockCountStatus.CANCELADA);
+        assertThat(cancelled.closedAt()).isNotNull();
+        verify(stockBalanceRepository, never()).save(any());
+        verify(stockMovementRepository, never()).save(any());
+    }
+
+    @Test
+    void getStockCount_throwsWhenNotFound() {
+        when(stockCountRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.getStockCount(99L))
+                .isInstanceOf(StockCountNotFoundException.class);
+    }
+
+    @Test
+    void listStockCounts_resolveODepositoEDelegaPaginacao() {
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(LOJA));
+        when(stockCountRepository.findByWarehouseId(1L, 0, 20))
+                .thenReturn(new PageResult<>(List.of(openCount(List.of())), 0, 20, 1L, 1));
+
+        assertThat(estoqueService.listStockCounts("LOJA-01", 0, 20).content()).hasSize(1);
+        verify(stockCountRepository).findByWarehouseId(1L, 0, 20);
+    }
+
+    @Test
+    void listStockCounts_throwsWhenWarehouseNotFound() {
+        when(warehouseRepository.findByCode("INEXISTENTE")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.listStockCounts("INEXISTENTE", 0, 20))
+                .isInstanceOf(WarehouseNotFoundException.class);
     }
 }

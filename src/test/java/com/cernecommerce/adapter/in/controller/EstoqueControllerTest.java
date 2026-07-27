@@ -5,12 +5,18 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 import com.cernecommerce.adapter.in.converter.ProductDTOConverter;
+import com.cernecommerce.adapter.in.converter.StockCountDTOConverter;
 import com.cernecommerce.adapter.in.converter.StockMovementDTOConverter;
 import com.cernecommerce.adapter.in.converter.WarehouseDTOConverter;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateSkuException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateWarehouseCodeException;
+import com.cernecommerce.core.domain.exception.estoque.InactiveProductException;
+import com.cernecommerce.core.domain.exception.estoque.InactiveWarehouseException;
 import com.cernecommerce.core.domain.exception.estoque.InsufficientStockException;
 import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
+import com.cernecommerce.core.domain.exception.estoque.StockCountAlreadyOpenException;
+import com.cernecommerce.core.domain.exception.estoque.StockCountNotFoundException;
+import com.cernecommerce.core.domain.exception.estoque.StockCountNotOpenException;
 import com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
@@ -19,6 +25,9 @@ import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
+import com.cernecommerce.core.domain.model.estoque.StockCount;
+import com.cernecommerce.core.domain.model.estoque.StockCountItem;
+import com.cernecommerce.core.domain.model.estoque.StockCountStatus;
 import com.cernecommerce.core.domain.model.estoque.StockMovement;
 import com.cernecommerce.core.domain.model.estoque.Warehouse;
 import com.cernecommerce.core.domain.model.estoque.WarehouseType;
@@ -51,7 +60,8 @@ public class EstoqueControllerTest {
         ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new EstoqueController(estoqueUseCase, new ProductDTOConverter(),
-                        new WarehouseDTOConverter(), new StockMovementDTOConverter(), publisher))
+                        new WarehouseDTOConverter(), new StockMovementDTOConverter(),
+                        new StockCountDTOConverter(), publisher))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }
@@ -511,6 +521,368 @@ public class EstoqueControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content").isEmpty())
                 .andExpect(jsonPath("$.totalElements").value(0));
+    }
+
+    // ------------------------------------------------------------------------------------
+    // EST-F018 — PATCH e desativação
+    // ------------------------------------------------------------------------------------
+
+    @Test
+    void updateProduct_returns_200_withUpdatedBody() throws Exception {
+        when(estoqueUseCase.updateProduct("NARG-001", "Narguilé Aladin 2.0", null))
+                .thenReturn(Product.of(1L, "NARG-001", "Narguilé Aladin 2.0", "narguile", true, List.of()));
+
+        mockMvc.perform(patch("/estoque/products/NARG-001")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Narguilé Aladin 2.0\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("Narguilé Aladin 2.0"))
+                .andExpect(jsonPath("$.sku").value("NARG-001"));
+
+        verify(estoqueUseCase).updateProduct("NARG-001", "Narguilé Aladin 2.0", null);
+    }
+
+    /** Corpo vazio é um no-op válido: nenhum campo veio, nada muda. */
+    @Test
+    void updateProduct_comCorpoVazio_naoAlteraNada() throws Exception {
+        when(estoqueUseCase.updateProduct("NARG-001", null, null))
+                .thenReturn(product("NARG-001"));
+
+        mockMvc.perform(patch("/estoque/products/NARG-001")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isOk());
+
+        verify(estoqueUseCase).updateProduct("NARG-001", null, null);
+    }
+
+    @Test
+    void updateProduct_skuInexistente_returns_404() throws Exception {
+        when(estoqueUseCase.updateProduct(eq("SKU-FANTASMA"), any(), any()))
+                .thenThrow(new ProductNotFoundException("SKU-FANTASMA"));
+
+        mockMvc.perform(patch("/estoque/products/SKU-FANTASMA")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Novo\"}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.errorCode").value("PRODUCT_NOT_FOUND"));
+    }
+
+    @Test
+    void updateProduct_comNomeVazio_returns_400() throws Exception {
+        mockMvc.perform(patch("/estoque/products/NARG-001")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"\"}"))
+                .andExpect(status().isBadRequest());
+
+        verify(estoqueUseCase, never()).updateProduct(any(), any(), any());
+    }
+
+    @Test
+    void setProductActive_returns_200() throws Exception {
+        when(estoqueUseCase.setProductActive("NARG-001", false))
+                .thenReturn(Product.of(1L, "NARG-001", "Narguile Aladin", "narguile", false, List.of()));
+
+        mockMvc.perform(patch("/estoque/products/NARG-001/active")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"active\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.active").value(false));
+    }
+
+    /** {@code Boolean} + {@code @NotNull} para o corpo vazio não virar um "desativar" silencioso. */
+    @Test
+    void setProductActive_semOCampoActive_returns_400() throws Exception {
+        mockMvc.perform(patch("/estoque/products/NARG-001/active")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest());
+
+        verify(estoqueUseCase, never()).setProductActive(any(), anyBoolean());
+    }
+
+    @Test
+    void updateWarehouse_returns_200() throws Exception {
+        when(estoqueUseCase.updateWarehouse("LOJA-01", "Loja Reformada", null))
+                .thenReturn(Warehouse.of(1L, "LOJA-01", "Loja Reformada", WarehouseType.LOJA_FISICA, true));
+
+        mockMvc.perform(patch("/estoque/warehouses/LOJA-01")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Loja Reformada\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("Loja Reformada"))
+                .andExpect(jsonPath("$.type").value("LOJA_FISICA"));
+    }
+
+    @Test
+    void updateWarehouse_comTipoDesconhecido_returns_400() throws Exception {
+        mockMvc.perform(patch("/estoque/warehouses/LOJA-01")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"type\":\"GALPAO\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void updateWarehouse_inexistente_returns_404() throws Exception {
+        when(estoqueUseCase.updateWarehouse(eq("INEXISTENTE"), any(), any()))
+                .thenThrow(new WarehouseNotFoundException("INEXISTENTE"));
+
+        mockMvc.perform(patch("/estoque/warehouses/INEXISTENTE")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Novo\"}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.errorCode").value("WAREHOUSE_NOT_FOUND"));
+    }
+
+    @Test
+    void setWarehouseActive_returns_200() throws Exception {
+        when(estoqueUseCase.setWarehouseActive("LOJA-01", false))
+                .thenReturn(Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, false));
+
+        mockMvc.perform(patch("/estoque/warehouses/LOJA-01/active")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"active\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.active").value(false));
+    }
+
+    @Test
+    void registerMovement_entradaEmProdutoDesativado_returns_409() throws Exception {
+        when(estoqueUseCase.adjustStock(eq("NARG-001"), eq("LOJA-01"), eq(MovementType.ENTRADA),
+                any(), any(), any()))
+                .thenThrow(new InactiveProductException("NARG-001"));
+
+        mockMvc.perform(post("/estoque/movements")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sku\":\"NARG-001\",\"warehouseCode\":\"LOJA-01\",\"type\":\"ENTRADA\","
+                                + "\"quantity\":5.000,\"reason\":\"Recebimento\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.errorCode").value("PRODUCT_INACTIVE"));
+    }
+
+    @Test
+    void registerMovement_entradaEmDepositoDesativado_returns_409() throws Exception {
+        when(estoqueUseCase.adjustStock(eq("NARG-001"), eq("LOJA-01"), eq(MovementType.ENTRADA),
+                any(), any(), any()))
+                .thenThrow(new InactiveWarehouseException("LOJA-01"));
+
+        mockMvc.perform(post("/estoque/movements")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sku\":\"NARG-001\",\"warehouseCode\":\"LOJA-01\",\"type\":\"ENTRADA\","
+                                + "\"quantity\":5.000,\"reason\":\"Recebimento\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.errorCode").value("WAREHOUSE_INACTIVE"));
+    }
+
+    // ------------------------------------------------------------------------------------
+    // EST-F006 — balanço de inventário
+    // ------------------------------------------------------------------------------------
+
+    private static final Warehouse LOJA =
+            Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+
+    private StockCount count(StockCountStatus status, List<StockCountItem> items) {
+        return StockCount.of(50L, 1L, status, "gerente",
+                Instant.parse("2026-07-27T09:00:00Z"),
+                status == StockCountStatus.ABERTA ? null : Instant.parse("2026-07-27T18:00:00Z"), items);
+    }
+
+    @Test
+    void openStockCount_returns_201_withLocation() throws Exception {
+        when(estoqueUseCase.openStockCount("LOJA-01", "admin"))
+                .thenReturn(count(StockCountStatus.ABERTA, List.of()));
+
+        mockMvc.perform(post("/estoque/stock-counts")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"warehouseCode\":\"LOJA-01\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(header().string("Location", "/estoque/stock-counts/50"))
+                .andExpect(jsonPath("$.id").value(50))
+                .andExpect(jsonPath("$.status").value("ABERTA"))
+                .andExpect(jsonPath("$.warehouseCode").value("LOJA-01"))
+                .andExpect(jsonPath("$.items").isEmpty());
+    }
+
+    @Test
+    void openStockCount_segundoNoMesmoDeposito_returns_409() throws Exception {
+        when(estoqueUseCase.openStockCount(eq("LOJA-01"), any()))
+                .thenThrow(new StockCountAlreadyOpenException("LOJA-01", 50L));
+
+        mockMvc.perform(post("/estoque/stock-counts")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"warehouseCode\":\"LOJA-01\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.errorCode").value("STOCK_COUNT_ALREADY_OPEN"));
+    }
+
+    @Test
+    void openStockCount_depositoInexistente_returns_404() throws Exception {
+        when(estoqueUseCase.openStockCount(eq("INEXISTENTE"), any()))
+                .thenThrow(new WarehouseNotFoundException("INEXISTENTE"));
+
+        mockMvc.perform(post("/estoque/stock-counts")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"warehouseCode\":\"INEXISTENTE\"}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.errorCode").value("WAREHOUSE_NOT_FOUND"));
+    }
+
+    @Test
+    void recordCountedItem_returns_200() throws Exception {
+        StockCount updated = count(StockCountStatus.ABERTA,
+                List.of(StockCountItem.of(1L, "NARG-001", new BigDecimal("37.000"), null, null)));
+        when(estoqueUseCase.recordCountedItem(50L, "NARG-001", new BigDecimal("37.000"))).thenReturn(updated);
+        when(estoqueUseCase.getWarehouse(1L)).thenReturn(LOJA);
+
+        mockMvc.perform(post("/estoque/stock-counts/50/items")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sku\":\"NARG-001\",\"countedQuantity\":37.000}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].sku").value("NARG-001"))
+                .andExpect(jsonPath("$.items[0].countedQuantity").value(37.0))
+                .andExpect(jsonPath("$.items[0].expectedQuantity").isEmpty())
+                .andExpect(jsonPath("$.warehouseCode").value("LOJA-01"));
+    }
+
+    /** Contar zero é o item que sumiu — o teto inferior é inclusivo de propósito. */
+    @Test
+    void recordCountedItem_contagemZero_returns_200() throws Exception {
+        StockCount updated = count(StockCountStatus.ABERTA,
+                List.of(StockCountItem.of(1L, "NARG-001", BigDecimal.ZERO, null, null)));
+        when(estoqueUseCase.recordCountedItem(eq(50L), eq("NARG-001"), any())).thenReturn(updated);
+        when(estoqueUseCase.getWarehouse(1L)).thenReturn(LOJA);
+
+        mockMvc.perform(post("/estoque/stock-counts/50/items")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sku\":\"NARG-001\",\"countedQuantity\":0}"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void recordCountedItem_contagemNegativa_returns_400() throws Exception {
+        mockMvc.perform(post("/estoque/stock-counts/50/items")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sku\":\"NARG-001\",\"countedQuantity\":-1}"))
+                .andExpect(status().isBadRequest());
+
+        verify(estoqueUseCase, never()).recordCountedItem(any(), any(), any());
+    }
+
+    @Test
+    void recordCountedItem_balancoFechado_returns_409() throws Exception {
+        when(estoqueUseCase.recordCountedItem(eq(50L), any(), any()))
+                .thenThrow(new StockCountNotOpenException(50L, StockCountStatus.FECHADA));
+
+        mockMvc.perform(post("/estoque/stock-counts/50/items")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sku\":\"NARG-001\",\"countedQuantity\":5}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.errorCode").value("STOCK_COUNT_NOT_OPEN"));
+    }
+
+    @Test
+    void closeStockCount_returns_200_withDivergences() throws Exception {
+        StockCount closed = count(StockCountStatus.FECHADA, List.of(
+                StockCountItem.of(1L, "SKU-FALTA", new BigDecimal("8.000"),
+                        new BigDecimal("10.000"), new BigDecimal("-2.000"))));
+        when(estoqueUseCase.closeStockCount(50L, "admin")).thenReturn(closed);
+        when(estoqueUseCase.getWarehouse(1L)).thenReturn(LOJA);
+
+        mockMvc.perform(post("/estoque/stock-counts/50/close").principal(AUTH))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("FECHADA"))
+                .andExpect(jsonPath("$.closedAt").isNotEmpty())
+                .andExpect(jsonPath("$.items[0].expectedQuantity").value(10.0))
+                .andExpect(jsonPath("$.items[0].difference").value(-2.0));
+    }
+
+    @Test
+    void closeStockCount_balancoJaFechado_returns_409() throws Exception {
+        when(estoqueUseCase.closeStockCount(eq(50L), any()))
+                .thenThrow(new StockCountNotOpenException(50L, StockCountStatus.FECHADA));
+
+        mockMvc.perform(post("/estoque/stock-counts/50/close").principal(AUTH))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.errorCode").value("STOCK_COUNT_NOT_OPEN"));
+    }
+
+    @Test
+    void closeStockCount_inexistente_returns_404() throws Exception {
+        when(estoqueUseCase.closeStockCount(eq(99L), any()))
+                .thenThrow(new StockCountNotFoundException(99L));
+
+        mockMvc.perform(post("/estoque/stock-counts/99/close").principal(AUTH))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.errorCode").value("STOCK_COUNT_NOT_FOUND"));
+    }
+
+    @Test
+    void cancelStockCount_returns_200() throws Exception {
+        when(estoqueUseCase.cancelStockCount(50L))
+                .thenReturn(count(StockCountStatus.CANCELADA, List.of()));
+        when(estoqueUseCase.getWarehouse(1L)).thenReturn(LOJA);
+
+        mockMvc.perform(post("/estoque/stock-counts/50/cancel").principal(AUTH))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CANCELADA"));
+    }
+
+    @Test
+    void getStockCount_returns_200() throws Exception {
+        when(estoqueUseCase.getStockCount(50L)).thenReturn(count(StockCountStatus.ABERTA, List.of()));
+        when(estoqueUseCase.getWarehouse(1L)).thenReturn(LOJA);
+
+        mockMvc.perform(get("/estoque/stock-counts/50").principal(AUTH))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(50))
+                .andExpect(jsonPath("$.username").value("gerente"));
+    }
+
+    @Test
+    void getStockCount_inexistente_returns_404() throws Exception {
+        when(estoqueUseCase.getStockCount(99L)).thenThrow(new StockCountNotFoundException(99L));
+
+        mockMvc.perform(get("/estoque/stock-counts/99").principal(AUTH))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.errorCode").value("STOCK_COUNT_NOT_FOUND"));
+    }
+
+    @Test
+    void listStockCounts_returns_200_paginated() throws Exception {
+        when(estoqueUseCase.listStockCounts("LOJA-01", 0, 20))
+                .thenReturn(new PageResult<>(List.of(count(StockCountStatus.ABERTA, List.of())), 0, 20, 1L, 1));
+
+        mockMvc.perform(get("/estoque/stock-counts").principal(AUTH).param("warehouseCode", "LOJA-01"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].id").value(50))
+                .andExpect(jsonPath("$.content[0].warehouseCode").value("LOJA-01"))
+                .andExpect(jsonPath("$.totalElements").value(1));
+    }
+
+    @Test
+    void listStockCounts_semWarehouseCode_returns_400() throws Exception {
+        mockMvc.perform(get("/estoque/stock-counts").principal(AUTH))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("MISSING_PARAMETER"));
     }
 
     @Test

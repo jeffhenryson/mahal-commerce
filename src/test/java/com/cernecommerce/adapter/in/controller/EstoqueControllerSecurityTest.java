@@ -288,6 +288,164 @@ public class EstoqueControllerSecurityTest {
                 .andExpect(status().isOk());
     }
 
+    // EST-F018 — PATCH e desativação reusam as permissões de MANAGE do respectivo recurso.
+
+    @Test
+    void patch_product_without_auth_returns_401() throws Exception {
+        mockMvc.perform(patch("/estoque/products/QUALQUER-SKU")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"Novo\"}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    /** Ler o catálogo não dá direito de editá-lo. */
+    @Test
+    void patch_product_with_product_read_only_returns_403() throws Exception {
+        mockMvc.perform(patch("/estoque/products/QUALQUER-SKU")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"Novo\"}")
+                .with(user("bob").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_READ"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void patch_product_with_product_manage_returns_200() throws Exception {
+        String sku = givenProduct();
+
+        mockMvc.perform(patch("/estoque/products/" + sku)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"Produto Renomeado\"}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_MANAGE"))))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void patch_product_active_with_product_read_only_returns_403() throws Exception {
+        mockMvc.perform(patch("/estoque/products/QUALQUER-SKU/active")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"active\":false}")
+                .with(user("bob").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_READ"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void patch_product_active_with_product_manage_returns_200() throws Exception {
+        String sku = givenProduct();
+
+        mockMvc.perform(patch("/estoque/products/" + sku + "/active")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"active\":false}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_MANAGE"))))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void patch_warehouse_with_warehouse_read_only_returns_403() throws Exception {
+        mockMvc.perform(patch("/estoque/warehouses/QUALQUER")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"Novo\"}")
+                .with(user("bob").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_WAREHOUSE_READ"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void patch_warehouse_and_active_with_warehouse_manage_returns_200() throws Exception {
+        String code = "LOJA_PATCH_SEC_" + System.nanoTime();
+        mockMvc.perform(post("/estoque/warehouses")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"code\":\"" + code + "\",\"name\":\"Loja Teste\",\"type\":\"LOJA_FISICA\"}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_WAREHOUSE_MANAGE"))))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(patch("/estoque/warehouses/" + code)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"Loja Renomeada\"}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_WAREHOUSE_MANAGE"))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(patch("/estoque/warehouses/" + code + "/active")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"active\":false}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_WAREHOUSE_MANAGE"))))
+                .andExpect(status().isOk());
+    }
+
+    // EST-F006 — o balanço reusa ESTOQUE_STOCK_MANAGE: fechar uma contagem é movimentar saldo.
+
+    @Test
+    void open_stock_count_without_auth_returns_401() throws Exception {
+        mockMvc.perform(post("/estoque/stock-counts")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"warehouseCode\":\"QUALQUER\"}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    /** Ver saldo não dá direito de abrir balanço — fechar um aplica ajuste. */
+    @Test
+    void open_stock_count_with_warehouse_read_only_returns_403() throws Exception {
+        mockMvc.perform(post("/estoque/stock-counts")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"warehouseCode\":\"QUALQUER\"}")
+                .with(user("bob").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_WAREHOUSE_READ"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void get_stock_count_with_warehouse_read_only_returns_403() throws Exception {
+        mockMvc.perform(get("/estoque/stock-counts/1")
+                .with(user("bob").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_WAREHOUSE_READ"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void close_stock_count_with_warehouse_read_only_returns_403() throws Exception {
+        mockMvc.perform(post("/estoque/stock-counts/1/close")
+                .with(user("bob").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_WAREHOUSE_READ"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void open_stock_count_with_estoque_stock_manage_returns_201() throws Exception {
+        String code = "LOJA_COUNT_SEC_" + System.nanoTime();
+        mockMvc.perform(post("/estoque/warehouses")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"code\":\"" + code + "\",\"name\":\"Loja Teste\",\"type\":\"LOJA_FISICA\"}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_WAREHOUSE_MANAGE"))))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(post("/estoque/stock-counts")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"warehouseCode\":\"" + code + "\"}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_STOCK_MANAGE"))))
+                .andExpect(status().isCreated());
+    }
+
     @Test
     void list_orphan_skus_without_auth_returns_401() throws Exception {
         mockMvc.perform(get("/estoque/integrity/orphan-skus"))
