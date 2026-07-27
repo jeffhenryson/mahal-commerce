@@ -6,6 +6,7 @@ import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
+import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.ReorderAlert;
@@ -21,6 +22,7 @@ import com.cernecommerce.core.ports.out.AfterCommitExecutor;
 import com.cernecommerce.core.ports.out.estoque.ProductRepository;
 import com.cernecommerce.core.ports.out.estoque.ReorderPointRepository;
 import com.cernecommerce.core.ports.out.estoque.StockBalanceRepository;
+import com.cernecommerce.core.ports.out.estoque.StockIntegrityRepository;
 import com.cernecommerce.core.ports.out.estoque.StockMovementRepository;
 import com.cernecommerce.core.ports.out.estoque.WarehouseRepository;
 import com.cernecommerce.core.ports.out.user.UserRepository;
@@ -43,19 +45,22 @@ public class EstoqueService implements EstoqueUseCase {
     private final StockBalanceRepository stockBalanceRepository;
     private final StockMovementRepository stockMovementRepository;
     private final ReorderPointRepository reorderPointRepository;
+    private final StockIntegrityRepository stockIntegrityRepository;
     private final NotificationUseCase notificationUseCase;
     private final UserRepository userRepository;
     private final AfterCommitExecutor afterCommitExecutor;
 
     public EstoqueService(ProductRepository productRepository, WarehouseRepository warehouseRepository,
             StockBalanceRepository stockBalanceRepository, StockMovementRepository stockMovementRepository,
-            ReorderPointRepository reorderPointRepository, NotificationUseCase notificationUseCase,
-            UserRepository userRepository, AfterCommitExecutor afterCommitExecutor) {
+            ReorderPointRepository reorderPointRepository, StockIntegrityRepository stockIntegrityRepository,
+            NotificationUseCase notificationUseCase, UserRepository userRepository,
+            AfterCommitExecutor afterCommitExecutor) {
         this.productRepository = productRepository;
         this.warehouseRepository = warehouseRepository;
         this.stockBalanceRepository = stockBalanceRepository;
         this.stockMovementRepository = stockMovementRepository;
         this.reorderPointRepository = reorderPointRepository;
+        this.stockIntegrityRepository = stockIntegrityRepository;
         this.notificationUseCase = notificationUseCase;
         this.userRepository = userRepository;
         this.afterCommitExecutor = afterCommitExecutor;
@@ -148,6 +153,12 @@ public class EstoqueService implements EstoqueUseCase {
                 .map(ReorderPoint::id)
                 .orElse(null);
         reorderPointRepository.save(new ReorderPoint(existingId, sku, warehouse.id(), minQuantity));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResult<OrphanSku> listOrphanSkus(int page, int size) {
+        return stockIntegrityRepository.findOrphanSkus(page, size);
     }
 
     /**

@@ -7,6 +7,7 @@ import com.cernecommerce.adapter.in.dtos.request.ProductRequest;
 import com.cernecommerce.adapter.in.dtos.request.ReorderPointRequest;
 import com.cernecommerce.adapter.in.dtos.request.StockMovementRequest;
 import com.cernecommerce.adapter.in.dtos.request.WarehouseRequest;
+import com.cernecommerce.adapter.in.dtos.response.OrphanSkuResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.ProductResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.StockBalanceResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.StockMovementResponseDTO;
@@ -14,6 +15,7 @@ import com.cernecommerce.adapter.in.dtos.response.WarehouseResponseDTO;
 import com.cernecommerce.core.domain.event.AuditEvent;
 import com.cernecommerce.core.domain.event.AuditEvent.EventType;
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
@@ -201,5 +203,29 @@ public class EstoqueController {
                 Map.of("sku", sku, "warehouseCode", request.getWarehouseCode(),
                         "minQuantity", request.getMinQuantity())));
         return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * Diagnóstico de EST-C011. Não publica {@code AuditEvent}: é leitura, e o módulo já fixa que
+     * consultas não geram evento (mesma regra de {@code GET /estoque/movements}).
+     */
+    @Operation(summary = "Lista pares SKU/depósito com dados de estoque cujo SKU não existe no catálogo",
+            description = "Diagnóstico de integridade: levanta o passivo de saldo, movimentações e pontos de "
+                    + "reposição órfãos gravados antes da validação de SKU. Somente leitura — o destino de cada "
+                    + "órfão (cadastrar o produto faltante ou expurgar a linha) é decisão humana.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK — página vazia se a base está íntegra"),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/integrity/orphan-skus")
+    @PreAuthorize("hasAuthority('ESTOQUE_STOCK_MANAGE')")
+    public ResponseEntity<PageResult<OrphanSkuResponseDTO>> listOrphanSkus(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        PageResult<OrphanSku> result = estoqueUseCase.listOrphanSkus(page, Math.min(size, 100));
+        PageResult<OrphanSkuResponseDTO> response = new PageResult<>(
+                result.content().stream().map(movementConverter::toResponse).toList(),
+                result.page(), result.size(), result.totalElements(), result.totalPages());
+        return ResponseEntity.ok(response);
     }
 }

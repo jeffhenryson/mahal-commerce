@@ -2,6 +2,7 @@ package com.cernecommerce.core.ports.in;
 
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
+import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
@@ -76,4 +77,22 @@ public interface EstoqueUseCase {
      * código do depósito não existir.
      */
     void setReorderPoint(String sku, String warehouseCode, BigDecimal minQuantity);
+
+    /**
+     * Diagnóstico de integridade (EST-C011): pares SKU/depósito com saldo, movimentação ou ponto
+     * de reposição gravados cujo SKU não existe no catálogo, nem como SKU pai nem como SKU de
+     * variação.
+     *
+     * <p>Desde EST-C002 nenhuma escrita nova cria um órfão — {@code adjustStock} e
+     * {@code setReorderPoint} barram SKU desconhecido. O que esta consulta levanta é o passivo
+     * anterior àquela correção, que continua na base porque não há FK das tabelas de estoque
+     * para {@code product}.</p>
+     *
+     * <p><b>Somente leitura, e de propósito:</b> o destino de cada órfão — cadastrar o produto
+     * que falta ou expurgar a linha — é decisão humana. Expurgar em massa arriscaria apagar
+     * histórico legítimo, então não existe operação de limpeza automática.</p>
+     *
+     * <p>Ordenado por {@code sku, warehouseCode}. Página vazia quando a base está íntegra.</p>
+     */
+    PageResult<OrphanSku> listOrphanSkus(int page, int size);
 }
