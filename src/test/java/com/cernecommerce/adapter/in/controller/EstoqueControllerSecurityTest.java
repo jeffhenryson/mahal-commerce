@@ -30,6 +30,23 @@ public class EstoqueControllerSecurityTest {
         mockMvc = MockMvcBuilders.webAppContextSetup(context).apply(springSecurity()).build();
     }
 
+    /**
+     * Cadastra um SKU único e o devolve. Desde EST-C002 movimentar saldo ou definir ponto de
+     * reposição exige que o SKU exista no catálogo, então os testes de escrita precisam criar o
+     * produto antes — só checar a authority não basta mais para chegar ao 2xx.
+     */
+    private String givenProduct() throws Exception {
+        String sku = "SKU_SEC_TEST_" + System.nanoTime();
+        mockMvc.perform(post("/estoque/products")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"sku\":\"" + sku + "\",\"name\":\"Produto Teste\",\"category\":\"testes\"}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_MANAGE"))))
+                .andExpect(status().isCreated());
+        return sku;
+    }
+
     @Test
     void list_products_without_auth_returns_401() throws Exception {
         mockMvc.perform(get("/estoque/products"))
@@ -163,6 +180,7 @@ public class EstoqueControllerSecurityTest {
 
     @Test
     void register_movement_with_estoque_stock_manage_returns_201() throws Exception {
+        String sku = givenProduct();
         String code = "LOJA_MOV_SEC_TEST_" + System.currentTimeMillis();
         mockMvc.perform(post("/estoque/warehouses")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -174,7 +192,7 @@ public class EstoqueControllerSecurityTest {
 
         mockMvc.perform(post("/estoque/movements")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"sku\":\"NARG-001\",\"warehouseCode\":\"" + code + "\",\"type\":\"ENTRADA\","
+                .content("{\"sku\":\"" + sku + "\",\"warehouseCode\":\"" + code + "\",\"type\":\"ENTRADA\","
                         + "\"quantity\":1,\"reason\":\"teste\"}")
                 .with(user("gerente").authorities(
                         new SimpleGrantedAuthority("ROLE_ADMIN"),
@@ -202,6 +220,7 @@ public class EstoqueControllerSecurityTest {
 
     @Test
     void set_reorder_point_with_estoque_stock_manage_returns_204() throws Exception {
+        String sku = givenProduct();
         String code = "LOJA_REORDER_SEC_TEST_" + System.currentTimeMillis();
         mockMvc.perform(post("/estoque/warehouses")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -211,7 +230,7 @@ public class EstoqueControllerSecurityTest {
                         new SimpleGrantedAuthority("ESTOQUE_WAREHOUSE_MANAGE"))))
                 .andExpect(status().isCreated());
 
-        mockMvc.perform(put("/estoque/products/NARG-001/reorder-point")
+        mockMvc.perform(put("/estoque/products/" + sku + "/reorder-point")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"warehouseCode\":\"" + code + "\",\"minQuantity\":10}")
                 .with(user("gerente").authorities(

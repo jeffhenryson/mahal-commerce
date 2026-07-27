@@ -1,6 +1,7 @@
 package com.cernecommerce.core.service;
 
 import com.cernecommerce.core.domain.exception.estoque.InsufficientStockException;
+import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
 import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionClosedException;
 import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionNotFoundException;
 import com.cernecommerce.core.domain.model.PageResult;
@@ -99,6 +100,22 @@ class PdvServiceTest {
                 .isInstanceOf(CashRegisterSessionClosedException.class);
 
         verify(estoqueUseCase, never()).adjustStock(any(), any(), any(), any(), any(), any());
+        verify(saleRepository, never()).save(any());
+    }
+
+    @Test
+    void registerSale_propagatesUnknownSkuAndDoesNotSaveSale() {
+        // EST-C002: antes, um SKU digitado errado no PDV criava saldo e ledger órfãos e a venda
+        // era gravada normalmente. Agora a venda inteira é revertida.
+        when(cashRegisterRepository.findById(1L)).thenReturn(Optional.of(openSession()));
+        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any()))
+                .thenThrow(new ProductNotFoundException("SKU-FANTASMA"));
+
+        List<SaleItem> items = List.of(new SaleItem("SKU-FANTASMA", BigDecimal.ONE, BigDecimal.TEN));
+
+        assertThatThrownBy(() -> pdvService.registerSale(1L, "LOJA-01", items, "caixa1"))
+                .isInstanceOf(ProductNotFoundException.class);
+
         verify(saleRepository, never()).save(any());
     }
 

@@ -3,6 +3,7 @@ package com.cernecommerce.core.service;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateSkuException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateWarehouseCodeException;
 import com.cernecommerce.core.domain.exception.estoque.InsufficientStockException;
+import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
@@ -16,6 +17,7 @@ import com.cernecommerce.core.domain.model.estoque.Warehouse;
 import com.cernecommerce.core.domain.model.estoque.WarehouseType;
 import com.cernecommerce.core.domain.model.notification.NotificationType;
 import com.cernecommerce.core.ports.in.NotificationUseCase;
+import com.cernecommerce.core.ports.out.AfterCommitExecutor;
 import com.cernecommerce.core.ports.out.estoque.ProductRepository;
 import com.cernecommerce.core.ports.out.estoque.ReorderPointRepository;
 import com.cernecommerce.core.ports.out.estoque.StockBalanceRepository;
@@ -33,6 +35,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -54,11 +57,27 @@ class EstoqueServiceTest {
 
     EstoqueService estoqueService;
 
+    /**
+     * Sem transação real nestes testes, o executor despacha na hora — é o mesmo comportamento da
+     * implementação de produção quando não há sincronização de transação ativa. A agregação em
+     * lote é exercitada por {@code TransactionAfterCommitExecutorTest} e pelo IT de alerta.
+     */
+    private final AfterCommitExecutor immediateExecutor = new AfterCommitExecutor() {
+        @Override
+        public <T> void accumulate(String key, T item, Consumer<List<T>> flush) {
+            flush.accept(List.of(item));
+        }
+    };
+
     @BeforeEach
     void setUp() {
         estoqueService = new EstoqueService(productRepository, warehouseRepository, stockBalanceRepository,
-                stockMovementRepository, reorderPointRepository, notificationUseCase, userRepository);
+                stockMovementRepository, reorderPointRepository, notificationUseCase, userRepository,
+                immediateExecutor);
         lenient().when(reorderPointRepository.findBySkuAndWarehouseId(any(), any())).thenReturn(Optional.empty());
+        // Padrão dos testes: o SKU existe no catálogo, que é a pré-condição das movimentações.
+        // Os testes de createProduct e os de SKU desconhecido sobrescrevem este stub.
+        lenient().when(productRepository.existsBySku(any())).thenReturn(true);
     }
 
     private List<ProductVariant> oneVariant() {
@@ -68,7 +87,7 @@ class EstoqueServiceTest {
     @Test
     void createProduct_savesAndReturns() {
         Product saved = Product.of(1L, "NARG-001", "Narguile Aladin", "narguile", true, oneVariant());
-        when(productRepository.findBySku("NARG-001")).thenReturn(Optional.empty());
+        when(productRepository.existsBySku(any())).thenReturn(false);
         when(productRepository.save(any())).thenReturn(saved);
 
         Product result = estoqueService.createProduct("NARG-001", "Narguile Aladin", "narguile", oneVariant());
@@ -80,8 +99,7 @@ class EstoqueServiceTest {
 
     @Test
     void createProduct_throwsWhenSkuAlreadyExists() {
-        when(productRepository.findBySku("NARG-001"))
-                .thenReturn(Optional.of(Product.of(1L, "NARG-001", "Existente", "narguile", true, List.of())));
+        when(productRepository.existsBySku("NARG-001")).thenReturn(true);
 
         assertThatThrownBy(() -> estoqueService.createProduct("NARG-001", "Narguile Aladin", "narguile", oneVariant()))
                 .isInstanceOf(DuplicateSkuException.class);
@@ -91,12 +109,48 @@ class EstoqueServiceTest {
     @Test
     void createProduct_allowsProductWithoutVariants() {
         Product saved = Product.of(2L, "CARV-001", "Carvão Coco", "carvao", true, List.of());
-        when(productRepository.findBySku("CARV-001")).thenReturn(Optional.empty());
+        when(productRepository.existsBySku(any())).thenReturn(false);
         when(productRepository.save(any())).thenReturn(saved);
 
         Product result = estoqueService.createProduct("CARV-001", "Carvão Coco", "carvao", List.of());
 
         assertThat(result.variants()).isEmpty();
+    }
+
+    @Test
+    void createProduct_throwsWhenVariantSkuAlreadyExists() {
+        // EST-C010: antes, o SKU de variação duplicado escapava até a constraint
+        // uk_product_variant_sku e virava 500 em vez de 409.
+        when(productRepository.existsBySku("NARG-001")).thenReturn(false);
+        when(productRepository.existsBySku("NARG-M-001")).thenReturn(true);
+
+        assertThatThrownBy(() -> estoqueService.createProduct("NARG-001", "Narguile Aladin", "narguile", oneVariant()))
+                .isInstanceOf(DuplicateSkuException.class)
+                .hasMessageContaining("NARG-M-001");
+        verify(productRepository, never()).save(any());
+    }
+
+    @Test
+    void createProduct_throwsWhenPayloadRepeatsTheSameVariantSku() {
+        List<ProductVariant> duplicated = List.of(
+                ProductVariant.create("NARG-M-001", List.of(new ProductAttribute("sabor", "menta"))),
+                ProductVariant.create("NARG-M-001", List.of(new ProductAttribute("sabor", "uva"))));
+
+        assertThatThrownBy(() -> estoqueService.createProduct("NARG-001", "Narguile Aladin", "narguile", duplicated))
+                .isInstanceOf(DuplicateSkuException.class)
+                .hasMessageContaining("NARG-M-001");
+        verify(productRepository, never()).save(any());
+    }
+
+    @Test
+    void createProduct_throwsWhenVariantSkuEqualsParentSku() {
+        List<ProductVariant> collidesWithParent = List.of(
+                ProductVariant.create("NARG-001", List.of(new ProductAttribute("sabor", "menta"))));
+
+        assertThatThrownBy(() -> estoqueService.createProduct("NARG-001", "Narguile Aladin", "narguile",
+                collidesWithParent))
+                .isInstanceOf(DuplicateSkuException.class);
+        verify(productRepository, never()).save(any());
     }
 
     @Test
@@ -339,6 +393,45 @@ class EstoqueServiceTest {
 
         verify(notificationUseCase, never()).notify(any(), any(), any(), any());
         verify(userRepository, never()).findUsernamesByPermission(any());
+    }
+
+    @Test
+    void adjustStock_throwsWhenSkuNotInCatalog() {
+        when(productRepository.existsBySku("SKU-FANTASMA")).thenReturn(false);
+
+        assertThatThrownBy(() -> estoqueService.adjustStock("SKU-FANTASMA", "LOJA-01", MovementType.ENTRADA,
+                new BigDecimal("5.000"), "Recebimento", "gerente"))
+                .isInstanceOf(ProductNotFoundException.class);
+
+        // Nada pode ser gravado — nem ledger, nem saldo. O depósito nem chega a ser resolvido.
+        verify(stockMovementRepository, never()).save(any());
+        verify(stockBalanceRepository, never()).save(any());
+        verify(warehouseRepository, never()).findByCode(any());
+    }
+
+    @Test
+    void adjustStock_acceptsVariantSkuNotJustParentSku() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        when(productRepository.existsBySku("NARG-M-001")).thenReturn(true);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("NARG-M-001", 1L)).thenReturn(Optional.empty());
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        StockBalance result = estoqueService.adjustStock("NARG-M-001", "LOJA-01", MovementType.ENTRADA,
+                new BigDecimal("5.000"), "Recebimento", "gerente");
+
+        assertThat(result.quantity()).isEqualByComparingTo("5.000");
+    }
+
+    @Test
+    void setReorderPoint_throwsWhenSkuNotInCatalog() {
+        when(productRepository.existsBySku("SKU-FANTASMA")).thenReturn(false);
+
+        assertThatThrownBy(() -> estoqueService.setReorderPoint("SKU-FANTASMA", "LOJA-01", BigDecimal.TEN))
+                .isInstanceOf(ProductNotFoundException.class);
+
+        verify(reorderPointRepository, never()).save(any());
+        verify(warehouseRepository, never()).findByCode(any());
     }
 
     @Test

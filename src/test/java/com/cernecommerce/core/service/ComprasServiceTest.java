@@ -1,6 +1,7 @@
 package com.cernecommerce.core.service;
 
 import com.cernecommerce.core.domain.exception.compras.SupplierNotFoundException;
+import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.compras.GoodsReceipt;
@@ -87,6 +88,21 @@ class ComprasServiceTest {
                 .isInstanceOf(SupplierNotFoundException.class);
 
         verify(estoqueUseCase, never()).adjustStock(any(), any(), any(), any(), any(), any());
+        verify(goodsReceiptRepository, never()).save(any());
+    }
+
+    @Test
+    void receiveGoods_propagatesUnknownSkuAndDoesNotSaveReceipt() {
+        // EST-C002: recebimento com SKU não cadastrado agora reverte tudo, em vez de dar entrada
+        // de saldo num SKU que não existe no catálogo.
+        when(supplierRepository.findById(1L)).thenReturn(Optional.of(supplier()));
+        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any()))
+                .thenThrow(new ProductNotFoundException("SKU-FANTASMA"));
+
+        assertThatThrownBy(() -> comprasService.receiveGoods(1L, "LOJA-01",
+                List.of(new GoodsReceiptItem("SKU-FANTASMA", BigDecimal.ONE)), "gerente"))
+                .isInstanceOf(ProductNotFoundException.class);
+
         verify(goodsReceiptRepository, never()).save(any());
     }
 

@@ -10,6 +10,7 @@ import com.cernecommerce.adapter.in.converter.WarehouseDTOConverter;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateSkuException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateWarehouseCodeException;
 import com.cernecommerce.core.domain.exception.estoque.InsufficientStockException;
+import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
@@ -261,6 +262,51 @@ public class EstoqueControllerTest {
                                 + "\"quantity\":5.000,\"reason\":\"Recebimento\"}"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.errorCode").value("WAREHOUSE_NOT_FOUND"));
+    }
+
+    @Test
+    void registerMovement_skuNotInCatalog_returns_404() throws Exception {
+        when(estoqueUseCase.adjustStock(eq("SKU-FANTASMA"), any(), any(), any(), any(), any()))
+                .thenThrow(new ProductNotFoundException("SKU-FANTASMA"));
+
+        mockMvc.perform(post("/estoque/movements")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sku\":\"SKU-FANTASMA\",\"warehouseCode\":\"LOJA-01\",\"type\":\"ENTRADA\","
+                                + "\"quantity\":5.000,\"reason\":\"Recebimento\"}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.errorCode").value("PRODUCT_NOT_FOUND"));
+    }
+
+    @Test
+    void setReorderPoint_skuNotInCatalog_returns_404() throws Exception {
+        doThrow(new ProductNotFoundException("SKU-FANTASMA"))
+                .when(estoqueUseCase).setReorderPoint(eq("SKU-FANTASMA"), any(), any());
+
+        mockMvc.perform(put("/estoque/products/SKU-FANTASMA/reorder-point")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"warehouseCode\":\"LOJA-01\",\"minQuantity\":10.000}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.errorCode").value("PRODUCT_NOT_FOUND"));
+    }
+
+    @Test
+    void createProduct_dataIntegrityViolation_returns_409_withoutLeakingDriverMessage() throws Exception {
+        // EST-C010: rede de segurança — antes, qualquer violação de constraint virava 500 com o
+        // texto do driver (nome de tabela, constraint e valores da linha) no corpo da resposta.
+        when(estoqueUseCase.createProduct(any(), any(), any(), any()))
+                .thenThrow(new org.springframework.dao.DataIntegrityViolationException(
+                        "ERROR: duplicate key value violates unique constraint \"uk_product_variant_sku\""));
+
+        mockMvc.perform(post("/estoque/products")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sku\":\"NARG-001\",\"name\":\"Narguile Aladin\",\"category\":\"narguile\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.errorCode").value("DATA_INTEGRITY_VIOLATION"))
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.not(
+                        org.hamcrest.Matchers.containsString("uk_product_variant_sku"))));
     }
 
     @Test
