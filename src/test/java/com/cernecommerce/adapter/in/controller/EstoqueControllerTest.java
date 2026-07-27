@@ -14,6 +14,7 @@ import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
+import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
@@ -445,5 +446,61 @@ public class EstoqueControllerTest {
                         .param("warehouseCode", "INEXISTENTE"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.errorCode").value("WAREHOUSE_NOT_FOUND"));
+    }
+
+    @Test
+    void listOrphanSkus_returns_200_with_diagnosticRows() throws Exception {
+        OrphanSku orphan = OrphanSku.of("SKU-FANTASMA", "LOJA-01", new BigDecimal("3.000"), 2L, true,
+                Instant.parse("2026-07-01T10:00:00Z"));
+        when(estoqueUseCase.listOrphanSkus(0, 20))
+                .thenReturn(new PageResult<>(List.of(orphan), 0, 20, 1L, 1));
+
+        mockMvc.perform(get("/estoque/integrity/orphan-skus").principal(AUTH))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].sku").value("SKU-FANTASMA"))
+                .andExpect(jsonPath("$.content[0].warehouseCode").value("LOJA-01"))
+                .andExpect(jsonPath("$.content[0].quantity").value(3.0))
+                .andExpect(jsonPath("$.content[0].movementCount").value(2))
+                .andExpect(jsonPath("$.content[0].hasReorderPoint").value(true))
+                .andExpect(jsonPath("$.content[0].lastMovementAt").exists())
+                .andExpect(jsonPath("$.totalElements").value(1));
+    }
+
+    /** Órfão que nunca foi movimentado: saldo/ponto de reposição sem ledger. */
+    @Test
+    void listOrphanSkus_serializesNullLastMovementAt() throws Exception {
+        OrphanSku orphan = OrphanSku.of("SKU-FANTASMA", "LOJA-01", new BigDecimal("1.000"), 0L, false, null);
+        when(estoqueUseCase.listOrphanSkus(0, 20))
+                .thenReturn(new PageResult<>(List.of(orphan), 0, 20, 1L, 1));
+
+        mockMvc.perform(get("/estoque/integrity/orphan-skus").principal(AUTH))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].lastMovementAt").isEmpty())
+                .andExpect(jsonPath("$.content[0].movementCount").value(0));
+    }
+
+    /** Base íntegra é 200 com página vazia — não é 404. */
+    @Test
+    void listOrphanSkus_returns_200_withEmptyPageWhenBaseIsClean() throws Exception {
+        when(estoqueUseCase.listOrphanSkus(0, 20))
+                .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0));
+
+        mockMvc.perform(get("/estoque/integrity/orphan-skus").principal(AUTH))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isEmpty())
+                .andExpect(jsonPath("$.totalElements").value(0));
+    }
+
+    @Test
+    void listOrphanSkus_capsPageSizeAt100() throws Exception {
+        when(estoqueUseCase.listOrphanSkus(0, 100))
+                .thenReturn(new PageResult<>(List.of(), 0, 100, 0L, 0));
+
+        mockMvc.perform(get("/estoque/integrity/orphan-skus")
+                        .principal(AUTH)
+                        .param("size", "5000"))
+                .andExpect(status().isOk());
+
+        verify(estoqueUseCase).listOrphanSkus(0, 100);
     }
 }

@@ -7,6 +7,7 @@ import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
+import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
@@ -21,6 +22,7 @@ import com.cernecommerce.core.ports.out.AfterCommitExecutor;
 import com.cernecommerce.core.ports.out.estoque.ProductRepository;
 import com.cernecommerce.core.ports.out.estoque.ReorderPointRepository;
 import com.cernecommerce.core.ports.out.estoque.StockBalanceRepository;
+import com.cernecommerce.core.ports.out.estoque.StockIntegrityRepository;
 import com.cernecommerce.core.ports.out.estoque.StockMovementRepository;
 import com.cernecommerce.core.ports.out.estoque.WarehouseRepository;
 import com.cernecommerce.core.ports.out.user.UserRepository;
@@ -52,6 +54,7 @@ class EstoqueServiceTest {
     @Mock StockBalanceRepository stockBalanceRepository;
     @Mock StockMovementRepository stockMovementRepository;
     @Mock ReorderPointRepository reorderPointRepository;
+    @Mock StockIntegrityRepository stockIntegrityRepository;
     @Mock NotificationUseCase notificationUseCase;
     @Mock UserRepository userRepository;
 
@@ -72,8 +75,8 @@ class EstoqueServiceTest {
     @BeforeEach
     void setUp() {
         estoqueService = new EstoqueService(productRepository, warehouseRepository, stockBalanceRepository,
-                stockMovementRepository, reorderPointRepository, notificationUseCase, userRepository,
-                immediateExecutor);
+                stockMovementRepository, reorderPointRepository, stockIntegrityRepository, notificationUseCase,
+                userRepository, immediateExecutor);
         lenient().when(reorderPointRepository.findBySkuAndWarehouseId(any(), any())).thenReturn(Optional.empty());
         // Padrão dos testes: o SKU existe no catálogo, que é a pré-condição das movimentações.
         // Os testes de createProduct e os de SKU desconhecido sobrescrevem este stub.
@@ -445,5 +448,46 @@ class EstoqueServiceTest {
                 "Recebimento", "gerente");
 
         verify(notificationUseCase, never()).notify(any(), any(), any(), any());
+    }
+
+    @Test
+    void listOrphanSkus_delegatesPagingToTheIntegrityRepository() {
+        OrphanSku orphan = OrphanSku.of("SKU-FANTASMA", "LOJA-01", new BigDecimal("3.000"), 2L, false,
+                Instant.parse("2026-07-01T10:00:00Z"));
+        when(stockIntegrityRepository.findOrphanSkus(1, 50))
+                .thenReturn(new PageResult<>(List.of(orphan), 1, 50, 1L, 1));
+
+        PageResult<OrphanSku> result = estoqueService.listOrphanSkus(1, 50);
+
+        assertThat(result.content()).containsExactly(orphan);
+        assertThat(result.page()).isEqualTo(1);
+        assertThat(result.totalElements()).isEqualTo(1L);
+        verify(stockIntegrityRepository).findOrphanSkus(1, 50);
+    }
+
+    /** Base íntegra é o caso esperado depois de EST-C002; não é erro nem 404. */
+    @Test
+    void listOrphanSkus_returnsEmptyPageWhenBaseIsClean() {
+        when(stockIntegrityRepository.findOrphanSkus(0, 20))
+                .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0));
+
+        PageResult<OrphanSku> result = estoqueService.listOrphanSkus(0, 20);
+
+        assertThat(result.content()).isEmpty();
+        assertThat(result.totalElements()).isZero();
+    }
+
+    /** É diagnóstico: não pode escrever nada, nem sequer resolver depósito por código. */
+    @Test
+    void listOrphanSkus_doesNotTouchAnyWriteRepository() {
+        when(stockIntegrityRepository.findOrphanSkus(0, 20))
+                .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0));
+
+        estoqueService.listOrphanSkus(0, 20);
+
+        verify(stockBalanceRepository, never()).save(any());
+        verify(stockMovementRepository, never()).save(any());
+        verify(reorderPointRepository, never()).save(any());
+        verify(warehouseRepository, never()).findByCode(any());
     }
 }

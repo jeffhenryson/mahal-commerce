@@ -287,4 +287,39 @@ public class EstoqueControllerSecurityTest {
                         new SimpleGrantedAuthority("ESTOQUE_STOCK_MANAGE"))))
                 .andExpect(status().isOk());
     }
+
+    @Test
+    void list_orphan_skus_without_auth_returns_401() throws Exception {
+        mockMvc.perform(get("/estoque/integrity/orphan-skus"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void list_orphan_skus_with_user_role_only_returns_403() throws Exception {
+        mockMvc.perform(get("/estoque/integrity/orphan-skus")
+                .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isForbidden());
+    }
+
+    /**
+     * O diagnóstico de integridade expõe o passivo de dados sujos do estoque, então segue a mesma
+     * régua do ledger: exige STOCK_MANAGE, e WAREHOUSE_READ não basta.
+     */
+    @Test
+    void list_orphan_skus_with_warehouse_read_only_returns_403() throws Exception {
+        mockMvc.perform(get("/estoque/integrity/orphan-skus")
+                .with(user("bob").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_WAREHOUSE_READ"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void list_orphan_skus_with_estoque_stock_manage_returns_200() throws Exception {
+        mockMvc.perform(get("/estoque/integrity/orphan-skus")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_STOCK_MANAGE"))))
+                .andExpect(status().isOk());
+    }
 }
