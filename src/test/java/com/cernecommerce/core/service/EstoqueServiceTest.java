@@ -191,11 +191,16 @@ class EstoqueServiceTest {
     }
 
     @Test
-    void listWarehouses_delegatesToRepository() {
-        List<Warehouse> warehouses = List.of(Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true));
-        when(warehouseRepository.findAll()).thenReturn(warehouses);
+    void listWarehouses_delegatesPagingToRepository() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        when(warehouseRepository.findAll(1, 50)).thenReturn(new PageResult<>(List.of(warehouse), 1, 50, 1L, 1));
 
-        assertThat(estoqueService.listWarehouses()).hasSize(1);
+        PageResult<Warehouse> result = estoqueService.listWarehouses(1, 50);
+
+        assertThat(result.content()).containsExactly(warehouse);
+        assertThat(result.page()).isEqualTo(1);
+        assertThat(result.totalElements()).isEqualTo(1L);
+        verify(warehouseRepository).findAll(1, 50);
     }
 
     @Test

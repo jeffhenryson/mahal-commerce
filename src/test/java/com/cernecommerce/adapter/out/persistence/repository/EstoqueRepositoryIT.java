@@ -135,7 +135,35 @@ class EstoqueRepositoryIT {
         assertThat(warehouseRepository.findByCode("WH-RT")).isPresent()
                 .get().satisfies(w -> assertThat(w.type()).isEqualTo(WarehouseType.LOJA_FISICA));
         assertThat(warehouseRepository.findByCode("WH-INEXISTENTE")).isEmpty();
-        assertThat(warehouseRepository.findAll()).extracting(Warehouse::code).contains("WH-RT");
+        assertThat(warehouseRepository.findAll(0, 100).content())
+                .extracting(Warehouse::code).contains("WH-RT");
+    }
+
+    /**
+     * EST-C005: a listagem de depósitos passou a ser paginada. A ordenação é por {@code id}
+     * (BIGSERIAL monotônico, chave única) para a paginação ser estável — {@code code} também
+     * seria único, mas {@code id} reflete a ordem de criação, que é a que o operador espera.
+     */
+    @Test
+    void warehouse_paginaOrdenadoPorId() {
+        Warehouse primeiro = givenWarehouse("WH-PAG-A");
+        Warehouse segundo = givenWarehouse("WH-PAG-B");
+        flushAndClear();
+
+        PageResult<Warehouse> pagina = warehouseRepository.findAll(0, 1);
+
+        assertThat(pagina.content()).hasSize(1);
+        assertThat(pagina.size()).isEqualTo(1);
+        assertThat(pagina.totalElements()).isGreaterThanOrEqualTo(2);
+        assertThat(pagina.totalPages()).isGreaterThanOrEqualTo(2);
+
+        // Varre todas as páginas: os dois depósitos aparecem uma vez cada, na ordem de criação.
+        List<Long> ids = new ArrayList<>();
+        for (int page = 0; page < pagina.totalPages(); page++) {
+            warehouseRepository.findAll(page, 1).content().forEach(w -> ids.add(w.id()));
+        }
+        assertThat(ids).containsSequence(primeiro.id(), segundo.id());
+        assertThat(ids).doesNotHaveDuplicates();
     }
 
     @Test

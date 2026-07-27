@@ -173,13 +173,28 @@ public class EstoqueControllerTest {
     }
 
     @Test
-    void listWarehouses_returns_200() throws Exception {
-        when(estoqueUseCase.listWarehouses()).thenReturn(
-                List.of(Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true)));
+    void listWarehouses_returns_200_paginated() throws Exception {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        when(estoqueUseCase.listWarehouses(0, 20))
+                .thenReturn(new PageResult<>(List.of(warehouse), 0, 20, 1L, 1));
 
         mockMvc.perform(get("/estoque/warehouses"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].code").value("LOJA-01"));
+                .andExpect(jsonPath("$.content[0].code").value("LOJA-01"))
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(20))
+                .andExpect(jsonPath("$.totalElements").value(1));
+    }
+
+    @Test
+    void listWarehouses_honoursPageAndSize() throws Exception {
+        when(estoqueUseCase.listWarehouses(2, 5))
+                .thenReturn(new PageResult<>(List.of(), 2, 5, 12L, 3));
+
+        mockMvc.perform(get("/estoque/warehouses").param("page", "2").param("size", "5"))
+                .andExpect(status().isOk());
+
+        verify(estoqueUseCase).listWarehouses(2, 5);
     }
 
     @Test
@@ -400,19 +415,26 @@ public class EstoqueControllerTest {
                 .andExpect(jsonPath("$.totalElements").value(0));
     }
 
+    /**
+     * O teto de 100 deixou de ser {@code Math.min} silencioso e virou {@code @Max(100)} → 400
+     * (EST-C005). Como a validação de parâmetro de handler é nativa do
+     * {@code RequestMappingHandlerAdapter} e não do controller em si, ela é exercitada com
+     * contexto real em {@code EstoqueControllerValidationTest}, não aqui no standalone.
+     */
     @Test
-    void listMovements_capsPageSizeAt100() throws Exception {
-        when(estoqueUseCase.listMovements("NARG-001", "LOJA-01", 0, 100))
-                .thenReturn(new PageResult<>(List.of(), 0, 100, 0L, 0));
+    void listMovements_passesPageAndSizeThroughUnchanged() throws Exception {
+        when(estoqueUseCase.listMovements("NARG-001", "LOJA-01", 1, 100))
+                .thenReturn(new PageResult<>(List.of(), 1, 100, 0L, 0));
 
         mockMvc.perform(get("/estoque/movements")
                         .principal(AUTH)
                         .param("sku", "NARG-001")
                         .param("warehouseCode", "LOJA-01")
-                        .param("size", "5000"))
+                        .param("page", "1")
+                        .param("size", "100"))
                 .andExpect(status().isOk());
 
-        verify(estoqueUseCase).listMovements("NARG-001", "LOJA-01", 0, 100);
+        verify(estoqueUseCase).listMovements("NARG-001", "LOJA-01", 1, 100);
     }
 
     @Test
@@ -492,15 +514,16 @@ public class EstoqueControllerTest {
     }
 
     @Test
-    void listOrphanSkus_capsPageSizeAt100() throws Exception {
-        when(estoqueUseCase.listOrphanSkus(0, 100))
-                .thenReturn(new PageResult<>(List.of(), 0, 100, 0L, 0));
+    void listOrphanSkus_passesPageAndSizeThroughUnchanged() throws Exception {
+        when(estoqueUseCase.listOrphanSkus(3, 100))
+                .thenReturn(new PageResult<>(List.of(), 3, 100, 0L, 0));
 
         mockMvc.perform(get("/estoque/integrity/orphan-skus")
                         .principal(AUTH)
-                        .param("size", "5000"))
+                        .param("page", "3")
+                        .param("size", "100"))
                 .andExpect(status().isOk());
 
-        verify(estoqueUseCase).listOrphanSkus(0, 100);
+        verify(estoqueUseCase).listOrphanSkus(3, 100);
     }
 }
