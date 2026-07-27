@@ -806,8 +806,8 @@ Query: page, size
 ### GET /estoque/products — Permissão: ESTOQUE_PRODUCT_READ
 
 ```
-Query: page, size (máx. 100)
-// Response 200 → PageResult<ProductResponse>
+Query: page (default 0, >= 0), size (default 20, 1..100)
+// Response 200 → PageResult<ProductResponse> / 400 VALIDATION_ERROR
 ```
 
 ---
@@ -874,16 +874,23 @@ Query: page, size (máx. 100)
 ### GET /estoque/warehouses — Permissão: ESTOQUE_WAREHOUSE_READ
 
 ```
-// Response 200 → WarehouseResponse[]
+Query: page (default 0, >= 0), size (default 20, 1..100)
+// Response 200 → PageResult<WarehouseResponse>, ordenado por id
+// 400 VALIDATION_ERROR (page ou size fora da faixa)
 ```
+
+⚠️ **Mudança de contrato no EST-C005:** antes devolvia `WarehouseResponse[]` — a lista inteira,
+sem paginação. Agora devolve um `PageResult`, então os depósitos estão em `content`.
 
 ---
 
 ### GET /estoque/stock-balance — Permissão: ESTOQUE_WAREHOUSE_READ
 
 ```
-Query: sku (obrigatório), warehouseCode (obrigatório)
+Query: sku (obrigatório, 3..50), warehouseCode (obrigatório, 2..50)
 // Response 200 → StockBalanceResponse / 404 WAREHOUSE_NOT_FOUND
+// 400 VALIDATION_ERROR (sku ou warehouseCode em branco ou fora do tamanho)
+// 400 MISSING_PARAMETER (parâmetro ausente)
 ```
 
 ```json
@@ -937,9 +944,10 @@ onde um SKU desconhecido reverte a venda ou o recebimento inteiro.
 ### GET /estoque/movements — Permissão: ESTOQUE_STOCK_MANAGE
 
 ```
-Query: sku (obrigatório), warehouseCode (obrigatório), page (default 0), size (default 20, teto 100)
+Query: sku (obrigatório, 3..50), warehouseCode (obrigatório, 2..50), page (default 0, >= 0), size (default 20, 1..100)
 // Response 200 → PageResult<StockMovementResponse>
 // 404 WAREHOUSE_NOT_FOUND / 400 MISSING_PARAMETER (sku ou warehouseCode ausente)
+// 400 VALIDATION_ERROR (parâmetro presente mas fora da faixa)
 ```
 
 ```json
@@ -999,8 +1007,8 @@ Operação revertida não notifica ninguém.
 ### GET /estoque/integrity/orphan-skus — Permissão: ESTOQUE_STOCK_MANAGE
 
 ```
-Query: page (default 0), size (default 20, teto 100)
-// Response 200 → PageResult<OrphanSkuResponse>
+Query: page (default 0, >= 0), size (default 20, 1..100)
+// Response 200 → PageResult<OrphanSkuResponse> / 400 VALIDATION_ERROR
 ```
 
 ```json

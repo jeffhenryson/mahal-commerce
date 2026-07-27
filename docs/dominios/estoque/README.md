@@ -49,6 +49,7 @@ preservado no record resultante, para que o merge no JPA acione o optimistic loc
 |---|---|---|
 | `DuplicateSkuException` | 409 | `SKU_ALREADY_EXISTS` |
 | `MissingServletRequestParameterException` (Spring) | 400 | `MISSING_PARAMETER` |
+| `HandlerMethodValidationException` (Spring) | 400 | `VALIDATION_ERROR` |
 | `DuplicateWarehouseCodeException` | 409 | `WAREHOUSE_CODE_ALREADY_EXISTS` |
 | `WarehouseNotFoundException` | 404 | `WAREHOUSE_NOT_FOUND` |
 | `ProductNotFoundException` | 404 | `PRODUCT_NOT_FOUND` |
@@ -83,7 +84,11 @@ preservado no record resultante, para que o merge no JPA acione o optimistic loc
 | Alerta é agregado por operação e só sai depois do commit | `AfterCommitExecutor` + `EstoqueService.dispatchReorderAlerts` | `TransactionAfterCommitExecutorTest.comTransacaoAtiva_agrega_e_despacha_uma_unica_vez_no_commit`, `em_rollback_nao_despacha_nada` |
 | Saldo igual ao mínimo **não** dispara alerta (comparação estrita) | `ReorderPoint.isBelow` | `EstoqueServiceTest.adjustStock_saida_aboveReorderPoint_doesNotNotify` |
 | Sem ponto de reposição configurado, nenhuma notificação é enviada | `EstoqueService.notifyIfBelowReorderPoint` | `EstoqueServiceTest.adjustStock_withoutReorderPointConfigured_doesNotNotify` |
-| Histórico de movimentações é paginado (máx. 100) e ordenado do mais recente para o mais antigo | `EstoqueController.listMovements` (`Math.min(size, 100)`) + `findBySkuAndWarehouseIdOrderByCreatedAtDescIdDesc` | `EstoqueControllerTest.listMovements_capsPageSizeAt100`, `listMovements_returns_200_with_ledger` |
+| Histórico de movimentações é paginado e ordenado do mais recente para o mais antigo | `EstoqueController.listMovements` + `findBySkuAndWarehouseIdOrderByCreatedAtDescIdDesc` | `EstoqueControllerTest.listMovements_returns_200_with_ledger` |
+| `page >= 0` e `size` entre 1 e 100 nos quatro endpoints paginados; fora da faixa é 400, não teto silencioso | `@Min`/`@Max` nos `@RequestParam` + `@Validated` no controller | `EstoqueControllerValidationTest.sizeAcimaDoTeto_returns_400`, `sizeZero_returns_400`, `pageNegativa_returns_400`, `sizeExatamenteNoTeto_returns_200` |
+| `sku` (3–50) e `warehouseCode` (2–50) em query e path são validados antes de chegar ao service | `@NotBlank`/`@Size` nos `@RequestParam`/`@PathVariable` | `EstoqueControllerValidationTest.getStockBalance_comParametroInvalido_returns_400`, `getStockBalance_comSkuAcimaDe50Caracteres_returns_400` |
+| Parâmetro **ausente** continua sendo 400 `MISSING_PARAMETER`, e não `VALIDATION_ERROR` | `GlobalExceptionHandler.handleMissingParam` vs. `handleHandlerMethodValidation` | `EstoqueControllerValidationTest.listMovements_semSku_continua_400_MISSING_PARAMETER` |
+| Listagem de depósitos é paginada e ordenada por id (paginação estável) | `WarehouseJpaRepository.findAllOrderById(Pageable)` | `EstoqueServiceTest.listWarehouses_delegatesPagingToRepository`, `EstoqueRepositoryIT.warehouse_paginaOrdenadoPorId` |
 | Movimentos com o mesmo `created_at` têm ordem determinística e paginação estável | desempate por `id` (BIGSERIAL) na ordenação do ledger | `EstoqueRepositoryIT.stockMovement_paginaDoMaisRecenteParaOMaisAntigo`, `stockMovement_paginacaoNaoRepeteNemPulaLinhaComCreatedAtIgual` |
 | Consultar histórico de par SKU/depósito nunca movimentado devolve página vazia (200), não 404 | `EstoqueService.listMovements` | `EstoqueServiceTest.listMovements_returnsEmptyPageWhenSkuNeverMoved`, `EstoqueControllerTest.listMovements_returns_200_withEmptyPageWhenNeverMoved` |
 | Histórico em depósito inexistente lança `WarehouseNotFoundException` (404) sem tocar no repositório de movimentações | `EstoqueService.listMovements` | `EstoqueServiceTest.listMovements_throwsWhenWarehouseNotFound` |
@@ -101,8 +106,8 @@ Todos exigem `bearerAuth`. Controller: `adapter/in/controller/EstoqueController.
 | `GET` | `/estoque/products` | `ESTOQUE_PRODUCT_READ` | Lista produtos paginados (`page` = 0, `size` = 20, teto de 100) |
 | `POST` | `/estoque/products` | `ESTOQUE_PRODUCT_MANAGE` | Cria produto (SKU pai) com variações e atributos. `201` + `Location: /estoque/products/{sku}`; `409 SKU_ALREADY_EXISTS` |
 | `POST` | `/estoque/warehouses` | `ESTOQUE_WAREHOUSE_MANAGE` | Cria depósito (`LOJA_FISICA` ou `ECOMMERCE`). `201` + `Location`; `409 WAREHOUSE_CODE_ALREADY_EXISTS` |
-| `GET` | `/estoque/warehouses` | `ESTOQUE_WAREHOUSE_READ` | Lista todos os depósitos (**sem paginação** — ver EST-C005) |
-| `GET` | `/estoque/stock-balance` | `ESTOQUE_WAREHOUSE_READ` | Consulta saldo por `sku` + `warehouseCode`. Retorna zero se nunca houve movimentação; `404 WAREHOUSE_NOT_FOUND` |
+| `GET` | `/estoque/warehouses` | `ESTOQUE_WAREHOUSE_READ` | Lista depósitos paginados, ordenados por id (`page` = 0, `size` = 20, faixa 1–100) |
+| `GET` | `/estoque/stock-balance` | `ESTOQUE_WAREHOUSE_READ` | Consulta saldo por `sku` + `warehouseCode`. Retorna zero se nunca houve movimentação; `404 WAREHOUSE_NOT_FOUND`; `400 VALIDATION_ERROR` |
 | `POST` | `/estoque/movements` | `ESTOQUE_STOCK_MANAGE` | Registra movimentação manual (`ENTRADA`/`SAIDA`/`AJUSTE`) e devolve o saldo atualizado. `201` + `Location` para o saldo; `400 INSUFFICIENT_STOCK`; `404 WAREHOUSE_NOT_FOUND`; `409 STOCK_UPDATE_CONFLICT` |
 | `GET` | `/estoque/movements` | `ESTOQUE_STOCK_MANAGE` | Histórico paginado do ledger por `sku` + `warehouseCode` (`page` = 0, `size` = 20, teto de 100), mais recentes primeiro. Par nunca movimentado devolve página vazia com `200`; `404 WAREHOUSE_NOT_FOUND`; `400 MISSING_PARAMETER` |
 | `PUT` | `/estoque/products/{sku}/reorder-point` | `ESTOQUE_STOCK_MANAGE` | Define a quantidade mínima do SKU no depósito (upsert). `204 No Content`; `404 WAREHOUSE_NOT_FOUND` |
@@ -193,11 +198,11 @@ notificação por item (EST-C003). Não há fila: se a entrega falhar, não há 
 
 ### Limites operacionais
 
-- `GET /estoque/products`, `GET /estoque/movements` e `GET /estoque/integrity/orphan-skus`:
-  `size` default 20, teto **100** (`Math.min(size, 100)` no controller).
-- `GET /estoque/warehouses`: **sem paginação** — devolve a lista inteira (EST-C005).
-- `GET /estoque/stock-balance`: `sku` e `warehouseCode` chegam **sem Bean Validation** — o
-  controller não é `@Validated`, diferente de `ComprasController` e `PdvController` (EST-C005).
+- Os quatro endpoints paginados (`/products`, `/warehouses`, `/movements`,
+  `/integrity/orphan-skus`): `page >= 0` e `size` entre 1 e 100, ambos por Bean Validation.
+  `size` fora da faixa é **400 `VALIDATION_ERROR`**, não um teto silencioso (EST-C005).
+- `sku` (3–50) e `warehouseCode` (2–50) em query e path são validados com `@NotBlank`/`@Size`,
+  espelhando as constraints dos DTOs de escrita.
 - Sem upload de arquivo neste módulo. A importação de XML de NF-e (EST-F005) vai introduzir o
   primeiro — e vai precisar de limite de tamanho e validação de conteúdo próprios.
 
@@ -276,6 +281,7 @@ nem para `product_variant.sku`. Ver EST-C002.
 | `core/domain/model/estoque/StockMovementTest` | Unit de domínio | `create`/`of` e todas as invariantes |
 | `core/domain/model/estoque/WarehouseTest` | Unit de domínio | `create`/`of` e obrigatoriedade de code/name/type |
 | `adapter/in/controller/EstoqueControllerTest` | MockMvc standalone | 29 casos: 200/201/204/400/404/409 dos 8 endpoints |
+| `adapter/in/controller/EstoqueControllerValidationTest` | `@SpringBootTest` + MockMvc real | Bean Validation dos `@RequestParam`/`@PathVariable`: faixa de `page`/`size` nos 4 endpoints paginados, `sku`/`warehouseCode` em branco ou fora do tamanho, e a distinção entre `VALIDATION_ERROR` e `MISSING_PARAMETER`. **Não é standalone de propósito** — a validação de parâmetro de handler é aplicada pelo `RequestMappingHandlerAdapter`, não pelo controller |
 | `adapter/in/controller/EstoqueControllerSecurityTest` | MockMvc + Security | 401 sem auth / 403 sem authority / sucesso com a authority correta, endpoint a endpoint — inclui o 403 de `WAREHOUSE_READ` no histórico de movimentações |
 | `infra/config/DevRoleBootstrapConfigTest` | Unit (Mockito) | 4 casos: `ROLE_DEV` recebe as permissões de negócio (incl. `PDV_SALE_MANAGE`), as `DEV_ONLY_*`, e não cria usuário sem `DEV_EMAIL` |
 | `infra/config/SeedConfigTest` | Unit (Mockito) | `ROLE_ADMIN` recebe as permissões `ESTOQUE_*` e `PDV_SALE_MANAGE` no seed de dev |
@@ -335,7 +341,6 @@ Convenções, variáveis e o environment compartilhado estão em
 | EST-F015 | 🟢 Baixa | Feature | kit-produto-composto | Produto "kit"/combo (ex.: kit narguilé = essência + carvão + descartável) que dá baixa nos componentes conforme receita cadastrada. | Backlog (Sprint 6) |
 | EST-F016 | 🟢 Baixa | Feature | unidade-medida-conversao | Múltiplas unidades por produto (compra em kg, venda em porção/g) com fator de conversão nas movimentações. | Backlog (Sprint 6) |
 | EST-F018 | 🟡 Média | Feature | atualizar-desativar-produto-deposito | Só existem `create` e `list` para produto e depósito. Falta `PUT`/`PATCH` e desativação — o campo `active` de `Product` e `Warehouse` nunca muda depois da criação. | Pendente |
-| EST-C005 | 🟢 Melhoria | Correção | validacao-e-paginacao-nos-endpoints-de-leitura | `GET /estoque/stock-balance` recebe `sku` e `warehouseCode` sem Bean Validation (o controller não é `@Validated`, diferente de `ComprasController` e `PdvController`); `GET /estoque/warehouses` retorna a lista inteira sem paginação. | Pendente |
 | EST-C006 | 🟢 Melhoria | Correção | migrations-v45-v47-sem-on-conflict | V45 e V47 inserem permissões sem `ON CONFLICT DO NOTHING`, ao contrário de V56/V57/V60. Re-execução em base parcialmente populada quebra. Herdado do antigo C018. | Pendente |
 | EST-C009 | 🟢 Melhoria | Correção | ajuste-de-inventario-so-incrementa | `StockBalance.apply` trata tudo que não é `SAIDA` como soma, então `AJUSTE` só aumenta saldo. Um ajuste de inventário para baixo hoje precisa ser lançado como `SAIDA`, o que polui a semântica do ledger. Depende da decisão de modelagem de EST-F006. | Pendente |
 
@@ -359,21 +364,21 @@ Convenções, variáveis e o environment compartilhado estão em
 - **2026-07-27** — `lacunas-de-teste-persistencia-e-concorrencia` (EST-C007): `StockBalanceConcurrencyIT` prova que o `@Version` de `stock_balance` impede lost update sob 8 escritas simultâneas (saldo final == baixas confirmadas) e que o perdedor da corrida vira conflito tratado, não 500; cobre também a corrida de primeira movimentação. `EstoqueRepositoryIT` cobre os cinco `*RepositoryImpl` do módulo — round-trip de produto com variações e atributos, `existsBySku` achando SKU pai e de variação, paginação ID-first, propagação do `version`, ordem do ledger e upsert do ponto de reposição.
 - **2026-07-27** — `package-info-obsoletos` (EST-C008): os `package-info` de `core/domain/model/estoque` e `core/ports/out/estoque` descreviam o módulo como "esqueleto (TODO)" e listavam como previstos modelos e adapters existentes desde EST-F001/F002; o comentário equivalente em `CoreBeanConfig` também foi corrigido. O único TODO que sobrou é o `NfeXmlImportPort` (EST-F005).
 
+- **2026-07-27** — `validacao-e-paginacao-nos-endpoints-de-leitura` (EST-C005): `EstoqueController` recebeu `@Validated` e os `@RequestParam`/`@PathVariable` ganharam constraints — `page >= 0`, `size` entre 1 e 100, `sku` 3–50 e `warehouseCode` 2–50, espelhando os DTOs de escrita. O `Math.min(size, 100)` silencioso saiu: `size` fora da faixa agora é **400 `VALIDATION_ERROR`**, alinhando `/estoque` com `/compras` e `/pdv`. `GET /estoque/warehouses` passou a ser paginado (`WarehouseRepository.findAll(page, size)` → `PageResult`, ordenado por `id`), o que é **mudança de contrato**: os depósitos saíram da raiz do JSON para `content`. Sem migration. Junto veio a correção de uma ponta de infra que valia para o projeto inteiro: desde o Spring Framework 6.1 a validação de parâmetro de handler é nativa do `RequestMappingHandlerAdapter` e lança `HandlerMethodValidationException`, não `ConstraintViolationException` — sem handler para ela, o `GlobalExceptionHandler` a jogava no catch-all de `Exception` e devolvia **500**. Era o comportamento real de `GET /compras/suppliers?size=200`, cujos `@Min`/`@Max` existiam desde COM-F001 e nunca tinham sido exercitados por teste. Nova `EstoqueControllerValidationTest` com contexto real (o standalone de `EstoqueControllerTest` não reproduz essa montagem).
 - **2026-07-27** — `saldo-orfao-ja-existente-na-base` (EST-C011): EST-C002 fechou a porta para novos órfãos, mas o passivo anterior seguia invisível na base — e é ele que contaminaria os relatórios de EST-F006 e EST-F007. Entregue o **levantamento**, não a limpeza: novo port `StockIntegrityRepository` (`core/ports/out/estoque`), query nativa em `StockIntegrityJpaRepository` e `GET /estoque/integrity/orphan-skus` paginado sob `ESTOQUE_STOCK_MANAGE`, mais o script avulso [`scripts/estoque-orphan-skus.sql`](../../../scripts/estoque-orphan-skus.sql) para o caminho DBA. O retrato é o record `OrphanSku` — uma linha por par SKU/depósito, com saldo, contagem e data do último movimento e presença de ponto de reposição, que é o contexto de que a decisão humana precisa. **Nenhum expurgo automático, de propósito:** os dois destinos possíveis (cadastrar o produto que faltava × apagar a digitação errada) são incompatíveis e a consulta não os distingue, então apagar em massa destruiria histórico legítimo — o script traz o bloco de `DELETE` comentado, com lista de SKUs a preencher à mão. Query nativa porque a origem é o `UNION` de três tabelas e JPQL não tem `UNION`; sem migration, e sem permissão nova. Cobertura na `EstoqueRepositoryIT` (7 cenários, incluindo SKU de variação, órfão só com ledger e paginação estável).
 - **2026-07-27** — `ordenacao-instavel-do-ledger` (EST-C012): o histórico ordenava só por `created_at DESC`, chave não-única — uma venda com N itens grava N movimentos no mesmo loop e na mesma transação, com `created_at` idêntico. Além da ordem de exibição arbitrária, a paginação de `GET /estoque/movements` ficava instável: com chave de ordenação não-única o banco não garante ordem consistente entre consultas, então a mesma linha podia voltar em duas páginas ou não aparecer em nenhuma. Corrigido com desempate por `id` (`findBySkuAndWarehouseIdOrderByCreatedAtDescIdDesc`); `id` é BIGSERIAL monotônico e dá ordem total. Sem migration — o índice `idx_stock_movement_sku_warehouse_created` continua servindo ao filtro e ao prefixo da ordenação. Achado ao escrever o `EstoqueRepositoryIT` do EST-C007, que reproduziu o cenário de venda multi-item.
 
 ## Próximos passos
 
-A sprint de integridade de 2026-07-27 fechou C002, C003, C004, C007, C008, C010, C011 e C012.
+A sprint de integridade de 2026-07-27 fechou C002, C003, C004, C005, C007, C008, C010, C011 e C012.
 
 O roteiro completo para fechar o módulo — ordem de execução de todos os itens restantes, as
 dependências entre eles e os dois que não cabem em estoque — está em
 [`proximos-passos.md`](proximos-passos.md). Resumo da prioridade imediata:
 
-1. **EST-C005** — `@Validated` no controller e paginação em `GET /estoque/warehouses`. Barato, e mexer nele depois obrigaria a reabrir controller já alterado pelas features.
-2. **EST-F018** — `PUT`/`PATCH` e desativação de produto e depósito.
-3. **EST-F006 + EST-C009** — inventário/contagem junto com a semântica de `AJUSTE`; o backlog registra que C009 depende da modelagem de F006, então não vale separar.
-4. **EST-F007** (custo médio) — destrava o DRE do domínio `financeiro`, mas vem depois de EST-F008 no roteiro, porque o custo entra por lote.
+1. **EST-F018** — `PUT`/`PATCH` e desativação de produto e depósito. O campo `active` de `Product` e `Warehouse` nunca muda depois da criação.
+2. **EST-F006 + EST-C009** — inventário/contagem junto com a semântica de `AJUSTE`; o backlog registra que C009 depende da modelagem de F006, então não vale separar.
+3. **EST-F007** (custo médio) — destrava o DRE do domínio `financeiro`, mas vem depois de EST-F008 no roteiro, porque o custo entra por lote.
 
 Fora do roteiro de código, EST-C011 deixou uma **pendência operacional**: rodar
 `GET /estoque/integrity/orphan-skus` (ou o script) contra a base de produção e decidir o destino

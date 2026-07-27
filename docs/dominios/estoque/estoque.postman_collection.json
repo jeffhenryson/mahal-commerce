@@ -343,16 +343,26 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/estoque/warehouses",
+              "raw": "{{baseUrl}}/estoque/warehouses?page=0&size=100",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "estoque",
                 "warehouses"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "100"
+                }
               ]
             },
-            "description": "`ESTOQUE_WAREHOUSE_READ`. Retorna a lista completa — este endpoint não é paginado."
+            "description": "`ESTOQUE_WAREHOUSE_READ`. Paginado desde o EST-C005 (`page` = 0, `size` = 20, teto de 100); antes devolvia a lista inteira sem paginação."
           },
           "response": [],
           "event": [
@@ -363,10 +373,14 @@
                 "exec": [
                   "pm.test('Status 200', () => pm.response.to.have.status(200));",
                   "const json = pm.response.json();",
-                  "pm.test('Resposta é uma lista', () => pm.expect(json).to.be.an('array'));",
+                  "pm.test('Resposta é uma página', () => {",
+                  "    pm.expect(json).to.have.property('content');",
+                  "    pm.expect(json.content).to.be.an('array');",
+                  "    pm.expect(json).to.have.property('totalElements');",
+                  "});",
                   "pm.test('Contém o depósito criado', () => {",
                   "    const code = pm.collectionVariables.get('warehouseCode');",
-                  "    pm.expect(json.map(w => w.code)).to.include(code);",
+                  "    pm.expect(json.content.map(w => w.code)).to.include(code);",
                   "});"
                 ]
               }
@@ -1794,7 +1808,7 @@
           ]
         },
         {
-          "name": "Teto de 100 por página",
+          "name": "size acima do teto → 400",
           "request": {
             "method": "GET",
             "header": [
@@ -1804,7 +1818,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/estoque/integrity/orphan-skus?size=5000",
+              "raw": "{{baseUrl}}/estoque/integrity/orphan-skus?size=101",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -1816,11 +1830,11 @@
               "query": [
                 {
                   "key": "size",
-                  "value": "5000"
+                  "value": "101"
                 }
               ]
             },
-            "description": "O controller aplica `Math.min(size, 100)`, como nos demais endpoints paginados do módulo."
+            "description": "Desde o EST-C005 o teto de 100 é `@Max(100)` e devolve 400 `VALIDATION_ERROR`, em vez do `Math.min` silencioso que respondia 200 com 100 itens."
           },
           "response": [],
           "event": [
@@ -1829,8 +1843,8 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
-                  "pm.test('size é limitado a 100', () => pm.expect(pm.response.json().size).to.eql(100));"
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('errorCode VALIDATION_ERROR', () => pm.expect(pm.response.json().errorCode).to.eql('VALIDATION_ERROR'));"
                 ]
               }
             }

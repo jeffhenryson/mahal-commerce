@@ -90,7 +90,10 @@ compartilham a **mesma transação**: falha em qualquer item reverte tudo.
 ### Limites operacionais
 
 - `GET /compras/suppliers`: `page` ≥ 0 e `size` entre 1 e 100, validados via Bean Validation
-  (o controller é `@Validated`).
+  (o controller é `@Validated`). Até 2026-07-27 esse limite devolvia **500**, não 400: a
+  `HandlerMethodValidationException` lançada pela validação nativa do Spring não tinha handler e
+  caía no catch-all do `GlobalExceptionHandler`. Corrigido junto com EST-C005 — ver
+  [`estoque`](../estoque/README.md#histórico-de-implementações).
 - `POST /compras/goods-receipts`: itens obrigatórios e quantidade > 0 via `@Valid` nos requests;
   **não há teto para o número de itens** de um recebimento — cada item vira uma escrita de saldo
   na mesma transação.
@@ -145,6 +148,7 @@ Convenções, variáveis e o environment compartilhado estão em
 
 ## Histórico de Implementações
 
+- **2026-07-27** — `size-fora-da-faixa-retornava-500` (efeito colateral do EST-C005): os `@Min(1) @Max(100)` de `GET /compras/suppliers` existiam desde COM-F001, mas nunca tinham sido exercitados por teste — e devolviam 500. Desde o Spring Framework 6.1 a validação de parâmetro de handler é aplicada pelo `RequestMappingHandlerAdapter` e lança `HandlerMethodValidationException`, não `ConstraintViolationException`; sem handler para ela, o catch-all de `Exception` do `GlobalExceptionHandler` transformava a violação em 500 `INTERNAL_ERROR`. Novo handler → 400 `VALIDATION_ERROR`, que é o que a coleção Postman deste módulo já documentava. Descoberto ao anotar o `EstoqueController` no EST-C005.
 - **2026-07-23** — `recebimento-movimenta-saldo` (EST-F009): `Supplier`, `GoodsReceipt`/`GoodsReceiptItem`, `POST /compras/goods-receipts` chamando `EstoqueUseCase.adjustStock` com `MovementType.ENTRADA` por item; RBAC `COMPRAS_RECEIPT_MANAGE`; migrations V58/V59/V60. Coberto por `ComprasServiceTest` e `ComprasControllerSecurityTest`.
 
 ## Próximos passos
