@@ -32,8 +32,13 @@ import com.cernecommerce.core.domain.exception.rbac.RoleNotFoundException;
 import com.cernecommerce.core.domain.exception.compras.SupplierNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateSkuException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateWarehouseCodeException;
+import com.cernecommerce.core.domain.exception.estoque.InactiveProductException;
+import com.cernecommerce.core.domain.exception.estoque.InactiveWarehouseException;
 import com.cernecommerce.core.domain.exception.estoque.InsufficientStockException;
 import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
+import com.cernecommerce.core.domain.exception.estoque.StockCountAlreadyOpenException;
+import com.cernecommerce.core.domain.exception.estoque.StockCountNotFoundException;
+import com.cernecommerce.core.domain.exception.estoque.StockCountNotOpenException;
 import com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException;
 import com.cernecommerce.core.domain.exception.crm.CampaignAutomationNotFoundException;
 import com.cernecommerce.core.domain.exception.crm.CustomerNotFoundException;
@@ -131,6 +136,37 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ProductNotFoundException.class)
     public ResponseEntity<ApiError> handleProductNotFound(ProductNotFoundException ex, HttpServletRequest req) {
         return error(HttpStatus.NOT_FOUND, ex.getMessage(), "PRODUCT_NOT_FOUND", req);
+    }
+
+    /**
+     * EST-F018: 409 e não 400 — a requisição está bem formada, o que conflita é o estado do
+     * recurso. Mesma família de {@code DuplicateSkuException} e {@code STOCK_UPDATE_CONFLICT}.
+     */
+    @ExceptionHandler(InactiveProductException.class)
+    public ResponseEntity<ApiError> handleInactiveProduct(InactiveProductException ex, HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "PRODUCT_INACTIVE", req);
+    }
+
+    @ExceptionHandler(InactiveWarehouseException.class)
+    public ResponseEntity<ApiError> handleInactiveWarehouse(InactiveWarehouseException ex, HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "WAREHOUSE_INACTIVE", req);
+    }
+
+    @ExceptionHandler(StockCountAlreadyOpenException.class)
+    public ResponseEntity<ApiError> handleStockCountAlreadyOpen(StockCountAlreadyOpenException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "STOCK_COUNT_ALREADY_OPEN", req);
+    }
+
+    @ExceptionHandler(StockCountNotFoundException.class)
+    public ResponseEntity<ApiError> handleStockCountNotFound(StockCountNotFoundException ex, HttpServletRequest req) {
+        return error(HttpStatus.NOT_FOUND, ex.getMessage(), "STOCK_COUNT_NOT_FOUND", req);
+    }
+
+    /** Estado do balanço conflita com a operação — fechar duas vezes aplicaria o ajuste em dobro. */
+    @ExceptionHandler(StockCountNotOpenException.class)
+    public ResponseEntity<ApiError> handleStockCountNotOpen(StockCountNotOpenException ex, HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "STOCK_COUNT_NOT_OPEN", req);
     }
 
     @ExceptionHandler(InsufficientStockException.class)

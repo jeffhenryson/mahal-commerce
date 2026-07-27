@@ -1,15 +1,22 @@
 package com.cernecommerce.adapter.in.controller;
 
 import com.cernecommerce.adapter.in.converter.ProductDTOConverter;
+import com.cernecommerce.adapter.in.converter.StockCountDTOConverter;
 import com.cernecommerce.adapter.in.converter.StockMovementDTOConverter;
 import com.cernecommerce.adapter.in.converter.WarehouseDTOConverter;
+import com.cernecommerce.adapter.in.dtos.request.ActiveRequest;
+import com.cernecommerce.adapter.in.dtos.request.ProductPatchRequest;
 import com.cernecommerce.adapter.in.dtos.request.ProductRequest;
 import com.cernecommerce.adapter.in.dtos.request.ReorderPointRequest;
+import com.cernecommerce.adapter.in.dtos.request.StockCountItemRequest;
+import com.cernecommerce.adapter.in.dtos.request.StockCountRequest;
 import com.cernecommerce.adapter.in.dtos.request.StockMovementRequest;
+import com.cernecommerce.adapter.in.dtos.request.WarehousePatchRequest;
 import com.cernecommerce.adapter.in.dtos.request.WarehouseRequest;
 import com.cernecommerce.adapter.in.dtos.response.OrphanSkuResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.ProductResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.StockBalanceResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.StockCountResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.StockMovementResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.WarehouseResponseDTO;
 import com.cernecommerce.core.domain.event.AuditEvent;
@@ -19,6 +26,8 @@ import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
+import com.cernecommerce.core.domain.model.estoque.StockCount;
+import com.cernecommerce.core.domain.model.estoque.StockCountItem;
 import com.cernecommerce.core.domain.model.estoque.StockMovement;
 import com.cernecommerce.core.domain.model.estoque.Warehouse;
 import com.cernecommerce.core.ports.in.EstoqueUseCase;
@@ -60,15 +69,17 @@ public class EstoqueController {
     private final ProductDTOConverter converter;
     private final WarehouseDTOConverter warehouseConverter;
     private final StockMovementDTOConverter movementConverter;
+    private final StockCountDTOConverter stockCountConverter;
     private final ApplicationEventPublisher publisher;
 
     public EstoqueController(EstoqueUseCase estoqueUseCase, ProductDTOConverter converter,
             WarehouseDTOConverter warehouseConverter, StockMovementDTOConverter movementConverter,
-            ApplicationEventPublisher publisher) {
+            StockCountDTOConverter stockCountConverter, ApplicationEventPublisher publisher) {
         this.estoqueUseCase = estoqueUseCase;
         this.converter = converter;
         this.warehouseConverter = warehouseConverter;
         this.movementConverter = movementConverter;
+        this.stockCountConverter = stockCountConverter;
         this.publisher = publisher;
     }
 
@@ -107,6 +118,46 @@ public class EstoqueController {
                 .body(converter.toResponse(created));
     }
 
+    @Operation(summary = "Altera parcialmente um produto (nome e/ou categoria)",
+            description = "Campo ausente ou nulo é mantido. Não altera o SKU nem as variações.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Atualizado", content = @Content(schema = @Schema(implementation = ProductResponseDTO.class))),
+            @ApiResponse(responseCode = "400", description = "Requisição inválida", content = @Content),
+            @ApiResponse(responseCode = "404", description = "SKU não encontrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PatchMapping("/products/{sku}")
+    @PreAuthorize("hasAuthority('ESTOQUE_PRODUCT_MANAGE')")
+    public ResponseEntity<ProductResponseDTO> updateProduct(
+            @PathVariable @NotBlank @Size(min = 3, max = 50) String sku,
+            @Valid @RequestBody ProductPatchRequest request, Authentication authentication) {
+        Product updated = estoqueUseCase.updateProduct(sku, request.getName(), request.getCategory());
+        publisher.publishEvent(AuditEvent.of(EventType.PRODUCT_UPDATED,
+                authentication.getName(), Map.of("sku", updated.sku())));
+        return ResponseEntity.ok(converter.toResponse(updated));
+    }
+
+    @Operation(summary = "Ativa ou desativa um produto",
+            description = "Produto desativado recusa entrada de estoque (manual ou por recebimento de Compras), "
+                    + "mas continua aceitando saída e venda, para escoar o saldo remanescente.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Alterado", content = @Content(schema = @Schema(implementation = ProductResponseDTO.class))),
+            @ApiResponse(responseCode = "400", description = "Campo 'active' ausente", content = @Content),
+            @ApiResponse(responseCode = "404", description = "SKU não encontrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PatchMapping("/products/{sku}/active")
+    @PreAuthorize("hasAuthority('ESTOQUE_PRODUCT_MANAGE')")
+    public ResponseEntity<ProductResponseDTO> setProductActive(
+            @PathVariable @NotBlank @Size(min = 3, max = 50) String sku,
+            @Valid @RequestBody ActiveRequest request, Authentication authentication) {
+        Product updated = estoqueUseCase.setProductActive(sku, request.getActive());
+        publisher.publishEvent(AuditEvent.of(
+                request.getActive() ? EventType.PRODUCT_ACTIVATED : EventType.PRODUCT_DEACTIVATED,
+                authentication.getName(), Map.of("sku", updated.sku())));
+        return ResponseEntity.ok(converter.toResponse(updated));
+    }
+
     @Operation(summary = "Cria um depósito (loja física ou e-commerce)")
     @ApiResponses({
             @ApiResponse(responseCode = "201", description = "Criado", content = @Content(schema = @Schema(implementation = WarehouseResponseDTO.class))),
@@ -123,6 +174,46 @@ public class EstoqueController {
                 authentication.getName(), Map.of("code", created.code())));
         return ResponseEntity.created(URI.create("/estoque/warehouses/" + created.code()))
                 .body(warehouseConverter.toResponse(created));
+    }
+
+    @Operation(summary = "Altera parcialmente um depósito (nome e/ou tipo)",
+            description = "Campo ausente ou nulo é mantido. Não altera o código.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Atualizado", content = @Content(schema = @Schema(implementation = WarehouseResponseDTO.class))),
+            @ApiResponse(responseCode = "400", description = "Requisição inválida", content = @Content),
+            @ApiResponse(responseCode = "404", description = "Depósito não encontrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PatchMapping("/warehouses/{code}")
+    @PreAuthorize("hasAuthority('ESTOQUE_WAREHOUSE_MANAGE')")
+    public ResponseEntity<WarehouseResponseDTO> updateWarehouse(
+            @PathVariable @NotBlank @Size(min = 2, max = 50) String code,
+            @Valid @RequestBody WarehousePatchRequest request, Authentication authentication) {
+        Warehouse updated = estoqueUseCase.updateWarehouse(code, request.getName(),
+                warehouseConverter.toTypeOrNull(request.getType()));
+        publisher.publishEvent(AuditEvent.of(EventType.WAREHOUSE_UPDATED,
+                authentication.getName(), Map.of("code", updated.code())));
+        return ResponseEntity.ok(warehouseConverter.toResponse(updated));
+    }
+
+    @Operation(summary = "Ativa ou desativa um depósito",
+            description = "Depósito desativado recusa entrada de estoque, mas continua despachando saída.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Alterado", content = @Content(schema = @Schema(implementation = WarehouseResponseDTO.class))),
+            @ApiResponse(responseCode = "400", description = "Campo 'active' ausente", content = @Content),
+            @ApiResponse(responseCode = "404", description = "Depósito não encontrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PatchMapping("/warehouses/{code}/active")
+    @PreAuthorize("hasAuthority('ESTOQUE_WAREHOUSE_MANAGE')")
+    public ResponseEntity<WarehouseResponseDTO> setWarehouseActive(
+            @PathVariable @NotBlank @Size(min = 2, max = 50) String code,
+            @Valid @RequestBody ActiveRequest request, Authentication authentication) {
+        Warehouse updated = estoqueUseCase.setWarehouseActive(code, request.getActive());
+        publisher.publishEvent(AuditEvent.of(
+                request.getActive() ? EventType.WAREHOUSE_ACTIVATED : EventType.WAREHOUSE_DEACTIVATED,
+                authentication.getName(), Map.of("code", updated.code())));
+        return ResponseEntity.ok(warehouseConverter.toResponse(updated));
     }
 
     @Operation(summary = "Lista depósitos paginados")
@@ -216,6 +307,124 @@ public class EstoqueController {
                 Map.of("sku", sku, "warehouseCode", request.getWarehouseCode(),
                         "minQuantity", request.getMinQuantity())));
         return ResponseEntity.noContent().build();
+    }
+
+    // ------------------------------------------------------------------------------------
+    // Balanço de inventário (EST-F006). O `warehouseCode` da resposta é ecoado do que chegou
+    // na requisição ou relido do balanço, porque o domínio guarda só o warehouseId.
+    // ------------------------------------------------------------------------------------
+
+    @Operation(summary = "Abre um balanço de inventário para um depósito",
+            description = "Só pode haver um balanço aberto por depósito.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "201", description = "Aberto", content = @Content(schema = @Schema(implementation = StockCountResponseDTO.class))),
+            @ApiResponse(responseCode = "404", description = "Depósito não encontrado", content = @Content),
+            @ApiResponse(responseCode = "409", description = "Já existe balanço aberto para o depósito", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PostMapping("/stock-counts")
+    @PreAuthorize("hasAuthority('ESTOQUE_STOCK_MANAGE')")
+    public ResponseEntity<StockCountResponseDTO> openStockCount(
+            @Valid @RequestBody StockCountRequest request, Authentication authentication) {
+        StockCount opened = estoqueUseCase.openStockCount(request.getWarehouseCode(), authentication.getName());
+        publisher.publishEvent(AuditEvent.of(EventType.STOCK_COUNT_OPENED, authentication.getName(),
+                Map.of("stockCountId", opened.id(), "warehouseCode", request.getWarehouseCode())));
+        return ResponseEntity.created(URI.create("/estoque/stock-counts/" + opened.id()))
+                .body(stockCountConverter.toResponse(opened, request.getWarehouseCode()));
+    }
+
+    @Operation(summary = "Registra a contagem física de um SKU no balanço",
+            description = "Upsert por SKU: recontar sobrescreve o valor anterior. Contagem zero é válida.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Registrado", content = @Content(schema = @Schema(implementation = StockCountResponseDTO.class))),
+            @ApiResponse(responseCode = "404", description = "Balanço ou SKU não encontrado", content = @Content),
+            @ApiResponse(responseCode = "409", description = "Balanço não está aberto", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PostMapping("/stock-counts/{id}/items")
+    @PreAuthorize("hasAuthority('ESTOQUE_STOCK_MANAGE')")
+    public ResponseEntity<StockCountResponseDTO> recordCountedItem(@PathVariable Long id,
+            @Valid @RequestBody StockCountItemRequest request) {
+        StockCount updated = estoqueUseCase.recordCountedItem(id, request.getSku(), request.getCountedQuantity());
+        return ResponseEntity.ok(stockCountConverter.toResponse(updated, warehouseCodeOf(updated)));
+    }
+
+    @Operation(summary = "Fecha o balanço e aplica os ajustes de saldo",
+            description = "Cada SKU cuja contagem divirja do saldo do sistema gera um AJUSTE levando o saldo "
+                    + "ao valor contado. Itens que bateram não geram movimentação. Tudo na mesma transação.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Fechado", content = @Content(schema = @Schema(implementation = StockCountResponseDTO.class))),
+            @ApiResponse(responseCode = "404", description = "Balanço não encontrado", content = @Content),
+            @ApiResponse(responseCode = "409", description = "Balanço não está aberto", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PostMapping("/stock-counts/{id}/close")
+    @PreAuthorize("hasAuthority('ESTOQUE_STOCK_MANAGE')")
+    public ResponseEntity<StockCountResponseDTO> closeStockCount(@PathVariable Long id,
+            Authentication authentication) {
+        StockCount closed = estoqueUseCase.closeStockCount(id, authentication.getName());
+        long divergentes = closed.items().stream().filter(StockCountItem::diverges).count();
+        publisher.publishEvent(AuditEvent.of(EventType.STOCK_COUNT_CLOSED, authentication.getName(),
+                Map.of("stockCountId", id, "itemCount", closed.items().size(),
+                        "divergentCount", divergentes)));
+        return ResponseEntity.ok(stockCountConverter.toResponse(closed, warehouseCodeOf(closed)));
+    }
+
+    @Operation(summary = "Cancela o balanço sem aplicar nenhum ajuste")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Cancelado", content = @Content(schema = @Schema(implementation = StockCountResponseDTO.class))),
+            @ApiResponse(responseCode = "404", description = "Balanço não encontrado", content = @Content),
+            @ApiResponse(responseCode = "409", description = "Balanço não está aberto", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PostMapping("/stock-counts/{id}/cancel")
+    @PreAuthorize("hasAuthority('ESTOQUE_STOCK_MANAGE')")
+    public ResponseEntity<StockCountResponseDTO> cancelStockCount(@PathVariable Long id,
+            Authentication authentication) {
+        StockCount cancelled = estoqueUseCase.cancelStockCount(id);
+        publisher.publishEvent(AuditEvent.of(EventType.STOCK_COUNT_CANCELLED, authentication.getName(),
+                Map.of("stockCountId", id)));
+        return ResponseEntity.ok(stockCountConverter.toResponse(cancelled, warehouseCodeOf(cancelled)));
+    }
+
+    @Operation(summary = "Consulta um balanço de inventário e seus itens")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "404", description = "Balanço não encontrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/stock-counts/{id}")
+    @PreAuthorize("hasAuthority('ESTOQUE_STOCK_MANAGE')")
+    public ResponseEntity<StockCountResponseDTO> getStockCount(@PathVariable Long id) {
+        StockCount count = estoqueUseCase.getStockCount(id);
+        return ResponseEntity.ok(stockCountConverter.toResponse(count, warehouseCodeOf(count)));
+    }
+
+    @Operation(summary = "Lista os balanços de um depósito, mais recentes primeiro")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "404", description = "Depósito não encontrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/stock-counts")
+    @PreAuthorize("hasAuthority('ESTOQUE_STOCK_MANAGE')")
+    public ResponseEntity<PageResult<StockCountResponseDTO>> listStockCounts(
+            @RequestParam @NotBlank @Size(min = 2, max = 50) String warehouseCode,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+        PageResult<StockCount> result = estoqueUseCase.listStockCounts(warehouseCode, page, size);
+        PageResult<StockCountResponseDTO> response = new PageResult<>(
+                result.content().stream().map(c -> stockCountConverter.toResponse(c, warehouseCode)).toList(),
+                result.page(), result.size(), result.totalElements(), result.totalPages());
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Resolve o código do depósito de um balanço já carregado. O domínio guarda {@code warehouseId},
+     * e a API fala em {@code warehouseCode} — a tradução é responsabilidade do adapter.
+     */
+    private String warehouseCodeOf(StockCount count) {
+        return estoqueUseCase.getWarehouse(count.warehouseId()).code();
     }
 
     /**

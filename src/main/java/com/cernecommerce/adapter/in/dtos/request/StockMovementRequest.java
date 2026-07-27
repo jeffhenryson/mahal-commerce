@@ -20,8 +20,17 @@ public class StockMovementRequest {
     @NotBlank
     private String type;
 
+    /**
+     * Em {@code ENTRADA}/{@code SAIDA} é o delta movimentado; em {@code AJUSTE} é o saldo contado
+     * na prateleira (EST-C009).
+     *
+     * <p>O mínimo é inclusivo porque {@code AJUSTE} para zero é válido — item que acabou. Zero em
+     * {@code ENTRADA}/{@code SAIDA} continua recusado, mas pelo invariante de {@code StockMovement}
+     * (400 {@code BAD_REQUEST}), já que Bean Validation não expressa regra condicional a outro
+     * campo.</p>
+     */
     @NotNull
-    @DecimalMin(value = "0.0", inclusive = false)
+    @DecimalMin(value = "0.0")
     private BigDecimal quantity;
 
     @NotBlank
