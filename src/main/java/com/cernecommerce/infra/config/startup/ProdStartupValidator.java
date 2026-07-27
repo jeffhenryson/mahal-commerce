@@ -7,6 +7,7 @@ import org.springframework.context.annotation.Profile;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Valida variáveis de ambiente obrigatórias na inicialização do perfil prod.
@@ -17,9 +18,18 @@ import java.util.List;
 @Profile("prod")
 public class ProdStartupValidator {
 
-    // Default que esteve hardcoded em docker-compose.prod.yml — considerado comprometido
-    // por estar no histórico do git (ver C002).
-    private static final String KNOWN_COMPROMISED_TOTP_KEY = "Vx74sQn7CT7IQyr34DOxmhIT3zerUlBbeyOazfudKpU=";
+    // Chaves que já estiveram hardcoded como fallback em docker-compose.prod.yml — todas
+    // consideradas comprometidas por estarem no histórico do git, mesmo após a remoção.
+    // A primeira veio de C002; a segunda foi reintroduzida em ca2ee50 e removida em PLAT-C028.
+    // Blacklistar (em vez de só remover o fallback do compose) impede que alguém copie o
+    // valor do histórico para o .env e suba com ele sem perceber.
+    private static final Set<String> KNOWN_COMPROMISED_TOTP_KEYS = Set.of(
+            "Vx74sQn7CT7IQyr34DOxmhIT3zerUlBbeyOazfudKpU=",
+            "zNEtKjyPPpEkAIBZBZ29nixcQCcAcA19ExgMgaQVRjg=");
+
+    // Base64 de 256 bits ocupa 44 caracteres (ceil(32*4/3) = 43 + '='). O limite anterior
+    // (32) aceitava uma chave de 24 bytes/192 bits, abaixo do exigido para AES-256.
+    private static final int MIN_TOTP_KEY_LENGTH = 44;
 
     @Value("${spring.application.name:}")
     private String applicationName;
@@ -94,12 +104,13 @@ public class ProdStartupValidator {
         if ("security-spring".equalsIgnoreCase(applicationName) || isBlankOrPlaceholder(applicationName)) {
             errors.add("spring.application.name ainda é 'security-spring' (nome do template) — renomeie em application.properties e no artifactId do pom.xml");
         }
-        if (isBlankOrPlaceholder(totpEncryptionKey)) {
-            errors.add("totp.encryption.key (TOTP_ENCRYPTION_KEY) está ausente — gere com: openssl rand -base64 32");
-        } else if (totpEncryptionKey.length() < 32) {
-            errors.add("totp.encryption.key parece curto demais — use ao menos 32 caracteres (Base64 de 256 bits)");
-        } else if (KNOWN_COMPROMISED_TOTP_KEY.equals(totpEncryptionKey)) {
-            errors.add("totp.encryption.key está usando o valor default que já esteve hardcoded em "
+        if (isBlankOrPlaceholder(totpEncryptionKey, "AAAAAAAAAA", "troque-para")) {
+            errors.add("totp.encryption.key (TOTP_ENCRYPTION_KEY) está ausente ou usa um valor de placeholder — gere com: openssl rand -base64 32");
+        } else if (totpEncryptionKey.length() < MIN_TOTP_KEY_LENGTH) {
+            errors.add("totp.encryption.key parece curto demais — use ao menos " + MIN_TOTP_KEY_LENGTH
+                    + " caracteres (Base64 de 256 bits), gerados com: openssl rand -base64 32");
+        } else if (KNOWN_COMPROMISED_TOTP_KEYS.contains(totpEncryptionKey)) {
+            errors.add("totp.encryption.key está usando um valor que já esteve hardcoded em "
                     + "docker-compose.prod.yml (considerado comprometido por estar no histórico do git) — gere um novo valor com: openssl rand -base64 32");
         }
         if (isBlankOrPlaceholder(avatarBaseUrl, "localhost", "example.com")) {

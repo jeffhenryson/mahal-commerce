@@ -28,7 +28,9 @@ class ProdStartupValidatorTest {
         ReflectionTestUtils.setField(v, "dbUrl", dbUrl);
         ReflectionTestUtils.setField(v, "resendApiKey", resendKey);
         ReflectionTestUtils.setField(v, "resendFrom", resendFrom);
-        ReflectionTestUtils.setField(v, "totpEncryptionKey", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==");
+        // Base64 de 32 bytes (44 chars). Não pode ser o padrão de zeros ("AAAA...") — desde
+        // PLAT-C028 o validator o trata como placeholder, como o HmlStartupValidator já fazia.
+        ReflectionTestUtils.setField(v, "totpEncryptionKey", "cpp8ZZIhZSudh6UPD+OgTzqUhGhnFroAq285qGFEb9M=");
         ReflectionTestUtils.setField(v, "avatarBaseUrl", "https://cdn.meudominio.com/avatars");
         ReflectionTestUtils.setField(v, "googleClientId", "123456789-abc.apps.googleusercontent.com");
         return v;
@@ -184,6 +186,45 @@ class ProdStartupValidatorTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("totp.encryption.key")
                 .hasMessageContaining("comprometido");
+    }
+
+    /**
+     * PLAT-C028: o fallback reintroduzido em {@code docker-compose.prod.yml} (commit ca2ee50)
+     * não era reconhecido pelo validator, então o boot não bloqueava. Removê-lo do compose não
+     * basta — o valor continua no histórico do git e pode ser copiado de volta para o .env.
+     */
+    @Test
+    void deve_rejeitar_totp_encryption_key_do_fallback_reintroduzido_no_compose() {
+        ProdStartupValidator v = validadorValido();
+        ReflectionTestUtils.setField(v, "totpEncryptionKey", "zNEtKjyPPpEkAIBZBZ29nixcQCcAcA19ExgMgaQVRjg=");
+        assertThatThrownBy(v::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("totp.encryption.key")
+                .hasMessageContaining("comprometido");
+    }
+
+    /**
+     * PLAT-C028: o limite anterior (32 chars) aceitava Base64 de 24 bytes — 192 bits, abaixo
+     * do necessário para AES-256. Base64 de 256 bits ocupa 44 caracteres.
+     */
+    @Test
+    void deve_rejeitar_totp_encryption_key_com_192_bits() {
+        ProdStartupValidator v = validadorValido();
+        ReflectionTestUtils.setField(v, "totpEncryptionKey", "M8Xk2pQvR7nLdT3yBw5zHfJc6mKgN9sA");
+        assertThatThrownBy(v::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("totp.encryption.key")
+                .hasMessageContaining("44");
+    }
+
+    /** O padrão de zeros em Base64 é placeholder de desenvolvimento, não uma chave. */
+    @Test
+    void deve_rejeitar_totp_encryption_key_base64_de_zeros() {
+        ProdStartupValidator v = validadorValido();
+        ReflectionTestUtils.setField(v, "totpEncryptionKey", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
+        assertThatThrownBy(v::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("totp.encryption.key");
     }
 
     // ── avatar.base-url ───────────────────────────────────────────────────────

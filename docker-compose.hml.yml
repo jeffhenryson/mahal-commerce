@@ -1,0 +1,199 @@
+# =============================================================================
+# Ambiente HML — projeto compose: mahal-commerce-hml
+#
+#   docker compose -f docker-compose.hml.yml up -d --build
+#   docker compose -f docker-compose.hml.yml logs -f mahal-backend
+#   docker compose -f docker-compose.hml.yml down
+#
+# Substitui o compose que hoje roda a partir do diretório PAI (projeto "mahal"),
+# que mantinha JWT_SECRET, TOTP_ENCRYPTION_KEY, senha do Postgres, senha do Redis,
+# RESEND_API_KEY e GOOGLE_CLIENT_ID hardcoded no arquivo (PLAT-C024). Aqui todos vêm
+# do .env, que é gitignored.
+#
+# PRESERVAÇÃO DE DADOS: os três volumes abaixo são declarados como `external` e
+# apontam para os volumes que o projeto "mahal" já criou. O banco de homologação
+# atual continua intacto ao migrar. NÃO renomeie sem antes fazer dump.
+#
+# Portas (host → container):
+#   5435 → 5432  Postgres        8082 → 8082  API
+#   6382 → 6379  Redis           8083 → 8081  Actuator (sem filtro JWT)
+#   8025 → 8025  Mailpit UI      9092 → 9090  Prometheus
+#   1025 → 1025  Mailpit SMTP    3002 → 3000  Grafana
+# =============================================================================
+
+name: mahal-commerce-hml
+
+services:
+  postgres-mahal:
+    image: postgres:16-alpine
+    container_name: postgres-mahal
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mahal
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      # POSTGRES_PASSWORD só tem efeito na PRIMEIRA inicialização do volume. Como o
+      # volume já existe, a senha real continua sendo a que foi definida na criação —
+      # por isso DB_PASSWORD segue "postgres" no .env. Trocar aqui não muda o banco.
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "5435:5432"
+    volumes:
+      - postgres_mahal_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres} -d mahal"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - mahal-network
+
+  redis-mahal:
+    image: redis:7-alpine
+    container_name: redis-mahal
+    restart: unless-stopped
+    # A senha do Redis não é persistida: é aplicada a cada start, então rotacionar
+    # REDIS_PASSWORD no .env basta — não há migração de dado envolvida.
+    command: redis-server --requirepass ${REDIS_PASSWORD}
+    ports:
+      - "6382:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - mahal-network
+
+  mailpit-mahal:
+    image: axllent/mailpit:latest
+    container_name: mailpit-mahal
+    restart: unless-stopped
+    ports:
+      - "8025:8025"  # Web UI — caixa de entrada de homologação
+      - "1025:1025"  # SMTP
+    networks:
+      - mahal-network
+
+  mahal-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mahal-commerce-backend:hml
+    container_name: mahal-backend
+    restart: unless-stopped
+    depends_on:
+      postgres-mahal:
+        condition: service_healthy
+      redis-mahal:
+        condition: service_healthy
+      mailpit-mahal:
+        condition: service_started
+    environment:
+      SPRING_PROFILES_ACTIVE: hml
+      # Hostnames da rede do compose — sobrepõem os valores localhost do .env, que
+      # servem para rodar a aplicação fora do container.
+      DB_URL: jdbc:postgresql://postgres-mahal:5432/mahal
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD}
+      REDIS_HOST: redis-mahal
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_SSL: "false"
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ISSUER: ${JWT_ISSUER}
+      JWT_AUDIENCE: ${JWT_AUDIENCE}
+      TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY}
+      TOTP_APP_NAME: ${TOTP_APP_NAME}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      # Em hml o email vai para o Mailpit, nunca para caixas reais.
+      EMAIL_PROVIDER: mailpit
+      MAILPIT_FROM: ${MAILPIT_FROM}
+      MAILPIT_API_URL: http://mailpit-mahal:8025/api/v1/send
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      RESEND_FROM: ${RESEND_FROM}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      EMAIL_VERIFICATION_FRONTEND_URL: ${EMAIL_VERIFICATION_FRONTEND_URL}
+      AVATAR_BASE_URL: http://localhost:8082
+    ports:
+      - "8082:8082"
+      - "8083:8081"
+    volumes:
+      - uploads_hml:/app/uploads
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/actuator/health | grep -q UP || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    networks:
+      - mahal-network
+
+  prometheus-mahal:
+    image: prom/prometheus:v2.52.0
+    container_name: prometheus-mahal
+    restart: unless-stopped
+    ports:
+      - "9092:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_mahal_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=7d"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/healthy || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - mahal-network
+
+  grafana-mahal:
+    image: grafana/grafana:11.0.0
+    container_name: grafana-mahal
+    restart: unless-stopped
+    ports:
+      - "3002:3000"
+    environment:
+      # Acesso anônimo: conveniente em homologação, rastreado como PLAT-C031.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+      GF_USERS_DEFAULT_THEME: "dark"
+      GF_SERVER_ROOT_URL: "http://localhost:3002"
+      GF_UNIFIED_ALERTING_ENABLED: "true"
+      GF_ALERTING_ENABLED: "false"
+    volumes:
+      - grafana_mahal_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus-mahal
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - mahal-network
+
+volumes:
+  # Volumes herdados do projeto "mahal" — mantidos external para não perder o banco
+  # de homologação já existente. `docker volume ls` deve listar os três.
+  postgres_mahal_data:
+    external: true
+    name: mahal_postgres_mahal_data
+  prometheus_mahal_data:
+    external: true
+    name: mahal_prometheus_mahal_data
+  grafana_mahal_data:
+    external: true
+    name: mahal_grafana_mahal_data
+  uploads_hml:
+
+networks:
+  mahal-network:
+    name: mahal-network
+    driver: bridge

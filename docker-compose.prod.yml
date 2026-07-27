@@ -1,7 +1,21 @@
 version: "3.9"
 
+# =============================================================================
+# Ambiente PROD — projeto compose: mahal-commerce-prod
 # Stack de producao do Mahal Commerce — API, Admin UI e Market UI
-# Uso: docker compose -f docker-compose.prod.yml up -d
+#
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# RODA APENAS NA VPS. Não suba este arquivo na máquina de desenvolvimento: ele
+# espera Traefik, os repositórios de frontend como diretórios sibling e um .env
+# com segredos de produção distintos dos de dev/hml.
+#
+# TOTP_ENCRYPTION_KEY não tem mais fallback (PLAT-C028) — sem a variável no .env
+# o compose falha, e o ProdStartupValidator rejeita as chaves já expostas no
+# histórico do git mesmo que sejam recolocadas manualmente.
+# =============================================================================
+
+name: mahal-commerce-prod
 
 services:
   postgres:
@@ -57,7 +71,9 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       JWT_ISSUER: ${JWT_ISSUER:-mahaltabacaria-api}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-mahaltabacaria-ui}
-      TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY:-zNEtKjyPPpEkAIBZBZ29nixcQCcAcA19ExgMgaQVRjg=}
+      # Sem fallback: um default hardcoded aqui vira uma chave AES versionada no repositório
+      # (PLAT-C028, regressão de C002). Gere com `openssl rand -base64 32` e defina no .env.
+      TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY}
       AVATAR_BASE_URL: ${AVATAR_BASE_URL:-https://mahaltabacaria.com.br}
       EMAIL_VERIFICATION_FRONTEND_URL: ${EMAIL_VERIFICATION_FRONTEND_URL:-https://mahaltabacaria.com.br/verify}
       REDIS_HOST: redis

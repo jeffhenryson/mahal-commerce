@@ -1,5 +1,19 @@
 version: "3.9"
 
+# ⚠️ OBSOLETO — SUBSTITUÍDO POR docker-compose.hml.yml (projeto mahal-commerce-hml).
+#
+# Este arquivo NÃO FUNCIONA como está: declara os volumes `security-spring_pgdata_hml`,
+# `security-spring_prometheusdata_hml` e `security-spring_grafanadata_hml` como
+# `external: true`, e nenhum deles existe nesta máquina (`docker volume ls` lista
+# `mahal_postgres_mahal_data` e `cerne-commerce_pgdata_hml`). Um `docker compose up`
+# aqui aborta com "external volume not found".
+#
+# Também não é o arquivo que criava os containers em execução: quem faz isso hoje é o
+# compose do diretório PAI (../docker-compose.yml, projeto "mahal"). Ver PLAT-C024.
+#
+# Use docker-compose.hml.yml. Este arquivo pode ser removido depois de confirmada a
+# migração — mantido por ora só para referência do que existia.
+#
 # Stack de homologação: PostgreSQL + Redis + Prometheus + Grafana + app (mahal-backend)
 # Uso: docker compose up -d
 # Prometheus scrapa mahal-backend:8081/actuator/prometheus a cada 15s (rede interna do

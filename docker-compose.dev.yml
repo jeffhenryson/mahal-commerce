@@ -1,0 +1,57 @@
+# =============================================================================
+# Ambiente DEV — projeto compose: mahal-commerce-dev
+#
+#   docker compose -f docker-compose.dev.yml up -d --build
+#   docker compose -f docker-compose.dev.yml logs -f
+#   docker compose -f docker-compose.dev.yml down
+#
+# O perfil dev é autossuficiente: H2 em memória, cache Caffeine e autoconfiguração do
+# Redis excluída (application-dev.properties). Por isso este arquivo sobe UM único
+# container — não há Postgres, Redis nem Mailpit aqui. Os dados somem a cada restart,
+# que é o comportamento pretendido do perfil.
+#
+# Requisitos:
+#   - .env na raiz do backend (ver .env.example)
+#   - src/main/resources/application-dev.properties (copiado de .example, gitignored)
+#     Esse arquivo é copiado para dentro da imagem pelo Dockerfile; sem ele o Spring
+#     tenta subir o Redis e o boot falha.
+#
+# Portas (host → container), escolhidas para conviver com o stack hml simultaneamente:
+#   8080 → 8082  API + actuator + H2 console + Swagger
+# =============================================================================
+
+name: mahal-commerce-dev
+
+services:
+  mahal-backend-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mahal-commerce-backend:dev
+    container_name: mahal-backend-dev
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Sobrepõe o que vier do .env — este container é sempre dev.
+      SPRING_PROFILES_ACTIVE: dev
+      # Em dev não há management.server.port separado: actuator na mesma porta da API.
+      PORT: 8082
+      # Precisa refletir a porta do HOST, não a do container, senão as URLs de avatar
+      # geradas apontam para uma porta que o navegador não alcança.
+      AVATAR_BASE_URL: http://localhost:8080
+      # O código de verificação de email é impresso no log em vez de enviado.
+      EMAIL_PROVIDER: logging
+    ports:
+      - "8080:8082"
+    volumes:
+      - uploads_dev:/app/uploads
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8082/actuator/health | grep -q UP || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+volumes:
+  uploads_dev:
