@@ -311,6 +311,12 @@ public class EstoqueService implements EstoqueUseCase {
                 .orElseThrow(() -> new WarehouseNotFoundException(String.valueOf(warehouseId)));
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public Warehouse getWarehouseByCode(String code) {
+        return requireWarehouse(code);
+    }
+
     // ---------------------------------------------------------------------------------------
     // Reserva de estoque (EST-F021)
     // ---------------------------------------------------------------------------------------
@@ -377,6 +383,14 @@ public class EstoqueService implements EstoqueUseCase {
     public int releaseReservationsByOwner(String ownerReference, String username) {
         List<StockReservation> active = stockReservationRepository.findActiveByOwnerReference(ownerReference);
         active.forEach(reservation -> stockReservationRepository.save(releaseInternal(reservation)));
+        return active.size();
+    }
+
+    @Override
+    @Transactional
+    public int consumeReservationsByOwner(String ownerReference, String username) {
+        List<StockReservation> active = stockReservationRepository.findActiveByOwnerReference(ownerReference);
+        active.forEach(reservation -> consumeReservation(reservation.id(), username));
         return active.size();
     }
 

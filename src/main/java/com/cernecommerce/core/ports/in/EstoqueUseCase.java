@@ -111,6 +111,14 @@ public interface EstoqueUseCase {
     Warehouse getWarehouse(Long warehouseId);
 
     /**
+     * Busca um depósito por código. Existe para quem precisa <b>validar</b> um código antes de
+     * guardá-lo — caso da abertura de caixa (PDV-F001), que carimba o depósito na sessão e não pode
+     * descobrir na primeira venda que ele não existe. Lança
+     * {@link com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException}.
+     */
+    Warehouse getWarehouseByCode(String code);
+
+    /**
      * Consulta o saldo de um SKU em um depósito. Retorna saldo zero se ainda não houve
      * nenhuma movimentação para o par SKU/depósito. Lança
      * {@link com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException}
@@ -265,6 +273,18 @@ public interface EstoqueUseCase {
      *         propósito — cancelar um pedido duas vezes não é erro)
      */
     int releaseReservationsByOwner(String ownerReference, String username);
+
+    /**
+     * Converte de uma vez todas as reservas ativas de um dono em saída real — o gêmeo de
+     * {@link #releaseReservationsByOwner} para o caminho feliz. É o que a confirmação de pagamento
+     * de um pedido com vários itens usa, inclusive quando esse pagamento acontece no balcão.
+     *
+     * <p>O físico e o reservado caem juntos; o disponível não se mexe, porque já estava descontado
+     * desde a reserva.</p>
+     *
+     * @return quantas reservas foram consumidas; zero se não havia nenhuma ativa
+     */
+    int consumeReservationsByOwner(String ownerReference, String username);
 
     /** Consulta uma reserva. */
     StockReservation getStockReservation(Long reservationId);
