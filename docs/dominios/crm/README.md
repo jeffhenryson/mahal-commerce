@@ -168,10 +168,14 @@ Convenções, variáveis e o environment compartilhado estão em
 
 | ID | Prioridade | Tipo | Item | Descrição | Status |
 |---|---|---|---|---|---|
+| CRM-F001 | 🔴 Alta | Feature | perfil-360-deixa-de-ser-placeholder | `GET /crm/customers/{id}/orders` e `/cashback` retornam `List.of()` no controller (`CrmController.java:217,230`) e `CustomerResponseDTO.cashback` é constante zero — F003 entregou as rotas sem fonte de dado. Passam a consultar `sales_order` e o ledger de cashback. Depende de PDV-F003 (pedido unificado) e CRM-F003. [`plano-pdv-marketplace.md`](../../plano-pdv-marketplace.md) §5.2. | Pendente |
+| CRM-F002 | 🔴 Alta | Feature | lookup-e-cadastro-rapido-no-balcao | `GET /crm/customers/lookup?cpf=` / `?contato=` sob permissão dedicada `CRM_CUSTOMER_LOOKUP` (o operador de balcão precisa achar **um** cliente, não listar a base — ver CRM-C002), mais cadastro rápido com nome + contato + CPF. É o que torna o "CPF na nota?" viável no caixa; sem cliente identificado não há cashback. Depende de CRM-C005. Fatia 2, §2.5. | Pendente |
+| CRM-F003 | 🔴 Alta | Feature | programa-de-cashback | Taxas por escopo `GLOBAL`/`CATEGORY`/`SKU` (a mais específica ativa vence) e ledger `cashback_entry` **append-only** — saldo é `SUM`, nunca coluna mutável. Ganho na conclusão do pedido com carência, expiração por scheduler e estorno via `REVERSED`. Resgate é desconto no pedido, **não** forma de pagamento. Inclui `GET /cashback/margin-impact`, que aponta os produtos cuja taxa consome margem demais — sem ele ninguém descobre o carvão a 8% antes do fechamento do mês. Migration V68. Fatia 4, §2.4. | Pendente |
 | CRM-C001 | 🟡 Importante | Correção | auditar-e-documentar-o-modulo | Este README não tem Modelo de Domínio, Regras de Negócio, API, Schema nem Cobertura de Testes — as 9 features foram entregues sem que a documentação de domínio fosse criada. Auditar o código e preencher no padrão de `estoque`. | Pendente |
 | CRM-C002 | 🔴 Alta | Correção | export-da-base-sem-auditoria-nem-limite | `GET /crm/customers/export` (`CrmController.java:150`) devolve **toda** a base de clientes — nome, telefone, e-mail e CPF em texto claro — sem paginação, sem rate limit e **sem publicar `AuditEvent`**. Qualquer token com `CRM_CUSTOMER_READ` (a permissão de leitura mais básica do módulo) pode drenar a base em loop sem deixar rastro. No mínimo: publicar evento de auditoria no export, e avaliar permissão dedicada + limite. O rate limit em si é transversal (PLAT-C030). | Pendente |
 | CRM-C003 | 🟢 Melhoria | Correção | disparo-de-campanha-nao-envia-nada | `CrmService.dispatchAutomation` (linha 215) grava uma linha em `campaign_log` por cliente do segmento e **não envia mensagem alguma** — o `EmailPort` injetado só serve ao `getChannelStatus`. A tela de Automações reporta disparo bem-sucedido para um envio que nunca aconteceu. Ou o envio é implementado, ou a resposta/documentação precisa deixar claro que é simulação. | Pendente |
 | CRM-C004 | 🟢 Melhoria | Correção | audit-event-ausente-em-ativar-desativar-automacao | `PATCH /crm/automacoes/{id}/ativa` é a única escrita do módulo sem `AuditEvent` — ligar ou desligar uma campanha não deixa rastro, enquanto criar e apagar deixam. | Pendente |
+| CRM-C005 | 🔴 Alta | Correção | email-obrigatorio-bloqueia-cliente-de-balcao | `Customer` exige `email` não-nulo e com formato válido (`core/domain/model/crm/Customer.java:30-35`). O cliente de balcão tem CPF e telefone e frequentemente não quer dar e-mail — identificá-lo hoje exige **inventar** um e-mail, o que polui a base, quebra o disparo de campanha e destrói a unicidade por e-mail. Tornar `email` opcional, com unicidade passando a ser por CPF quando faltar e `CHECK (email IS NOT NULL OR cpf IS NOT NULL)` no schema (V66). É alteração numa invariante de domínio já testada — bloqueia o cashback no balcão. §2.5. | Pendente |
 
 Novas features e correções do CRM seguem as séries `CRM-F001+` e `CRM-C002+`. A série legada
 `F001–F009` está congelada (todos concluídos, ver histórico).
@@ -195,6 +199,12 @@ em [`docs/feature-registry.md`](../../feature-registry.md), seção `crm`.
 
 ## Próximos passos
 
+Roteiro completo, com prompt pronto para colar numa sessão nova, em
+[`proximos-passos.md`](proximos-passos.md).
+
 - [ ] **CRM-C002** — auditoria no export da base; é o maior risco aberto do módulo.
+- [ ] **CRM-C005 + CRM-F002** — Fatia 2 de [`plano-pdv-marketplace.md`](../../plano-pdv-marketplace.md):
+      cliente identificável no balcão. Bloqueia o cashback.
+- [ ] **CRM-F003** — Fatia 4: programa de cashback. É o pedido nominal do dono.
 - [ ] **CRM-C001** — auditar o código e completar este README (Modelo de Domínio, Regras, API, Schema, Testes).
 - [ ] **CRM-C003** — decidir entre implementar o envio de campanha ou explicitar que é simulação.

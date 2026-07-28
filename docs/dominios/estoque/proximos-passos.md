@@ -4,9 +4,17 @@
 **Para quê:** dar a ordem de execução do backlog restante de estoque, com as dependências reais entre
 os itens, até o módulo poder ser considerado fechado e a atenção migrar para outro domínio.
 
+**Revisado em:** 2026-07-28. A ordem mudou — ver o aviso abaixo.
+
 O backlog em si continua em [`README.md`](README.md#backlog-do-módulo) — este arquivo é o **roteiro**,
 não a lista. Quando um item for concluído, ele sai do backlog do README; este roteiro só precisa ser
 atualizado se a ordem mudar.
+
+> **A ordem de 2026-07-27 foi substituída.** O [`plano-pdv-marketplace.md`](../../plano-pdv-marketplace.md)
+> decidiu três itens que estavam em aberto (F013 reserva, F015 kit, F012 transferência) e reordenou o
+> resto em função do PDV e do marketplace. Além disso, **a reserva de estoque saiu na frente**: V63
+> (pricing) e V64 (reserva) já estão no working tree, com domínio, service, ports e persistência
+> escritos. O que valia como "próximo item" (F012) deixou de valer.
 
 ---
 
@@ -37,23 +45,46 @@ a base real e decidir, SKU a SKU, entre cadastrar o produto que faltava e expurg
 linha. Se eu for solicitado a "terminar o C011", o que cabe é apresentar a lista — não
 apagar nada.
 
-ORDEM SUGERIDA (respeita as dependências reais entre os itens)
- 1. EST-F012  transferência entre depósitos (MovementType.TRANSFER). Mexe nos mesmos
-              pontos que F006/C009 acabaram de tocar: o enum MovementType e
-              StockBalance.apply — cuidado para não quebrar o AJUSTE de saldo-alvo.
- 2. EST-F014  estorno/devolução de venda, com rastreabilidade da venda de origem.
- 3. EST-F008  lote e validade. Muda a granularidade do saldo — trate como mudança
+TRABALHO EM ANDAMENTO — termine antes de abrir item novo
+V63 (product pricing) e V64 (stock reservation) estão no working tree, NÃO commitados.
+A reserva já tem: StockReservation, ReservationStatus, StockBalance com reservedQuantity /
+availableQuantity() / reserve() / consumeReservation() / releaseReservation(), as 7
+operações em EstoqueUseCase e EstoqueService (inclusive expireReservations), a entity, o
+JpaRepository, o RepositoryImpl, os DTOs, o converter, as 3 exceptions e o TTL configurável
+(estoque.reservation.default-ttl, hoje PT30M).
+FALTA: endpoints em EstoqueController, o scheduler de expiração chamando expireReservations
+(o método existe; o job com @SchedulerLock não — use os *CleanupService existentes como
+molde), a suíte de testes inteira (só PricingTest foi escrito) e a documentação/Postman.
+Deixar isso pela metade é o pior estado possível: código que ninguém alcança e migration
+que ninguém validou.
+
+ORDEM SUGERIDA (revisada em 2026-07-28 pelo plano de PDV/marketplace)
+ 1. EST-F013 + EST-F021 + EST-C013  terminar a reserva: controller, scheduler de expiração,
+              testes, endpoint de integridade (reserved_quantity × soma das reservas ACTIVE)
+              e docs. Inclui a mudança de apply(SAIDA) para validar contra o DISPONÍVEL —
+              método maduro no caminho crítico de PDV, compras e balanço, então revalide a
+              suíte inteira. reserved = 0 preserva o comportamento atual por construção.
+ 2. EST-F014  estorno/devolução de venda (Fatia 5 do plano). Sobe de prioridade: reserva sem
+              cancelamento é armadilha, e a devolução é pré-requisito do cashback estornado.
+ 3. EST-F015 + EST-F022  kit virtual de um nível + custo derivado no Pricing (Fatia 6).
+ 4. EST-F008  lote e validade. Muda a granularidade do saldo — trate como mudança
               de modelagem, não como campo novo.
- 4. EST-F007  custo médio ponderado. Vem depois de F008 (o custo entra por lote) e
-              destrava o DRE do domínio financeiro.
- 5. EST-F016  unidade de medida e conversão — mexe na semântica de quantity em todo lugar.
- 6. EST-F015  kit/produto composto.
+ 5. EST-F007  custo médio ponderado. Depois de F008 (o custo entra por lote) e DEPOIS DO
+              CASHBACK (Fatia 4): o costPrice manual de V63 já dá a ordem de grandeza, que
+              é o que decide se a taxa do carvão é 2% ou 8%.
+ 6. EST-F016  unidade de medida e conversão — mexe na semântica de quantity em todo lugar.
  7. EST-F005  entrada por XML de NF-e (NfeXmlImportPort). Por último entre as features
               de entrada, porque o XML traz lote e custo — depende de F008 e F007.
 
+DESPRIORIZADOS POR DECISÃO (não são esquecimento — §2.2 e §8.5 do plano)
+- EST-F012 (transferência entre depósitos) só faz sentido quando existir um SEGUNDO LOCAL
+  FÍSICO de verdade. O marketplace NÃO vai usar WarehouseType.ECOMMERCE para separar canal:
+  numa loja só a prateleira é uma só, e partir o pool geraria rebalanceamento manual
+  permanente. A reserva é o mecanismo que deixa um pool servir dois canais.
+- EST-F020 (preço por variação) desaconselhado: sabores da mesma essência custam o mesmo;
+  grade com preços distintos se modela como produtos separados até doer de verdade.
+
 NÃO CABEM EM ESTOQUE — me traga a decisão em vez de implementar:
-- EST-F013 (reserva de estoque no checkout) depende de carrinho/checkout, e ecommerce
-  é esqueleto. Diga o que precisaria existir em ecommerce antes.
 - EST-F011 (curva ABC e giro) está marcado como domínio `relatorios`, que não existe.
   Diga se é para criar o domínio ou trazer para estoque.
 - EST-C006 (V45/V47 sem ON CONFLICT) não tem correção possível: migration aplicada não
@@ -78,14 +109,14 @@ ARMADILHAS DESTE PROJETO (já me custaram build quebrado)
 - HexagonalArchitectureTest (ArchUnit) barra qualquer import de framework em core/domain
   e core/ports, e em core/service só libera org.springframework.transaction.*.
   ApplicationEventPublisher e TransactionSynchronizationManager ficam em adapter/infra.
-- Migrations: a próxima é V63. Seeds de permissão precisam de ON CONFLICT DO NOTHING.
+- Migrations: a próxima é V65 (V63 e V64 já existem no working tree). Seeds de permissão precisam de ON CONFLICT DO NOTHING.
   O perfil dev NÃO roda Flyway (ddl-auto=create-drop), então permissão nova também tem
   que entrar em SeedConfig e DevRoleBootstrapConfig, senão dá 403 em dev.
 - Todo endpoint novo precisa de @PreAuthorize.
 - Testes de contexto real que escrevem estoque precisam cadastrar o SKU antes —
   desde EST-C002 movimentar SKU inexistente é 404.
 
-Comece lendo o README do módulo e me apresentando o plano para o EST-F012.
+Comece lendo o README do módulo e me apresentando o plano para terminar a reserva (EST-F013/F021/C013).
 ```
 
 ---
@@ -99,7 +130,9 @@ Os itens não são independentes, e a ordem abaixo evita refazer trabalho:
 | ~~C011 primeiro~~ ✅ | Feito em 2026-07-27: a ferramenta de levantamento existe. Sobrou só a conferência humana da base real, que não bloqueia os itens de código abaixo. |
 | ~~C005 e F018~~ ✅ | Feitos em 2026-07-27, antes das features grandes justamente para não reabrir controller e DTOs depois. |
 | ~~F006 **com** C009~~ ✅ | Feitos juntos em 2026-07-27, como previsto: a semântica de `AJUSTE` **era** a modelagem do balanço. `AJUSTE` virou saldo-alvo e o fechamento da contagem é quem o usa em lote. |
-| F012 logo depois de F006/C009 | `MovementType.TRANSFER` mexe no enum e em `StockBalance.apply`, que acabaram de mudar — fazer agora evita reabrir a mesma decisão. Cuidado para não quebrar o `AJUSTE` de saldo-alvo. |
+| ~~F012 logo depois de F006/C009~~ | **Revogado em 2026-07-28.** O plano decidiu que o marketplace usa **um pool só** e não separa canal por depósito, então a transferência entre depósitos deixa de ter caso de uso até existir um segundo local físico. Ver §2.2. |
+| Terminar a reserva antes de abrir item novo | V64 já está escrita e o core inteiro também. Meia-reserva é pior que reserva nenhuma: a coluna `reserved_quantity` já existe no schema e ninguém a alimenta pela API, então o disponível e o físico coincidem por acidente, não por desenho. |
+| F014 antes de o marketplace usar a reserva | Reserva sem cancelamento é armadilha — estoque travado sem como destravar pela operação. O expirador cobre o caso do abandono, não o do pedido pago que precisa ser desfeito. |
 | F008 antes de F007 | O custo entra por lote. Fazer custo médio primeiro e depois introduzir lote significa recalcular a modelagem de custo. |
 | F005 por último entre as entradas | O XML de NF-e traz lote e custo prontos. Implementar o import antes de F008 e F007 seria importar campos que ainda não têm onde ser guardados. |
 
@@ -120,6 +153,11 @@ o que se perde é controle de perecível e venda fracionada, não a integridade 
 
 ## O que "módulo fechado" significa aqui
 
-Fechar os 7 itens que restam no roteiro, mais uma decisão registrada sobre os três que não cabem
-em estoque (F013, F011, C006). Com isso o backlog do módulo zera e `financeiro` fica destravado
-para o DRE, que hoje espera o custo médio de F007.
+Fechar os 7 grupos que restam no roteiro, mais uma decisão registrada sobre os dois que não cabem
+em estoque (F011, C006) e sobre os dois despriorizados (F012, F020). Com isso o backlog do módulo
+zera e `financeiro` fica destravado para o DRE, que hoje espera o custo médio de F007.
+
+**O estoque deixou de ser o módulo da vez.** Depois que a reserva fechar (grupo 1), a prioridade do
+projeto passa para `vendas-balcao` — as Fatias 0 a 3 do plano são todas de lá, e o estoque só volta
+ao centro na Fatia 5 (devolução) e na 6 (kits). Ver
+[`dominios/vendas-balcao/proximos-passos.md`](../vendas-balcao/proximos-passos.md).

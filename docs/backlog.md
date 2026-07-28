@@ -26,6 +26,24 @@
 `plataforma` é o módulo guarda-chuva das correções que não pertencem a nenhum domínio de
 negócio — segurança, infra, CI/CD, testes, migrations, performance, documentação.
 
+> **Planos transversais.** Itens que atravessam vários módulos continuam registrados no README de
+> cada um, mas o desenho e a **ordem de execução** entre eles ficam num documento próprio:
+> [`plano-pdv-marketplace.md`](plano-pdv-marketplace.md) (2026-07-28) — PDV operável na loja
+> física + marketplace sobre o mesmo estoque, com cashback e kits. Cobre `PDV-F003…F006`,
+> `PDV-C004`, `CRM-F001…F003`, `CRM-C005`, `EST-F013…F015`, `EST-F021`, `EST-F022`, `EST-C013`,
+> `ECM-F001…F004`, `ECM-C002`, `FIN-F001`, `FIN-F002` e `PLAT-C034` em 12 fatias.
+>
+> A **ordem de execução dentro de cada módulo** — com as decisões já tomadas, as armadilhas do
+> projeto e um prompt pronto para colar numa sessão nova — fica em `proximos-passos.md` ao lado de
+> cada README:
+> [vendas-balcao](dominios/vendas-balcao/proximos-passos.md) ·
+> [crm](dominios/crm/proximos-passos.md) ·
+> [estoque](dominios/estoque/proximos-passos.md) ·
+> [ecommerce](dominios/ecommerce/proximos-passos.md) ·
+> [financeiro](dominios/financeiro/proximos-passos.md) ·
+> [plataforma](dominios/plataforma/proximos-passos.md).
+> **O módulo da vez é `vendas-balcao`** — as Fatias 0, 1 e 3 são todas dele.
+
 Domínios ainda sem README: `gestao-empresarial`, `auth`, `notification`, `relatorios`. Serão
 criados pelo `/1-analise <dominio>` na primeira análise de cada um.
 

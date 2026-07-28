@@ -83,6 +83,16 @@
     {
       "key": "stockCountId",
       "value": ""
+    },
+    {
+      "key": "pricedSku",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "unpricedSku",
+      "value": "",
+      "type": "string"
     }
   ],
   "item": [
@@ -668,6 +678,456 @@
                   "pm.test('Status 400', () => pm.response.to.have.status(400));",
                   "pm.test('errorCode = VALIDATION_ERROR',",
                   "    () => pm.expect(pm.response.json().errorCode).to.eql('VALIDATION_ERROR'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02b — Precificação (EST-F019)",
+      "description": "Custo, markup e preço praticado do produto. **Markup é sobre o custo; margem é sobre a venda** — custo 45,00 com markup 80% sugere 81,00, e vender a 79,90 entrega margem de 43,68% e markup efetivo de 77,56%. Enviar o bloco `pricing` exige `ESTOQUE_PRODUCT_PRICE_MANAGE` além de `ESTOQUE_PRODUCT_MANAGE`.",
+      "item": [
+        {
+          "name": "Criar produto precificado (markup 80% sobre custo 45,00)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/products",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "products"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"{{pricedSku}}\",\n  \"name\": \"Narguilé Aladin — teste de preço\",\n  \"category\": \"NARGUILES\",\n  \"pricing\": {\n    \"costPrice\": 45.00,\n    \"markupPercent\": 80\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "`ESTOQUE_PRODUCT_MANAGE` + `ESTOQUE_PRODUCT_PRICE_MANAGE`. Sem `salePrice`, o preço efetivo é o sugerido pelo markup: 45,00 × 1,80 = **81,00**."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('pricedSku', 'PM-PRICE-' + Date.now());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const p = pm.response.json().pricing;",
+                  "pm.test('Preço sugerido = custo x (1 + markup/100)', () => {",
+                  "    pm.expect(Number(p.suggestedPrice)).to.eql(81);",
+                  "    pm.expect(Number(p.effectivePrice)).to.eql(81);",
+                  "});",
+                  "pm.test('Margem sobre a venda, nao sobre o custo', () => {",
+                  "    pm.expect(Number(p.marginAmount)).to.eql(36);",
+                  "    pm.expect(Number(p.marginPercent)).to.eql(44.44);",
+                  "});",
+                  "pm.test('Precificado e acima do custo', () => {",
+                  "    pm.expect(p.priced).to.be.true;",
+                  "    pm.expect(p.belowCost).to.be.false;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Consultar preço do SKU",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/products/{{pricedSku}}/price",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "products",
+                "{{pricedSku}}",
+                "price"
+              ]
+            },
+            "description": "`ESTOQUE_PRODUCT_READ`. Devolve os derivados já calculados — é o endpoint que o PDV consome antes de montar o item de venda."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const p = pm.response.json();",
+                  "pm.test('Derivados coerentes com o cadastro', () => {",
+                  "    pm.expect(Number(p.costPrice)).to.eql(45);",
+                  "    pm.expect(Number(p.effectivePrice)).to.eql(81);",
+                  "    pm.expect(Number(p.effectiveMarkupPercent)).to.eql(80);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Aplicar preço psicológico (79,90 vence o sugerido)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/products/{{pricedSku}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "products",
+                "{{pricedSku}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pricing\": {\n    \"salePrice\": 79.90\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "`ESTOQUE_PRODUCT_PRICE_MANAGE`. `salePrice` informado **vence** o sugerido. O markup pretendido continua 80%, mas o `effectiveMarkupPercent` revela os 77,56% que o preço praticado entrega."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const p = pm.response.json().pricing;",
+                  "pm.test('Preco praticado vence o sugerido', () => {",
+                  "    pm.expect(Number(p.suggestedPrice)).to.eql(81);",
+                  "    pm.expect(Number(p.effectivePrice)).to.eql(79.9);",
+                  "});",
+                  "pm.test('Markup pretendido x efetivo', () => {",
+                  "    pm.expect(Number(p.markupPercent)).to.eql(80);",
+                  "    pm.expect(Number(p.effectiveMarkupPercent)).to.eql(77.56);",
+                  "    pm.expect(Number(p.marginPercent)).to.eql(43.68);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH parcial: só o custo não apaga markup nem preço",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/products/{{pricedSku}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "products",
+                "{{pricedSku}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pricing\": {\n    \"costPrice\": 60.00\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Semântica de PATCH dentro de `pricing`: campo ausente é **mantido**. Mandar só `costPrice` move o sugerido (60,00 × 1,80 = 108,00) e preserva o praticado."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const p = pm.response.json().pricing;",
+                  "pm.test('Markup e preco praticado preservados', () => {",
+                  "    pm.expect(Number(p.markupPercent)).to.eql(80);",
+                  "    pm.expect(Number(p.salePrice)).to.eql(79.9);",
+                  "});",
+                  "pm.test('Sugerido acompanha o custo novo', () => {",
+                  "    pm.expect(Number(p.suggestedPrice)).to.eql(108);",
+                  "    pm.expect(Number(p.effectivePrice)).to.eql(79.9);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Venda abaixo do custo é sinalizada, não bloqueada",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/products/{{pricedSku}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "products",
+                "{{pricedSku}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pricing\": {\n    \"salePrice\": 40.00\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Custo 60,00 e preço 40,00: o domínio **não bloqueia** — queima de estoque e produto-isca são decisões comerciais legítimas. O que ele faz é marcar `belowCost`."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const p = pm.response.json().pricing;",
+                  "pm.test('Prejuizo sinalizado', () => {",
+                  "    pm.expect(p.belowCost).to.be.true;",
+                  "    pm.expect(Number(p.marginAmount)).to.eql(-20);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Produto sem preço: derivados vêm nulos, não zerados",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/products",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "products"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"{{unpricedSku}}\",\n  \"name\": \"Carvão — sem preço cadastrado\",\n  \"category\": \"CARVOES\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Omitir `pricing` deixa o produto **não precificado**. Preço desconhecido não é preço zero — por isso os derivados voltam `null` e `priced` é `false`, em vez de um 0,00 que faria o PDV vender de graça."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('unpricedSku', 'PM-NOPRICE-' + Date.now());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const p = pm.response.json().pricing;",
+                  "pm.test('Bloco pricing existe mas vazio', () => {",
+                  "    pm.expect(p).to.not.be.undefined;",
+                  "    pm.expect(p.priced).to.be.false;",
+                  "});",
+                  "pm.test('Derivados nulos, nao zero', () => {",
+                  "    pm.expect(p.effectivePrice == null).to.be.true;",
+                  "    pm.expect(p.marginPercent == null).to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Erro: custo negativo → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/products",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "products"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"PM-INVALID-PRICE\",\n  \"name\": \"Produto inválido\",\n  \"pricing\": {\n    \"costPrice\": -1.00\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "`@PositiveOrZero` no `PricingRequest`, espelhando a invariante de `Pricing` e o CHECK da V63."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Erro: SKU fora do catálogo → 404",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/products/SKU-FANTASMA-404/price",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "products",
+                "SKU-FANTASMA-404",
+                "price"
+              ]
+            },
+            "description": "Consultar preço de SKU inexistente é `404 PRODUCT_NOT_FOUND`."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));",
+                  "pm.test('errorCode PRODUCT_NOT_FOUND', () => pm.expect(pm.response.json().errorCode).to.eql('PRODUCT_NOT_FOUND'));"
                 ]
               }
             }

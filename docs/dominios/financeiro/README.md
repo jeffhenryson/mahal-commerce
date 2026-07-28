@@ -78,13 +78,28 @@ Convenções, variáveis e o environment compartilhado estão em
 
 | ID | Prioridade | Tipo | Item | Descrição | Status |
 |---|---|---|---|---|---|
+| FIN-F001 | 🟡 Média | Feature | cashback-como-provisao-no-dre | Cashback reconhecido como **provisão de passivo no ganho**, não como despesa no resgate — o crédito já existe contra a empresa no momento em que é gerado, e reconhecê-lo só no resgate infla o resultado dos meses em que os clientes acumulam. Consome o ledger `cashback_entry` (CRM-F003). Ver [`plano-pdv-marketplace.md`](../../plano-pdv-marketplace.md) §2.4. | Pendente |
+| FIN-F002 | 🟡 Média | Feature | nfce-via-emissor-terceiro | Port fiscal + adapter para Focus NFe ou PlugNotas, campos fiscais (NCM/CEST/CFOP) no produto, emissão na conclusão do pedido e cancelamento dentro da janela legal. **Nunca construir emissão própria** (§2.8/§8.1): schemas XML por UF, certificado A1/A3, contingência, homologação SEFAZ e manutenção perpétua, contra ~R$100–300/mês de prateleira. Para tabacaria o argumento é mais forte ainda — fumo tem ICMS-ST e IPI, e errar CST 60/NCM/CEST não gera bug, gera autuação. **Não é bloqueante para o PDV rodar**; é o portão para desligar o processo fiscal atual. Fatia 11 — calendário (certificado, cadastro fiscal, homologação) maior que o esforço. | Pendente |
 | FIN-C001 | 🟡 Importante | Correção | auditar-e-documentar-o-modulo | README ainda no molde de esqueleto: faltam Modelo de Domínio, Regras de Negócio, API, Schema e Cobertura de Testes. Rode `/1-analise financeiro`. Padrão: [`estoque`](../estoque/README.md). | Pendente |
 
 > `EST-F007` (`valorizacao-custo-medio`, que alimenta o DRE) é um cruzamento
 > `estoque↔financeiro` e está rastreado em [`estoque`](../estoque/README.md#backlog-do-módulo).
 
+> O que o financeiro precisa que seja decidido **agora**, mesmo sem construir nada de fiscal
+> ([`plano-pdv-marketplace.md`](../../plano-pdv-marketplace.md) §2.8): o pedido nasce **imutável
+> depois de concluído** e com **numeração estável e sem buracos** (`order_number` de sequência
+> própria, emitido na conclusão — `BIGSERIAL` deixa buracos em rollback, e buraco em numeração de
+> documento fiscal é problema com o fisco). Adicionar NCM/CEST depois é migration trivial;
+> retrofitar imutabilidade e numeração num modelo já em produção, não.
+
 ## Próximos passos
 
+Roteiro completo em [`proximos-passos.md`](proximos-passos.md) — inclui **as três decisões de
+outros módulos que precisam ser cobradas agora** para o financeiro não nascer sem margem
+histórica nem numeração fiscal confiável.
+
+- [ ] **FIN-F001** — cashback como provisão de passivo, reconhecida no ganho.
+- [ ] **FIN-F002** — NFC-e via emissor terceiro; nunca construir emissão própria.
 - [ ] Modelos: `DreLine`, `GatewayFee`, `Reconciliation`.
 - [ ] Casos de uso: `buildDre`, `reconcileGatewayFees`, consulta de fluxo de caixa por período.
 - [ ] Ports out: `GatewayFeeReconciliationPort` (importação de repasses/taxas dos gateways).

@@ -150,12 +150,23 @@ Convenções, variáveis e o environment compartilhado estão em
 |---|---|---|---|---|---|
 | PDV-F001 | 🔴 Alta | Feature | ciclo-de-caixa | `openSession`, `registerWithdrawal` (sangria), suprimento e `closeSession` com conferência (esperado × contado). Hoje só é possível registrar venda numa sessão que nada no sistema sabe abrir. TODO em `core/ports/in/PdvUseCase.java:13` e `adapter/in/controller/PdvController.java:39`. | Pendente |
 | PDV-F002 | 🟡 Média | Feature | modelos-de-movimento-de-caixa | `CashMovement` (sangria/suprimento) e `CashRegisterClosure`; dar regras de negócio ao stub `CashRegisterSession` (`core/domain/model/pdv/CashRegisterSession.java:10`). | Pendente |
+| PDV-F003 | 🔴 Alta | Feature | unificar-venda-em-pedido | Unificar `Sale`/`SaleItem` em `Order`/`OrderItem` com discriminador de canal (`BALCAO`/`MARKETPLACE`) e máquina de estados; migration V64 renomeia `cash_register_sale → sales_order` e `sale_item → order_item`. Precede todo o resto porque é a única mudança que fica mais cara a cada dia de dado real. Fatia 0 de [`plano-pdv-marketplace.md`](../../plano-pdv-marketplace.md) §2.1. | 🚧 Em andamento — domínio escrito (`core/domain/model/pedido`), falta service, persistência, controller e migration |
+| PDV-F004 | 🔴 Alta | Feature | preco-e-custo-congelados-no-item | `unitPrice` sai de `SaleItemRequest` — o servidor resolve via `EstoqueUseCase.findPricingBySku`. O item passa a congelar `unit_price`, `cost_price` (snapshot, sem ele a margem histórica é reescrita pela próxima compra) e `cashback_percent`. Desconto vira `discountAmount` explícito sob `PDV_SALE_DISCOUNT`, com teto em `system_config`. Quebra de contrato deliberada em `POST /pdv/sessions/{id}/sales` — **sem consumidor real**: o PDV do `frontend-admin` é protótipo mockado. §2.3. | 🚧 Em andamento — `OrderItem.fromCatalog` já resolve preço e custo do `Pricing` |
+| PDV-F005 | 🔴 Alta | Feature | leitura-de-venda | `SaleRepository` (`core/ports/out/pdv/SaleRepository.java:8-11`) expõe só `save()` — venda registrada é write-only, não há como relê-la pela API. Adicionar `findById`, listagem por sessão e por cliente, com `GET /pdv/sales/{id}` e `GET /pdv/sessions/{id}/sales`. | Pendente |
+| PDV-F006 | 🟡 Média | Feature | pagamento-multiplas-formas-e-troco | `order_payment` (V67) com uma linha por forma — dinheiro + cartão no mesmo pedido são duas linhas. Troco é `change_amount` no pedido, **não** linha de pagamento negativa. Fechamento de caixa reporta totais por forma; só `DINHEIRO` entra na conferência da gaveta. §2.6. | Pendente |
 | PDV-C001 | 🟡 Importante | Correção | auditar-e-documentar-o-modulo | Preencher Regras de Negócio, Schema (V57) e Cobertura de Testes no padrão de `estoque`. | Pendente |
 | PDV-C002 | 🟢 Melhoria | Correção | expor-dto-em-vez-de-record-de-dominio | `GET /pdv/sessions` retorna `PageResult<CashRegisterSession>` — record de domínio direto na API, sem DTO. | Pendente |
+| PDV-C004 | 🔴 Alta | Correção | amarrar-sessao-ao-operador-na-venda | `PdvService.registerSale` (`:40-44`) valida que a sessão está `OPEN`, **não** que pertence a quem está vendendo. Com o ciclo de caixa, a venda passa a exigir sessão do próprio operador (`403 SESSION_NOT_OWNED`) e o `warehouseCode` passa a vir da sessão em vez do request — é esse escopo, não permissão fina de estoque, que fecha o isolamento documentado na seção *Integração com estoque* acima. §1.4 e §2.7. | Pendente |
 
 > A permissão `PDV_SALE_MANAGE` está ausente dos seeders de dev — rastreado como
 > **EST-C001** em [`estoque`](../estoque/README.md#backlog-do-módulo), porque o sintoma
 > aparece no fluxo de baixa de estoque.
+
+> **PDV-F001** e **PDV-F002** são a Fatia 1 de [`plano-pdv-marketplace.md`](../../plano-pdv-marketplace.md)
+> §2.7, que detalha o modelo: `CashRegisterSession` com `open`/`closedWith`, `cash_movement`
+> (`SANGRIA`/`SUPRIMENTO`), índice parcial único garantindo uma sessão aberta por operador, e
+> fechamento que registra divergência sem bloquear — espelhando `StockCount`. `findOpenByOperator`
+> já existe em `CashRegisterRepository:15` e nunca foi chamado.
 
 ## Histórico de Implementações
 
@@ -163,5 +174,13 @@ Convenções, variáveis e o environment compartilhado estão em
 
 ## Próximos passos
 
-- [ ] **PDV-F001** — ciclo de caixa (abertura/sangria/fechamento), a maior lacuna do módulo.
+Roteiro completo — ordem, decisões já tomadas e armadilhas — em
+[`proximos-passos.md`](proximos-passos.md), que inclui um prompt pronto para colar numa sessão
+nova. Resumo da ordem (§6 do [plano](../../plano-pdv-marketplace.md)):
+
+- [ ] **PDV-F003 + PDV-F004 + PDV-F005** — Fatia 0: fundação do pedido. Vem antes de tudo, inclusive
+      do ciclo de caixa, porque é a única mudança cujo custo cresce com o volume de vendas gravadas.
+- [ ] **PDV-F001 + PDV-F002 + PDV-C004** — Fatia 1: ciclo de caixa, a maior lacuna operacional —
+      hoje abrir caixa exige `INSERT` manual.
+- [ ] **PDV-F006** — Fatia 3: pagamento com múltiplas formas e troco.
 - [ ] **PDV-C001** — auditar o código e completar este README.
