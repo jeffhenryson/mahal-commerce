@@ -10,6 +10,11 @@ de errar) está no plano; aqui fica só a ordem e as armadilhas.
 
 Este é o **módulo por onde o projeto começa**: as Fatias 0, 1 e 3 do plano são todas daqui.
 
+> **Em andamento (2026-07-28):** a Fatia 0 está escrita e a Fatia 1 foi aprovada com escopo
+> ampliado — inclui a superfície `/orders` do administrador e a liquidação no balcão de pedido feito
+> no app. O detalhamento, com as decisões tomadas com o dono, está em
+> [`fatia-1-ciclo-de-caixa.md`](fatia-1-ciclo-de-caixa.md). **Comece por lá.**
+
 ---
 
 ## Prompt para colar numa sessão nova
@@ -109,6 +114,10 @@ ARMADILHAS DESTE PROJETO (já custaram build quebrado)
 - Seeds de permissão precisam de ON CONFLICT DO NOTHING. O perfil dev NÃO roda Flyway
   (ddl-auto=create-drop), então permissão nova TAMBÉM tem que entrar em SeedConfig e
   DevRoleBootstrapConfig — esquecer isso dá 403 em dev, e já aconteceu duas vezes.
+- src/test/resources/application-dev.properties SUBSTITUI o de src/main/resources/,
+  nao herda. Propriedade nova que o teste precisa tem que ser escrita nos DOIS.
+- A suite NAO executa as migrations: dev tem flyway.enabled=false e monta o schema por
+  ddl-auto a partir das entities. O SQL das migrations nunca roda nos testes.
 - Todo endpoint novo precisa de @PreAuthorize.
 - Testes que escrevem estoque precisam cadastrar o SKU antes: desde EST-C002, movimentar
   SKU inexistente é 404.

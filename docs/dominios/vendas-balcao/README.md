@@ -1,14 +1,14 @@
 # Domínio: vendas-balcao (PDV — Frente de Caixa)
 
-**Status:** 🟡 Parcial — registro de venda com baixa de estoque operacional; ciclo de caixa (abertura/sangria/fechamento) ainda em esqueleto
+**Status:** 🟢 Operacional — ciclo de caixa completo (abertura, sangria/suprimento, fechamento com conferência) e venda com preço vindo do catálogo. Falta pagamento com múltiplas formas (PDV-F006, Fatia 3).
 **Pacote Java:** `com.cernecommerce...pdv` (packages não aceitam hífen; `pdv` ↔ `vendas-balcao`)
 **Rota HTTP base:** `/pdv`
-**Última atualização deste doc:** 2026-07-27 (seção de Segurança e Infraestrutura)
+**Última atualização deste doc:** 2026-07-28 (Fatia 1 — ciclo de caixa e superfície `/orders`)
 
-> ⚠️ **Auditoria de código pendente.** Este README foi atualizado em 2026-07-26 apenas para
-> refletir a entrega de `EST-F010` e receber o backlog do módulo. As seções de Regras de
-> Negócio, API completa, Schema e Cobertura de Testes ainda precisam ser preenchidas a partir
-> do código — rode `/1-analise vendas-balcao`. Padrão: [`estoque`](../estoque/README.md).
+> ⚠️ **Auditoria de código pendente (PDV-C001).** As seções de Regras de Negócio, Schema e
+> Cobertura de Testes ainda precisam ser preenchidas a partir do código — rode
+> `/1-analise vendas-balcao`. Padrão: [`estoque`](../estoque/README.md). A API e a Segurança já
+> refletem a Fatia 1.
 
 ## Objetivo
 
@@ -18,8 +18,7 @@ registro de vendas no balcão.
 ## Escopo planejado
 
 - **Fluxo de caixa:** abertura de caixa, sangria (retirada), suprimento e
-  fechamento com conferência (valor esperado × contado). 🟡 Pendente — `CashRegisterSession`
-  é um stub com o enum `Status {OPEN, CLOSED}`, sem regras `open()`/`close()`.
+  fechamento com conferência (valor esperado × contado). ✅ Implementado (PDV-F001/F002).
 - **Itens de venda balcão:** registro de itens vendidos no balcão, vinculados à
   sessão de caixa aberta, **com baixa automática de estoque**. ✅ Implementado (EST-F010).
 
@@ -38,6 +37,14 @@ registro de vendas no balcão.
 | Método | Rota | Permissão | Descrição |
 |---|---|---|---|
 | `GET` | `/pdv/sessions` | `PDV_READ` | Lista sessões de caixa paginadas (`page` ≥ 0, `size` 1–100) |
+| `POST` | `/pdv/sessions` | `PDV_SESSION_MANAGE` | Abre o caixa. Uma sessão aberta por operador; o depósito informado vale para todas as vendas dela |
+| `GET` | `/pdv/sessions/current` | `PDV_READ` | Caixa aberto do operador autenticado |
+| `GET` | `/pdv/sessions/{id}` | `PDV_READ` | Detalhe da sessão |
+| `POST` | `/pdv/sessions/{id}/movements` | `PDV_SESSION_MANAGE` | Sangria ou suprimento. Exige sessão aberta **e do próprio operador** |
+| `GET` | `/pdv/sessions/{id}/movements` | `PDV_READ` | Movimentos da sessão |
+| `POST` | `/pdv/sessions/{id}/close` | `PDV_SESSION_CLOSE` | Fecha confrontando contado × esperado. **Divergência não bloqueia** |
+| `GET` | `/pdv/pending-online-orders` | `PDV_READ` | Pedidos do app aguardando pagamento, para o caixa localizar quem chegou na loja |
+| `POST` | `/pdv/sessions/{id}/orders/{orderId}/settle` | `PDV_SALE_MANAGE` | Liquida no balcão um pedido do app: consome a reserva e conclui |
 | `POST` | `/pdv/sessions/{id}/sales` | `PDV_SALE_MANAGE` (+ `PDV_SALE_DISCOUNT` se houver desconto) | Registra venda na sessão e **dá baixa no estoque** item a item. Preço e custo vêm do catálogo, não do request. Exige sessão `OPEN` |
 | `GET` | `/pdv/sales/{id}` | `PDV_READ` | Consulta um pedido. Antes de PDV-F005 a venda era write-only |
 | `GET` | `/pdv/sessions/{id}/sales` | `PDV_READ` | Pedidos da sessão, paginados, do mais recente para o mais antigo |
@@ -62,6 +69,12 @@ registro de vendas no balcão.
 | `PDV_READ` | `GET /pdv/sessions` | V53 | ✅ `SeedConfig` + `DevRoleBootstrapConfig` |
 | `PDV_SALE_MANAGE` | `POST /pdv/sessions/{id}/sales` | V57 | ✅ desde **EST-C001** (antes faltava, e o endpoint respondia 403 em `dev`) |
 | `PDV_SALE_DISCOUNT` | desconto > 0 em `POST /pdv/sessions/{id}/sales` | V65 | ✅ `SeedConfig` + `DevRoleBootstrapConfig` |
+| `PDV_SESSION_MANAGE` | abertura de caixa e movimentos | V66 | ✅ `SeedConfig` + `DevRoleBootstrapConfig` |
+| `PDV_SESSION_CLOSE` | fechamento com conferência | V66 | ✅ `SeedConfig` + `DevRoleBootstrapConfig` |
+
+`PDV_SESSION_CLOSE` é separada de `PDV_SESSION_MANAGE` porque a conferência do fechamento costuma
+ser do gerente, não de quem operou o caixa — e é a única operação da sessão que **não** exige ser o
+dono dela.
 
 > A checagem de `PDV_SALE_DISCOUNT` é **programática**, no controller, e não por `@PreAuthorize`:
 > ela depende do corpo da requisição, e o `@PreAuthorize` decide antes de olhar o payload.
@@ -81,10 +94,17 @@ banco — sem controle de quem abriu, quando, nem com qual fundo de troco.
 
 ### Isolamento de dados
 
-Single-tenant e **sem vínculo operador↔caixa**: qualquer usuário com `PDV_SALE_MANAGE` registra
-venda em **qualquer** sessão de caixa aberta, inclusive na de outro operador. O `username` fica
-no `stock_movement` gerado pela baixa, mas a `Sale` em si não amarra a autoria à sessão. Fechar
-isso faz parte de PDV-F001.
+Single-tenant. O vínculo operador↔caixa **foi fechado em PDV-C004**: registrar venda e movimentar
+dinheiro exigem que a sessão pertença ao operador autenticado (`403 SESSION_NOT_OWNED`), e o
+depósito da venda vem da sessão em vez do request — o operador não baixa estoque de depósito alheio.
+
+A única operação da sessão que não exige posse é o **fechamento**, deliberadamente: a conferência é
+do gerente.
+
+> ⚠️ **A garantia de "uma sessão aberta por operador" não é exercitada por teste.** Ela existe em
+> dois lugares — checagem no domínio e índice parcial único `uk_cash_register_session_open_operator`
+> (V66) —, mas o perfil `dev` monta o schema por `ddl-auto` e o H2 não suporta índice parcial. Sob
+> concorrência, só o Postgres protege, e isso nunca foi testado. Rastreado como **PLAT-C035**.
 
 ### Auditoria
 
@@ -116,8 +136,10 @@ venda inteira, e nada é persistido.
 
 ### Riscos conhecidos
 
-- **PDV-F001** — sem ciclo de caixa: sessões abertas fora do sistema, sem conferência.
-- **PDV-C002** — `GET /pdv/sessions` devolve o record de domínio direto, sem DTO.
+- **PLAT-C035** — a garantia de "uma sessão aberta por operador" depende de um índice parcial que
+  o H2 não suporta; sob concorrência, só o Postgres protege, e isso nunca foi testado.
+- **PDV-F006** — o `expectedAmount` do fechamento soma todas as formas de pagamento enquanto
+  `order_payment` não existir (Fatia 3).
 - **PLAT-C030** — sem rate limit.
 
 ## Integração com estoque
@@ -160,27 +182,34 @@ Convenções, variáveis e o environment compartilhado estão em
 
 | ID | Prioridade | Tipo | Item | Descrição | Status |
 |---|---|---|---|---|---|
-| PDV-F001 | 🔴 Alta | Feature | ciclo-de-caixa | `openSession`, `registerWithdrawal` (sangria), suprimento e `closeSession` com conferência (esperado × contado). Hoje só é possível registrar venda numa sessão que nada no sistema sabe abrir. TODO em `core/ports/in/PdvUseCase.java:13` e `adapter/in/controller/PdvController.java:39`. | Pendente |
-| PDV-F002 | 🟡 Média | Feature | modelos-de-movimento-de-caixa | `CashMovement` (sangria/suprimento) e `CashRegisterClosure`; dar regras de negócio ao stub `CashRegisterSession` (`core/domain/model/pdv/CashRegisterSession.java:10`). | Pendente |
-| PDV-F003 | 🔴 Alta | Feature | unificar-venda-em-pedido | Unificar `Sale`/`SaleItem` em `Order`/`OrderItem` com discriminador de canal (`BALCAO`/`MARKETPLACE`) e máquina de estados; migration V64 renomeia `cash_register_sale → sales_order` e `sale_item → order_item`. Precede todo o resto porque é a única mudança que fica mais cara a cada dia de dado real. Fatia 0 de [`plano-pdv-marketplace.md`](../../plano-pdv-marketplace.md) §2.1. | 🚧 Em andamento — domínio escrito (`core/domain/model/pedido`), falta service, persistência, controller e migration |
-| PDV-F004 | 🔴 Alta | Feature | preco-e-custo-congelados-no-item | `unitPrice` sai de `SaleItemRequest` — o servidor resolve via `EstoqueUseCase.findPricingBySku`. O item passa a congelar `unit_price`, `cost_price` (snapshot, sem ele a margem histórica é reescrita pela próxima compra) e `cashback_percent`. Desconto vira `discountAmount` explícito sob `PDV_SALE_DISCOUNT`, com teto em `system_config`. Quebra de contrato deliberada em `POST /pdv/sessions/{id}/sales` — **sem consumidor real**: o PDV do `frontend-admin` é protótipo mockado. §2.3. | 🚧 Em andamento — `OrderItem.fromCatalog` já resolve preço e custo do `Pricing` |
-| PDV-F005 | 🔴 Alta | Feature | leitura-de-venda | `SaleRepository` (`core/ports/out/pdv/SaleRepository.java:8-11`) expõe só `save()` — venda registrada é write-only, não há como relê-la pela API. Adicionar `findById`, listagem por sessão e por cliente, com `GET /pdv/sales/{id}` e `GET /pdv/sessions/{id}/sales`. | Pendente |
 | PDV-F006 | 🟡 Média | Feature | pagamento-multiplas-formas-e-troco | `order_payment` (V67) com uma linha por forma — dinheiro + cartão no mesmo pedido são duas linhas. Troco é `change_amount` no pedido, **não** linha de pagamento negativa. Fechamento de caixa reporta totais por forma; só `DINHEIRO` entra na conferência da gaveta. §2.6. | Pendente |
+| PDV-F007 | 🟢 Baixa | Feature | marcar-pedido-como-reembolsado | Status `REEMBOLSADO`, distinto de `CANCELADO`, com estorno do pagamento e `REVERSED` no ledger de cashback. Cancelar e reembolsar são eventos diferentes: contá-los juntos esconde quanto dinheiro de fato voltou ao cliente. Depende da Fatia 3 (`order_payment`) e da Fatia 4 (cashback) — antes disso não há o que estornar. Acréscimo de enum + `CHECK`, barato quando as duas existirem. Levantado com o dono em 2026-07-28. | Pendente |
 | PDV-C001 | 🟡 Importante | Correção | auditar-e-documentar-o-modulo | Preencher Regras de Negócio, Schema (V57) e Cobertura de Testes no padrão de `estoque`. | Pendente |
-| PDV-C002 | 🟢 Melhoria | Correção | expor-dto-em-vez-de-record-de-dominio | `GET /pdv/sessions` retorna `PageResult<CashRegisterSession>` — record de domínio direto na API, sem DTO. | Pendente |
-| PDV-C004 | 🔴 Alta | Correção | amarrar-sessao-ao-operador-na-venda | `PdvService.registerSale` (`:40-44`) valida que a sessão está `OPEN`, **não** que pertence a quem está vendendo. Com o ciclo de caixa, a venda passa a exigir sessão do próprio operador (`403 SESSION_NOT_OWNED`) e o `warehouseCode` passa a vir da sessão em vez do request — é esse escopo, não permissão fina de estoque, que fecha o isolamento documentado na seção *Integração com estoque* acima. §1.4 e §2.7. | Pendente |
 
 > A permissão `PDV_SALE_MANAGE` está ausente dos seeders de dev — rastreado como
 > **EST-C001** em [`estoque`](../estoque/README.md#backlog-do-módulo), porque o sintoma
 > aparece no fluxo de baixa de estoque.
 
-> **PDV-F001** e **PDV-F002** são a Fatia 1 de [`plano-pdv-marketplace.md`](../../plano-pdv-marketplace.md)
-> §2.7, que detalha o modelo: `CashRegisterSession` com `open`/`closedWith`, `cash_movement`
-> (`SANGRIA`/`SUPRIMENTO`), índice parcial único garantindo uma sessão aberta por operador, e
-> fechamento que registra divergência sem bloquear — espelhando `StockCount`. `findOpenByOperator`
-> já existe em `CashRegisterRepository:15` e nunca foi chamado.
-
 ## Histórico de Implementações
+
+- **2026-07-28** — `ciclo-de-caixa` (**PDV-F001**, **PDV-F002**, **PDV-C002**, **PDV-C004**):
+  `CashRegisterSession` deixou de ser stub e ganhou invariantes, `open`/`closedWith`/`diverges`;
+  `CashMovement` + `CashMovementType` como ledger append-only, com o sinal vindo do tipo e não do
+  valor; migration V66 com as colunas de conferência, a tabela `cash_movement` e o índice parcial
+  único por operador. Seis endpoints novos de sessão. O fechamento espelha `StockCount`: confronta
+  contado × esperado, carimba a divergência e **fecha mesmo assim**. `PDV_SESSION_CLOSE` é separada
+  de `PDV_SESSION_MANAGE` porque a conferência é do gerente — é a única operação da sessão que não
+  exige posse. `GET /pdv/sessions` passou a devolver DTO (PDV-C002), e a venda passou a herdar o
+  depósito da sessão e a exigir posse dela (PDV-C004). Coberto por `CashRegisterSessionTest`,
+  `CashMovementTest`, `PdvServiceTest`, `PdvControllerSecurityTest` e `PdvCashCycleIT`.
+- **2026-07-28** — `fundacao-do-pedido` (**PDV-F003**, **PDV-F004**, **PDV-F005**): `Sale`/`SaleItem`
+  foram **substituídos** por `Order`/`OrderItem` em `core/domain/model/pedido`, com discriminador de
+  canal e máquina de estados; migration V65 renomeia `cash_register_sale → sales_order`. O preço e o
+  custo passam a vir do catálogo (`OrderItem.fromCatalog`), com `unitPrice` fora do request e
+  `discountAmount` sob `PDV_SALE_DISCOUNT`; o item congela `unit_price`, `cost_price` e
+  `cashback_percent`. Numeração de sequência própria emitida na conclusão. A venda deixou de ser
+  write-only: `GET /pdv/sales/{id}` e `GET /pdv/sessions/{id}/sales`. Coberto por `OrderTest`,
+  `OrderItemTest`, `OrderStatusTest` e `PedidoRepositoryIT`.
 
 - **2026-07-23** — `baixa-automatica-venda` (EST-F010): `Sale`/`SaleItem` com `subtotal()`, `POST /pdv/sessions/{id}/sales` chamando `EstoqueUseCase.adjustStock` com `MovementType.SAIDA` por item e disparando o alerta de reposição; RBAC `PDV_SALE_MANAGE`; migration V57 (`cash_register_session`, `cash_register_sale`, `sale_item`). Coberto por `PdvServiceTest`, `SaleTest` e `PdvControllerSecurityTest`. Commit `deed2d2`.
 

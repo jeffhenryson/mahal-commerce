@@ -17,6 +17,7 @@
 | estoque | [`dominios/estoque/README.md`](dominios/estoque/README.md) | `EST-F001+`, `EST-C001+` |
 | compras | [`dominios/compras/README.md`](dominios/compras/README.md) | `COM-F001+`, `COM-C001+` |
 | vendas-balcao (PDV) | [`dominios/vendas-balcao/README.md`](dominios/vendas-balcao/README.md) | `PDV-F001+`, `PDV-C001+` |
+| **pedido** (transversal a canais) | [`dominios/pedido/README.md`](dominios/pedido/README.md) | `PED-F001+`, `PED-C001+` |
 | crm | [`dominios/crm/README.md`](dominios/crm/README.md) | `CRM-F001+`, `CRM-C001+` |
 | ecommerce | [`dominios/ecommerce/README.md`](dominios/ecommerce/README.md) | `ECM-F001+`, `ECM-C001+` |
 | financeiro | [`dominios/financeiro/README.md`](dominios/financeiro/README.md) | `FIN-F001+`, `FIN-C001+` |
@@ -43,6 +44,10 @@ negócio — segurança, infra, CI/CD, testes, migrations, performance, document
 > [financeiro](dominios/financeiro/proximos-passos.md) ·
 > [plataforma](dominios/plataforma/proximos-passos.md).
 > **O módulo da vez é `vendas-balcao`** — as Fatias 0, 1 e 3 são todas dele.
+
+`pedido` é o domínio do **documento de venda**, comum a balcão e marketplace, criado em
+2026-07-28 na Fatia 1. O pedido nasce em `vendas-balcao` ou `ecommerce`; `pedido` é onde ele é
+modelado e onde o administrador o gerencia (`/orders`).
 
 Domínios ainda sem README: `gestao-empresarial`, `auth`, `notification`, `relatorios`. Serão
 criados pelo `/1-analise <dominio>` na primeira análise de cada um.

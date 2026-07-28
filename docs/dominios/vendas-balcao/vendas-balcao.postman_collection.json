@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "6e9af74b-8f04-5565-a62e-827738736a03",
     "name": "Mahal — Vendas Balcão (PDV)",
-    "description": "Coleção de testes do módulo **Vendas Balcão / PDV** (`/pdv`) do mahal-backend.\n\nCobre a listagem de sessões de caixa e o registro de venda, que **dá baixa automática no\nestoque** item a item. Se qualquer item não tiver saldo, a venda inteira é revertida —\nnem a venda nem as baixas anteriores do mesmo lote são gravadas.\n\n**Pré-requisito:** a abertura de caixa ainda não tem endpoint (ver backlog do módulo).\nA pasta `02 — Sessões de caixa` procura uma sessão com status `OPEN`; se não houver, abra\numa pelo banco:\n\n```sql\nINSERT INTO cash_register_session (operator, opened_at, opening_amount, status)\nVALUES ('admin', NOW(), 200.00, 'OPEN');\n```\n\nSem sessão aberta, as requisições de venda são ignoradas automaticamente (com aviso no\nconsole) em vez de falharem.\n\nDocumentação do módulo: `docs/dominios/vendas-balcao/README.md`.",
+    "description": "Coleção de testes do módulo **Vendas Balcão / PDV** (`/pdv`) do mahal-backend.\n\nCobre o **ciclo de caixa completo** — abertura, venda, sangria/suprimento e fechamento com conferência — e o registro de venda, que **dá baixa automática no estoque** item a item. Se qualquer item não tiver saldo, a venda inteira é revertida.\n\nRode as pastas **na ordem**: elas encadeiam `warehouseCode`, `sku` e `sessionId` por variável de coleção. Não é mais preciso abrir sessão pelo banco — `02 — Abertura de caixa` faz isso pela API.\n\n**O que mudou no contrato (Fatia 0 e 1, 2026-07-28):**\n- `unitPrice` **saiu** do corpo da venda: o preço vem do catálogo (`Pricing`, V63). Produto sem preço recusa a venda com `409 PRODUCT_NOT_PRICED`.\n- `warehouseCode` **saiu** do corpo da venda: vem da sessão de caixa.\n- Desconto é `discountAmount` por item e exige `PDV_SALE_DISCOUNT`.\n- Vender e movimentar dinheiro exigem que a sessão seja **do próprio operador** (`403 SESSION_NOT_OWNED`).\n\n**Sobre o fechamento:** divergência entre contado e esperado **não bloqueia** — é registrada, como no fechamento de um balanço de inventário. `differenceAmount` negativo é falta na gaveta, e é um número legítimo.\n\n⚠️ `expectedAmount` soma **todas** as formas de pagamento enquanto `order_payment` não existir (Fatia 3). Com vendas só em dinheiro o número bate; na primeira venda no cartão ele acusa uma sobra que não existe fisicamente.\n\nPermissões necessárias: `PDV_READ`, `PDV_SALE_MANAGE`, `PDV_SALE_DISCOUNT`, `PDV_SESSION_MANAGE`, `PDV_SESSION_CLOSE` — todas semeadas em `dev`.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -430,8 +430,154 @@
       ]
     },
     {
-      "name": "02 — Sessões de caixa",
+      "name": "02 — Abertura de caixa",
       "item": [
+        {
+          "name": "Abrir caixa",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pdv/sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pdv",
+                "sessions"
+              ]
+            },
+            "description": "`PDV_SESSION_MANAGE`. Uma sessão aberta por operador — repetir devolve 409 SESSION_ALREADY_OPEN. O `warehouseCode` informado aqui vale para TODAS as vendas deste caixa: ele não vai mais no corpo da venda (PDV-C004).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"openingAmount\": 200.00,\n  \"warehouseCode\": \"{{warehouseCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const s = pm.response.json();",
+                  "pm.collectionVariables.set('sessionId', s.id);",
+                  "pm.test('Abre com o fundo de troco informado', () => {",
+                  "    pm.expect(s.status).to.eql('OPEN');",
+                  "    pm.expect(Number(s.openingAmount)).to.eql(200);",
+                  "    pm.expect(s.warehouseCode).to.eql(pm.collectionVariables.get('warehouseCode'));",
+                  "});",
+                  "pm.test('Sessão aberta ainda não tem conferência', () => {",
+                  "    pm.expect(s.closedAt).to.be.null;",
+                  "    pm.expect(s.countedAmount).to.be.null;",
+                  "    pm.expect(s.diverges).to.eql(false);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Abrir segundo caixa para o mesmo operador → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pdv/sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pdv",
+                "sessions"
+              ]
+            },
+            "description": "Uma sessão aberta por operador. A regra vale no domínio e no índice parcial único do schema (V66).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"openingAmount\": 50.00,\n  \"warehouseCode\": \"{{warehouseCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 409', () => pm.response.to.have.status(409));",
+                  "pm.test('errorCode SESSION_ALREADY_OPEN', () => pm.expect(pm.response.json().errorCode).to.eql('SESSION_ALREADY_OPEN'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Meu caixa aberto",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pdv/sessions/current",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pdv",
+                "sessions",
+                "current"
+              ]
+            },
+            "description": "`PDV_READ`. 404 NO_OPEN_SESSION quando o operador não tem caixa aberto."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('É a sessão recém-aberta', () => pm.expect(pm.response.json().id).to.eql(Number(pm.collectionVariables.get('sessionId'))));"
+                ]
+              }
+            }
+          ]
+        },
         {
           "name": "Listar sessões de caixa (paginado)",
           "request": {
@@ -676,7 +822,206 @@
       ]
     },
     {
-      "name": "04 — Casos de erro",
+      "name": "04 — Sangria e suprimento",
+      "item": [
+        {
+          "name": "Sangria de 150,00",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pdv/sessions/{{sessionId}}/movements",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pdv",
+                "sessions",
+                "{{sessionId}}",
+                "movements"
+              ]
+            },
+            "description": "`PDV_SESSION_MANAGE`. `amount` é SEMPRE positivo — o sentido vem do `type`, e a resposta traz `signedAmount` com o efeito no caixa. `reason` é obrigatório: sangria sem motivo é indistinguível de desvio.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"SANGRIA\",\n  \"amount\": 150.00,\n  \"reason\": \"depósito no cofre\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const m = pm.response.json();",
+                  "pm.test('O sinal vem do tipo, não do valor', () => {",
+                  "    pm.expect(Number(m.amount)).to.eql(150);",
+                  "    pm.expect(Number(m.signedAmount)).to.eql(-150);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Suprimento de 30,00",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pdv/sessions/{{sessionId}}/movements",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pdv",
+                "sessions",
+                "{{sessionId}}",
+                "movements"
+              ]
+            },
+            "description": "Reforço de troco. Soma no esperado, ao contrário da sangria.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"SUPRIMENTO\",\n  \"amount\": 30.00,\n  \"reason\": \"reforço de troco\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Suprimento soma', () => pm.expect(Number(pm.response.json().signedAmount)).to.eql(30));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Sangria sem motivo → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pdv/sessions/{{sessionId}}/movements",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pdv",
+                "sessions",
+                "{{sessionId}}",
+                "movements"
+              ]
+            },
+            "description": "`reason` é obrigatório por regra de negócio, não por estética.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"SANGRIA\",\n  \"amount\": 10.00\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar movimentos da sessão",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pdv/sessions/{{sessionId}}/movements",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pdv",
+                "sessions",
+                "{{sessionId}}",
+                "movements"
+              ]
+            },
+            "description": "`PDV_READ`. Ordem em que aconteceram."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Sangria e suprimento registrados', () => pm.expect(pm.response.json().length).to.be.at.least(2));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "05 — Casos de erro",
       "item": [
         {
           "name": "Erro: saldo insuficiente → 400 (venda inteira revertida)",
@@ -957,6 +1302,119 @@
         }
       ],
       "description": "Para exercitar o 409 `CASH_REGISTER_SESSION_CLOSED`, feche uma sessão pelo banco (`UPDATE cash_register_session SET status = 'CLOSED', closed_at = NOW() WHERE id = ...`) e aponte `{{sessionId}}` para ela."
+    },
+    {
+      "name": "06 — Fechamento com conferência",
+      "item": [
+        {
+          "name": "Fechar caixa com divergência",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pdv/sessions/{{sessionId}}/close",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pdv",
+                "sessions",
+                "{{sessionId}}",
+                "close"
+              ]
+            },
+            "description": "`PDV_SESSION_CLOSE` — permissão separada de `PDV_SESSION_MANAGE` porque a conferência costuma ser do gerente, e é a única operação da sessão que NÃO exige ser o dono dela.\n\n**Divergência não impede o fechamento** — é registrada, exatamente como no fechamento de um balanço de inventário. `differenceAmount` negativo é falta na gaveta, e é um número legítimo.\n\nEsperado = 200 (abertura) + vendas − 150 (sangria) + 30 (suprimento).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"countedAmount\": 100.00\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const s = pm.response.json();",
+                  "pm.test('Fechou apesar da divergência', () => pm.expect(s.status).to.eql('CLOSED'));",
+                  "pm.test('Conferência carimbada', () => {",
+                  "    pm.expect(s.expectedAmount).to.not.be.null;",
+                  "    pm.expect(Number(s.countedAmount)).to.eql(100);",
+                  "    pm.expect(Number(s.differenceAmount)).to.eql(Number(s.countedAmount) - Number(s.expectedAmount));",
+                  "    pm.expect(s.diverges).to.eql(s.differenceAmount != 0);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Fechar de novo → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pdv/sessions/{{sessionId}}/close",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pdv",
+                "sessions",
+                "{{sessionId}}",
+                "close"
+              ]
+            },
+            "description": "Refechar reescreveria a conferência original, que é o registro que precisa ser imutável.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"countedAmount\": 999.00\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 409', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "99 — Encerramento",

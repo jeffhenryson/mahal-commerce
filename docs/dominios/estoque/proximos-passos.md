@@ -112,6 +112,10 @@ ARMADILHAS DESTE PROJETO (já me custaram build quebrado)
 - Migrations: a próxima é V65 (V63 e V64 já existem no working tree). Seeds de permissão precisam de ON CONFLICT DO NOTHING.
   O perfil dev NÃO roda Flyway (ddl-auto=create-drop), então permissão nova também tem
   que entrar em SeedConfig e DevRoleBootstrapConfig, senão dá 403 em dev.
+- src/test/resources/application-dev.properties SUBSTITUI o de src/main/resources/,
+  nao herda. Propriedade nova que o teste precisa tem que ser escrita nos DOIS.
+- A suite NAO executa as migrations: dev tem flyway.enabled=false e monta o schema por
+  ddl-auto a partir das entities. O SQL das migrations nunca roda nos testes.
 - Todo endpoint novo precisa de @PreAuthorize.
 - Testes de contexto real que escrevem estoque precisam cadastrar o SKU antes —
   desde EST-C002 movimentar SKU inexistente é 404.

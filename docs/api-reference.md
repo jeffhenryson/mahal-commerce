@@ -1221,18 +1221,93 @@ um `StockMovement` de `ENTRADA` via `EstoqueUseCase.adjustStock`, atualizando o 
 ### GET /pdv/sessions — Permissão: PDV_READ
 
 Lista sessões de caixa paginadas (`page` ≥ 0, `size` entre 1 e 100 — default 0/20). Retorna
-`PageResult<CashRegisterSession>`. **Não há endpoint de abertura, sangria ou fechamento de caixa**
-— as sessões precisam ser criadas fora da API.
+`PageResult<CashRegisterSessionResponseDTO>` (era o record de domínio até PDV-C002).
+
+### POST /pdv/sessions — Permissão: PDV_SESSION_MANAGE
+
+```json
+{ "openingAmount": 200.00, "warehouseCode": "LOJA-01" }
+// 201 + Location → CashRegisterSessionResponseDTO
+// 409 SESSION_ALREADY_OPEN / 404 WAREHOUSE_NOT_FOUND / 400 VALIDATION_ERROR
+```
+
+**Uma sessão aberta por operador**, garantida por índice parcial único no schema além da checagem
+de domínio. O `warehouseCode` informado aqui é o depósito de **todas** as vendas deste caixa — ele
+não vai mais no corpo da venda (PDV-C004).
+
+### GET /pdv/sessions/current — Permissão: PDV_READ
+
+Caixa aberto do operador autenticado. `404 NO_OPEN_SESSION`.
+
+### GET /pdv/sessions/{id} — Permissão: PDV_READ
+
+`404 CASH_REGISTER_SESSION_NOT_FOUND`.
+
+### POST /pdv/sessions/{id}/movements — Permissão: PDV_SESSION_MANAGE
+
+```json
+{ "type": "SANGRIA", "amount": 150.00, "reason": "depósito no cofre" }
+// 201 → CashMovementResponseDTO
+// 403 SESSION_NOT_OWNED / 409 CASH_REGISTER_SESSION_CLOSED / 400 VALIDATION_ERROR
+```
+
+`type ∈ {SANGRIA, SUPRIMENTO}`. `amount` é **sempre positivo** — o sentido vem do `type`, e a
+resposta traz `signedAmount` com o efeito no caixa. `reason` é obrigatório: sangria sem motivo
+registrado é indistinguível de desvio.
+
+Exige sessão aberta **e do próprio operador**.
+
+### GET /pdv/sessions/{id}/movements — Permissão: PDV_READ
+
+Lista os movimentos da sessão, na ordem em que aconteceram.
+
+### POST /pdv/sessions/{id}/close — Permissão: PDV_SESSION_CLOSE
+
+```json
+{ "countedAmount": 495.00 }
+// 200 → CashRegisterSessionResponseDTO com expectedAmount, countedAmount, differenceAmount, diverges
+// 404 CASH_REGISTER_SESSION_NOT_FOUND / 409 CASH_REGISTER_SESSION_CLOSED
+```
+
+`expectedAmount = openingAmount + vendas concluídas − sangrias + suprimentos`.
+
+**Divergência NÃO impede o fechamento** — é registrada, exatamente como no fechamento de um balanço
+de inventário. `differenceAmount` negativo significa falta na gaveta, e é um número legítimo.
+
+Fechar **não** exige ser o dono da sessão: a conferência costuma ser do gerente, e é por isso que
+`PDV_SESSION_CLOSE` existe separada de `PDV_SESSION_MANAGE`.
+
+> ⚠️ **`expectedAmount` é aproximado nesta fase.** A conferência da gaveta deveria considerar só o
+> que entrou em **dinheiro**, mas `order_payment` só existe na Fatia 3 — por ora o esperado soma
+> **todas** as vendas concluídas da sessão. Enquanto a loja só receber dinheiro, o número bate; na
+> primeira venda no cartão ele vai acusar uma sobra que não existe fisicamente.
+
+### GET /pdv/pending-online-orders — Permissão: PDV_READ
+
+Pedidos `MARKETPLACE` em `AGUARDANDO_PAGAMENTO` — a lista que o caixa consulta quando o cliente
+chega à loja para retirar e pagar um pedido montado no app.
+
+### POST /pdv/sessions/{id}/orders/{orderId}/settle — Permissão: PDV_SALE_MANAGE
+
+Liquida no balcão um pedido feito no aplicativo: **consome a reserva** de estoque (não dá baixa
+nova, que debitaria duas vezes), vincula o pedido à sessão de caixa e conclui, emitindo o
+`orderNumber`.
+
+O `channel` **continua `MARKETPLACE`** — foi o site que gerou a venda, e é assim que ela tem que
+aparecer no relatório de conversão. O que muda é o `sessionId`, que passa a apontar para o caixa que
+recebeu o dinheiro.
+
+`403 SESSION_NOT_OWNED` / `404` / `409 INVALID_STATUS_TRANSITION` se o pedido não estiver aguardando
+pagamento.
 
 ### POST /pdv/sessions/{id}/sales — Permissão: PDV_SALE_MANAGE (+ PDV_SALE_DISCOUNT se houver desconto)
 
-> **Contrato alterado em PDV-F004.** `unitPrice` **saiu** do request: o preço e o custo são
+> **Contrato alterado em PDV-F004 e PDV-C004.** `unitPrice` e `warehouseCode` **saíram** do request — o depósito vem da sessão de caixa. Além disso, a venda passa a exigir que a sessão pertença ao operador autenticado (`403 SESSION_NOT_OWNED`). Sobre o preço: o preço e o custo são
 > resolvidos pelo servidor a partir do catálogo (`Pricing`, V63). Aceitar preço do cliente HTTP
 > tornava indistinguíveis erro de digitação, desconto autorizado e fraude.
 
 ```json
 {
-  "warehouseCode": "LOJA-01",     // obrigatório (passa a vir da sessão em PDV-C004)
   "customerId": 42,                // opcional — sem cliente, sem cashback
   "items": [                       // obrigatório, não vazio
     { "sku": "NARG-001", "quantity": 2.000, "discountAmount": 4.00 }
@@ -1296,6 +1371,63 @@ Retorna `OrderResponseDTO`. `404 ORDER_NOT_FOUND`.
 
 `PageResult<OrderResponseDTO>` dos pedidos da sessão, do mais recente para o mais antigo
 (`page` ≥ 0, `size` 1–100). `404 CASH_REGISTER_SESSION_NOT_FOUND`.
+
+---
+
+## Pedidos (visão do administrador) — `/orders`
+
+Atravessa canais: enxerga venda de balcão e pedido de marketplace na mesma superfície. Separada do
+`/pdv`, que enxerga a operação de um caixa. **Aqui aparecem custo e margem**, que o DTO do PDV omite
+de propósito — `PDV_READ` é a permissão mais distribuída daquele módulo.
+
+Três permissões, porque as consequências são diferentes: ler é inócuo, avançar estágio é expedição, e
+cancelar **devolve mercadoria ao estoque**.
+
+### GET /orders — Permissão: ORDER_READ
+
+Filtros, todos opcionais: `channel` (`BALCAO`/`MARKETPLACE`), `status`, `customerId`, `from`, `to`
+(ISO-8601, sobre a data de criação), `page`, `size`. Ordenado do mais recente para o mais antigo.
+
+### GET /orders/{id} — Permissão: ORDER_READ
+
+```json
+// OrderAdminResponseDTO — além dos campos do PDV:
+{
+  "marginAmount": 8.00,              // soma da margem dos itens; null se algum item não tem custo
+  "allowedTransitions": ["CANCELADO", "SEPARADO"],
+  "items": [ { "costPrice": 18.00, "marginAmount": 8.00, "...": "..." } ]
+}
+// 404 ORDER_NOT_FOUND
+```
+
+`marginAmount` é **nulo, não parcial**, quando algum item não tem custo congelado (pedidos anteriores
+à V65): somar só os itens conhecidos produziria um número que parece a margem do pedido e não é.
+
+### POST /orders/{id}/status — Permissão: ORDER_FULFILL
+
+```json
+{ "status": "SEPARADO" }
+// 200 → OrderAdminResponseDTO / 404 / 409 INVALID_STATUS_TRANSITION
+```
+
+`SEPARADO → ENVIADO → ENTREGUE`, nesta ordem. Consulte `allowedTransitions` no detalhe do pedido.
+
+### POST /orders/{id}/cancel — Permissão: ORDER_CANCEL
+
+```json
+{ "reason": "cliente desistiu na entrega" }
+// 200 → OrderAdminResponseDTO / 404 / 409 INVALID_STATUS_TRANSITION (já cancelado)
+```
+
+**Devolve a mercadoria ao estoque** na mesma transação: um `StockMovement` de `ENTRADA` por item, com
+o `orderNumber` no motivo. Vale inclusive para pedido já entregue — cancelar um pedido entregue *é*
+uma devolução, e devolução é entrada de estoque.
+
+`reason` é obrigatório: estorno sem justificativa registrada é indistinguível de erro.
+
+> **Ainda não acontece aqui:** estorno do **pagamento** (depende da Fatia 3, `order_payment`) e
+> `REVERSED` no **cashback** (depende da Fatia 4). Marcar como reembolsado, distinto de cancelado, é
+> `PDV-F007` no backlog.
 
 ---
 
