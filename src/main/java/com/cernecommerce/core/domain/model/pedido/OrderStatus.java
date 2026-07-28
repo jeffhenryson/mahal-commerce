@@ -35,7 +35,10 @@ public enum OrderStatus {
     /** Entregue. Terminal. */
     ENTREGUE,
 
-    /** Venda de balcão finalizada. Terminal, exceto por devolução. */
+    /**
+     * Finalizada no balcão: mercadoria entregue e dinheiro recebido. Vale tanto para a venda de
+     * balcão quanto para o pedido do app retirado e pago na loja. Terminal, exceto por devolução.
+     */
     CONCLUIDO,
 
     /** Cancelado, com os estornos correspondentes já aplicados. Terminal. */
@@ -43,7 +46,11 @@ public enum OrderStatus {
 
     private static final Map<OrderStatus, Set<OrderStatus>> ALLOWED = Map.of(
             CRIADO, EnumSet.of(CONCLUIDO, CANCELADO),
-            AGUARDANDO_PAGAMENTO, EnumSet.of(PAGO, CANCELADO),
+            // CONCLUIDO aqui é a retirada no balcão: o cliente montou o pedido no app, veio à loja,
+            // pagou no caixa e levou a mercadoria. Terminou exatamente como uma venda de balcão
+            // termina — inventar um caminho de "retirada" pela esteira de envio faria o pedido
+            // passar por SEPARADO e ENVIADO para uma entrega que aconteceu no balcão.
+            AGUARDANDO_PAGAMENTO, EnumSet.of(PAGO, CONCLUIDO, CANCELADO),
             PAGO, EnumSet.of(SEPARADO, CANCELADO),
             SEPARADO, EnumSet.of(ENVIADO, CANCELADO),
             ENVIADO, EnumSet.of(ENTREGUE, CANCELADO),

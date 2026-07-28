@@ -40,6 +40,16 @@ class OrderStatusTest {
         assertThat(OrderStatus.CRIADO.canTransitionTo(OrderStatus.PAGO)).isFalse();
     }
 
+    /**
+     * Retirada e pagamento no balcão: o cliente montou o pedido no app e veio buscar. Termina em
+     * {@code CONCLUIDO} — o mesmo estado de uma venda de balcão, porque foi exatamente isso que
+     * aconteceu. Passar por {@code SEPARADO} e {@code ENVIADO} descreveria uma entrega que não houve.
+     */
+    @Test
+    void pendingOnlineOrderCanBeSettledAtTheCounter() {
+        assertThat(OrderStatus.AGUARDANDO_PAGAMENTO.canTransitionTo(OrderStatus.CONCLUIDO)).isTrue();
+    }
+
     @Test
     void marketplacePathIsStrictlySequential() {
         assertThat(OrderStatus.AGUARDANDO_PAGAMENTO.canTransitionTo(OrderStatus.PAGO)).isTrue();

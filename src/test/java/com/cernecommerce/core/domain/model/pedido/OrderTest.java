@@ -87,14 +87,20 @@ class OrderTest {
                 .hasMessageContaining("sessionId");
     }
 
+    /**
+     * O pedido montado no app e pago no balcão: continua {@code MARKETPLACE}, porque foi o site que
+     * o gerou, mas carrega a sessão de caixa que o liquidou — o fechamento daquela gaveta precisa
+     * contabilizar o dinheiro que entrou.
+     */
     @Test
-    void marketplaceRejectsCashRegisterSession() {
-        assertThatThrownBy(() -> Order.of(null, null, SalesChannel.MARKETPLACE,
+    void marketplaceAcceptsCashRegisterSessionWhenSettledAtTheCounter() {
+        Order settled = Order.of(null, null, SalesChannel.MARKETPLACE,
                 OrderStatus.AGUARDANDO_PAGAMENTO, 7L, 1L, "LOJA-01", twoCharcoals(),
                 new BigDecimal("44.00"), BigDecimal.ZERO, BigDecimal.ZERO, new BigDecimal("44.00"),
-                null, null, NOW, null, null, null, 0L))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("sessão de caixa");
+                null, null, NOW, null, null, null, 0L);
+
+        assertThat(settled.channel()).isEqualTo(SalesChannel.MARKETPLACE);
+        assertThat(settled.sessionId()).isEqualTo(1L);
     }
 
     @Test

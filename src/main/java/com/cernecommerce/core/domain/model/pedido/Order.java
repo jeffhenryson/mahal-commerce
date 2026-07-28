@@ -22,6 +22,16 @@ import java.util.List;
  * <p>Sessão de caixa, formas de pagamento, endereço e frete ficam em tabelas próprias, populadas só
  * pelo canal que as tem. É o que evita o pedido de 40 colunas em que metade é sempre nula.</p>
  *
+ * <h2>{@code channel} é origem; {@code sessionId} é liquidação</h2>
+ * <p>São dimensões independentes, e confundi-las custaria caro. {@link #channel} diz <b>onde o
+ * pedido nasceu</b> e nunca muda. {@link #sessionId} diz <b>qual caixa o liquidou</b>.</p>
+ *
+ * <p>O caso que separa os dois: o cliente monta o pedido no aplicativo, vem à loja e paga no balcão.
+ * Esse pedido continua sendo {@code MARKETPLACE} — foi o site que o gerou, e é assim que ele tem que
+ * aparecer no relatório de conversão — mas o dinheiro entrou numa gaveta específica, e o fechamento
+ * daquele caixa precisa contabilizá-lo. Reescrever o canal para {@code BALCAO} na liquidação faria o
+ * marketplace parecer não vender nada.</p>
+ *
  * <h2>Numeração</h2>
  * <p>{@link #orderNumber} vem de sequência própria e é emitido na <b>conclusão</b>, não na criação:
  * o {@code BIGSERIAL} do id deixa buracos quando uma transação faz rollback, e buraco em numeração
@@ -68,12 +78,11 @@ public record Order(
         if (channel == SalesChannel.MARKETPLACE && customerId == null) {
             throw new IllegalArgumentException("customerId é obrigatório em pedido de MARKETPLACE");
         }
-        // Sessão de caixa: exatamente o contrário. O balcão sempre tem uma; o marketplace nunca.
+        // Sessão de caixa: o balcão sempre tem uma. O marketplace normalmente não tem — mas PODE
+        // ter, quando o cliente monta o pedido no app e vem pagar na loja. Ver a nota sobre
+        // sessionId na documentação do tipo.
         if (channel == SalesChannel.BALCAO && sessionId == null) {
             throw new IllegalArgumentException("sessionId é obrigatório em venda de BALCAO");
-        }
-        if (channel == SalesChannel.MARKETPLACE && sessionId != null) {
-            throw new IllegalArgumentException("pedido de MARKETPLACE não tem sessão de caixa");
         }
 
         grossAmount = requireNonNegative(grossAmount, "grossAmount");
@@ -208,6 +217,28 @@ public record Order(
         return new Order(id, orderNumber, channel, status, customerId, sessionId, warehouseCode, items,
                 grossAmount, discountAmount, value, newNet, changeAmount, cancelReason, createdAt,
                 paidAt, concludedAt, cancelledAt, version);
+    }
+
+    /**
+     * Identificador que a reserva de estoque usa para apontar de volta para este pedido.
+     *
+     * <p>O formato mora aqui, e não espalhado por quem reserva e por quem consome, porque
+     * {@code stock_reservation.owner_reference} é texto livre — não há FK que force os dois lados a
+     * concordarem. O {@code COMMENT} da coluna na V64 já antecipava este formato.</p>
+     */
+    public static String reservationOwnerReference(Long orderId) {
+        return "ORDER:" + orderId;
+    }
+
+    /**
+     * Vincula o pedido à sessão de caixa que o liquidou. É o que acontece quando um pedido montado
+     * no aplicativo é pago no balcão: o canal continua {@code MARKETPLACE}, mas o dinheiro entrou
+     * numa gaveta específica e o fechamento dela precisa contabilizá-lo.
+     */
+    public Order withSession(Long newSessionId) {
+        return new Order(id, orderNumber, channel, status, customerId, newSessionId, warehouseCode,
+                items, grossAmount, discountAmount, cashbackRedeemed, netAmount, changeAmount,
+                cancelReason, createdAt, paidAt, concludedAt, cancelledAt, version);
     }
 
     /** Vincula o pedido a um cliente identificado depois da montagem — o "CPF na nota?" do balcão. */

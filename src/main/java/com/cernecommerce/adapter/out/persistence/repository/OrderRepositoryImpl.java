@@ -13,6 +13,8 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.Optional;
 
 @Repository
@@ -79,6 +81,25 @@ public class OrderRepositoryImpl implements OrderRepository {
                 .findBySessionIdOrderByIdDesc(sessionId, PageRequest.of(page, size));
         return new PageResult<>(result.getContent().stream().map(this::toDomain).toList(),
                 page, size, result.getTotalElements(), result.getTotalPages());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResult<Order> findAll(SalesChannel channel, OrderStatus status, Long customerId,
+            Instant from, Instant to, int page, int size) {
+        Page<OrderEntity> result = orderJpaRepository.findFiltered(
+                channel == null ? null : channel.name(),
+                status == null ? null : status.name(),
+                customerId, from, to, PageRequest.of(page, size));
+        return new PageResult<>(result.getContent().stream().map(this::toDomain).toList(),
+                page, size, result.getTotalElements(), result.getTotalPages());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public BigDecimal sumConcludedNetAmountBySessionId(Long sessionId) {
+        BigDecimal sum = orderJpaRepository.sumConcludedNetAmountBySessionId(sessionId);
+        return sum == null ? BigDecimal.ZERO : sum;
     }
 
     @Override

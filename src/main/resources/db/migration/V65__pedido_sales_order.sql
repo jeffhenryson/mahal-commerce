@@ -69,9 +69,11 @@ ALTER TABLE sales_order ADD CONSTRAINT ck_sales_order_status
 -- primeira barreira, o schema é a que sobrevive a carga direta e script de correção.
 ALTER TABLE sales_order ADD CONSTRAINT ck_sales_order_customer_by_channel
     CHECK (channel = 'BALCAO' OR customer_id IS NOT NULL);
+-- Balcão sempre tem caixa. Marketplace PODE ter: é o pedido montado no app e pago na loja, que
+-- continua sendo MARKETPLACE (o site é que o gerou) mas entra na conferência da gaveta que o
+-- recebeu. Por isso a regra é só "balcão exige sessão", e não uma equivalência por canal.
 ALTER TABLE sales_order ADD CONSTRAINT ck_sales_order_session_by_channel
-    CHECK ((channel = 'BALCAO'      AND session_id IS NOT NULL)
-        OR (channel = 'MARKETPLACE' AND session_id IS NULL));
+    CHECK (channel <> 'BALCAO' OR session_id IS NOT NULL);
 ALTER TABLE sales_order ADD CONSTRAINT ck_sales_order_amounts_non_negative
     CHECK (total_amount >= 0 AND discount_amount >= 0
        AND cashback_redeemed >= 0 AND net_amount >= 0);
