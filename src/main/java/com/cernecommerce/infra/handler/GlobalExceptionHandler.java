@@ -47,6 +47,10 @@ import com.cernecommerce.core.domain.exception.crm.DuplicateTagNameException;
 import com.cernecommerce.core.domain.exception.crm.TagNotFoundException;
 import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionClosedException;
 import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionNotFoundException;
+import com.cernecommerce.core.domain.exception.pedido.DiscountLimitExceededException;
+import com.cernecommerce.core.domain.exception.pedido.InvalidOrderStatusTransitionException;
+import com.cernecommerce.core.domain.exception.pedido.OrderNotFoundException;
+import com.cernecommerce.core.domain.exception.pedido.ProductNotPricedException;
 import com.cernecommerce.core.domain.event.AuditEvent;
 import com.cernecommerce.core.domain.exception.user.EmailAlreadyExistsException;
 import com.cernecommerce.core.domain.exception.user.UserNotFoundException;
@@ -469,6 +473,31 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiError> handleCashRegisterSessionClosed(CashRegisterSessionClosedException ex,
             HttpServletRequest req) {
         return error(HttpStatus.CONFLICT, ex.getMessage(), "CASH_REGISTER_SESSION_CLOSED", req);
+    }
+
+    @ExceptionHandler(OrderNotFoundException.class)
+    public ResponseEntity<ApiError> handleOrderNotFound(OrderNotFoundException ex, HttpServletRequest req) {
+        return error(HttpStatus.NOT_FOUND, ex.getMessage(), "ORDER_NOT_FOUND", req);
+    }
+
+    /**
+     * PDV-F004: 409 e não 400 — a requisição está bem formada, o que impede a venda é o estado do
+     * cadastro. Mesma família de {@code PRODUCT_INACTIVE}.
+     */
+    @ExceptionHandler(ProductNotPricedException.class)
+    public ResponseEntity<ApiError> handleProductNotPriced(ProductNotPricedException ex, HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "PRODUCT_NOT_PRICED", req);
+    }
+
+    @ExceptionHandler(DiscountLimitExceededException.class)
+    public ResponseEntity<ApiError> handleDiscountLimit(DiscountLimitExceededException ex, HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "DISCOUNT_LIMIT_EXCEEDED", req);
+    }
+
+    @ExceptionHandler(InvalidOrderStatusTransitionException.class)
+    public ResponseEntity<ApiError> handleInvalidOrderStatusTransition(InvalidOrderStatusTransitionException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "INVALID_STATUS_TRANSITION", req);
     }
 
     @ExceptionHandler(org.springframework.web.servlet.resource.NoResourceFoundException.class)

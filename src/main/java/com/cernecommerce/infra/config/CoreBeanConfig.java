@@ -73,7 +73,7 @@ import com.cernecommerce.core.ports.out.estoque.StockMovementRepository;
 import com.cernecommerce.core.ports.out.estoque.StockReservationRepository;
 import com.cernecommerce.core.ports.out.estoque.WarehouseRepository;
 import com.cernecommerce.core.ports.out.pdv.CashRegisterRepository;
-import com.cernecommerce.core.ports.out.pdv.SaleRepository;
+import com.cernecommerce.core.ports.out.pedido.OrderRepository;
 import com.cernecommerce.core.ports.in.ComprasUseCase;
 import com.cernecommerce.core.ports.out.compras.GoodsReceiptRepository;
 import com.cernecommerce.core.ports.out.compras.SupplierRepository;
@@ -96,6 +96,7 @@ import com.cernecommerce.core.service.EcommerceService;
 import com.cernecommerce.core.service.LogisticaService;
 import com.cernecommerce.core.service.CrmService;
 
+import java.math.BigDecimal;
 import java.nio.file.Path;
 import java.time.Duration;
 
@@ -197,9 +198,14 @@ class CoreBeanConfig {
     // correspondentes ganhem implementação.
 
     @Bean
-    PdvUseCase pdvUseCase(CashRegisterRepository cashRegisterRepository, SaleRepository saleRepository,
-            EstoqueUseCase estoqueUseCase) {
-        return new PdvService(cashRegisterRepository, saleRepository, estoqueUseCase);
+    PdvUseCase pdvUseCase(CashRegisterRepository cashRegisterRepository, OrderRepository orderRepository,
+            EstoqueUseCase estoqueUseCase,
+            // Teto de desconto por pedido (PDV-F004). Acima dele, 409 em vez de um segundo nível de
+            // permissão — dois níveis só criariam a tentação de distribuir o maior. Migra para
+            // system_config junto com o painel de configuração.
+            @Value("${pdv.sale.max-discount-percent:10}") BigDecimal maxDiscountPercent) {
+        return new PdvService(cashRegisterRepository, orderRepository, estoqueUseCase,
+                maxDiscountPercent);
     }
 
     @Bean

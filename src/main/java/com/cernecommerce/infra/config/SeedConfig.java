@@ -32,7 +32,7 @@ public class SeedConfig {
         "ESTOQUE_RESERVATION_READ", "ESTOQUE_RESERVATION_MANAGE",
         "CRM_CUSTOMER_READ", "CRM_CUSTOMER_MANAGE",
         "COMPRAS_READ", "COMPRAS_RECEIPT_MANAGE", "ECOMMERCE_READ", "FINANCEIRO_READ", "LOGISTICA_READ",
-        "PDV_READ", "PDV_SALE_MANAGE"
+        "PDV_READ", "PDV_SALE_MANAGE", "PDV_SALE_DISCOUNT"
     };
 
     // DEV_ONLY_PERMISSIONS e ROLE_DEV são gerenciados pelo DevRoleBootstrapConfig (todos os profiles).

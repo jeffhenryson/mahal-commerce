@@ -1,16 +1,16 @@
 package com.cernecommerce.adapter.in.controller;
 
-import com.cernecommerce.adapter.in.converter.SaleDTOConverter;
+import com.cernecommerce.adapter.in.converter.OrderDTOConverter;
 import com.cernecommerce.adapter.in.dtos.request.SaleRequest;
-import com.cernecommerce.adapter.in.dtos.response.SaleResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.OrderResponseDTO;
 import com.cernecommerce.core.domain.event.AuditEvent;
 import com.cernecommerce.core.domain.event.AuditEvent.EventType;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.pdv.CashRegisterSession;
-import com.cernecommerce.core.domain.model.pdv.Sale;
-import com.cernecommerce.core.domain.model.pdv.SaleItem;
+import com.cernecommerce.core.domain.model.pedido.Order;
 import com.cernecommerce.core.ports.in.PdvUseCase;
+import com.cernecommerce.core.ports.in.PdvUseCase.SaleItemCommand;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -23,8 +23,10 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -34,6 +36,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 
@@ -41,7 +44,7 @@ import java.util.Map;
  * Controller do domínio <b>vendas-balcao (PDV)</b>.
  *
  * <p>Fluxo hexagonal Controller → {@link PdvUseCase} → service. Endpoints previstos
- * (TODO): abertura/sangria/fechamento de caixa.</p>
+ * (PDV-F001/F002): abertura, sangria, suprimento e fechamento de caixa.</p>
  */
 @RestController
 @RequestMapping("/pdv")
@@ -50,14 +53,16 @@ import java.util.Map;
 @Validated
 public class PdvController {
 
+    private static final String DISCOUNT_AUTHORITY = "PDV_SALE_DISCOUNT";
+
     private final PdvUseCase pdvUseCase;
-    private final SaleDTOConverter saleConverter;
+    private final OrderDTOConverter orderConverter;
     private final ApplicationEventPublisher publisher;
 
-    public PdvController(PdvUseCase pdvUseCase, SaleDTOConverter saleConverter,
+    public PdvController(PdvUseCase pdvUseCase, OrderDTOConverter orderConverter,
             ApplicationEventPublisher publisher) {
         this.pdvUseCase = pdvUseCase;
-        this.saleConverter = saleConverter;
+        this.orderConverter = orderConverter;
         this.publisher = publisher;
     }
 
@@ -70,30 +75,80 @@ public class PdvController {
         return ResponseEntity.ok(pdvUseCase.listSessions(page, size));
     }
 
-    @Operation(summary = "Registra uma venda de balcão na sessão de caixa e dá baixa automática no estoque")
+    @Operation(summary = "Registra uma venda de balcão na sessão de caixa e dá baixa automática no estoque",
+            description = "O preço e o custo de cada item são resolvidos pelo servidor a partir do "
+                    + "catálogo — o request informa SKU, quantidade e, opcionalmente, desconto. "
+                    + "Desconto maior que zero exige a permissão PDV_SALE_DISCOUNT.")
     @ApiResponses({
-            @ApiResponse(responseCode = "201", description = "Criada", content = @Content(schema = @Schema(implementation = SaleResponseDTO.class))),
+            @ApiResponse(responseCode = "201", description = "Criada", content = @Content(schema = @Schema(implementation = OrderResponseDTO.class))),
             @ApiResponse(responseCode = "400", description = "Saldo insuficiente para algum item", content = @Content),
-            @ApiResponse(responseCode = "404", description = "Sessão de caixa não encontrada", content = @Content),
-            @ApiResponse(responseCode = "409", description = "Sessão de caixa encerrada", content = @Content),
-            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+            @ApiResponse(responseCode = "404", description = "Sessão de caixa ou SKU não encontrado", content = @Content),
+            @ApiResponse(responseCode = "409", description = "Sessão encerrada, produto sem preço ou desconto acima do teto", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão — inclusive desconto sem PDV_SALE_DISCOUNT", content = @Content)
     })
     @PostMapping("/sessions/{id}/sales")
     @PreAuthorize("hasAuthority('PDV_SALE_MANAGE')")
-    public ResponseEntity<SaleResponseDTO> registerSale(@PathVariable("id") Long sessionId,
+    public ResponseEntity<OrderResponseDTO> registerSale(@PathVariable("id") Long sessionId,
             @Valid @RequestBody SaleRequest request, Authentication authentication) {
-        List<SaleItem> items = saleConverter.toItems(request.getItems());
-        Sale sale = pdvUseCase.registerSale(sessionId, request.getWarehouseCode(), items, authentication.getName());
-        // EST-C004: a venda é o caminho de maior volume de movimentação de estoque. Sem este
-        // evento, só a movimentação manual do EstoqueController deixava trilha. É um evento por
+        List<SaleItemCommand> items = orderConverter.toCommands(request.getItems());
+        requireDiscountAuthority(items, authentication);
+
+        Order order = pdvUseCase.registerSale(sessionId, request.getWarehouseCode(),
+                request.getCustomerId(), items, authentication.getName());
+
+        // EST-C004: a venda é o caminho de maior volume de movimentação de estoque. É um evento por
         // operação (não por item) para não inundar a trilha numa venda com muitos itens.
         publisher.publishEvent(AuditEvent.of(EventType.STOCK_MOVEMENT_REGISTERED, authentication.getName(),
                 Map.of("origin", "PDV_SALE",
                         "sessionId", sessionId,
+                        "orderNumber", order.orderNumber(),
                         "warehouseCode", request.getWarehouseCode(),
                         "type", MovementType.SAIDA.name(),
-                        "skus", items.stream().map(SaleItem::sku).toList(),
+                        "skus", items.stream().map(SaleItemCommand::sku).toList(),
                         "itemCount", items.size())));
-        return ResponseEntity.status(201).body(saleConverter.toResponse(sale));
+        return ResponseEntity.status(201).body(orderConverter.toResponse(order));
+    }
+
+    @Operation(summary = "Consulta um pedido pelo id")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = OrderResponseDTO.class))),
+            @ApiResponse(responseCode = "404", description = "Pedido não encontrado", content = @Content)
+    })
+    @GetMapping("/sales/{id}")
+    @PreAuthorize("hasAuthority('PDV_READ')")
+    public ResponseEntity<OrderResponseDTO> getOrder(@PathVariable("id") Long orderId) {
+        return ResponseEntity.ok(orderConverter.toResponse(pdvUseCase.getOrder(orderId)));
+    }
+
+    @Operation(summary = "Lista os pedidos de uma sessão de caixa, do mais recente para o mais antigo")
+    @GetMapping("/sessions/{id}/sales")
+    @PreAuthorize("hasAuthority('PDV_READ')")
+    public ResponseEntity<PageResult<OrderResponseDTO>> listSessionOrders(
+            @PathVariable("id") Long sessionId,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+        return ResponseEntity.ok(orderConverter.toResponse(pdvUseCase.listSessionOrders(sessionId, page, size)));
+    }
+
+    /**
+     * Desconto exige permissão própria, e a checagem é programática porque depende do <b>corpo</b>
+     * da requisição — {@code @PreAuthorize} decide antes de olhar o payload. Vender e abater não
+     * são a mesma autorização: registrar venda é operação de caixa, conceder desconto é decisão
+     * comercial.
+     */
+    private void requireDiscountAuthority(List<SaleItemCommand> items, Authentication authentication) {
+        boolean hasDiscount = items.stream()
+                .map(SaleItemCommand::discountAmount)
+                .anyMatch(discount -> discount != null && discount.compareTo(BigDecimal.ZERO) > 0);
+        if (!hasDiscount) {
+            return;
+        }
+        boolean allowed = authentication.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .anyMatch(DISCOUNT_AUTHORITY::equals);
+        if (!allowed) {
+            throw new AccessDeniedException(
+                    "Conceder desconto exige a permissão " + DISCOUNT_AUTHORITY + ".");
+        }
     }
 }
