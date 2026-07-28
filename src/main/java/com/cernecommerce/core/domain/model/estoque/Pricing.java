@@ -1,0 +1,200 @@
+package com.cernecommerce.core.domain.model.estoque;
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+
+/**
+ * Precificação de um {@link Product} (EST-F019): custo de aquisição, markup desejado e preço
+ * praticado. Value object sem identidade própria — persistido em colunas de {@code product}.
+ *
+ * <p>Os três campos são opcionais e independentes: o catálogo aceita produto sem preço nenhum
+ * (era o único estado possível antes desta feature) e produto com custo mas sem preço de venda
+ * definido. {@link #empty()} representa "não precificado".</p>
+ *
+ * <h2>Markup não é margem</h2>
+ * <p>São duas divisões diferentes sobre a mesma diferença, e confundi-las é o erro clássico de
+ * precificação de varejo:</p>
+ * <ul>
+ *   <li><b>Markup</b> ({@link #markupPercent}) é sobre o <b>custo</b> — quanto se acrescenta ao
+ *       que se pagou. É o <i>input</i> do lojista: "compro a 50 e quero 100% em cima".</li>
+ *   <li><b>Margem</b> ({@link #marginPercent()}) é sobre a <b>venda</b> — que fatia do que
+ *       entrou no caixa sobrou. É o que interessa ao resultado.</li>
+ * </ul>
+ * <p>Custo 50 e venda 100 são markup de <b>100%</b> e margem de <b>50%</b>. Por isso ambos são
+ * expostos: o markup para precificar, a margem para saber quanto se ganhou de fato — e para
+ * dimensionar cashback, que sai da margem, não do faturamento.</p>
+ *
+ * <h2>Preço sugerido x preço praticado</h2>
+ * <p>{@link #suggestedPrice()} é o que o markup manda cobrar. {@link #salePrice} é o que a loja
+ * cobra de verdade, e <b>vence</b> quando informado — é o espaço para preço psicológico
+ * (R$ 49,90 em vez dos R$ 48,73 que a fórmula devolveu) e para preço de tabela do fornecedor.
+ * {@link #effectivePrice()} resolve os dois: o praticado se existir, senão o sugerido.</p>
+ *
+ * <p>Quando o preço praticado diverge do sugerido, {@link #effectiveMarkupPercent()} devolve o
+ * markup que o preço praticado <i>realmente</i> representa — o número honesto, em oposição ao
+ * markup pretendido que ficou guardado em {@link #markupPercent}.</p>
+ */
+public record Pricing(BigDecimal costPrice, BigDecimal markupPercent, BigDecimal salePrice) {
+
+    /** Casas decimais de valores monetários — alinhado com {@code NUMERIC(14,2)} no schema. */
+    private static final int MONEY_SCALE = 2;
+
+    /** Casas decimais dos percentuais derivados. Exibição, não armazenamento. */
+    private static final int PERCENT_SCALE = 2;
+
+    private static final BigDecimal HUNDRED = BigDecimal.valueOf(100);
+
+    private static final Pricing EMPTY = new Pricing(null, null, null);
+
+    public Pricing {
+        if (costPrice != null && costPrice.signum() < 0) {
+            throw new IllegalArgumentException("costPrice não pode ser negativo");
+        }
+        if (markupPercent != null && markupPercent.signum() < 0) {
+            throw new IllegalArgumentException("markupPercent não pode ser negativo");
+        }
+        if (salePrice != null && salePrice.signum() < 0) {
+            throw new IllegalArgumentException("salePrice não pode ser negativo");
+        }
+    }
+
+    /** Produto sem precificação — nenhum dos três campos definido. */
+    public static Pricing empty() {
+        return EMPTY;
+    }
+
+    /** Precificação a partir dos três campos; qualquer um pode ser nulo. */
+    public static Pricing of(BigDecimal costPrice, BigDecimal markupPercent, BigDecimal salePrice) {
+        return new Pricing(costPrice, markupPercent, salePrice);
+    }
+
+    /** Precificação por markup: o preço de venda fica a cargo de {@link #suggestedPrice()}. */
+    public static Pricing byMarkup(BigDecimal costPrice, BigDecimal markupPercent) {
+        return new Pricing(costPrice, markupPercent, null);
+    }
+
+    /** Indica se nenhum dos três campos foi definido. */
+    public boolean isEmpty() {
+        return costPrice == null && markupPercent == null && salePrice == null;
+    }
+
+    /**
+     * Preço que o markup manda cobrar: {@code costPrice * (1 + markupPercent / 100)}, arredondado
+     * a 2 casas com {@code HALF_UP}.
+     *
+     * @return {@code null} se custo ou markup não estiverem definidos — sem os dois não há o que
+     *         sugerir.
+     */
+    public BigDecimal suggestedPrice() {
+        if (costPrice == null || markupPercent == null) {
+            return null;
+        }
+        BigDecimal multiplier = BigDecimal.ONE.add(markupPercent.divide(HUNDRED, 6, RoundingMode.HALF_UP));
+        return costPrice.multiply(multiplier).setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * Preço a ser cobrado de fato: o praticado ({@link #salePrice}) quando informado, senão o
+     * {@link #suggestedPrice()}. É o valor que o PDV e a vitrine devem consumir.
+     *
+     * @return {@code null} quando o produto não tem preço praticado nem como sugerir um.
+     */
+    public BigDecimal effectivePrice() {
+        return salePrice != null ? salePrice : suggestedPrice();
+    }
+
+    /** Indica se há preço a cobrar — praticado ou sugerido. */
+    public boolean isPriced() {
+        return effectivePrice() != null;
+    }
+
+    /**
+     * Lucro bruto por unidade: {@code effectivePrice - costPrice}. Negativo quando se vende
+     * abaixo do custo (ver {@link #isBelowCost()}).
+     *
+     * @return {@code null} se faltar custo ou preço efetivo.
+     */
+    public BigDecimal marginAmount() {
+        BigDecimal price = effectivePrice();
+        if (costPrice == null || price == null) {
+            return null;
+        }
+        return price.subtract(costPrice).setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * Margem sobre a <b>venda</b>: {@code (effectivePrice - costPrice) / effectivePrice * 100}.
+     * Nunca passa de 100%. É a fatia do faturamento que sobra — a base sobre a qual se
+     * dimensiona desconto e cashback.
+     *
+     * @return {@code null} se faltar custo, faltar preço efetivo, ou o preço efetivo for zero
+     *         (divisão indefinida — brinde não tem margem percentual).
+     */
+    public BigDecimal marginPercent() {
+        BigDecimal price = effectivePrice();
+        if (costPrice == null || price == null || price.signum() == 0) {
+            return null;
+        }
+        return price.subtract(costPrice)
+                .divide(price, 6, RoundingMode.HALF_UP)
+                .multiply(HUNDRED)
+                .setScale(PERCENT_SCALE, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * Markup que o preço efetivo <b>realmente</b> representa:
+     * {@code (effectivePrice - costPrice) / costPrice * 100}. Difere de {@link #markupPercent}
+     * sempre que há preço praticado divergente do sugerido — é o número a exibir para o lojista
+     * conferir se o arredondamento comercial comeu a margem pretendida.
+     *
+     * @return {@code null} se faltar custo, faltar preço efetivo, ou o custo for zero (divisão
+     *         indefinida — sobre custo zero todo markup é infinito).
+     */
+    public BigDecimal effectiveMarkupPercent() {
+        BigDecimal price = effectivePrice();
+        if (costPrice == null || price == null || costPrice.signum() == 0) {
+            return null;
+        }
+        return price.subtract(costPrice)
+                .divide(costPrice, 6, RoundingMode.HALF_UP)
+                .multiply(HUNDRED)
+                .setScale(PERCENT_SCALE, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * Indica se o preço efetivo está <b>abaixo</b> do custo — prejuízo por unidade vendida.
+     * Não é bloqueado pelo domínio (queima de estoque e produto-isca são decisões comerciais
+     * legítimas), mas é sinalizado para a UI avisar.
+     */
+    public boolean isBelowCost() {
+        BigDecimal margin = marginAmount();
+        return margin != null && margin.signum() < 0;
+    }
+
+    /**
+     * Alteração parcial (mesma semântica de {@code Product.withDetails}): argumento nulo
+     * significa <b>não mexer neste campo</b>.
+     *
+     * <p>Consequência conhecida, idêntica à de {@code Product.withDetails}: como {@code null}
+     * quer dizer "manter", não há como <b>limpar</b> um campo já preenchido por este caminho —
+     * o máximo é trocá-lo. Despreficicar exige recriar via {@link #of}.</p>
+     */
+    public Pricing withPatch(BigDecimal newCostPrice, BigDecimal newMarkupPercent, BigDecimal newSalePrice) {
+        return new Pricing(
+                newCostPrice == null ? costPrice : newCostPrice,
+                newMarkupPercent == null ? markupPercent : newMarkupPercent,
+                newSalePrice == null ? salePrice : newSalePrice);
+    }
+
+    /**
+     * Fixa o preço sugerido como preço praticado, congelando o resultado do markup atual.
+     * Usado quando o lojista aceita a sugestão sem edição — a partir daí, mexer no custo não
+     * move mais o preço sozinho.
+     *
+     * @return {@code this} se não há sugestão a materializar.
+     */
+    public Pricing materializeSuggestion() {
+        BigDecimal suggested = suggestedPrice();
+        return suggested == null ? this : new Pricing(costPrice, markupPercent, suggested);
+    }
+}
