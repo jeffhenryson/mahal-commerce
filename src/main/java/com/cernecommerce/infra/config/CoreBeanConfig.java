@@ -62,6 +62,7 @@ import com.cernecommerce.core.service.TotpService;
 import com.cernecommerce.core.service.UserService;
 
 // Domínios de negócio (esqueletos — sem dependências de port out ainda)
+import com.cernecommerce.core.ports.in.OrderUseCase;
 import com.cernecommerce.core.ports.in.PdvUseCase;
 import com.cernecommerce.core.ports.in.EstoqueUseCase;
 import com.cernecommerce.core.ports.out.estoque.ProductRepository;
@@ -72,6 +73,7 @@ import com.cernecommerce.core.ports.out.estoque.StockIntegrityRepository;
 import com.cernecommerce.core.ports.out.estoque.StockMovementRepository;
 import com.cernecommerce.core.ports.out.estoque.StockReservationRepository;
 import com.cernecommerce.core.ports.out.estoque.WarehouseRepository;
+import com.cernecommerce.core.ports.out.pdv.CashMovementRepository;
 import com.cernecommerce.core.ports.out.pdv.CashRegisterRepository;
 import com.cernecommerce.core.ports.out.pedido.OrderRepository;
 import com.cernecommerce.core.ports.in.ComprasUseCase;
@@ -88,6 +90,7 @@ import com.cernecommerce.core.ports.out.crm.CustomerRepository;
 import com.cernecommerce.core.ports.out.crm.CustomerTagRepository;
 import com.cernecommerce.core.ports.out.crm.StageTransitionRepository;
 import com.cernecommerce.core.ports.out.crm.TagRepository;
+import com.cernecommerce.core.service.OrderService;
 import com.cernecommerce.core.service.PdvService;
 import com.cernecommerce.core.service.EstoqueService;
 import com.cernecommerce.core.service.ComprasService;
@@ -198,14 +201,20 @@ class CoreBeanConfig {
     // correspondentes ganhem implementação.
 
     @Bean
-    PdvUseCase pdvUseCase(CashRegisterRepository cashRegisterRepository, OrderRepository orderRepository,
+    OrderUseCase orderUseCase(OrderRepository orderRepository, EstoqueUseCase estoqueUseCase) {
+        return new OrderService(orderRepository, estoqueUseCase);
+    }
+
+    @Bean
+    PdvUseCase pdvUseCase(CashRegisterRepository cashRegisterRepository,
+            CashMovementRepository cashMovementRepository, OrderRepository orderRepository,
             EstoqueUseCase estoqueUseCase,
             // Teto de desconto por pedido (PDV-F004). Acima dele, 409 em vez de um segundo nível de
             // permissão — dois níveis só criariam a tentação de distribuir o maior. Migra para
             // system_config junto com o painel de configuração.
             @Value("${pdv.sale.max-discount-percent:10}") BigDecimal maxDiscountPercent) {
-        return new PdvService(cashRegisterRepository, orderRepository, estoqueUseCase,
-                maxDiscountPercent);
+        return new PdvService(cashRegisterRepository, cashMovementRepository, orderRepository,
+                estoqueUseCase, maxDiscountPercent);
     }
 
     @Bean

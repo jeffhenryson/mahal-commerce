@@ -1,12 +1,19 @@
 package com.cernecommerce.adapter.in.controller;
 
+import com.cernecommerce.adapter.in.converter.CashRegisterDTOConverter;
 import com.cernecommerce.adapter.in.converter.OrderDTOConverter;
+import com.cernecommerce.adapter.in.dtos.request.CashMovementRequest;
+import com.cernecommerce.adapter.in.dtos.request.CloseCashRegisterSessionRequest;
+import com.cernecommerce.adapter.in.dtos.request.OpenCashRegisterSessionRequest;
 import com.cernecommerce.adapter.in.dtos.request.SaleRequest;
+import com.cernecommerce.adapter.in.dtos.response.CashMovementResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.CashRegisterSessionResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.OrderResponseDTO;
 import com.cernecommerce.core.domain.event.AuditEvent;
 import com.cernecommerce.core.domain.event.AuditEvent.EventType;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
+import com.cernecommerce.core.domain.model.pdv.CashMovement;
 import com.cernecommerce.core.domain.model.pdv.CashRegisterSession;
 import com.cernecommerce.core.domain.model.pedido.Order;
 import com.cernecommerce.core.ports.in.PdvUseCase;
@@ -36,15 +43,18 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.net.URI;
 import java.math.BigDecimal;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
  * Controller do domínio <b>vendas-balcao (PDV)</b>.
  *
- * <p>Fluxo hexagonal Controller → {@link PdvUseCase} → service. Endpoints previstos
- * (PDV-F001/F002): abertura, sangria, suprimento e fechamento de caixa.</p>
+ * <p>Fluxo hexagonal Controller → {@link PdvUseCase} → service. Os {@code AuditEvent} são publicados
+ * aqui, e não no service, porque {@code HexagonalArchitectureTest} barra
+ * {@code ApplicationEventPublisher} em {@code core/service}.</p>
  */
 @RestController
 @RequestMapping("/pdv")
@@ -57,34 +67,137 @@ public class PdvController {
 
     private final PdvUseCase pdvUseCase;
     private final OrderDTOConverter orderConverter;
+    private final CashRegisterDTOConverter cashRegisterConverter;
     private final ApplicationEventPublisher publisher;
 
     public PdvController(PdvUseCase pdvUseCase, OrderDTOConverter orderConverter,
-            ApplicationEventPublisher publisher) {
+            CashRegisterDTOConverter cashRegisterConverter, ApplicationEventPublisher publisher) {
         this.pdvUseCase = pdvUseCase;
         this.orderConverter = orderConverter;
+        this.cashRegisterConverter = cashRegisterConverter;
         this.publisher = publisher;
     }
+
+    // ── Ciclo de caixa ───────────────────────────────────────────────────────────────────────
 
     @Operation(summary = "Lista sessões de caixa")
     @GetMapping("/sessions")
     @PreAuthorize("hasAuthority('PDV_READ')")
-    public ResponseEntity<PageResult<CashRegisterSession>> listSessions(
+    public ResponseEntity<PageResult<CashRegisterSessionResponseDTO>> listSessions(
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
-        return ResponseEntity.ok(pdvUseCase.listSessions(page, size));
+        return ResponseEntity.ok(cashRegisterConverter.toResponse(pdvUseCase.listSessions(page, size)));
     }
 
-    @Operation(summary = "Registra uma venda de balcão na sessão de caixa e dá baixa automática no estoque",
+    @Operation(summary = "Abre um caixa para o operador autenticado",
+            description = "Uma sessão aberta por operador. O depósito informado aqui é o que todas "
+                    + "as vendas deste caixa vão usar.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "201", description = "Aberto", content = @Content(schema = @Schema(implementation = CashRegisterSessionResponseDTO.class))),
+            @ApiResponse(responseCode = "409", description = "O operador já tem caixa aberto", content = @Content),
+            @ApiResponse(responseCode = "404", description = "Depósito não encontrado", content = @Content)
+    })
+    @PostMapping("/sessions")
+    @PreAuthorize("hasAuthority('PDV_SESSION_MANAGE')")
+    public ResponseEntity<CashRegisterSessionResponseDTO> openSession(
+            @Valid @RequestBody OpenCashRegisterSessionRequest request, Authentication authentication) {
+        CashRegisterSession session = pdvUseCase.openSession(authentication.getName(),
+                request.getOpeningAmount(), request.getWarehouseCode());
+        publisher.publishEvent(AuditEvent.of(EventType.CASH_SESSION_OPENED, authentication.getName(),
+                Map.of("sessionId", session.id(),
+                        "openingAmount", session.openingAmount(),
+                        "warehouseCode", session.warehouseCode())));
+        return ResponseEntity.created(URI.create("/pdv/sessions/" + session.id()))
+                .body(cashRegisterConverter.toResponse(session));
+    }
+
+    @Operation(summary = "Caixa aberto do operador autenticado")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = CashRegisterSessionResponseDTO.class))),
+            @ApiResponse(responseCode = "404", description = "O operador não tem caixa aberto", content = @Content)
+    })
+    @GetMapping("/sessions/current")
+    @PreAuthorize("hasAuthority('PDV_READ')")
+    public ResponseEntity<CashRegisterSessionResponseDTO> getCurrentSession(Authentication authentication) {
+        return ResponseEntity.ok(
+                cashRegisterConverter.toResponse(pdvUseCase.getCurrentSession(authentication.getName())));
+    }
+
+    @Operation(summary = "Consulta uma sessão de caixa")
+    @GetMapping("/sessions/{id}")
+    @PreAuthorize("hasAuthority('PDV_READ')")
+    public ResponseEntity<CashRegisterSessionResponseDTO> getSession(@PathVariable("id") Long sessionId) {
+        return ResponseEntity.ok(cashRegisterConverter.toResponse(pdvUseCase.getSession(sessionId)));
+    }
+
+    @Operation(summary = "Registra sangria ou suprimento na sessão",
+            description = "Exige que a sessão esteja aberta e pertença ao operador autenticado.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "201", description = "Registrado", content = @Content(schema = @Schema(implementation = CashMovementResponseDTO.class))),
+            @ApiResponse(responseCode = "403", description = "A sessão é de outro operador", content = @Content),
+            @ApiResponse(responseCode = "409", description = "Sessão já encerrada", content = @Content)
+    })
+    @PostMapping("/sessions/{id}/movements")
+    @PreAuthorize("hasAuthority('PDV_SESSION_MANAGE')")
+    public ResponseEntity<CashMovementResponseDTO> registerCashMovement(@PathVariable("id") Long sessionId,
+            @Valid @RequestBody CashMovementRequest request, Authentication authentication) {
+        CashMovement movement = pdvUseCase.registerCashMovement(sessionId, request.getType(),
+                request.getAmount(), request.getReason(), authentication.getName());
+        publisher.publishEvent(AuditEvent.of(EventType.CASH_MOVEMENT_REGISTERED, authentication.getName(),
+                Map.of("sessionId", sessionId,
+                        "type", movement.type().name(),
+                        "amount", movement.amount(),
+                        "reason", movement.reason())));
+        return ResponseEntity.status(201).body(cashRegisterConverter.toResponse(movement));
+    }
+
+    @Operation(summary = "Lista os movimentos de caixa da sessão")
+    @GetMapping("/sessions/{id}/movements")
+    @PreAuthorize("hasAuthority('PDV_READ')")
+    public ResponseEntity<List<CashMovementResponseDTO>> listCashMovements(@PathVariable("id") Long sessionId) {
+        return ResponseEntity.ok(
+                cashRegisterConverter.toMovementResponses(pdvUseCase.listCashMovements(sessionId)));
+    }
+
+    @Operation(summary = "Fecha o caixa confrontando o contado com o esperado",
+            description = "Divergência NÃO impede o fechamento — é registrada, como no fechamento de "
+                    + "um balanço de inventário. Fechar não exige ser o dono da sessão: a conferência "
+                    + "costuma ser do gerente.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Fechado, com esperado × contado × diferença", content = @Content(schema = @Schema(implementation = CashRegisterSessionResponseDTO.class))),
+            @ApiResponse(responseCode = "404", description = "Sessão não encontrada", content = @Content),
+            @ApiResponse(responseCode = "409", description = "Sessão já encerrada", content = @Content)
+    })
+    @PostMapping("/sessions/{id}/close")
+    @PreAuthorize("hasAuthority('PDV_SESSION_CLOSE')")
+    public ResponseEntity<CashRegisterSessionResponseDTO> closeSession(@PathVariable("id") Long sessionId,
+            @Valid @RequestBody CloseCashRegisterSessionRequest request, Authentication authentication) {
+        CashRegisterSession session = pdvUseCase.closeSession(sessionId, request.getCountedAmount(),
+                authentication.getName());
+        Map<String, Object> details = new HashMap<>();
+        details.put("sessionId", sessionId);
+        details.put("expectedAmount", session.expectedAmount());
+        details.put("countedAmount", session.countedAmount());
+        details.put("differenceAmount", session.differenceAmount());
+        details.put("diverges", session.diverges());
+        publisher.publishEvent(
+                AuditEvent.of(EventType.CASH_SESSION_CLOSED, authentication.getName(), details));
+        return ResponseEntity.ok(cashRegisterConverter.toResponse(session));
+    }
+
+    // ── Venda ────────────────────────────────────────────────────────────────────────────────
+
+    @Operation(summary = "Registra uma venda de balcão na sessão e dá baixa automática no estoque",
             description = "O preço e o custo de cada item são resolvidos pelo servidor a partir do "
-                    + "catálogo — o request informa SKU, quantidade e, opcionalmente, desconto. "
-                    + "Desconto maior que zero exige a permissão PDV_SALE_DISCOUNT.")
+                    + "catálogo, e o depósito vem da sessão de caixa — o request informa apenas SKU, "
+                    + "quantidade e, opcionalmente, desconto e cliente. Desconto maior que zero exige "
+                    + "a permissão PDV_SALE_DISCOUNT.")
     @ApiResponses({
             @ApiResponse(responseCode = "201", description = "Criada", content = @Content(schema = @Schema(implementation = OrderResponseDTO.class))),
             @ApiResponse(responseCode = "400", description = "Saldo insuficiente para algum item", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sessão de outro operador, ou desconto sem PDV_SALE_DISCOUNT", content = @Content),
             @ApiResponse(responseCode = "404", description = "Sessão de caixa ou SKU não encontrado", content = @Content),
-            @ApiResponse(responseCode = "409", description = "Sessão encerrada, produto sem preço ou desconto acima do teto", content = @Content),
-            @ApiResponse(responseCode = "403", description = "Sem permissão — inclusive desconto sem PDV_SALE_DISCOUNT", content = @Content)
+            @ApiResponse(responseCode = "409", description = "Sessão encerrada, produto sem preço ou desconto acima do teto", content = @Content)
     })
     @PostMapping("/sessions/{id}/sales")
     @PreAuthorize("hasAuthority('PDV_SALE_MANAGE')")
@@ -93,8 +206,8 @@ public class PdvController {
         List<SaleItemCommand> items = orderConverter.toCommands(request.getItems());
         requireDiscountAuthority(items, authentication);
 
-        Order order = pdvUseCase.registerSale(sessionId, request.getWarehouseCode(),
-                request.getCustomerId(), items, authentication.getName());
+        Order order = pdvUseCase.registerSale(sessionId, request.getCustomerId(), items,
+                authentication.getName());
 
         // EST-C004: a venda é o caminho de maior volume de movimentação de estoque. É um evento por
         // operação (não por item) para não inundar a trilha numa venda com muitos itens.
@@ -102,7 +215,7 @@ public class PdvController {
                 Map.of("origin", "PDV_SALE",
                         "sessionId", sessionId,
                         "orderNumber", order.orderNumber(),
-                        "warehouseCode", request.getWarehouseCode(),
+                        "warehouseCode", order.warehouseCode(),
                         "type", MovementType.SAIDA.name(),
                         "skus", items.stream().map(SaleItemCommand::sku).toList(),
                         "itemCount", items.size())));
@@ -128,6 +241,42 @@ public class PdvController {
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
         return ResponseEntity.ok(orderConverter.toResponse(pdvUseCase.listSessionOrders(sessionId, page, size)));
+    }
+
+    @Operation(summary = "Pedidos do aplicativo aguardando pagamento",
+            description = "A lista que o caixa consulta quando o cliente chega à loja para retirar e "
+                    + "pagar um pedido montado no app.")
+    @GetMapping("/pending-online-orders")
+    @PreAuthorize("hasAuthority('PDV_READ')")
+    public ResponseEntity<PageResult<OrderResponseDTO>> listPendingOnlineOrders(
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+        return ResponseEntity.ok(orderConverter.toResponse(pdvUseCase.listPendingOnlineOrders(page, size)));
+    }
+
+    @Operation(summary = "Liquida no balcão um pedido feito no aplicativo",
+            description = "Recebe o pagamento, consome a reserva de estoque e conclui. O canal "
+                    + "continua MARKETPLACE — o que muda é a sessão de caixa que passa a responder "
+                    + "pelo dinheiro recebido.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Liquidado", content = @Content(schema = @Schema(implementation = OrderResponseDTO.class))),
+            @ApiResponse(responseCode = "403", description = "A sessão é de outro operador", content = @Content),
+            @ApiResponse(responseCode = "404", description = "Sessão ou pedido não encontrado", content = @Content),
+            @ApiResponse(responseCode = "409", description = "Sessão encerrada, ou pedido que não está aguardando pagamento", content = @Content)
+    })
+    @PostMapping("/sessions/{id}/orders/{orderId}/settle")
+    @PreAuthorize("hasAuthority('PDV_SALE_MANAGE')")
+    public ResponseEntity<OrderResponseDTO> settleOnlineOrder(@PathVariable("id") Long sessionId,
+            @PathVariable("orderId") Long orderId, Authentication authentication) {
+        Order order = pdvUseCase.settleOnlineOrder(sessionId, orderId, authentication.getName());
+        publisher.publishEvent(AuditEvent.of(EventType.STOCK_MOVEMENT_REGISTERED, authentication.getName(),
+                Map.of("origin", "PDV_SETTLE_ONLINE",
+                        "sessionId", sessionId,
+                        "orderId", orderId,
+                        "orderNumber", order.orderNumber(),
+                        "warehouseCode", order.warehouseCode(),
+                        "type", MovementType.SAIDA.name())));
+        return ResponseEntity.ok(orderConverter.toResponse(order));
     }
 
     /**

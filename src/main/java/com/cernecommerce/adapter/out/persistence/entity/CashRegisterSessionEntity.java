@@ -29,8 +29,28 @@ public class CashRegisterSessionEntity {
     @Column(name = "opening_amount", nullable = false, precision = 14, scale = 2)
     private BigDecimal openingAmount;
 
+    /**
+     * Depósito de onde sai a mercadoria vendida neste caixa (PDV-C004). Fica na sessão, e não no
+     * request de cada venda, para o operador não baixar estoque de depósito alheio.
+     */
+    @Column(name = "warehouse_code", nullable = false, length = 50)
+    private String warehouseCode;
+
     @Column(name = "closed_at")
     private Instant closedAt;
+
+    @Column(name = "closed_by", length = 80)
+    private String closedBy;
+
+    @Column(name = "expected_amount", precision = 14, scale = 2)
+    private BigDecimal expectedAmount;
+
+    @Column(name = "counted_amount", precision = 14, scale = 2)
+    private BigDecimal countedAmount;
+
+    /** {@code counted − expected}. Negativo é falta no caixa, e é um número legítimo. */
+    @Column(name = "difference_amount", precision = 14, scale = 2)
+    private BigDecimal differenceAmount;
 
     @Column(nullable = false, length = 10)
     private String status;

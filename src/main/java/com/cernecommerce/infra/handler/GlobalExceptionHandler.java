@@ -45,8 +45,11 @@ import com.cernecommerce.core.domain.exception.crm.CustomerNotFoundException;
 import com.cernecommerce.core.domain.exception.crm.DuplicateCustomerEmailException;
 import com.cernecommerce.core.domain.exception.crm.DuplicateTagNameException;
 import com.cernecommerce.core.domain.exception.crm.TagNotFoundException;
+import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionAlreadyOpenException;
 import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionClosedException;
 import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionNotFoundException;
+import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionNotOwnedException;
+import com.cernecommerce.core.domain.exception.pdv.NoOpenCashRegisterSessionException;
 import com.cernecommerce.core.domain.exception.pedido.DiscountLimitExceededException;
 import com.cernecommerce.core.domain.exception.pedido.InvalidOrderStatusTransitionException;
 import com.cernecommerce.core.domain.exception.pedido.OrderNotFoundException;
@@ -473,6 +476,28 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiError> handleCashRegisterSessionClosed(CashRegisterSessionClosedException ex,
             HttpServletRequest req) {
         return error(HttpStatus.CONFLICT, ex.getMessage(), "CASH_REGISTER_SESSION_CLOSED", req);
+    }
+
+    @ExceptionHandler(CashRegisterSessionAlreadyOpenException.class)
+    public ResponseEntity<ApiError> handleSessionAlreadyOpen(CashRegisterSessionAlreadyOpenException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "SESSION_ALREADY_OPEN", req);
+    }
+
+    @ExceptionHandler(NoOpenCashRegisterSessionException.class)
+    public ResponseEntity<ApiError> handleNoOpenSession(NoOpenCashRegisterSessionException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.NOT_FOUND, ex.getMessage(), "NO_OPEN_SESSION", req);
+    }
+
+    /**
+     * PDV-C004: 403 e não 404. A sessão existe e o chamador sabe disso — o que falta é ela ser dele.
+     * Um 404 aqui esconderia a causa real e faria o operador procurar um caixa que está lá.
+     */
+    @ExceptionHandler(CashRegisterSessionNotOwnedException.class)
+    public ResponseEntity<ApiError> handleSessionNotOwned(CashRegisterSessionNotOwnedException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.FORBIDDEN, ex.getMessage(), "SESSION_NOT_OWNED", req);
     }
 
     @ExceptionHandler(OrderNotFoundException.class)

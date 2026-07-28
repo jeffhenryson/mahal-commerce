@@ -15,6 +15,7 @@ import com.cernecommerce.adapter.in.converter.StageTransitionDTOConverter;
 import com.cernecommerce.adapter.in.converter.TagDTOConverter;
 import com.cernecommerce.adapter.in.converter.ProductDTOConverter;
 import com.cernecommerce.adapter.in.converter.RoleDTOConverter;
+import com.cernecommerce.adapter.in.converter.CashRegisterDTOConverter;
 import com.cernecommerce.adapter.in.converter.OrderDTOConverter;
 import com.cernecommerce.adapter.in.converter.StockCountDTOConverter;
 import com.cernecommerce.adapter.in.converter.StockReservationDTOConverter;
@@ -114,5 +115,10 @@ class ConverterBeanConfig {
     @Bean
     OrderDTOConverter orderDTOConverter() {
         return new OrderDTOConverter();
+    }
+
+    @Bean
+    CashRegisterDTOConverter cashRegisterDTOConverter() {
+        return new CashRegisterDTOConverter();
     }
 }
