@@ -3,6 +3,7 @@ package com.cernecommerce.adapter.out.persistence.repository;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.OrphanSku;
+import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
@@ -91,6 +92,64 @@ class EstoqueRepositoryIT {
                     assertThat(v.sku()).isEqualTo("RT-001-M");
                     assertThat(v.attributes()).containsExactly(new ProductAttribute("sabor", "menta"));
                 });
+    }
+
+    // ---------- EST-F019 — precificação ----------
+
+    @Test
+    void product_roundTrip_preservaAPrecificacao() {
+        productRepository.save(Product.create("PR-001", "Narguilé", "narguile", List.of(),
+                Pricing.of(new BigDecimal("45.00"), new BigDecimal("80.5000"), new BigDecimal("79.90"))));
+        flushAndClear();
+
+        Pricing pricing = productRepository.findBySku("PR-001").orElseThrow().pricing();
+
+        assertThat(pricing.costPrice()).isEqualByComparingTo("45.00");
+        assertThat(pricing.markupPercent()).isEqualByComparingTo("80.5000");
+        assertThat(pricing.salePrice()).isEqualByComparingTo("79.90");
+    }
+
+    /**
+     * Produto sem preço tem que voltar como {@link Pricing#empty()}, e não com zeros: preço
+     * desconhecido não é preço zero, e a diferença decide se o PDV recusa a venda ou dá o item
+     * de graça.
+     */
+    @Test
+    void product_semPreco_voltaComoPricingVazio() {
+        productRepository.save(Product.create("PR-002", "Carvão", "carvao", List.of()));
+        flushAndClear();
+
+        assertThat(productRepository.findBySku("PR-002").orElseThrow().pricing().isEmpty()).isTrue();
+    }
+
+    /** A escala 4 de markup_percent existe para sobreviver ao round-trip sem truncar. */
+    @Test
+    void markupPercent_preservaAsQuatroCasasDecimais() {
+        productRepository.save(Product.create("PR-003", "Essência", "essencia", List.of(),
+                Pricing.byMarkup(new BigDecimal("45.00"), new BigDecimal("33.3333"))));
+        flushAndClear();
+
+        Pricing pricing = productRepository.findBySku("PR-003").orElseThrow().pricing();
+
+        assertThat(pricing.markupPercent()).isEqualByComparingTo("33.3333");
+        assertThat(pricing.suggestedPrice()).isEqualByComparingTo("60.00");
+    }
+
+    @Test
+    void findByAnySku_resolveOPaiTantoPeloSkuPaiQuantoPeloDeVariacao() {
+        productRepository.save(Product.create("PR-004", "Essência", "essencia",
+                List.of(ProductVariant.create("PR-004-UVA", List.of(new ProductAttribute("sabor", "uva")))),
+                Pricing.of(null, null, new BigDecimal("29.90"))));
+        flushAndClear();
+
+        Product pelosPai = productRepository.findByAnySku("PR-004").orElseThrow();
+        Product pelaVariacao = productRepository.findByAnySku("PR-004-UVA").orElseThrow();
+
+        assertThat(pelosPai.sku()).isEqualTo("PR-004");
+        assertThat(pelaVariacao.sku()).as("variação resolve para o produto pai").isEqualTo("PR-004");
+        assertThat(pelaVariacao.pricing().effectivePrice()).as("e herda o preço dele")
+                .isEqualByComparingTo("29.90");
+        assertThat(productRepository.findByAnySku("PR-999")).as("SKU inexistente").isEmpty();
     }
 
     @Test

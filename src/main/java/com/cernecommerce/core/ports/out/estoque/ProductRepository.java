@@ -15,6 +15,15 @@ public interface ProductRepository {
     Optional<Product> findBySku(String sku);
 
     /**
+     * Busca o produto pai a partir de <b>qualquer</b> SKU do catálogo — o do próprio pai ou o de
+     * uma variação. Distinto de {@link #findBySku(String)}, que só encontra pelo SKU pai.
+     *
+     * <p>É o caminho de resolução de preço (EST-F019): o PDV lê o código da variação na
+     * prateleira, mas a {@code Pricing} mora no pai.</p>
+     */
+    Optional<Product> findByAnySku(String sku);
+
+    /**
      * Indica se o SKU existe no catálogo, seja como SKU pai de um produto ou como SKU de uma
      * variação. É a checagem usada antes de movimentar saldo, para impedir que uma digitação
      * errada crie saldo e ledger órfãos.

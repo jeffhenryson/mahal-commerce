@@ -12,4 +12,7 @@ public class ProductResponseDTO {
     private String category;
     private boolean active;
     private List<ProductVariantResponseDTO> variants;
+
+    /** EST-F019 — nunca nulo; produto sem preço vem com os campos internos nulos. */
+    private PricingResponseDTO pricing;
 }

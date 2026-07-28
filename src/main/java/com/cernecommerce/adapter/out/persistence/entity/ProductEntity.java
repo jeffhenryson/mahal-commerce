@@ -3,6 +3,7 @@ package com.cernecommerce.adapter.out.persistence.entity;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -31,6 +32,17 @@ public class ProductEntity {
 
     @Column(nullable = false)
     private boolean active;
+
+    // EST-F019 — precificação. Nullable: produto não precificado é estado válido, e preço zero
+    // não é o mesmo que preço desconhecido. Ver V63 e o value object Pricing.
+    @Column(name = "cost_price", precision = 14, scale = 2)
+    private BigDecimal costPrice;
+
+    @Column(name = "markup_percent", precision = 9, scale = 4)
+    private BigDecimal markupPercent;
+
+    @Column(name = "sale_price", precision = 14, scale = 2)
+    private BigDecimal salePrice;
 
     @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     @ToString.Exclude

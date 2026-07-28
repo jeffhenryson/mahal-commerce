@@ -29,6 +29,14 @@ public class StockBalanceEntity {
     @Column(nullable = false, precision = 14, scale = 3)
     private BigDecimal quantity;
 
+    /**
+     * Parte de {@code quantity} já prometida a um pedido que ainda não saiu (EST-F021). Fica nesta
+     * linha, e não numa soma sobre {@code stock_reservation}, para cair sob o mesmo {@code @Version}
+     * do saldo — é isso que faz duas reservas concorrentes colidirem em vez de ambas passarem.
+     */
+    @Column(name = "reserved_quantity", nullable = false, precision = 14, scale = 3)
+    private BigDecimal reservedQuantity;
+
     @Version
     @Column(nullable = false)
     private long version;

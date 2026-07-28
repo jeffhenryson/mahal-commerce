@@ -1,5 +1,6 @@
 package com.cernecommerce.adapter.in.dtos.request;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
@@ -19,4 +20,12 @@ public class ProductPatchRequest {
 
     @Size(max = 100)
     private String category;
+
+    /**
+     * Precificação (EST-F019). Ausente, mantém a atual; presente, cada um dos seus campos segue
+     * a mesma regra de "nulo mantém". Exige {@code ESTOQUE_PRODUCT_PRICE_MANAGE} — mandar este
+     * bloco sem a permissão é 403, e nada do PATCH é aplicado.
+     */
+    @Valid
+    private PricingRequest pricing;
 }

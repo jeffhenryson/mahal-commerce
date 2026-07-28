@@ -43,6 +43,7 @@ class DevRoleBootstrapConfigTest {
 
         verify(roleUseCase).assignPermission("ROLE_DEV", "ESTOQUE_STOCK_MANAGE");
         verify(roleUseCase).assignPermission("ROLE_DEV", "ESTOQUE_PRODUCT_MANAGE");
+        verify(roleUseCase).assignPermission("ROLE_DEV", "ESTOQUE_PRODUCT_PRICE_MANAGE");
         verify(roleUseCase).assignPermission("ROLE_DEV", "ESTOQUE_WAREHOUSE_MANAGE");
         verify(roleUseCase).assignPermission("ROLE_DEV", "PDV_READ");
     }

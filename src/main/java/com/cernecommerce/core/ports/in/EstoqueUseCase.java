@@ -3,15 +3,19 @@ package com.cernecommerce.core.ports.in;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.OrphanSku;
+import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
+import com.cernecommerce.core.domain.model.estoque.ReservationStatus;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
 import com.cernecommerce.core.domain.model.estoque.StockCount;
 import com.cernecommerce.core.domain.model.estoque.StockMovement;
+import com.cernecommerce.core.domain.model.estoque.StockReservation;
 import com.cernecommerce.core.domain.model.estoque.Warehouse;
 import com.cernecommerce.core.domain.model.estoque.WarehouseType;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.util.List;
 
 /**
@@ -24,7 +28,15 @@ public interface EstoqueUseCase {
      * {@link com.cernecommerce.core.domain.exception.estoque.DuplicateSkuException}
      * se o SKU do produto ou de alguma variação já existir.
      */
-    Product createProduct(String sku, String name, String category, List<ProductVariant> variants);
+    default Product createProduct(String sku, String name, String category, List<ProductVariant> variants) {
+        return createProduct(sku, name, category, variants, Pricing.empty());
+    }
+
+    /**
+     * Cria um produto precificado (EST-F019). {@code pricing} nulo equivale a
+     * {@link Pricing#empty()} — produto sem preço é estado válido do catálogo.
+     */
+    Product createProduct(String sku, String name, String category, List<ProductVariant> variants, Pricing pricing);
 
     /** Lista produtos paginados. */
     PageResult<Product> listProducts(int page, int size);
@@ -36,7 +48,26 @@ public interface EstoqueUseCase {
      * {@link com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException} se o SKU
      * não for um SKU pai existente.
      */
-    Product updateProduct(String sku, String name, String category);
+    default Product updateProduct(String sku, String name, String category) {
+        return updateProduct(sku, name, category, null);
+    }
+
+    /**
+     * Alteração parcial incluindo precificação (EST-F019). {@code pricing} nulo mantém a
+     * precificação atual; se vier preenchido, cada um dos seus três campos segue a mesma
+     * semântica de PATCH — nulo mantém, valor troca (ver {@link Pricing#withPatch}).
+     */
+    Product updateProduct(String sku, String name, String category, Pricing pricing);
+
+    /**
+     * Resolve a precificação vigente de <b>qualquer</b> SKU do catálogo — pai ou variação
+     * (EST-F019). Variação herda o preço do pai. É a consulta que o PDV e a vitrine usam antes
+     * de montar o item de venda.
+     *
+     * @throws com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException
+     *         se o SKU não existir no catálogo.
+     */
+    Pricing findPricingBySku(String sku);
 
     /**
      * Ativa ou desativa um produto (EST-F018). Produto inativo <b>recusa entrada</b> de estoque
@@ -175,4 +206,84 @@ public interface EstoqueUseCase {
 
     /** Balanços de um depósito, dos mais recentes para os mais antigos. */
     PageResult<StockCount> listStockCounts(String warehouseCode, int page, int size);
+
+    // ---------------------------------------------------------------------------------------
+    // Reserva de estoque (EST-F021)
+    // ---------------------------------------------------------------------------------------
+
+    /**
+     * Compromete saldo de um SKU sem tirá-lo da prateleira, para que balcão e marketplace consumam
+     * o mesmo depósito sem overselling. É o caminho do <b>checkout online</b>: entre montar o
+     * pedido e o pagamento confirmar, o saldo precisa estar prometido sem ter saído.
+     *
+     * <p>O PDV <b>não</b> usa este caminho — no balcão a mercadoria sai na hora, e
+     * {@link #adjustStock} com {@code SAIDA} continua sendo o correto.</p>
+     *
+     * @param ownerReference identificador de quem pediu a reserva, usado depois para consumir ou
+     *        liberar o conjunto todo. Obrigatório.
+     * @param ttl validade da reserva; {@code null} usa o padrão configurado. Reserva sem prazo
+     *        seria saldo perdido sem ninguém perceber, então não há como criar uma perpétua.
+     * @throws com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException se o SKU não
+     *         existir no catálogo
+     * @throws com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException se o
+     *         depósito não existir
+     * @throws com.cernecommerce.core.domain.exception.estoque.InsufficientStockException se o
+     *         <b>disponível</b> não cobrir a quantidade
+     */
+    StockReservation reserveStock(String sku, String warehouseCode, BigDecimal quantity,
+            String ownerReference, Duration ttl, String username);
+
+    /**
+     * Converte a reserva em saída de verdade: grava um {@link MovementType#SAIDA} no ledger e baixa
+     * o físico e o reservado juntos. O disponível não se mexe — já estava descontado desde a
+     * reserva. É o que o webhook de pagamento confirmado chama.
+     *
+     * @throws com.cernecommerce.core.domain.exception.estoque.StockReservationNotFoundException
+     *         se a reserva não existir
+     * @throws com.cernecommerce.core.domain.exception.estoque.StockReservationNotActiveException
+     *         se já tiver sido consumida, liberada ou expirada — consumir duas vezes daria baixa
+     *         dobrada na mesma mercadoria
+     */
+    StockReservation consumeReservation(Long reservationId, String username);
+
+    /**
+     * Devolve a reserva ao disponível sem mexer no físico — pedido cancelado ou carrinho desfeito.
+     * Não gera movimentação: nada entrou nem saiu da prateleira.
+     *
+     * @throws com.cernecommerce.core.domain.exception.estoque.StockReservationNotFoundException
+     *         se a reserva não existir
+     * @throws com.cernecommerce.core.domain.exception.estoque.StockReservationNotActiveException
+     *         se já estiver resolvida
+     */
+    StockReservation releaseReservation(Long reservationId, String username);
+
+    /**
+     * Libera de uma vez todas as reservas ativas de um dono. É a operação que o cancelamento de um
+     * pedido com vários itens usa, para não depender de o chamador ter guardado id por id.
+     *
+     * @return quantas reservas foram liberadas; zero se não havia nenhuma ativa (idempotente de
+     *         propósito — cancelar um pedido duas vezes não é erro)
+     */
+    int releaseReservationsByOwner(String ownerReference, String username);
+
+    /** Consulta uma reserva. */
+    StockReservation getStockReservation(Long reservationId);
+
+    /**
+     * Listagem filtrada de reservas, mais recentes primeiro. {@code sku}, {@code warehouseCode} e
+     * {@code status} são opcionais e se combinam.
+     *
+     * @throws com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException se
+     *         {@code warehouseCode} for informado e não existir
+     */
+    PageResult<StockReservation> listReservations(String sku, String warehouseCode, ReservationStatus status,
+            int page, int size);
+
+    /**
+     * Expira as reservas vencidas, devolvendo a quantidade ao disponível. Chamado pelo varredor
+     * agendado, em lotes.
+     *
+     * @return quantas reservas foram expiradas nesta passada
+     */
+    int expireReservations(int batchSize);
 }

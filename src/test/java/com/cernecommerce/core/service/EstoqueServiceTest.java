@@ -13,6 +13,7 @@ import com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundExceptio
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.OrphanSku;
+import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
@@ -33,6 +34,7 @@ import com.cernecommerce.core.ports.out.estoque.StockBalanceRepository;
 import com.cernecommerce.core.ports.out.estoque.StockCountRepository;
 import com.cernecommerce.core.ports.out.estoque.StockIntegrityRepository;
 import com.cernecommerce.core.ports.out.estoque.StockMovementRepository;
+import com.cernecommerce.core.ports.out.estoque.StockReservationRepository;
 import com.cernecommerce.core.ports.out.estoque.WarehouseRepository;
 import com.cernecommerce.core.ports.out.user.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,6 +45,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -67,8 +70,12 @@ class EstoqueServiceTest {
     @Mock ReorderPointRepository reorderPointRepository;
     @Mock StockIntegrityRepository stockIntegrityRepository;
     @Mock StockCountRepository stockCountRepository;
+    @Mock StockReservationRepository stockReservationRepository;
     @Mock NotificationUseCase notificationUseCase;
     @Mock UserRepository userRepository;
+
+    /** Mesmo default de {@code estoque.reservation.default-ttl} em {@code CoreBeanConfig}. */
+    private static final Duration RESERVATION_TTL = Duration.ofMinutes(30);
 
     EstoqueService estoqueService;
 
@@ -88,7 +95,8 @@ class EstoqueServiceTest {
     void setUp() {
         estoqueService = new EstoqueService(productRepository, warehouseRepository, stockBalanceRepository,
                 stockMovementRepository, reorderPointRepository, stockIntegrityRepository, stockCountRepository,
-                notificationUseCase, userRepository, immediateExecutor);
+                stockReservationRepository, notificationUseCase, userRepository, immediateExecutor,
+                RESERVATION_TTL);
         lenient().when(reorderPointRepository.findBySkuAndWarehouseId(any(), any())).thenReturn(Optional.empty());
         // Padrão dos testes: o SKU existe no catálogo, que é a pré-condição das movimentações.
         // Os testes de createProduct e os de SKU desconhecido sobrescrevem este stub.
@@ -512,6 +520,134 @@ class EstoqueServiceTest {
                 .isInstanceOf(ProductNotFoundException.class);
 
         verify(productRepository, never()).save(any());
+    }
+
+    // ---------- EST-F019 — precificação ----------
+
+    private Product pricedProduct() {
+        return Product.of(1L, "NARG-001", "Narguile Aladin", "narguile", true, oneVariant(),
+                Pricing.of(new BigDecimal("45.00"), new BigDecimal("80"), new BigDecimal("79.90")));
+    }
+
+    @Test
+    void createProduct_semPricing_nasceNaoPrecificado() {
+        when(productRepository.existsBySku(any())).thenReturn(false);
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Product created = estoqueService.createProduct("CARV-001", "Carvão Coco", "carvao", List.of());
+
+        assertThat(created.pricing().isEmpty()).isTrue();
+        assertThat(created.pricing().isPriced()).isFalse();
+    }
+
+    @Test
+    void createProduct_comPricingNulo_naoQuebra() {
+        when(productRepository.existsBySku(any())).thenReturn(false);
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Product created = estoqueService.createProduct("CARV-001", "Carvão Coco", "carvao", List.of(), null);
+
+        assertThat(created.pricing()).isEqualTo(Pricing.empty());
+    }
+
+    @Test
+    void createProduct_comMarkup_persisteOPrecoSugerido() {
+        when(productRepository.existsBySku(any())).thenReturn(false);
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Product created = estoqueService.createProduct("NARG-001", "Narguile", "narguile", List.of(),
+                Pricing.byMarkup(new BigDecimal("45.00"), new BigDecimal("80")));
+
+        assertThat(created.pricing().effectivePrice()).isEqualByComparingTo("81.00");
+        assertThat(created.pricing().marginPercent()).isEqualByComparingTo("44.44");
+    }
+
+    @Test
+    void updateProduct_pricingNulo_preservaAPrecificacaoAtual() {
+        when(productRepository.findBySku("NARG-001")).thenReturn(Optional.of(pricedProduct()));
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Product updated = estoqueService.updateProduct("NARG-001", "Nome Novo", null, null);
+
+        assertThat(updated.name()).isEqualTo("Nome Novo");
+        assertThat(updated.pricing().salePrice()).isEqualByComparingTo("79.90");
+        assertThat(updated.pricing().costPrice()).isEqualByComparingTo("45.00");
+    }
+
+    /**
+     * O caso que motiva o {@code withPatch} no service: mandar só o custo não pode apagar o
+     * markup e o preço já cadastrados.
+     */
+    @Test
+    void updateProduct_pricingParcial_naoApagaOsDemaisCampos() {
+        when(productRepository.findBySku("NARG-001")).thenReturn(Optional.of(pricedProduct()));
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Product updated = estoqueService.updateProduct("NARG-001", null, null,
+                Pricing.of(new BigDecimal("60.00"), null, null));
+
+        assertThat(updated.pricing().costPrice()).isEqualByComparingTo("60.00");
+        assertThat(updated.pricing().markupPercent()).as("markup preservado").isEqualByComparingTo("80");
+        assertThat(updated.pricing().salePrice()).as("preço praticado preservado").isEqualByComparingTo("79.90");
+        assertThat(updated.pricing().suggestedPrice()).as("sugestão acompanha o custo novo")
+                .isEqualByComparingTo("108.00");
+    }
+
+    @Test
+    void updateProduct_precificaProdutoQueNaoTinhaPreco() {
+        when(productRepository.findBySku("NARG-001")).thenReturn(Optional.of(existingProduct()));
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Product updated = estoqueService.updateProduct("NARG-001", null, null,
+                Pricing.byMarkup(new BigDecimal("45.00"), new BigDecimal("80")));
+
+        assertThat(updated.pricing().effectivePrice()).isEqualByComparingTo("81.00");
+    }
+
+    @Test
+    void updateProduct_pricingNaoDerrubaAsVariacoes() {
+        when(productRepository.findBySku("NARG-001")).thenReturn(Optional.of(pricedProduct()));
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Product updated = estoqueService.updateProduct("NARG-001", null, null,
+                Pricing.of(new BigDecimal("60.00"), null, null));
+
+        assertThat(updated.variants()).extracting(ProductVariant::sku).containsExactly("NARG-M-001");
+    }
+
+    @Test
+    void findPricingBySku_resolvePeloSkuPai() {
+        when(productRepository.findByAnySku("NARG-001")).thenReturn(Optional.of(pricedProduct()));
+
+        assertThat(estoqueService.findPricingBySku("NARG-001").effectivePrice())
+                .isEqualByComparingTo("79.90");
+    }
+
+    /** A variação herda o preço do pai — é o caminho do leitor de código de barras no balcão. */
+    @Test
+    void findPricingBySku_resolveVariacaoPeloPrecoDoPai() {
+        when(productRepository.findByAnySku("NARG-M-001")).thenReturn(Optional.of(pricedProduct()));
+
+        assertThat(estoqueService.findPricingBySku("NARG-M-001").effectivePrice())
+                .isEqualByComparingTo("79.90");
+    }
+
+    @Test
+    void findPricingBySku_produtoSemPreco_devolveEmptyEmVezDeErro() {
+        when(productRepository.findByAnySku("NARG-001")).thenReturn(Optional.of(existingProduct()));
+
+        Pricing pricing = estoqueService.findPricingBySku("NARG-001");
+
+        assertThat(pricing.isEmpty()).isTrue();
+        assertThat(pricing.isPriced()).isFalse();
+    }
+
+    @Test
+    void findPricingBySku_throwsWhenSkuNotInCatalog() {
+        when(productRepository.findByAnySku("SKU-FANTASMA")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.findPricingBySku("SKU-FANTASMA"))
+                .isInstanceOf(ProductNotFoundException.class);
     }
 
     @Test

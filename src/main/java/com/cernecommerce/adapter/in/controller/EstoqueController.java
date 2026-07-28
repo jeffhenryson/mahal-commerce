@@ -14,6 +14,7 @@ import com.cernecommerce.adapter.in.dtos.request.StockMovementRequest;
 import com.cernecommerce.adapter.in.dtos.request.WarehousePatchRequest;
 import com.cernecommerce.adapter.in.dtos.request.WarehouseRequest;
 import com.cernecommerce.adapter.in.dtos.response.OrphanSkuResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.PricingResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.ProductResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.StockBalanceResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.StockCountResponseDTO;
@@ -100,26 +101,32 @@ public class EstoqueController {
         return ResponseEntity.ok(response);
     }
 
-    @Operation(summary = "Cria um produto (SKU pai) com suas variações")
+    @Operation(summary = "Cria um produto (SKU pai) com suas variações e, opcionalmente, sua precificação",
+            description = "O bloco `pricing` é opcional — omitido, o produto nasce sem preço. "
+                    + "Enviá-lo exige `ESTOQUE_PRODUCT_PRICE_MANAGE` além de `ESTOQUE_PRODUCT_MANAGE`.")
     @ApiResponses({
             @ApiResponse(responseCode = "201", description = "Criado", content = @Content(schema = @Schema(implementation = ProductResponseDTO.class))),
             @ApiResponse(responseCode = "409", description = "SKU já cadastrado", content = @Content),
             @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
     })
     @PostMapping("/products")
-    @PreAuthorize("hasAuthority('ESTOQUE_PRODUCT_MANAGE')")
+    @PreAuthorize("hasAuthority('ESTOQUE_PRODUCT_MANAGE') "
+            + "and (#request.pricing == null or hasAuthority('ESTOQUE_PRODUCT_PRICE_MANAGE'))")
     public ResponseEntity<ProductResponseDTO> createProduct(@Valid @RequestBody ProductRequest request,
             Authentication authentication) {
         List<ProductVariant> variants = converter.toVariants(request.getVariants());
-        Product created = estoqueUseCase.createProduct(request.getSku(), request.getName(), request.getCategory(), variants);
+        Product created = estoqueUseCase.createProduct(request.getSku(), request.getName(), request.getCategory(),
+                variants, converter.toPricing(request.getPricing()));
         publisher.publishEvent(AuditEvent.of(EventType.PRODUCT_CREATED,
                 authentication.getName(), Map.of("sku", created.sku())));
         return ResponseEntity.created(URI.create("/estoque/products/" + created.sku()))
                 .body(converter.toResponse(created));
     }
 
-    @Operation(summary = "Altera parcialmente um produto (nome e/ou categoria)",
-            description = "Campo ausente ou nulo é mantido. Não altera o SKU nem as variações.")
+    @Operation(summary = "Altera parcialmente um produto (nome, categoria e/ou precificação)",
+            description = "Campo ausente ou nulo é mantido, inclusive dentro de `pricing`. "
+                    + "Não altera o SKU nem as variações. Mandar o bloco `pricing` exige "
+                    + "`ESTOQUE_PRODUCT_PRICE_MANAGE` além de `ESTOQUE_PRODUCT_MANAGE`.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Atualizado", content = @Content(schema = @Schema(implementation = ProductResponseDTO.class))),
             @ApiResponse(responseCode = "400", description = "Requisição inválida", content = @Content),
@@ -127,14 +134,41 @@ public class EstoqueController {
             @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
     })
     @PatchMapping("/products/{sku}")
-    @PreAuthorize("hasAuthority('ESTOQUE_PRODUCT_MANAGE')")
+    @PreAuthorize("hasAuthority('ESTOQUE_PRODUCT_MANAGE') "
+            + "and (#request.pricing == null or hasAuthority('ESTOQUE_PRODUCT_PRICE_MANAGE'))")
     public ResponseEntity<ProductResponseDTO> updateProduct(
             @PathVariable @NotBlank @Size(min = 3, max = 50) String sku,
             @Valid @RequestBody ProductPatchRequest request, Authentication authentication) {
-        Product updated = estoqueUseCase.updateProduct(sku, request.getName(), request.getCategory());
+        Product updated = estoqueUseCase.updateProduct(sku, request.getName(), request.getCategory(),
+                converter.toPricing(request.getPricing()));
         publisher.publishEvent(AuditEvent.of(EventType.PRODUCT_UPDATED,
                 authentication.getName(), Map.of("sku", updated.sku())));
+        // Evento próprio para mudança de preço: quem baixou o preço de quê e quando é a pergunta
+        // que se faz depois de um fechamento de caixa estranho, e ela não pode se perder no meio
+        // dos PRODUCT_UPDATED de renomeação de produto.
+        if (request.getPricing() != null) {
+            publisher.publishEvent(AuditEvent.of(EventType.PRODUCT_PRICE_CHANGED,
+                    authentication.getName(), Map.of(
+                            "sku", updated.sku(),
+                            "effectivePrice", String.valueOf(updated.pricing().effectivePrice()))));
+        }
         return ResponseEntity.ok(converter.toResponse(updated));
+    }
+
+    @Operation(summary = "Consulta a precificação vigente de um SKU",
+            description = "Aceita SKU pai ou de variação — a variação herda o preço do pai. "
+                    + "Devolve os valores derivados (preço sugerido, preço efetivo, margem) já "
+                    + "calculados, para o PDV e a vitrine não reimplementarem o arredondamento.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = PricingResponseDTO.class))),
+            @ApiResponse(responseCode = "404", description = "SKU não encontrado no catálogo", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/products/{sku}/price")
+    @PreAuthorize("hasAuthority('ESTOQUE_PRODUCT_READ')")
+    public ResponseEntity<PricingResponseDTO> getProductPrice(
+            @PathVariable @NotBlank @Size(min = 3, max = 50) String sku) {
+        return ResponseEntity.ok(converter.toResponse(estoqueUseCase.findPricingBySku(sku)));
     }
 
     @Operation(summary = "Ativa ou desativa um produto",

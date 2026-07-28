@@ -31,11 +31,13 @@ public class StockBalanceRepositoryImpl implements StockBalanceRepository {
         entity.setSku(stockBalance.sku());
         entity.setWarehouseId(stockBalance.warehouseId());
         entity.setQuantity(stockBalance.quantity());
+        entity.setReservedQuantity(stockBalance.reservedQuantity());
         entity.setVersion(stockBalance.version());
         return toDomain(stockBalanceJpaRepository.save(entity));
     }
 
     private StockBalance toDomain(StockBalanceEntity e) {
-        return StockBalance.of(e.getId(), e.getSku(), e.getWarehouseId(), e.getQuantity(), e.getVersion());
+        return StockBalance.of(e.getId(), e.getSku(), e.getWarehouseId(), e.getQuantity(),
+                e.getReservedQuantity(), e.getVersion());
     }
 }

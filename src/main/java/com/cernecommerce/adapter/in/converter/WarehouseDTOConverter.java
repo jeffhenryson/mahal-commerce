@@ -35,6 +35,8 @@ public class WarehouseDTOConverter {
         dto.setSku(balance.sku());
         dto.setWarehouseCode(warehouseCode);
         dto.setQuantity(balance.quantity());
+        dto.setReservedQuantity(balance.reservedQuantity());
+        dto.setAvailableQuantity(balance.availableQuantity());
         return dto;
     }
 }

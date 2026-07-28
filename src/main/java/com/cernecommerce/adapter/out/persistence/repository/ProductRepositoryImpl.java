@@ -5,6 +5,7 @@ import com.cernecommerce.adapter.out.persistence.entity.ProductEntity;
 import com.cernecommerce.adapter.out.persistence.entity.ProductVariantEntity;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.Product;
+import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.ports.out.estoque.ProductRepository;
@@ -34,6 +35,9 @@ public class ProductRepositoryImpl implements ProductRepository {
         entity.setName(product.name());
         entity.setCategory(product.category());
         entity.setActive(product.active());
+        entity.setCostPrice(product.pricing().costPrice());
+        entity.setMarkupPercent(product.pricing().markupPercent());
+        entity.setSalePrice(product.pricing().salePrice());
         for (ProductVariant variant : product.variants()) {
             ProductVariantEntity variantEntity = new ProductVariantEntity();
             variantEntity.setId(variant.id());
@@ -53,6 +57,12 @@ public class ProductRepositoryImpl implements ProductRepository {
     @Transactional(readOnly = true)
     public Optional<Product> findBySku(String sku) {
         return productJpaRepository.findBySku(sku).map(this::toDomain);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<Product> findByAnySku(String sku) {
+        return productJpaRepository.findByAnySku(sku).map(this::toDomain);
     }
 
     @Override
@@ -80,7 +90,8 @@ public class ProductRepositoryImpl implements ProductRepository {
         List<ProductVariant> variants = e.getVariants().stream()
                 .map(this::toDomain)
                 .toList();
-        return Product.of(e.getId(), e.getSku(), e.getName(), e.getCategory(), e.isActive(), variants);
+        Pricing pricing = Pricing.of(e.getCostPrice(), e.getMarkupPercent(), e.getSalePrice());
+        return Product.of(e.getId(), e.getSku(), e.getName(), e.getCategory(), e.isActive(), variants, pricing);
     }
 
     private ProductVariant toDomain(ProductVariantEntity e) {

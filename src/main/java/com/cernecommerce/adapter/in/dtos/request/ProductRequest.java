@@ -22,4 +22,8 @@ public class ProductRequest {
 
     @Valid
     private List<ProductVariantRequest> variants;
+
+    /** Opcional (EST-F019) — omitido, o produto nasce sem precificação. */
+    @Valid
+    private PricingRequest pricing;
 }

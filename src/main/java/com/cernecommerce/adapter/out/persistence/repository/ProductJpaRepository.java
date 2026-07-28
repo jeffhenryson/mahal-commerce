@@ -19,6 +19,14 @@ public interface ProductJpaRepository extends JpaRepository<ProductEntity, Long>
             + "LEFT JOIN p.variants v WHERE p.sku = :sku OR v.sku = :sku")
     boolean existsBySkuOrVariantSku(String sku);
 
+    // EST-F019: resolve o produto pai a partir de QUALQUER sku do catálogo — o próprio pai ou o
+    // de uma variação. É o caminho de consulta de preço do PDV, que lê o código de barras da
+    // variação (o sabor específico na prateleira) mas precisa do preço, que mora no pai.
+    // O JOIN FETCH evita o N+1 de carregar as variações depois.
+    @Query("SELECT DISTINCT p FROM ProductEntity p LEFT JOIN FETCH p.variants v LEFT JOIN FETCH v.attributes "
+            + "WHERE p.sku = :sku OR p.id IN (SELECT v2.product.id FROM ProductVariantEntity v2 WHERE v2.sku = :sku)")
+    Optional<ProductEntity> findByAnySku(String sku);
+
     // EST-F018: um SKU só conta como ativo se o produto pai estiver ativo. Para SKU de variação
     // exige-se as duas pontas — desativar o pai tira a grade inteira de circulação, sem precisar
     // percorrer variação por variação.

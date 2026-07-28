@@ -70,6 +70,7 @@ import com.cernecommerce.core.ports.out.estoque.StockBalanceRepository;
 import com.cernecommerce.core.ports.out.estoque.StockCountRepository;
 import com.cernecommerce.core.ports.out.estoque.StockIntegrityRepository;
 import com.cernecommerce.core.ports.out.estoque.StockMovementRepository;
+import com.cernecommerce.core.ports.out.estoque.StockReservationRepository;
 import com.cernecommerce.core.ports.out.estoque.WarehouseRepository;
 import com.cernecommerce.core.ports.out.pdv.CashRegisterRepository;
 import com.cernecommerce.core.ports.out.pdv.SaleRepository;
@@ -96,6 +97,7 @@ import com.cernecommerce.core.service.LogisticaService;
 import com.cernecommerce.core.service.CrmService;
 
 import java.nio.file.Path;
+import java.time.Duration;
 
 import dev.samstevens.totp.code.CodeVerifier;
 import dev.samstevens.totp.code.DefaultCodeGenerator;
@@ -204,11 +206,16 @@ class CoreBeanConfig {
     EstoqueUseCase estoqueUseCase(ProductRepository productRepository, WarehouseRepository warehouseRepository,
             StockBalanceRepository stockBalanceRepository, StockMovementRepository stockMovementRepository,
             ReorderPointRepository reorderPointRepository, StockIntegrityRepository stockIntegrityRepository,
-            StockCountRepository stockCountRepository, NotificationUseCase notificationUseCase,
-            UserRepository userRepository, AfterCommitExecutor afterCommitExecutor) {
+            StockCountRepository stockCountRepository, StockReservationRepository stockReservationRepository,
+            NotificationUseCase notificationUseCase, UserRepository userRepository,
+            AfterCommitExecutor afterCommitExecutor,
+            // 30 min cobre com folga a confirmação de PIX (segundos) e de cartão, sem deixar saldo
+            // travado por engano quando o cliente abandona o checkout na tela de pagamento.
+            @Value("${estoque.reservation.default-ttl:PT30M}") Duration defaultReservationTtl) {
         return new EstoqueService(productRepository, warehouseRepository, stockBalanceRepository,
                 stockMovementRepository, reorderPointRepository, stockIntegrityRepository,
-                stockCountRepository, notificationUseCase, userRepository, afterCommitExecutor);
+                stockCountRepository, stockReservationRepository, notificationUseCase, userRepository,
+                afterCommitExecutor, defaultReservationTtl);
     }
 
     @Bean

@@ -39,6 +39,10 @@ class SeedConfigTest {
         verify(permissionUseCase).createPermission("ESTOQUE_WAREHOUSE_MANAGE");
         verify(roleUseCase).assignPermission("ROLE_ADMIN", "ESTOQUE_PRODUCT_READ");
         verify(roleUseCase).assignPermission("ROLE_ADMIN", "ESTOQUE_PRODUCT_MANAGE");
+        // EST-F019 — sem esta no seed, precificar responde 403 em dev, que é exatamente o
+        // sintoma que EST-C001 já custou uma sessão de depuração no PDV_SALE_MANAGE.
+        verify(permissionUseCase).createPermission("ESTOQUE_PRODUCT_PRICE_MANAGE");
+        verify(roleUseCase).assignPermission("ROLE_ADMIN", "ESTOQUE_PRODUCT_PRICE_MANAGE");
         verify(roleUseCase).assignPermission("ROLE_ADMIN", "ESTOQUE_WAREHOUSE_READ");
         verify(roleUseCase).assignPermission("ROLE_ADMIN", "ESTOQUE_WAREHOUSE_MANAGE");
     }

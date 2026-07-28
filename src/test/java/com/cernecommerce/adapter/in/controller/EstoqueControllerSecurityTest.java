@@ -480,4 +480,93 @@ public class EstoqueControllerSecurityTest {
                         new SimpleGrantedAuthority("ESTOQUE_STOCK_MANAGE"))))
                 .andExpect(status().isOk());
     }
+
+    // ------------------------------------------------------------------------------------
+    // EST-F019 — precificação exige ESTOQUE_PRODUCT_PRICE_MANAGE além de PRODUCT_MANAGE.
+    // A separação existe para que quem mantém o cadastro (nome, categoria, grade) não ganhe
+    // de brinde o poder de mexer em preço, que é decisão comercial e não operacional.
+    // ------------------------------------------------------------------------------------
+
+    @Test
+    void create_product_com_pricing_sem_price_manage_returns_403() throws Exception {
+        mockMvc.perform(post("/estoque/products")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"sku\":\"SKU_PRICE_403\",\"name\":\"Narguile\","
+                        + "\"pricing\":{\"costPrice\":45.00,\"markupPercent\":80}}")
+                .with(user("operador").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_MANAGE"))))
+                .andExpect(status().isForbidden());
+    }
+
+    /** Sem o bloco `pricing`, PRODUCT_MANAGE sozinho continua bastando — nada regrediu. */
+    @Test
+    void create_product_sem_pricing_com_product_manage_returns_201() throws Exception {
+        mockMvc.perform(post("/estoque/products")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"sku\":\"SKU_SEM_PRICE_" + System.nanoTime() + "\",\"name\":\"Narguile\"}")
+                .with(user("operador").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_MANAGE"))))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
+    void create_product_com_pricing_e_price_manage_returns_201() throws Exception {
+        mockMvc.perform(post("/estoque/products")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"sku\":\"SKU_PRICE_OK_" + System.nanoTime() + "\",\"name\":\"Narguile\","
+                        + "\"pricing\":{\"costPrice\":45.00,\"markupPercent\":80}}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_MANAGE"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_PRICE_MANAGE"))))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
+    void patch_product_com_pricing_sem_price_manage_returns_403() throws Exception {
+        String sku = givenProduct();
+
+        mockMvc.perform(patch("/estoque/products/" + sku)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"pricing\":{\"costPrice\":60.00}}")
+                .with(user("operador").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_MANAGE"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void patch_product_sem_pricing_com_product_manage_returns_200() throws Exception {
+        String sku = givenProduct();
+
+        mockMvc.perform(patch("/estoque/products/" + sku)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"Nome Novo\"}")
+                .with(user("operador").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_MANAGE"))))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void get_product_price_without_product_read_returns_403() throws Exception {
+        mockMvc.perform(get("/estoque/products/QUALQUER-SKU/price")
+                .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isForbidden());
+    }
+
+    /** Consultar preço é leitura de catálogo: PRODUCT_READ basta, não exige a de precificar. */
+    @Test
+    void get_product_price_with_product_read_returns_200() throws Exception {
+        String sku = givenProduct();
+
+        mockMvc.perform(get("/estoque/products/" + sku + "/price")
+                .with(user("vendedor").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_READ"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.priced").value(false));
+    }
 }

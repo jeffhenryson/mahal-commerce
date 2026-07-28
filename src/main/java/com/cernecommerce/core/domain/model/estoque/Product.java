@@ -4,7 +4,13 @@ import java.util.List;
 
 /**
  * Produto (SKU pai) da grade de estoque. Agrega as variações (SKU filhos), cada
- * uma distinguida por seus {@link ProductAttribute} (sabor, tamanho, cor).
+ * uma distinguida por seus {@link ProductAttribute} (sabor, tamanho, cor), e a
+ * {@link Pricing} do SKU pai.
+ *
+ * <p><b>Preço mora no SKU pai</b> (EST-F019). As variações herdam — sabores diferentes da mesma
+ * essência 50g custam o mesmo. Preço por variação (ex.: tamanhos distintos do mesmo narguilé)
+ * é EST-F020 no backlog do módulo; até lá, grade com preços diferentes se modela como produtos
+ * separados.</p>
  */
 public record Product(
     Long id,
@@ -12,7 +18,8 @@ public record Product(
     String name,
     String category,
     boolean active,
-    List<ProductVariant> variants
+    List<ProductVariant> variants,
+    Pricing pricing
 ) {
 
     public Product {
@@ -23,17 +30,30 @@ public record Product(
             throw new IllegalArgumentException("name é obrigatório");
         }
         variants = variants == null ? List.of() : List.copyOf(variants);
+        pricing = pricing == null ? Pricing.empty() : pricing;
     }
 
-    /** Cria um novo produto (sem id, ativo por padrão). */
+    /** Cria um novo produto sem precificação (sem id, ativo por padrão). */
     public static Product create(String sku, String name, String category, List<ProductVariant> variants) {
-        return new Product(null, sku, name, category, true, variants);
+        return create(sku, name, category, variants, Pricing.empty());
+    }
+
+    /** Cria um novo produto precificado (sem id, ativo por padrão). */
+    public static Product create(String sku, String name, String category, List<ProductVariant> variants,
+            Pricing pricing) {
+        return new Product(null, sku, name, category, true, variants, pricing);
+    }
+
+    /** Reconstitui um produto sem precificação a partir de persistência. */
+    public static Product of(Long id, String sku, String name, String category, boolean active,
+            List<ProductVariant> variants) {
+        return of(id, sku, name, category, active, variants, Pricing.empty());
     }
 
     /** Reconstitui um produto a partir de persistência. */
     public static Product of(Long id, String sku, String name, String category, boolean active,
-            List<ProductVariant> variants) {
-        return new Product(id, sku, name, category, active, variants);
+            List<ProductVariant> variants, Pricing pricing) {
+        return new Product(id, sku, name, category, active, variants, pricing);
     }
 
     /**
@@ -53,11 +73,16 @@ public record Product(
         return new Product(id, sku,
                 newName == null ? name : newName,
                 newCategory == null ? category : newCategory,
-                active, variants);
+                active, variants, pricing);
     }
 
     /** Ativa ou desativa o produto, preservando o resto. */
     public Product withActive(boolean newActive) {
-        return new Product(id, sku, name, category, newActive, variants);
+        return new Product(id, sku, name, category, newActive, variants, pricing);
+    }
+
+    /** Substitui a precificação do produto, preservando o resto. */
+    public Product withPricing(Pricing newPricing) {
+        return new Product(id, sku, name, category, active, variants, newPricing);
     }
 }
