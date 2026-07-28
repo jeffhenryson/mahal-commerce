@@ -38,7 +38,15 @@ registro de vendas no balcão.
 | Método | Rota | Permissão | Descrição |
 |---|---|---|---|
 | `GET` | `/pdv/sessions` | `PDV_READ` | Lista sessões de caixa paginadas (`page` ≥ 0, `size` 1–100) |
-| `POST` | `/pdv/sessions/{id}/sales` | `PDV_SALE_MANAGE` | Registra venda na sessão e **dá baixa no estoque** item a item. Exige sessão `OPEN`; `400 INSUFFICIENT_STOCK` se faltar saldo |
+| `POST` | `/pdv/sessions/{id}/sales` | `PDV_SALE_MANAGE` (+ `PDV_SALE_DISCOUNT` se houver desconto) | Registra venda na sessão e **dá baixa no estoque** item a item. Preço e custo vêm do catálogo, não do request. Exige sessão `OPEN` |
+| `GET` | `/pdv/sales/{id}` | `PDV_READ` | Consulta um pedido. Antes de PDV-F005 a venda era write-only |
+| `GET` | `/pdv/sessions/{id}/sales` | `PDV_READ` | Pedidos da sessão, paginados, do mais recente para o mais antigo |
+
+> **Contrato alterado em PDV-F004** (sem consumidor real — o PDV do `frontend-admin` é protótipo
+> mockado): `unitPrice` saiu do corpo de `POST /pdv/sessions/{id}/sales`, `discountAmount` e
+> `customerId` entraram. Produto sem preço recusa a venda com `409 PRODUCT_NOT_PRICED`; desconto
+> acima do teto (`pdv.sale.max-discount-percent`, default 10%) responde `409
+> DISCOUNT_LIMIT_EXCEEDED`. Detalhes em [`docs/api-reference.md`](../../api-reference.md#pdv-vendas-balcão--pdv).
 
 ## Segurança e Infraestrutura
 
@@ -53,6 +61,10 @@ registro de vendas no balcão.
 |---|---|---|---|
 | `PDV_READ` | `GET /pdv/sessions` | V53 | ✅ `SeedConfig` + `DevRoleBootstrapConfig` |
 | `PDV_SALE_MANAGE` | `POST /pdv/sessions/{id}/sales` | V57 | ✅ desde **EST-C001** (antes faltava, e o endpoint respondia 403 em `dev`) |
+| `PDV_SALE_DISCOUNT` | desconto > 0 em `POST /pdv/sessions/{id}/sales` | V65 | ✅ `SeedConfig` + `DevRoleBootstrapConfig` |
+
+> A checagem de `PDV_SALE_DISCOUNT` é **programática**, no controller, e não por `@PreAuthorize`:
+> ela depende do corpo da requisição, e o `@PreAuthorize` decide antes de olhar o payload.
 
 ⚠️ **`PDV_SALE_MANAGE` movimenta estoque sem exigir nenhuma permissão `ESTOQUE_*`.**
 `PdvService.registerSale` chama `EstoqueUseCase.adjustStock` diretamente; o `@PreAuthorize` só

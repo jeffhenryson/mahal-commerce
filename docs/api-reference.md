@@ -1224,35 +1224,78 @@ Lista sessões de caixa paginadas (`page` ≥ 0, `size` entre 1 e 100 — defaul
 `PageResult<CashRegisterSession>`. **Não há endpoint de abertura, sangria ou fechamento de caixa**
 — as sessões precisam ser criadas fora da API.
 
-### POST /pdv/sessions/{id}/sales — Permissão: PDV_SALE_MANAGE
+### POST /pdv/sessions/{id}/sales — Permissão: PDV_SALE_MANAGE (+ PDV_SALE_DISCOUNT se houver desconto)
+
+> **Contrato alterado em PDV-F004.** `unitPrice` **saiu** do request: o preço e o custo são
+> resolvidos pelo servidor a partir do catálogo (`Pricing`, V63). Aceitar preço do cliente HTTP
+> tornava indistinguíveis erro de digitação, desconto autorizado e fraude.
 
 ```json
 {
-  "warehouseCode": "LOJA-01",    // obrigatório
-  "items": [                      // obrigatório, não vazio
-    { "sku": "NARG-001", "quantity": 2.000, "unitPrice": 89.90 }
+  "warehouseCode": "LOJA-01",     // obrigatório (passa a vir da sessão em PDV-C004)
+  "customerId": 42,                // opcional — sem cliente, sem cashback
+  "items": [                       // obrigatório, não vazio
+    { "sku": "NARG-001", "quantity": 2.000, "discountAmount": 4.00 }
   ]
 }
-// Response 201 → SaleResponseDTO
+// Response 201 → OrderResponseDTO
 // 400 INSUFFICIENT_STOCK (saldo insuficiente para algum item) / 400 VALIDATION_ERROR
-// 404 CASH_REGISTER_SESSION_NOT_FOUND / 409 sessão de caixa encerrada
+// 403 desconto > 0 sem PDV_SALE_DISCOUNT
+// 404 CASH_REGISTER_SESSION_NOT_FOUND / 404 PRODUCT_NOT_FOUND
+// 409 CASH_REGISTER_SESSION_CLOSED / 409 PRODUCT_NOT_PRICED / 409 DISCOUNT_LIMIT_EXCEEDED
 ```
 
 Registra a venda e **dá baixa automática no estoque na mesma transação**: cada item gera um
-`StockMovement` de `SAIDA`. Se qualquer item não tiver saldo, a transação inteira é revertida.
-`quantity` > 0 e `unitPrice` ≥ 0.
+`StockMovement` de `SAIDA`. Se qualquer item não tiver saldo, a transação inteira é revertida. A
+venda nasce e termina na mesma transação (`CRIADO → CONCLUIDO`), e é na conclusão que o
+`orderNumber` é emitido, de sequência própria.
+
+`quantity` > 0; `discountAmount` ≥ 0 e não pode passar do bruto do item. O teto de desconto por
+pedido é `pdv.sale.max-discount-percent` (default **10%**).
+
+Produto sem preço no catálogo **recusa a venda** com `409 PRODUCT_NOT_PRICED` — preço zero e preço
+desconhecido não são a mesma coisa.
 
 ```json
-// SaleResponseDTO
+// OrderResponseDTO
 {
   "id": 1,
+  "orderNumber": "000001000",
+  "channel": "BALCAO",
+  "status": "CONCLUIDO",
+  "customerId": 42,
   "sessionId": 1,
   "warehouseCode": "LOJA-01",
-  "soldAt": "2026-07-23T18:40:02Z",
-  "totalAmount": 179.80,
-  "items": [ { "sku": "NARG-001", "quantity": 2.000, "unitPrice": 89.90 } ]
+  "grossAmount": 179.80,
+  "discountAmount": 4.00,
+  "cashbackRedeemed": 0.00,
+  "netAmount": 175.80,
+  "changeAmount": null,
+  "createdAt": "2026-07-28T18:40:02Z",
+  "paidAt": "2026-07-28T18:40:02Z",
+  "concludedAt": "2026-07-28T18:40:02Z",
+  "items": [
+    {
+      "id": 1, "sku": "NARG-001", "quantity": 2.000,
+      "unitPrice": 89.90, "discountAmount": 4.00,
+      "grossAmount": 179.80, "netAmount": 175.80,
+      "cashbackPercent": null, "cashbackAmount": null
+    }
+  ]
 }
 ```
+
+Custo e margem **não** são expostos aqui: são dado de gestão, e `PDV_READ` é a permissão mais
+distribuída do módulo.
+
+### GET /pdv/sales/{id} — Permissão: PDV_READ
+
+Retorna `OrderResponseDTO`. `404 ORDER_NOT_FOUND`.
+
+### GET /pdv/sessions/{id}/sales — Permissão: PDV_READ
+
+`PageResult<OrderResponseDTO>` dos pedidos da sessão, do mais recente para o mais antigo
+(`page` ≥ 0, `size` 1–100). `404 CASH_REGISTER_SESSION_NOT_FOUND`.
 
 ---
 

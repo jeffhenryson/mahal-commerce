@@ -572,7 +572,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"warehouseCode\": \"{{warehouseCode}}\",\n  \"items\": [\n    {\n      \"sku\": \"{{sku}}\",\n      \"quantity\": 2,\n      \"unitPrice\": 25.5\n    },\n    {\n      \"sku\": \"{{sku}}\",\n      \"quantity\": 1,\n      \"unitPrice\": 10.0\n    }\n  ]\n}",
+              "raw": "{\n  \"warehouseCode\": \"{{warehouseCode}}\",\n  \"items\": [\n    {\n      \"sku\": \"{{sku}}\",\n      \"quantity\": 2\n    },\n    {\n      \"sku\": \"{{sku}}\",\n      \"quantity\": 1\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -706,7 +706,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"warehouseCode\": \"{{warehouseCode}}\",\n  \"items\": [\n    {\n      \"sku\": \"{{sku}}\",\n      \"quantity\": 1,\n      \"unitPrice\": 25.5\n    },\n    {\n      \"sku\": \"{{sku}}\",\n      \"quantity\": 9999,\n      \"unitPrice\": 25.5\n    }\n  ]\n}",
+              "raw": "{\n  \"warehouseCode\": \"{{warehouseCode}}\",\n  \"items\": [\n    {\n      \"sku\": \"{{sku}}\",\n      \"quantity\": 1\n    },\n    {\n      \"sku\": \"{{sku}}\",\n      \"quantity\": 9999\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -829,7 +829,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"warehouseCode\": \"{{warehouseCode}}\",\n  \"items\": [\n    {\n      \"sku\": \"{{sku}}\",\n      \"quantity\": 1,\n      \"unitPrice\": 10.0\n    }\n  ]\n}",
+              "raw": "{\n  \"warehouseCode\": \"{{warehouseCode}}\",\n  \"items\": [\n    {\n      \"sku\": \"{{sku}}\",\n      \"quantity\": 1\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
