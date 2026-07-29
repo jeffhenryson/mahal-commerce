@@ -1,6 +1,8 @@
 package com.cernecommerce.core.ports.in;
 
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.pagamento.OrderPayment;
+import com.cernecommerce.core.domain.model.pagamento.PaymentMethod;
 import com.cernecommerce.core.domain.model.pdv.CashMovement;
 import com.cernecommerce.core.domain.model.pdv.CashMovementType;
 import com.cernecommerce.core.domain.model.pdv.CashRegisterSession;
@@ -73,13 +75,33 @@ public interface PdvUseCase {
      */
     CashRegisterSession closeSession(Long sessionId, BigDecimal countedAmount, String username);
 
+    /**
+     * Totais recebidos na sessão, agrupados por forma de pagamento — só pagamento {@code CAPTURED}
+     * conta. É o detalhamento que acompanha o fechamento: <b>só {@code DINHEIRO} entra na
+     * conferência da gaveta</b>; débito, crédito e PIX vão para conferência contra a adquirente,
+     * não contra o contado no caixa.
+     *
+     * <p>Devolve as quatro formas sempre, mesmo com total zero — forma que a sessão nunca usou não
+     * desaparece da lista, só aparece zerada.</p>
+     *
+     * @throws com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionNotFoundException
+     *         se a sessão não existir
+     */
+    List<PaymentTotal> getSessionPaymentTotals(Long sessionId);
+
     // ── Venda ────────────────────────────────────────────────────────────────────────────────
 
     /**
-     * Registra uma venda de balcão e dá baixa no estoque, tudo na mesma transação (PDV-F003/F004).
+     * Registra uma venda de balcão, captura o(s) pagamento(s) e dá baixa no estoque, tudo na mesma
+     * transação (PDV-F003/F004/F006).
      *
      * <p>O preço e o custo de cada item vêm do <b>catálogo</b>, nunca do chamador. O depósito vem da
      * <b>sessão</b>, nunca do request. Saldo insuficiente em qualquer item reverte a venda inteira.</p>
+     *
+     * <p>Pagamento é validado <b>antes</b> de tocar o estoque: {@code payments} tem que somar pelo
+     * menos o líquido do pedido, e a parte que não é {@code DINHEIRO} não pode sozinha passar do
+     * líquido — só dinheiro pode ser tendido a mais para virar troco. O troco entra no pedido
+     * concluído, nunca como uma linha de pagamento.</p>
      *
      * @param customerId cliente identificado, ou {@code null} — a venda anônima de passagem é o caso
      *        normal do balcão
@@ -89,10 +111,18 @@ public interface PdvUseCase {
      *         se algum item não tiver preço no catálogo
      * @throws com.cernecommerce.core.domain.exception.pedido.DiscountLimitExceededException
      *         se o desconto total passar do teto configurado
+     * @throws com.cernecommerce.core.domain.exception.pagamento.InsufficientPaymentException
+     *         se a soma dos pagamentos não cobrir o líquido do pedido
+     * @throws com.cernecommerce.core.domain.exception.pagamento.PaymentExceedsOrderTotalException
+     *         se a soma dos pagamentos que não são {@code DINHEIRO} passar do líquido do pedido
      * @throws com.cernecommerce.core.domain.exception.estoque.InsufficientStockException
      *         se o saldo de algum item for insuficiente
      */
-    Order registerSale(Long sessionId, Long customerId, List<SaleItemCommand> items, String username);
+    Order registerSale(Long sessionId, Long customerId, List<SaleItemCommand> items,
+            List<PaymentCommand> payments, String username);
+
+    /** Pagamentos de um pedido, na ordem em que foram lançados (PDV-F006). */
+    List<OrderPayment> getOrderPayments(Long orderId);
 
     /**
      * Busca um pedido pelo id (PDV-F005).
@@ -140,5 +170,17 @@ public interface PdvUseCase {
      * valor sem deixar trilha de desconto.</p>
      */
     record SaleItemCommand(String sku, BigDecimal quantity, BigDecimal discountAmount) {
+    }
+
+    /**
+     * O que o chamador informa por linha de pagamento (PDV-F006).
+     *
+     * @param installments só faz sentido com {@code method == CREDITO}; {@code null} nos demais
+     */
+    record PaymentCommand(PaymentMethod method, BigDecimal amount, Integer installments) {
+    }
+
+    /** Total recebido por forma de pagamento numa sessão — só {@code CAPTURED} conta. */
+    record PaymentTotal(PaymentMethod method, BigDecimal amount) {
     }
 }

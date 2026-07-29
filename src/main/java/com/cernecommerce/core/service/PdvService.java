@@ -1,5 +1,7 @@
 package com.cernecommerce.core.service;
 
+import com.cernecommerce.core.domain.exception.pagamento.InsufficientPaymentException;
+import com.cernecommerce.core.domain.exception.pagamento.PaymentExceedsOrderTotalException;
 import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionAlreadyOpenException;
 import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionClosedException;
 import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionNotFoundException;
@@ -9,6 +11,8 @@ import com.cernecommerce.core.domain.exception.pedido.DiscountLimitExceededExcep
 import com.cernecommerce.core.domain.exception.pedido.OrderNotFoundException;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
+import com.cernecommerce.core.domain.model.pagamento.OrderPayment;
+import com.cernecommerce.core.domain.model.pagamento.PaymentMethod;
 import com.cernecommerce.core.domain.model.pdv.CashMovement;
 import com.cernecommerce.core.domain.model.pdv.CashMovementType;
 import com.cernecommerce.core.domain.model.pdv.CashRegisterSession;
@@ -18,6 +22,7 @@ import com.cernecommerce.core.domain.model.pedido.OrderStatus;
 import com.cernecommerce.core.domain.model.pedido.SalesChannel;
 import com.cernecommerce.core.ports.in.EstoqueUseCase;
 import com.cernecommerce.core.ports.in.PdvUseCase;
+import com.cernecommerce.core.ports.out.pagamento.OrderPaymentRepository;
 import com.cernecommerce.core.ports.out.pdv.CashMovementRepository;
 import com.cernecommerce.core.ports.out.pdv.CashRegisterRepository;
 import com.cernecommerce.core.ports.out.pedido.OrderRepository;
@@ -36,6 +41,7 @@ public class PdvService implements PdvUseCase {
     private final CashRegisterRepository cashRegisterRepository;
     private final CashMovementRepository cashMovementRepository;
     private final OrderRepository orderRepository;
+    private final OrderPaymentRepository orderPaymentRepository;
     private final EstoqueUseCase estoqueUseCase;
 
     /** Teto de desconto por pedido, em percentual sobre o bruto. */
@@ -43,10 +49,12 @@ public class PdvService implements PdvUseCase {
 
     public PdvService(CashRegisterRepository cashRegisterRepository,
             CashMovementRepository cashMovementRepository, OrderRepository orderRepository,
-            EstoqueUseCase estoqueUseCase, BigDecimal maxDiscountPercent) {
+            OrderPaymentRepository orderPaymentRepository, EstoqueUseCase estoqueUseCase,
+            BigDecimal maxDiscountPercent) {
         this.cashRegisterRepository = cashRegisterRepository;
         this.cashMovementRepository = cashMovementRepository;
         this.orderRepository = orderRepository;
+        this.orderPaymentRepository = orderPaymentRepository;
         this.estoqueUseCase = estoqueUseCase;
         this.maxDiscountPercent = maxDiscountPercent;
     }
@@ -113,19 +121,37 @@ public class PdvService implements PdvUseCase {
         }
         // Fechar NÃO exige ser o dono: a conferência costuma ser do gerente, e é por isso que
         // PDV_SESSION_CLOSE existe separada de PDV_SESSION_MANAGE.
+        //
+        // PDV-F006: só DINHEIRO entra na conferência da gaveta. Débito, crédito e PIX não passam
+        // pela mão do operador — eles se conferem contra o extrato da adquirente, não contra o
+        // contado aqui. Somar tudo (como antes de order_payment existir) faria o fechamento
+        // acusar sobra sempre que houvesse venda no cartão.
         BigDecimal expected = session.openingAmount()
-                .add(orderRepository.sumConcludedNetAmountBySessionId(sessionId))
+                .add(orderPaymentRepository.sumCapturedAmountBySessionIdAndMethod(sessionId, PaymentMethod.DINHEIRO))
                 .add(cashMovementRepository.sumSignedAmountBySessionId(sessionId));
 
         // Divergência não bloqueia — é o achado do fechamento, como no balanço de inventário.
         return cashRegisterRepository.save(session.closedWith(expected, countedAmount, username));
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public List<PaymentTotal> getSessionPaymentTotals(Long sessionId) {
+        getSession(sessionId);
+        List<PaymentTotal> totals = new ArrayList<>();
+        for (PaymentMethod method : PaymentMethod.values()) {
+            totals.add(new PaymentTotal(method,
+                    orderPaymentRepository.sumCapturedAmountBySessionIdAndMethod(sessionId, method)));
+        }
+        return totals;
+    }
+
     // ── Venda ────────────────────────────────────────────────────────────────────────────────
 
     @Override
     @Transactional
-    public Order registerSale(Long sessionId, Long customerId, List<SaleItemCommand> items, String username) {
+    public Order registerSale(Long sessionId, Long customerId, List<SaleItemCommand> items,
+            List<PaymentCommand> payments, String username) {
         CashRegisterSession session = requireOwnOpenSession(sessionId, username);
 
         // PDV-F004: o preço e o custo vêm do catálogo. findPricingBySku já lança
@@ -143,6 +169,10 @@ public class PdvService implements PdvUseCase {
         Order order = Order.openBalcao(sessionId, warehouseCode, customerId, orderItems);
         requireDiscountWithinLimit(order);
 
+        // PDV-F006: pagamento é validado ANTES de tocar o estoque — um pagamento insuficiente não
+        // deveria custar um adjustStock que só vai ser desfeito pelo rollback da transação.
+        BigDecimal changeAmount = validatePaymentsAndComputeChange(payments, order.netAmount());
+
         for (OrderItem item : order.items()) {
             estoqueUseCase.adjustStock(item.sku(), warehouseCode, MovementType.SAIDA, item.quantity(),
                     "Venda balcão sessão #" + sessionId, username);
@@ -150,8 +180,50 @@ public class PdvService implements PdvUseCase {
 
         // No balcão a mercadoria sai e o dinheiro entra no mesmo instante: CRIADO → CONCLUIDO na
         // mesma transação. A numeração é consumida aqui, na conclusão, e não na criação.
-        return orderRepository.save(
-                order.concluded(orderRepository.nextOrderNumber(), null, Instant.now()));
+        Order saved = orderRepository.save(
+                order.concluded(orderRepository.nextOrderNumber(), changeAmount, Instant.now()));
+
+        for (PaymentCommand payment : payments) {
+            orderPaymentRepository.save(OrderPayment.captured(saved.id(), payment.method(),
+                    payment.amount(), payment.installments()));
+        }
+        return saved;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<OrderPayment> getOrderPayments(Long orderId) {
+        getOrder(orderId);
+        return orderPaymentRepository.findByOrderId(orderId);
+    }
+
+    /**
+     * Valida a lista de pagamentos contra o líquido do pedido e devolve o troco.
+     *
+     * <p>Regra: a soma do que <b>não</b> é {@code DINHEIRO} não pode passar do líquido — débito,
+     * crédito e PIX são lançados pelo valor exato que o operador decide cobrar, e só dinheiro pode
+     * ser tendido a mais. Isso garante que todo excedente é explicável por dinheiro, e o troco é
+     * simplesmente {@code total pago − líquido}.</p>
+     */
+    private BigDecimal validatePaymentsAndComputeChange(List<PaymentCommand> payments, BigDecimal netAmount) {
+        BigDecimal nonCashTotal = BigDecimal.ZERO;
+        BigDecimal cashTotal = BigDecimal.ZERO;
+        for (PaymentCommand payment : payments) {
+            if (payment.method() == PaymentMethod.DINHEIRO) {
+                cashTotal = cashTotal.add(payment.amount());
+            } else {
+                nonCashTotal = nonCashTotal.add(payment.amount());
+            }
+        }
+        if (nonCashTotal.compareTo(netAmount) > 0) {
+            throw new PaymentExceedsOrderTotalException(nonCashTotal, netAmount);
+        }
+        BigDecimal totalPaid = cashTotal.add(nonCashTotal);
+        if (totalPaid.compareTo(netAmount) < 0) {
+            throw new InsufficientPaymentException(totalPaid, netAmount);
+        }
+        BigDecimal change = totalPaid.subtract(netAmount);
+        return change.signum() > 0 ? change : null;
     }
 
     @Override

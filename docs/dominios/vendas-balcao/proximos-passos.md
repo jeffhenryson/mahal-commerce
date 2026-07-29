@@ -10,10 +10,15 @@ de errar) está no plano; aqui fica só a ordem e as armadilhas.
 
 Este é o **módulo por onde o projeto começa**: as Fatias 0, 1 e 3 do plano são todas daqui.
 
-> **Em andamento (2026-07-28):** a Fatia 0 está escrita e a Fatia 1 foi aprovada com escopo
-> ampliado — inclui a superfície `/orders` do administrador e a liquidação no balcão de pedido feito
-> no app. O detalhamento, com as decisões tomadas com o dono, está em
-> [`fatia-1-ciclo-de-caixa.md`](fatia-1-ciclo-de-caixa.md). **Comece por lá.**
+> **Atualizado em 2026-07-29:** Fatias 0, 1 e 3 estão fechadas e com suíte completa verde (1442
+> testes). Fatia 1 saiu com escopo ampliado — inclui a superfície `/orders` do administrador e a
+> liquidação no balcão de pedido feito no app; detalhamento em
+> [`fatia-1-ciclo-de-caixa.md`](fatia-1-ciclo-de-caixa.md). Fatia 3 (PDV-F006, pagamento com
+> múltiplas formas, troco e comprovante interno) está registrada no
+> [Histórico do README](README.md#histórico-de-implementações). **Próximo item do módulo:**
+> `PDV-C001` (auditar e documentar) — o resto da fila de prioridade do PDV/CRM/cashback está em
+> [`docs/plano-pdv-marketplace.md`](../../plano-pdv-marketplace.md) §6 (Fatia 2 → CRM é a próxima
+> peça fora deste módulo).
 
 ---
 

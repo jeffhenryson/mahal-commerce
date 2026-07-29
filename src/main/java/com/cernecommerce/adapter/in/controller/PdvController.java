@@ -9,14 +9,18 @@ import com.cernecommerce.adapter.in.dtos.request.SaleRequest;
 import com.cernecommerce.adapter.in.dtos.response.CashMovementResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.CashRegisterSessionResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.OrderResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.PaymentTotalResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.SaleReceiptResponseDTO;
 import com.cernecommerce.core.domain.event.AuditEvent;
 import com.cernecommerce.core.domain.event.AuditEvent.EventType;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
+import com.cernecommerce.core.domain.model.pagamento.OrderPayment;
 import com.cernecommerce.core.domain.model.pdv.CashMovement;
 import com.cernecommerce.core.domain.model.pdv.CashRegisterSession;
 import com.cernecommerce.core.domain.model.pedido.Order;
 import com.cernecommerce.core.ports.in.PdvUseCase;
+import com.cernecommerce.core.ports.in.PdvUseCase.PaymentCommand;
 import com.cernecommerce.core.ports.in.PdvUseCase.SaleItemCommand;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -187,26 +191,28 @@ public class PdvController {
 
     // ── Venda ────────────────────────────────────────────────────────────────────────────────
 
-    @Operation(summary = "Registra uma venda de balcão na sessão e dá baixa automática no estoque",
+    @Operation(summary = "Registra uma venda de balcão na sessão, captura o pagamento e dá baixa automática no estoque",
             description = "O preço e o custo de cada item são resolvidos pelo servidor a partir do "
                     + "catálogo, e o depósito vem da sessão de caixa — o request informa apenas SKU, "
                     + "quantidade e, opcionalmente, desconto e cliente. Desconto maior que zero exige "
-                    + "a permissão PDV_SALE_DISCOUNT.")
+                    + "a permissão PDV_SALE_DISCOUNT. `payments` exige pelo menos uma linha; a soma "
+                    + "tem que cobrir o líquido, e só DINHEIRO pode ser tendido a mais para gerar troco.")
     @ApiResponses({
             @ApiResponse(responseCode = "201", description = "Criada", content = @Content(schema = @Schema(implementation = OrderResponseDTO.class))),
-            @ApiResponse(responseCode = "400", description = "Saldo insuficiente para algum item", content = @Content),
+            @ApiResponse(responseCode = "400", description = "Saldo ou pagamento insuficiente para a venda", content = @Content),
             @ApiResponse(responseCode = "403", description = "Sessão de outro operador, ou desconto sem PDV_SALE_DISCOUNT", content = @Content),
             @ApiResponse(responseCode = "404", description = "Sessão de caixa ou SKU não encontrado", content = @Content),
-            @ApiResponse(responseCode = "409", description = "Sessão encerrada, produto sem preço ou desconto acima do teto", content = @Content)
+            @ApiResponse(responseCode = "409", description = "Sessão encerrada, produto sem preço, desconto acima do teto ou pagamento não-dinheiro acima do total", content = @Content)
     })
     @PostMapping("/sessions/{id}/sales")
     @PreAuthorize("hasAuthority('PDV_SALE_MANAGE')")
     public ResponseEntity<OrderResponseDTO> registerSale(@PathVariable("id") Long sessionId,
             @Valid @RequestBody SaleRequest request, Authentication authentication) {
         List<SaleItemCommand> items = orderConverter.toCommands(request.getItems());
+        List<PaymentCommand> payments = orderConverter.toPaymentCommands(request.getPayments());
         requireDiscountAuthority(items, authentication);
 
-        Order order = pdvUseCase.registerSale(sessionId, request.getCustomerId(), items,
+        Order order = pdvUseCase.registerSale(sessionId, request.getCustomerId(), items, payments,
                 authentication.getName());
 
         // EST-C004: a venda é o caminho de maior volume de movimentação de estoque. É um evento por
@@ -219,10 +225,11 @@ public class PdvController {
                         "type", MovementType.SAIDA.name(),
                         "skus", items.stream().map(SaleItemCommand::sku).toList(),
                         "itemCount", items.size())));
-        return ResponseEntity.status(201).body(orderConverter.toResponse(order));
+        return ResponseEntity.status(201)
+                .body(orderConverter.toResponse(order, pdvUseCase.getOrderPayments(order.id())));
     }
 
-    @Operation(summary = "Consulta um pedido pelo id")
+    @Operation(summary = "Consulta um pedido pelo id, com os pagamentos")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = OrderResponseDTO.class))),
             @ApiResponse(responseCode = "404", description = "Pedido não encontrado", content = @Content)
@@ -230,7 +237,40 @@ public class PdvController {
     @GetMapping("/sales/{id}")
     @PreAuthorize("hasAuthority('PDV_READ')")
     public ResponseEntity<OrderResponseDTO> getOrder(@PathVariable("id") Long orderId) {
-        return ResponseEntity.ok(orderConverter.toResponse(pdvUseCase.getOrder(orderId)));
+        Order order = pdvUseCase.getOrder(orderId);
+        return ResponseEntity.ok(orderConverter.toResponse(order, pdvUseCase.getOrderPayments(orderId)));
+    }
+
+    @Operation(summary = "Comprovante interno da venda — não é documento fiscal",
+            description = "Resumo para a loja imprimir/exportar (itens, valores, formas de "
+                    + "pagamento). A NFC-e (Fatia 11) é quem substitui isto por um documento fiscal "
+                    + "de verdade quando o emissor terceiro for integrado.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = SaleReceiptResponseDTO.class))),
+            @ApiResponse(responseCode = "404", description = "Pedido não encontrado", content = @Content)
+    })
+    @GetMapping("/sales/{id}/receipt")
+    @PreAuthorize("hasAuthority('PDV_READ')")
+    public ResponseEntity<SaleReceiptResponseDTO> getSaleReceipt(@PathVariable("id") Long orderId) {
+        Order order = pdvUseCase.getOrder(orderId);
+        List<OrderPayment> payments = pdvUseCase.getOrderPayments(orderId);
+        return ResponseEntity.ok(orderConverter.toReceipt(order, payments));
+    }
+
+    @Operation(summary = "Totais recebidos na sessão, por forma de pagamento",
+            description = "Só pagamento CAPTURED conta. Devolve as quatro formas sempre, mesmo com "
+                    + "total zero. Só DINHEIRO entra na conferência da gaveta no fechamento — "
+                    + "débito, crédito e PIX se conferem contra a adquirente.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "404", description = "Sessão não encontrada", content = @Content)
+    })
+    @GetMapping("/sessions/{id}/payment-totals")
+    @PreAuthorize("hasAuthority('PDV_READ')")
+    public ResponseEntity<List<PaymentTotalResponseDTO>> getSessionPaymentTotals(
+            @PathVariable("id") Long sessionId) {
+        return ResponseEntity.ok(
+                orderConverter.toPaymentTotalResponse(pdvUseCase.getSessionPaymentTotals(sessionId)));
     }
 
     @Operation(summary = "Lista os pedidos de uma sessão de caixa, do mais recente para o mais antigo")
@@ -276,7 +316,7 @@ public class PdvController {
                         "orderNumber", order.orderNumber(),
                         "warehouseCode", order.warehouseCode(),
                         "type", MovementType.SAIDA.name())));
-        return ResponseEntity.ok(orderConverter.toResponse(order));
+        return ResponseEntity.ok(orderConverter.toResponse(order, pdvUseCase.getOrderPayments(order.id())));
     }
 
     /**

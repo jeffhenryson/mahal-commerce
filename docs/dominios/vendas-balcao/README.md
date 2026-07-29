@@ -1,6 +1,6 @@
 # Domínio: vendas-balcao (PDV — Frente de Caixa)
 
-**Status:** 🟢 Operacional — ciclo de caixa completo (abertura, sangria/suprimento, fechamento com conferência) e venda com preço vindo do catálogo. Falta pagamento com múltiplas formas (PDV-F006, Fatia 3).
+**Status:** 🟢 Operacional — ciclo de caixa completo (abertura, sangria/suprimento, fechamento com conferência por forma de pagamento), venda com preço vindo do catálogo, e pagamento com múltiplas formas, troco e comprovante interno (PDV-F006, Fatia 3).
 **Pacote Java:** `com.cernecommerce...pdv` (packages não aceitam hífen; `pdv` ↔ `vendas-balcao`)
 **Rota HTTP base:** `/pdv`
 **Última atualização deste doc:** 2026-07-28 (Fatia 1 — ciclo de caixa e superfície `/orders`)
@@ -43,17 +43,23 @@ registro de vendas no balcão.
 | `POST` | `/pdv/sessions/{id}/movements` | `PDV_SESSION_MANAGE` | Sangria ou suprimento. Exige sessão aberta **e do próprio operador** |
 | `GET` | `/pdv/sessions/{id}/movements` | `PDV_READ` | Movimentos da sessão |
 | `POST` | `/pdv/sessions/{id}/close` | `PDV_SESSION_CLOSE` | Fecha confrontando contado × esperado. **Divergência não bloqueia** |
+| `GET` | `/pdv/sessions/{id}/payment-totals` | `PDV_READ` | Total recebido na sessão por forma de pagamento — só `CAPTURED` conta. As quatro formas sempre aparecem, mesmo zeradas |
 | `GET` | `/pdv/pending-online-orders` | `PDV_READ` | Pedidos do app aguardando pagamento, para o caixa localizar quem chegou na loja |
 | `POST` | `/pdv/sessions/{id}/orders/{orderId}/settle` | `PDV_SALE_MANAGE` | Liquida no balcão um pedido do app: consome a reserva e conclui |
-| `POST` | `/pdv/sessions/{id}/sales` | `PDV_SALE_MANAGE` (+ `PDV_SALE_DISCOUNT` se houver desconto) | Registra venda na sessão e **dá baixa no estoque** item a item. Preço e custo vêm do catálogo, não do request. Exige sessão `OPEN` |
-| `GET` | `/pdv/sales/{id}` | `PDV_READ` | Consulta um pedido. Antes de PDV-F005 a venda era write-only |
+| `POST` | `/pdv/sessions/{id}/sales` | `PDV_SALE_MANAGE` (+ `PDV_SALE_DISCOUNT` se houver desconto) | Registra venda na sessão, **captura o pagamento** e **dá baixa no estoque** item a item. Preço e custo vêm do catálogo, não do request. Exige sessão `OPEN` e ao menos uma linha em `payments` |
+| `GET` | `/pdv/sales/{id}` | `PDV_READ` | Consulta um pedido, com os pagamentos. Antes de PDV-F005 a venda era write-only |
+| `GET` | `/pdv/sales/{id}/receipt` | `PDV_READ` | Comprovante interno da venda — **não é documento fiscal** (isso é a NFC-e, Fatia 11) |
 | `GET` | `/pdv/sessions/{id}/sales` | `PDV_READ` | Pedidos da sessão, paginados, do mais recente para o mais antigo |
 
-> **Contrato alterado em PDV-F004** (sem consumidor real — o PDV do `frontend-admin` é protótipo
-> mockado): `unitPrice` saiu do corpo de `POST /pdv/sessions/{id}/sales`, `discountAmount` e
-> `customerId` entraram. Produto sem preço recusa a venda com `409 PRODUCT_NOT_PRICED`; desconto
-> acima do teto (`pdv.sale.max-discount-percent`, default 10%) responde `409
-> DISCOUNT_LIMIT_EXCEEDED`. Detalhes em [`docs/api-reference.md`](../../api-reference.md#pdv-vendas-balcão--pdv).
+> **Contrato alterado em PDV-F004/F006** (sem consumidor real — o PDV do `frontend-admin` é
+> protótipo mockado): `unitPrice` saiu do corpo de `POST /pdv/sessions/{id}/sales`,
+> `discountAmount`, `customerId` e `payments` entraram (`payments` é **obrigatório**, pelo menos
+> uma linha). Produto sem preço recusa a venda com `409 PRODUCT_NOT_PRICED`; desconto acima do
+> teto (`pdv.sale.max-discount-percent`, default 10%) responde `409 DISCOUNT_LIMIT_EXCEEDED`;
+> pagamento insuficiente responde `400 INSUFFICIENT_PAYMENT`; débito/crédito/PIX que sozinhos
+> passam do total do pedido respondem `409 PAYMENT_EXCEEDS_ORDER_TOTAL` — só dinheiro pode ser
+> tendido a mais para gerar troco. Detalhes em
+> [`docs/api-reference.md`](../../api-reference.md#pdv-vendas-balcão--pdv).
 
 ## Segurança e Infraestrutura
 
@@ -71,6 +77,10 @@ registro de vendas no balcão.
 | `PDV_SALE_DISCOUNT` | desconto > 0 em `POST /pdv/sessions/{id}/sales` | V65 | ✅ `SeedConfig` + `DevRoleBootstrapConfig` |
 | `PDV_SESSION_MANAGE` | abertura de caixa e movimentos | V66 | ✅ `SeedConfig` + `DevRoleBootstrapConfig` |
 | `PDV_SESSION_CLOSE` | fechamento com conferência | V66 | ✅ `SeedConfig` + `DevRoleBootstrapConfig` |
+
+Pagamento (PDV-F006, V68) **não trouxe permissão nova**: capturar pagamento é parte do próprio
+`registerSale`, sob `PDV_SALE_MANAGE`; ler pagamento/totais/comprovante é `PDV_READ`, como o resto
+da leitura do módulo.
 
 `PDV_SESSION_CLOSE` é separada de `PDV_SESSION_MANAGE` porque a conferência do fechamento costuma
 ser do gerente, não de quem operou o caixa — e é a única operação da sessão que **não** exige ser o
@@ -138,8 +148,6 @@ venda inteira, e nada é persistido.
 
 - **PLAT-C035** — a garantia de "uma sessão aberta por operador" depende de um índice parcial que
   o H2 não suporta; sob concorrência, só o Postgres protege, e isso nunca foi testado.
-- **PDV-F006** — o `expectedAmount` do fechamento soma todas as formas de pagamento enquanto
-  `order_payment` não existir (Fatia 3).
 - **PLAT-C030** — sem rate limit.
 
 ## Integração com estoque
@@ -182,8 +190,7 @@ Convenções, variáveis e o environment compartilhado estão em
 
 | ID | Prioridade | Tipo | Item | Descrição | Status |
 |---|---|---|---|---|---|
-| PDV-F006 | 🟡 Média | Feature | pagamento-multiplas-formas-e-troco | `order_payment` (V67) com uma linha por forma — dinheiro + cartão no mesmo pedido são duas linhas. Troco é `change_amount` no pedido, **não** linha de pagamento negativa. Fechamento de caixa reporta totais por forma; só `DINHEIRO` entra na conferência da gaveta. §2.6. | Pendente |
-| PDV-F007 | 🟢 Baixa | Feature | marcar-pedido-como-reembolsado | Status `REEMBOLSADO`, distinto de `CANCELADO`, com estorno do pagamento e `REVERSED` no ledger de cashback. Cancelar e reembolsar são eventos diferentes: contá-los juntos esconde quanto dinheiro de fato voltou ao cliente. Depende da Fatia 3 (`order_payment`) e da Fatia 4 (cashback) — antes disso não há o que estornar. Acréscimo de enum + `CHECK`, barato quando as duas existirem. Levantado com o dono em 2026-07-28. | Pendente |
+| PDV-F007 | 🟢 Baixa | Feature | marcar-pedido-como-reembolsado | Status `REEMBOLSADO`, distinto de `CANCELADO`, com estorno do pagamento e `REVERSED` no ledger de cashback. Cancelar e reembolsar são eventos diferentes: contá-los juntos esconde quanto dinheiro de fato voltou ao cliente. `order_payment` já existe (Fatia 3, 2026-07-29); falta a Fatia 4 (cashback) para ter o que reverter dos dois lados. Acréscimo de enum + `CHECK`, barato agora que as duas existirem. Levantado com o dono em 2026-07-28. | Pendente |
 | PDV-C001 | 🟡 Importante | Correção | auditar-e-documentar-o-modulo | Preencher Regras de Negócio, Schema (V57) e Cobertura de Testes no padrão de `estoque`. | Pendente |
 
 > A permissão `PDV_SALE_MANAGE` está ausente dos seeders de dev — rastreado como
@@ -192,6 +199,23 @@ Convenções, variáveis e o environment compartilhado estão em
 
 ## Histórico de Implementações
 
+- **2026-07-29** — `pagamento-multiplas-formas-e-troco` (**PDV-F006**): nova tabela `order_payment`
+  (V68, um port próprio em `core/ports/out/pagamento`) — uma linha por forma, balcão grava direto
+  em `CAPTURED` porque o dinheiro já está na gaveta no instante da venda. `POST
+  /pdv/sessions/{id}/sales` passa a exigir `payments` (pelo menos uma linha); a soma tem que cobrir
+  o líquido do pedido, validada **antes** de tocar o estoque. **Regra de troco, mais estrita que o
+  desenho original do plano (§2.6):** a parte que não é `DINHEIRO` não pode, sozinha, passar do
+  líquido — só dinheiro pode ser tendido a mais — o que fecha um caso de pagamento dividido em que
+  a fórmula original do plano (`soma DINHEIRO − total`) calcularia um troco menor que o real. Troco
+  continua sendo `change_amount` no pedido, nunca uma linha de pagamento negativa. O fechamento de
+  caixa passou a somar só `DINHEIRO` no `expectedAmount` — débito, crédito e PIX se conferem contra
+  a adquirente, não contra o contado na gaveta — e ganhou `GET /pdv/sessions/{id}/payment-totals`
+  com o total por forma. Também entrou `GET /pdv/sales/{id}/receipt`: comprovante interno **não
+  fiscal** (itens, valores, formas de pagamento) para a loja imprimir/exportar até a NFC-e (Fatia
+  11) existir. Índice único em `gateway_ref` desde já — muito antes do gateway (Fatia 10) existir,
+  por decisão de risco do próprio plano. Coberto por `OrderPaymentTest`, os novos casos de
+  `PdvServiceTest`, `PdvControllerSecurityTest` e `PdvCashCycleIT`
+  (`splitPaymentIsPersistedAndOnlyCashCountsTowardsTheDrawer`).
 - **2026-07-28** — `ciclo-de-caixa` (**PDV-F001**, **PDV-F002**, **PDV-C002**, **PDV-C004**):
   `CashRegisterSession` deixou de ser stub e ganhou invariantes, `open`/`closedWith`/`diverges`;
   `CashMovement` + `CashMovementType` como ledger append-only, com o sinal vindo do tipo e não do
@@ -221,7 +245,6 @@ nova. Resumo da ordem (§6 do [plano](../../plano-pdv-marketplace.md)):
 
 - [ ] **PDV-F003 + PDV-F004 + PDV-F005** — Fatia 0: fundação do pedido. Vem antes de tudo, inclusive
       do ciclo de caixa, porque é a única mudança cujo custo cresce com o volume de vendas gravadas.
-- [ ] **PDV-F001 + PDV-F002 + PDV-C004** — Fatia 1: ciclo de caixa, a maior lacuna operacional —
-      hoje abrir caixa exige `INSERT` manual.
-- [ ] **PDV-F006** — Fatia 3: pagamento com múltiplas formas e troco.
+- [x] **PDV-F001 + PDV-F002 + PDV-C004** — Fatia 1: ciclo de caixa. Fechado em 2026-07-28.
+- [x] **PDV-F006** — Fatia 3: pagamento com múltiplas formas e troco. Fechado em 2026-07-29.
 - [ ] **PDV-C001** — auditar o código e completar este README.

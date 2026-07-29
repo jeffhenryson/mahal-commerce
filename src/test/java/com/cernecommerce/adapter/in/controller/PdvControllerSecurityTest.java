@@ -55,12 +55,16 @@ public class PdvControllerSecurityTest {
     /**
      * PDV-F004: sem {@code unitPrice} — o preço é resolvido pelo servidor.
      * PDV-C004: sem {@code warehouseCode} — o depósito vem da sessão de caixa.
+     * PDV-F006: {@code payments} é obrigatório; o valor aqui não precisa bater com o preço real —
+     * a sessão inexistente (999999) barra antes de qualquer validação de pagamento ser alcançada.
      */
-    private static final String SALE_BODY = "{\"items\":[{\"sku\":\"NARG-001\",\"quantity\":1}]}";
+    private static final String SALE_BODY = "{\"items\":[{\"sku\":\"NARG-001\",\"quantity\":1}],"
+            + "\"payments\":[{\"method\":\"DINHEIRO\",\"amount\":1}]}";
 
     /** Mesma venda, com desconto — exige a permissão PDV_SALE_DISCOUNT além de PDV_SALE_MANAGE. */
     private static final String SALE_BODY_WITH_DISCOUNT =
-            "{\"items\":[{\"sku\":\"NARG-001\",\"quantity\":1,\"discountAmount\":1.00}]}";
+            "{\"items\":[{\"sku\":\"NARG-001\",\"quantity\":1,\"discountAmount\":1.00}],"
+            + "\"payments\":[{\"method\":\"DINHEIRO\",\"amount\":1}]}";
 
     private static final String OPEN_SESSION_BODY =
             "{\"openingAmount\":200.00,\"warehouseCode\":\"LOJA-01\"}";
@@ -249,6 +253,47 @@ public class PdvControllerSecurityTest {
     @Test
     void list_session_orders_with_nonexistent_session_returns_404() throws Exception {
         mockMvc.perform(get("/pdv/sessions/999999/sales")
+                .with(user("gerente").authorities(new SimpleGrantedAuthority("PDV_READ"))))
+                .andExpect(status().isNotFound());
+    }
+
+    // ── PDV-F006: pagamento ──────────────────────────────────────────────────────────────────
+
+    @Test
+    void register_sale_without_payments_returns_400() throws Exception {
+        mockMvc.perform(post("/pdv/sessions/999999/sales")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"items\":[{\"sku\":\"NARG-001\",\"quantity\":1}]}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("PDV_SALE_MANAGE"))))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void get_receipt_without_pdv_read_returns_403() throws Exception {
+        mockMvc.perform(get("/pdv/sales/1/receipt")
+                .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void get_receipt_for_nonexistent_order_with_pdv_read_returns_404() throws Exception {
+        mockMvc.perform(get("/pdv/sales/999999/receipt")
+                .with(user("gerente").authorities(new SimpleGrantedAuthority("PDV_READ"))))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void payment_totals_without_pdv_read_returns_403() throws Exception {
+        mockMvc.perform(get("/pdv/sessions/1/payment-totals")
+                .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void payment_totals_for_nonexistent_session_with_pdv_read_returns_404() throws Exception {
+        mockMvc.perform(get("/pdv/sessions/999999/payment-totals")
                 .with(user("gerente").authorities(new SimpleGrantedAuthority("PDV_READ"))))
                 .andExpect(status().isNotFound());
     }

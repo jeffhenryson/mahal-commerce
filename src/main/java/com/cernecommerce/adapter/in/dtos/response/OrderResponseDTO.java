@@ -50,4 +50,9 @@ public class OrderResponseDTO {
     private Instant cancelledAt;
 
     private List<OrderItemResponseDTO> items;
+
+    @Schema(description = "Pagamentos do pedido (PDV-F006). Ausente/nulo em listagens — só vem "
+            + "preenchido em GET /pdv/sales/{id} e nas respostas de registro/liquidação, para não "
+            + "gerar uma consulta extra por linha em toda paginação.")
+    private List<OrderPaymentResponseDTO> payments;
 }

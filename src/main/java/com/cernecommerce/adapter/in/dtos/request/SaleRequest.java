@@ -23,4 +23,9 @@ public class SaleRequest {
     @NotEmpty
     @Valid
     private List<SaleItemRequest> items;
+
+    @NotEmpty
+    @Valid
+    @Schema(description = "Pelo menos uma linha (PDV-F006). Várias linhas = pagamento dividido.")
+    private List<SalePaymentRequest> payments;
 }

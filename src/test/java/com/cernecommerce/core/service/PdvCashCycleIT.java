@@ -5,12 +5,14 @@ import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionNotOwnedEx
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.estoque.WarehouseType;
+import com.cernecommerce.core.domain.model.pagamento.PaymentMethod;
 import com.cernecommerce.core.domain.model.pdv.CashMovementType;
 import com.cernecommerce.core.domain.model.pdv.CashRegisterSession;
 import com.cernecommerce.core.domain.model.pedido.Order;
 import com.cernecommerce.core.domain.model.pedido.OrderStatus;
 import com.cernecommerce.core.ports.in.EstoqueUseCase;
 import com.cernecommerce.core.ports.in.PdvUseCase;
+import com.cernecommerce.core.ports.in.PdvUseCase.PaymentCommand;
 import com.cernecommerce.core.ports.in.PdvUseCase.SaleItemCommand;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
@@ -60,6 +62,11 @@ class PdvCashCycleIT {
         return UUID.randomUUID().toString().substring(0, 8);
     }
 
+    /** Uma linha de pagamento em dinheiro, exata. */
+    private static List<PaymentCommand> cash(String amount) {
+        return List.of(new PaymentCommand(PaymentMethod.DINHEIRO, new BigDecimal(amount), null));
+    }
+
     /**
      * Depósito + produto precificado + saldo inicial. Cadastrar o SKU é pré-condição desde EST-C002:
      * movimentar SKU inexistente é 404.
@@ -93,7 +100,7 @@ class PdvCashCycleIT {
 
         // 2. Vende 2 unidades. O preço vem do catálogo; o depósito, da sessão.
         Order order = pdvUseCase.registerSale(session.id(), null,
-                List.of(new SaleItemCommand(sku, new BigDecimal("2.000"), null)), operator);
+                List.of(new SaleItemCommand(sku, new BigDecimal("2.000"), null)), cash("44.00"), operator);
         assertThat(order.status()).isEqualTo(OrderStatus.CONCLUIDO);
         assertThat(order.netAmount()).isEqualByComparingTo("44.00");
         assertThat(order.warehouseCode()).isEqualTo(warehouseCode);
@@ -121,6 +128,47 @@ class PdvCashCycleIT {
         assertThat(closed.closedBy()).isEqualTo("gerente");
     }
 
+    /**
+     * PDV-F006 de ponta a ponta: pagamento dividido, troco só do dinheiro, o fechamento ignorando
+     * o débito e os totais por forma de pagamento batendo. É o único teste que exercita a query
+     * nativa de {@code sumCapturedAmountBySessionIdAndMethod} contra banco real.
+     */
+    @Test
+    void splitPaymentIsPersistedAndOnlyCashCountsTowardsTheDrawer() {
+        String operator = "caixa-" + uniqueSuffix();
+        String[] setup = givenStockedWarehouse(operator).split("\\|");
+        String warehouseCode = setup[0];
+        String sku = setup[1];
+
+        CashRegisterSession session = pdvUseCase.openSession(operator, new BigDecimal("50.00"), warehouseCode);
+
+        // Pedido de 22,00: R$15 no débito + R$10 em dinheiro — troco de R$3, só do dinheiro.
+        List<PaymentCommand> split = List.of(
+                new PaymentCommand(PaymentMethod.DEBITO, new BigDecimal("15.00"), null),
+                new PaymentCommand(PaymentMethod.DINHEIRO, new BigDecimal("10.00"), null));
+        Order order = pdvUseCase.registerSale(session.id(), null,
+                List.of(new SaleItemCommand(sku, BigDecimal.ONE, null)), split, operator);
+        flushAndClear();
+
+        assertThat(order.changeAmount()).isEqualByComparingTo("3.00");
+        assertThat(pdvUseCase.getOrderPayments(order.id())).hasSize(2);
+
+        List<PdvUseCase.PaymentTotal> totals = pdvUseCase.getSessionPaymentTotals(session.id());
+        assertThat(totals).hasSize(4);
+        assertThat(totalFor(totals, PaymentMethod.DEBITO)).isEqualByComparingTo("15.00");
+        assertThat(totalFor(totals, PaymentMethod.PIX)).isEqualByComparingTo("0");
+
+        // Esperado na gaveta: só o dinheiro entra — 50 (abertura) + 10 (dinheiro da venda) = 60.
+        // Os 15 do débito vão para conferência contra a adquirente, não contra o contado aqui.
+        CashRegisterSession closed = pdvUseCase.closeSession(session.id(), new BigDecimal("60.00"), operator);
+        assertThat(closed.expectedAmount()).isEqualByComparingTo("60.00");
+        assertThat(closed.diverges()).isFalse();
+    }
+
+    private BigDecimal totalFor(List<PdvUseCase.PaymentTotal> totals, PaymentMethod method) {
+        return totals.stream().filter(t -> t.method() == method).findFirst().orElseThrow().amount();
+    }
+
     @Test
     void cancelledSaleDoesNotCountTowardsTheExpectedAmount() {
         String operator = "caixa-" + uniqueSuffix();
@@ -130,7 +178,7 @@ class PdvCashCycleIT {
 
         CashRegisterSession session = pdvUseCase.openSession(operator, new BigDecimal("100.00"), warehouseCode);
         pdvUseCase.registerSale(session.id(), null,
-                List.of(new SaleItemCommand(sku, BigDecimal.ONE, null)), operator);
+                List.of(new SaleItemCommand(sku, BigDecimal.ONE, null)), cash("22.00"), operator);
         flushAndClear();
 
         // Sem venda cancelada, esperado = 100 + 22 = 122.
@@ -180,7 +228,7 @@ class PdvCashCycleIT {
         flushAndClear();
 
         assertThatThrownBy(() -> pdvUseCase.registerSale(session.id(), null,
-                List.of(new SaleItemCommand(sku, BigDecimal.ONE, null)), "outro-caixa"))
+                List.of(new SaleItemCommand(sku, BigDecimal.ONE, null)), cash("22.00"), "outro-caixa"))
                 .isInstanceOf(CashRegisterSessionNotOwnedException.class);
     }
 
@@ -191,8 +239,8 @@ class PdvCashCycleIT {
         String sku = setup[1];
 
         CashRegisterSession session = pdvUseCase.openSession(operator, BigDecimal.TEN, setup[0]);
-        pdvUseCase.registerSale(session.id(), null, List.of(new SaleItemCommand(sku, BigDecimal.ONE, null)), operator);
-        pdvUseCase.registerSale(session.id(), null, List.of(new SaleItemCommand(sku, BigDecimal.ONE, null)), operator);
+        pdvUseCase.registerSale(session.id(), null, List.of(new SaleItemCommand(sku, BigDecimal.ONE, null)), cash("22.00"), operator);
+        pdvUseCase.registerSale(session.id(), null, List.of(new SaleItemCommand(sku, BigDecimal.ONE, null)), cash("22.00"), operator);
         flushAndClear();
 
         assertThat(pdvUseCase.listSessionOrders(session.id(), 0, 20).totalElements()).isEqualTo(2L);
@@ -206,9 +254,9 @@ class PdvCashCycleIT {
 
         CashRegisterSession session = pdvUseCase.openSession(operator, BigDecimal.TEN, setup[0]);
         String first = pdvUseCase.registerSale(session.id(), null,
-                List.of(new SaleItemCommand(sku, BigDecimal.ONE, null)), operator).orderNumber();
+                List.of(new SaleItemCommand(sku, BigDecimal.ONE, null)), cash("22.00"), operator).orderNumber();
         String second = pdvUseCase.registerSale(session.id(), null,
-                List.of(new SaleItemCommand(sku, BigDecimal.ONE, null)), operator).orderNumber();
+                List.of(new SaleItemCommand(sku, BigDecimal.ONE, null)), cash("22.00"), operator).orderNumber();
 
         assertThat(first).isNotEqualTo(second);
     }
