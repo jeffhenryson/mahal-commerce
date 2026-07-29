@@ -2,6 +2,7 @@ package com.cernecommerce.core.service;
 
 import com.cernecommerce.core.domain.exception.crm.CampaignAutomationNotFoundException;
 import com.cernecommerce.core.domain.exception.crm.CustomerNotFoundException;
+import com.cernecommerce.core.domain.exception.crm.DuplicateCustomerCpfException;
 import com.cernecommerce.core.domain.exception.crm.DuplicateCustomerEmailException;
 import com.cernecommerce.core.domain.exception.crm.DuplicateTagNameException;
 import com.cernecommerce.core.domain.exception.crm.TagNotFoundException;
@@ -69,9 +70,17 @@ public class CrmService implements CrmUseCase {
     @Override
     @Transactional
     public Customer createCustomer(String nome, String contato, String email, String cpf, String origem) {
-        customerRepository.findByEmail(email).ifPresent(c -> {
-            throw new DuplicateCustomerEmailException(email);
-        });
+        // CRM-C005: email e cpf são opcionais agora — só checa duplicidade do que veio preenchido.
+        if (email != null && !email.isBlank()) {
+            customerRepository.findByEmail(email).ifPresent(c -> {
+                throw new DuplicateCustomerEmailException(email);
+            });
+        }
+        if (cpf != null && !cpf.isBlank()) {
+            customerRepository.findByCpf(cpf).ifPresent(c -> {
+                throw new DuplicateCustomerCpfException(cpf);
+            });
+        }
         Customer customer = Customer.create(nome, contato, email, cpf, origem);
         return customerRepository.save(customer);
     }
@@ -81,6 +90,27 @@ public class CrmService implements CrmUseCase {
     public Customer findCustomerById(Long id) {
         return customerRepository.findById(id)
                 .orElseThrow(() -> new CustomerNotFoundException(id));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Customer lookupCustomer(String cpf, String email, String contato) {
+        // Ordem de prioridade quando mais de um critério vier preenchido: cpf (oficial) → email →
+        // contato — o mais forte primeiro, para não devolver o cliente errado por coincidência de
+        // telefone quando o CPF, mais específico, também foi informado.
+        if (cpf != null && !cpf.isBlank()) {
+            return customerRepository.findByCpf(cpf)
+                    .orElseThrow(() -> new CustomerNotFoundException("cpf " + cpf));
+        }
+        if (email != null && !email.isBlank()) {
+            return customerRepository.findByEmail(email)
+                    .orElseThrow(() -> new CustomerNotFoundException("email " + email));
+        }
+        if (contato != null && !contato.isBlank()) {
+            return customerRepository.findByContato(contato)
+                    .orElseThrow(() -> new CustomerNotFoundException("contato " + contato));
+        }
+        throw new IllegalArgumentException("informe cpf, email ou contato para a busca");
     }
 
     @Override

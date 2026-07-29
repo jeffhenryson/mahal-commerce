@@ -86,6 +86,80 @@ public class CrmControllerSecurityTest {
     }
 
     @Test
+    void create_customer_leve_without_email_or_cpf_returns_201() throws Exception {
+        // CRM-C005: nome + contato bastam agora — sem email, sem cpf.
+        String contato = "SEC_TEST_" + System.currentTimeMillis();
+        mockMvc.perform(post("/crm/customers")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"nome\":\"Maria\",\"contato\":\"" + contato + "\"}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("CRM_CUSTOMER_MANAGE"))))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
+    void create_customer_without_any_identifier_returns_400() throws Exception {
+        mockMvc.perform(post("/crm/customers")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"nome\":\"Maria\"}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("CRM_CUSTOMER_MANAGE"))))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void lookup_customer_without_auth_returns_401() throws Exception {
+        mockMvc.perform(get("/crm/customers/lookup").param("cpf", "12345678900"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void lookup_customer_without_crm_customer_lookup_returns_403() throws Exception {
+        mockMvc.perform(get("/crm/customers/lookup").param("cpf", "12345678900")
+                .with(user("bob").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("CRM_CUSTOMER_READ"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void lookup_customer_with_crm_customer_lookup_returns_404_when_not_found() throws Exception {
+        mockMvc.perform(get("/crm/customers/lookup").param("cpf", "99999999999")
+                .with(user("caixa").authorities(new SimpleGrantedAuthority("CRM_CUSTOMER_LOOKUP"))))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.errorCode").value("CUSTOMER_NOT_FOUND"));
+    }
+
+    @Test
+    void lookup_customer_without_any_criteria_returns_400() throws Exception {
+        mockMvc.perform(get("/crm/customers/lookup")
+                .with(user("caixa").authorities(new SimpleGrantedAuthority("CRM_CUSTOMER_LOOKUP"))))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void lookup_customer_finds_by_cpf_after_quick_registration() throws Exception {
+        // De ponta a ponta: cadastra (CRM_CUSTOMER_MANAGE) e acha pelo lookup (CRM_CUSTOMER_LOOKUP)
+        // — a mesma jornada do balcão, com as duas permissões que o plano mantém separadas.
+        String cpf = String.valueOf(10000000000L + (System.nanoTime() % 89999999999L));
+        mockMvc.perform(post("/crm/customers")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"nome\":\"Cliente Balcao\",\"cpf\":\"" + cpf + "\"}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("CRM_CUSTOMER_MANAGE"))))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(get("/crm/customers/lookup").param("cpf", cpf)
+                .with(user("caixa").authorities(new SimpleGrantedAuthority("CRM_CUSTOMER_LOOKUP"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.cpf").value(cpf))
+                .andExpect(jsonPath("$.nome").value("Cliente Balcao"));
+    }
+
+    @Test
     void list_customers_without_auth_returns_401() throws Exception {
         mockMvc.perform(get("/crm/customers"))
                 .andExpect(status().isUnauthorized());

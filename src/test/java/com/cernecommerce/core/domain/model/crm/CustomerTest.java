@@ -60,20 +60,55 @@ class CustomerTest {
     }
 
     @Test
-    void throwsWhenContatoIsBlank() {
-        assertThatThrownBy(() -> Customer.create("Maria Silva", " ", "maria@example.com", null, null))
-                .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    @Test
-    void throwsWhenEmailIsBlank() {
-        assertThatThrownBy(() -> Customer.create("Maria Silva", "11999998888", " ", null, null))
-                .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    @Test
     void throwsWhenEmailHasInvalidFormat() {
         assertThatThrownBy(() -> Customer.create("Maria Silva", "11999998888", "email-invalido", null, null))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    // ── CRM-C005: cpf é o identificador oficial; email e contato são alternativos ───────────
+
+    @Test
+    void allowsContatoBlankWhenEmailIsPresent() {
+        Customer customer = Customer.create("Maria Silva", " ", "maria@example.com", null, null);
+
+        assertThat(customer.contato()).isBlank();
+        assertThat(customer.email()).isEqualTo("maria@example.com");
+    }
+
+    @Test
+    void allowsEmailBlankWhenContatoIsPresent() {
+        Customer customer = Customer.create("Maria Silva", "11999998888", " ", null, null);
+
+        assertThat(customer.email()).isBlank();
+        assertThat(customer.contato()).isEqualTo("11999998888");
+    }
+
+    /** "Cliente leve": nenhum contato nem email, só CPF — é o cadastro oficial por si só. */
+    @Test
+    void allowsContatoAndEmailBlankWhenCpfIsPresent() {
+        Customer customer = Customer.create("Maria Silva", null, null, "12345678900", null);
+
+        assertThat(customer.contato()).isNull();
+        assertThat(customer.email()).isNull();
+        assertThat(customer.cpf()).isEqualTo("12345678900");
+    }
+
+    @Test
+    void throwsWhenNoIdentifierAtAll() {
+        assertThatThrownBy(() -> Customer.create("Maria Silva", null, null, null, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("cpf, email ou contato");
+        assertThatThrownBy(() -> Customer.create("Maria Silva", " ", " ", " ", null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("cpf, email ou contato");
+    }
+
+    @Test
+    void isOfficiallyRegistered_trueOnlyWithCpf() {
+        Customer comCpf = Customer.create("Maria Silva", null, null, "12345678900", null);
+        Customer semCpf = Customer.create("Maria Silva", "11999998888", null, null, null);
+
+        assertThat(comCpf.isOfficiallyRegistered()).isTrue();
+        assertThat(semCpf.isOfficiallyRegistered()).isFalse();
     }
 }

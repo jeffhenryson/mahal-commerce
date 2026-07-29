@@ -14,6 +14,10 @@ public interface CustomerJpaRepository extends JpaRepository<CustomerEntity, Lon
 
     Optional<CustomerEntity> findByEmail(String email);
 
+    Optional<CustomerEntity> findByCpf(String cpf);
+
+    Optional<CustomerEntity> findFirstByContato(String contato);
+
     Page<CustomerEntity> findByNomeContainingIgnoreCaseOrContatoContaining(String nome, String contato,
             Pageable pageable);
 

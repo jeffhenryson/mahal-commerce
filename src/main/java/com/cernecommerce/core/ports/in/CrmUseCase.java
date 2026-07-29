@@ -22,9 +22,14 @@ import java.util.List;
 public interface CrmUseCase {
 
     /**
-     * Cria um cliente. Lança
-     * {@link com.cernecommerce.core.domain.exception.crm.DuplicateCustomerEmailException}
-     * se o email já estiver cadastrado.
+     * Cria um cliente. {@code contato} e {@code email} são opcionais desde CRM-C005 — só
+     * {@code nome} e ao menos um identificador (cpf, email ou contato) são exigidos, checado no
+     * compact constructor de {@link Customer}.
+     *
+     * @throws com.cernecommerce.core.domain.exception.crm.DuplicateCustomerEmailException
+     *         se o email já estiver cadastrado
+     * @throws com.cernecommerce.core.domain.exception.crm.DuplicateCustomerCpfException
+     *         se o cpf já estiver cadastrado
      */
     Customer createCustomer(String nome, String contato, String email, String cpf, String origem);
 
@@ -34,6 +39,17 @@ public interface CrmUseCase {
      * se não existir.
      */
     Customer findCustomerById(Long id);
+
+    /**
+     * Busca pontual por CPF, email ou contato — o "CPF na nota?" do balcão (CRM-F002). Informe
+     * exatamente um critério; os demais como {@code null}. Tentados nessa ordem de prioridade
+     * quando mais de um vier preenchido: cpf (identificador oficial) → email → contato.
+     *
+     * @throws IllegalArgumentException se nenhum critério for informado
+     * @throws com.cernecommerce.core.domain.exception.crm.CustomerNotFoundException
+     *         se não achar ninguém pelo critério informado
+     */
+    Customer lookupCustomer(String cpf, String email, String contato);
 
     /**
      * Lista clientes paginados, filtrando por nome ou contato quando {@code search} não for

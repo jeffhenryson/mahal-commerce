@@ -38,6 +38,18 @@ public class CustomerRepositoryImpl implements CustomerRepository {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public Optional<Customer> findByCpf(String cpf) {
+        return customerJpaRepository.findByCpf(cpf).map(this::toDomain);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<Customer> findByContato(String contato) {
+        return customerJpaRepository.findFirstByContato(contato).map(this::toDomain);
+    }
+
+    @Override
     public Customer save(Customer customer) {
         CustomerEntity entity = new CustomerEntity();
         entity.setId(customer.id());

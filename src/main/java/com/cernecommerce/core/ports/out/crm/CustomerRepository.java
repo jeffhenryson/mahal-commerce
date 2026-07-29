@@ -17,6 +17,16 @@ public interface CustomerRepository {
 
     Optional<Customer> findByEmail(String email);
 
+    /** Identificador OFICIAL do cadastro (CRM-C005). */
+    Optional<Customer> findByCpf(String cpf);
+
+    /**
+     * Contato não é único — telefone pode ser reaproveitado (família, número corporativo) —, então
+     * devolve o primeiro achado. Suficiente para o caso de uso: achar rápido no balcão, não provar
+     * unicidade.
+     */
+    Optional<Customer> findByContato(String contato);
+
     Customer save(Customer customer);
 
     /** Lista clientes paginados, filtrando por nome ou contato quando {@code search} não for nulo/vazio. */

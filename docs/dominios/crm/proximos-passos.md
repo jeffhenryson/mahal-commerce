@@ -32,17 +32,19 @@ Cobertura de Testes (CRM-C001). Duas coisas específicas travam o resto do proje
   (CrmController.java:217,230) e CustomerResponseDTO.cashback é constante zero. São
   placeholders EXPLÍCITOS de F003, não bugs: a rota foi entregue sem fonte de dado.
 
-ORDEM
- 1. CRM-C005 — email opcional, unicidade por CPF quando faltar, CHECK (email IS NOT NULL
-    OR cpf IS NOT NULL) no schema. É alteração numa invariante de domínio JÁ TESTADA:
-    espere quebrar testes de CustomerTest e da suíte de CRM, e trate isso como o trabalho,
-    não como efeito colateral.
- 2. CRM-F002 — lookup por CPF/contato + cadastro rápido, sob permissão dedicada
-    CRM_CUSTOMER_LOOKUP. Junto com a 1 fecha a Fatia 2 do plano.
- 3. CRM-F003 — programa de cashback (Fatia 4). O maior item do módulo. Depende da Fatia 3
-    (pagamento), porque o ganho é calculado sobre o líquido pago.
+ORDEM (revisada em 2026-07-29: CRM-C005 + CRM-F002 fechados)
+ 1. ~~CRM-C005 — email opcional, unicidade por CPF~~ ✅ Fechado 2026-07-29 — modelo final
+    mais amplo que o previsto aqui: CPF é o identificador OFICIAL, email e contato são
+    alternativos (qualquer um dos três basta), não só "email OU cpf". Ver Histórico do
+    README.
+ 2. ~~CRM-F002 — lookup por CPF/contato + cadastro rápido~~ ✅ Fechado junto com a C005 —
+    GET /crm/customers/lookup?cpf=&email=&contato= sob CRM_CUSTOMER_LOOKUP.
+ 3. CRM-F003 — programa de cashback (Fatia 4). O maior item do módulo, agora destravado.
+    Depende da Fatia 3 (pagamento — FECHADA 2026-07-29, order_payment existe), porque o
+    ganho é calculado sobre o líquido pago. Calibragem da taxa global fica para quando
+    esta fatia começar de verdade — decisão de negócio adiada com o usuário.
  4. CRM-F001 — orders/cashback deixam de ser placeholder. Depende de PDV-F003 (a tabela
-    sales_order) e de CRM-F003 (o ledger).
+    sales_order, já existe) e de CRM-F003 (o ledger, ainda não).
  5. CRM-C002 — auditoria no export da base. Independente de tudo acima; é o maior risco de
     segurança aberto do módulo e pode ser feito a qualquer momento.
  6. CRM-C001 — auditar o código e completar o README. Por último.
@@ -86,12 +88,12 @@ ARMADILHAS DESTE PROJETO
   é @SpringBootTest + @ActiveProfiles("dev") + @Transactional com flush()+clear().
 - HexagonalArchitectureTest barra framework em core/domain e core/ports; em core/service só
   libera org.springframework.transaction.*. ApplicationEventPublisher fica no controller.
-- A próxima migration é V65 — V63 e V64 já existem no working tree, não commitadas.
+- A próxima migration é V70 — V69 (CRM-C005) já está commitada.
 - Permissão nova precisa de ON CONFLICT DO NOTHING na migration E de entrada em SeedConfig
   e DevRoleBootstrapConfig, senão dá 403 em dev.
 - Todo endpoint novo precisa de @PreAuthorize.
 
-Comece lendo o README do módulo e o §2.5 do plano, e me apresente o plano para CRM-C005.
+Comece lendo o README do módulo e o §2.4 do plano, e me apresente o plano para CRM-F003 (cashback) — sem travar a taxa global ainda, isso é decisão do dono.
 ```
 
 ---

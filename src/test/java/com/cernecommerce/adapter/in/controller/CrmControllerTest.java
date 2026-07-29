@@ -136,6 +136,52 @@ public class CrmControllerTest {
     }
 
     @Test
+    void create_customerLeveWithOnlyContato_returns_201() throws Exception {
+        // CRM-C005: sem email nem cpf, só nome + contato — "cliente leve".
+        when(crmUseCase.createCustomer("Maria Silva", "11999998888", null, null, null))
+                .thenReturn(Customer.of(1L, "Maria Silva", "11999998888", null, null, null, Instant.now(),
+                        CustomerStage.NOVO_LEAD));
+
+        mockMvc.perform(post("/crm/customers")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nome\":\"Maria Silva\",\"contato\":\"11999998888\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.email").doesNotExist());
+    }
+
+    // ── CRM-F002: busca de balcão ─────────────────────────────────────────────────────────────
+
+    @Test
+    void lookup_byCpf_returns_200() throws Exception {
+        when(crmUseCase.lookupCustomer("12345678900", null, null))
+                .thenReturn(customer(1L, "maria@example.com"));
+
+        mockMvc.perform(get("/crm/customers/lookup").param("cpf", "12345678900").principal(AUTH))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(1));
+    }
+
+    @Test
+    void lookup_notFound_returns_404() throws Exception {
+        when(crmUseCase.lookupCustomer(null, null, "11999998888"))
+                .thenThrow(new CustomerNotFoundException("contato 11999998888"));
+
+        mockMvc.perform(get("/crm/customers/lookup").param("contato", "11999998888").principal(AUTH))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.errorCode").value("CUSTOMER_NOT_FOUND"));
+    }
+
+    @Test
+    void lookup_withoutAnyCriteria_returns_400() throws Exception {
+        when(crmUseCase.lookupCustomer(null, null, null))
+                .thenThrow(new IllegalArgumentException("informe cpf, email ou contato para a busca"));
+
+        mockMvc.perform(get("/crm/customers/lookup").principal(AUTH))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void get_returns_200() throws Exception {
         when(crmUseCase.findCustomerById(1L)).thenReturn(customer(1L, "maria@example.com"));
 

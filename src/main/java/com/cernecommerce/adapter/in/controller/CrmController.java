@@ -109,6 +109,27 @@ public class CrmController {
                 .body(converter.toResponse(created));
     }
 
+    @Operation(summary = "Busca um cliente por CPF, email ou contato — o \"CPF na nota?\" do balcão",
+            description = "Informe exatamente um critério. Prioridade quando mais de um vier "
+                    + "preenchido: cpf (identificador oficial) → email → contato. Não achando, o "
+                    + "operador segue para o cadastro rápido (POST /crm/customers) — venda anônima "
+                    + "continua sempre permitida sem passar por aqui.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "400", description = "Nenhum critério informado", content = @Content),
+            @ApiResponse(responseCode = "404", description = "Cliente não encontrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/customers/lookup")
+    @PreAuthorize("hasAuthority('CRM_CUSTOMER_LOOKUP')")
+    public ResponseEntity<CustomerResponseDTO> lookupCustomer(
+            @RequestParam(required = false) String cpf,
+            @RequestParam(required = false) String email,
+            @RequestParam(required = false) String contato) {
+        Customer customer = crmUseCase.lookupCustomer(cpf, email, contato);
+        return ResponseEntity.ok(converter.toResponse(customer));
+    }
+
     @Operation(summary = "Busca um cliente por id")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "OK"),

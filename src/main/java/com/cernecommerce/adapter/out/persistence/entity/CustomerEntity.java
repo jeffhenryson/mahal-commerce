@@ -12,7 +12,10 @@ import java.time.Instant;
 @NoArgsConstructor
 @Entity
 @EqualsAndHashCode(onlyExplicitlyIncluded = true)
-@Table(name = "customers", uniqueConstraints = @UniqueConstraint(name = "uk_customers_email", columnNames = "email"))
+@Table(name = "customers", uniqueConstraints = {
+        @UniqueConstraint(name = "uk_customers_email", columnNames = "email"),
+        @UniqueConstraint(name = "uk_customers_cpf", columnNames = "cpf")
+})
 public class CustomerEntity {
 
     @Id
@@ -23,12 +26,15 @@ public class CustomerEntity {
     @Column(nullable = false, length = 255)
     private String nome;
 
-    @Column(nullable = false, length = 30)
+    /** Opcional desde CRM-C005 — cpf ou email sozinhos já identificam o cliente. */
+    @Column(length = 30)
     private String contato;
 
-    @Column(nullable = false, length = 255, unique = true)
+    /** Opcional desde CRM-C005 — cliente "leve" pode ser identificado só por cpf/contato. */
+    @Column(length = 255)
     private String email;
 
+    /** Identificador OFICIAL do cadastro (CRM-C005) — único quando presente. */
     @Column(length = 11)
     private String cpf;
 

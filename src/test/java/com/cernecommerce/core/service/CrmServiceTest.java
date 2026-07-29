@@ -101,6 +101,80 @@ class CrmServiceTest {
         verify(customerRepository, never()).save(any());
     }
 
+    // ── CRM-C005: cpf é o identificador oficial; email e contato são alternativos ───────────
+
+    @Test
+    void createCustomer_throwsWhenCpfAlreadyExists() {
+        when(customerRepository.findByCpf("12345678900"))
+                .thenReturn(Optional.of(customer(1L, null)));
+
+        assertThatThrownBy(() -> crmService.createCustomer("Maria Silva", null, null,
+                "12345678900", null))
+                .isInstanceOf(com.cernecommerce.core.domain.exception.crm.DuplicateCustomerCpfException.class);
+        verify(customerRepository, never()).save(any());
+    }
+
+    @Test
+    void createCustomer_skipsDuplicateChecksForFieldsNotInformed() {
+        // Cliente leve (só contato): não checa email nem cpf, porque nenhum dos dois foi informado.
+        Customer saved = Customer.of(1L, "Maria Silva", "11999998888", null, null, null, Instant.now(),
+                CustomerStage.NOVO_LEAD);
+        when(customerRepository.save(any())).thenReturn(saved);
+
+        crmService.createCustomer("Maria Silva", "11999998888", null, null, null);
+
+        verify(customerRepository, never()).findByEmail(any());
+        verify(customerRepository, never()).findByCpf(any());
+        verify(customerRepository).save(any());
+    }
+
+    @Test
+    void lookupCustomer_findsByCpfFirstWhenMultipleCriteriaGiven() {
+        Customer found = customer(1L, "maria@example.com");
+        when(customerRepository.findByCpf("12345678900")).thenReturn(Optional.of(found));
+
+        Customer result = crmService.lookupCustomer("12345678900", "maria@example.com", "11999998888");
+
+        assertThat(result.id()).isEqualTo(1L);
+        verify(customerRepository).findByCpf("12345678900");
+        verify(customerRepository, never()).findByEmail(any());
+        verify(customerRepository, never()).findByContato(any());
+    }
+
+    @Test
+    void lookupCustomer_fallsBackToEmailThenContato() {
+        when(customerRepository.findByEmail("maria@example.com"))
+                .thenReturn(Optional.of(customer(1L, "maria@example.com")));
+
+        crmService.lookupCustomer(null, "maria@example.com", "11999998888");
+
+        verify(customerRepository).findByEmail("maria@example.com");
+        verify(customerRepository, never()).findByContato(any());
+
+        when(customerRepository.findByContato("11999998888"))
+                .thenReturn(Optional.of(customer(2L, null)));
+
+        crmService.lookupCustomer(null, null, "11999998888");
+
+        verify(customerRepository).findByContato("11999998888");
+    }
+
+    @Test
+    void lookupCustomer_throwsCustomerNotFoundWhenNoMatch() {
+        when(customerRepository.findByCpf("12345678900")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> crmService.lookupCustomer("12345678900", null, null))
+                .isInstanceOf(CustomerNotFoundException.class);
+    }
+
+    @Test
+    void lookupCustomer_throwsIllegalArgumentWhenNoCriteriaGiven() {
+        assertThatThrownBy(() -> crmService.lookupCustomer(null, null, null))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> crmService.lookupCustomer(" ", " ", " "))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
     @Test
     void findCustomerById_returnsCustomer() {
         when(customerRepository.findById(1L)).thenReturn(Optional.of(customer(1L, "maria@example.com")));
