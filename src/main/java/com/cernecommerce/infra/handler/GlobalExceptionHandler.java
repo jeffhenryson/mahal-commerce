@@ -39,14 +39,19 @@ import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountAlreadyOpenException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountNotOpenException;
+import com.cernecommerce.core.domain.exception.estoque.StockReservationNotActiveException;
+import com.cernecommerce.core.domain.exception.estoque.StockReservationNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException;
 import com.cernecommerce.core.domain.exception.crm.CampaignAutomationNotFoundException;
 import com.cernecommerce.core.domain.exception.crm.CustomerNotFoundException;
+import com.cernecommerce.core.domain.exception.crm.DuplicateCustomerCpfException;
 import com.cernecommerce.core.domain.exception.crm.DuplicateCustomerEmailException;
 import com.cernecommerce.core.domain.exception.crm.DuplicateTagNameException;
 import com.cernecommerce.core.domain.exception.crm.TagNotFoundException;
 import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionAlreadyOpenException;
 import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionClosedException;
+import com.cernecommerce.core.domain.exception.pagamento.InsufficientPaymentException;
+import com.cernecommerce.core.domain.exception.pagamento.PaymentExceedsOrderTotalException;
 import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionNotFoundException;
 import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionNotOwnedException;
 import com.cernecommerce.core.domain.exception.pdv.NoOpenCashRegisterSessionException;
@@ -181,6 +186,19 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "INSUFFICIENT_STOCK", req);
     }
 
+    @ExceptionHandler(StockReservationNotFoundException.class)
+    public ResponseEntity<ApiError> handleStockReservationNotFound(StockReservationNotFoundException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.NOT_FOUND, ex.getMessage(), "RESERVATION_NOT_FOUND", req);
+    }
+
+    /** Reserva já resolvida (consumida, liberada ou expirada) não pode ser consumida/liberada de novo. */
+    @ExceptionHandler(StockReservationNotActiveException.class)
+    public ResponseEntity<ApiError> handleStockReservationNotActive(StockReservationNotActiveException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "RESERVATION_NOT_ACTIVE", req);
+    }
+
     @ExceptionHandler(SupplierNotFoundException.class)
     public ResponseEntity<ApiError> handleSupplierNotFound(SupplierNotFoundException ex, HttpServletRequest req) {
         return error(HttpStatus.NOT_FOUND, ex.getMessage(), "SUPPLIER_NOT_FOUND", req);
@@ -195,6 +213,11 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(DuplicateCustomerEmailException.class)
     public ResponseEntity<ApiError> handleDuplicateCustomerEmail(DuplicateCustomerEmailException ex, HttpServletRequest req) {
         return error(HttpStatus.CONFLICT, ex.getMessage(), "CUSTOMER_EMAIL_ALREADY_EXISTS", req);
+    }
+
+    @ExceptionHandler(DuplicateCustomerCpfException.class)
+    public ResponseEntity<ApiError> handleDuplicateCustomerCpf(DuplicateCustomerCpfException ex, HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "CUSTOMER_CPF_ALREADY_EXISTS", req);
     }
 
     @ExceptionHandler(CustomerNotFoundException.class)
@@ -517,6 +540,19 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(DiscountLimitExceededException.class)
     public ResponseEntity<ApiError> handleDiscountLimit(DiscountLimitExceededException ex, HttpServletRequest req) {
         return error(HttpStatus.CONFLICT, ex.getMessage(), "DISCOUNT_LIMIT_EXCEEDED", req);
+    }
+
+    /** PDV-F006: mesma família de INSUFFICIENT_STOCK — o request está bem formado, faltou dinheiro. */
+    @ExceptionHandler(InsufficientPaymentException.class)
+    public ResponseEntity<ApiError> handleInsufficientPayment(InsufficientPaymentException ex, HttpServletRequest req) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "INSUFFICIENT_PAYMENT", req);
+    }
+
+    /** PDV-F006: mesma família de DISCOUNT_LIMIT_EXCEEDED — conflita com uma regra de negócio, não é malformado. */
+    @ExceptionHandler(PaymentExceedsOrderTotalException.class)
+    public ResponseEntity<ApiError> handlePaymentExceedsOrderTotal(PaymentExceedsOrderTotalException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "PAYMENT_EXCEEDS_ORDER_TOTAL", req);
     }
 
     @ExceptionHandler(InvalidOrderStatusTransitionException.class)

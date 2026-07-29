@@ -1176,6 +1176,80 @@ não basta.
 
 ---
 
+### GET /estoque/reservations — Permissão: ESTOQUE_RESERVATION_READ
+
+```
+Query: sku (opcional), warehouseCode (opcional), status (opcional — ACTIVE/CONSUMED/RELEASED/EXPIRED),
+       page (default 0, >= 0), size (default 20, 1..100)
+// Response 200 → PageResult<StockReservationResponse> / 404 WAREHOUSE_NOT_FOUND (warehouseCode inexistente)
+```
+
+```json
+// PageResult<StockReservationResponse>
+{
+  "content": [
+    {
+      "id": 10,
+      "sku": "NARG-001",
+      "warehouseCode": "LOJA-01",
+      "quantity": 2.000,
+      "ownerReference": "CHECKOUT:abc",
+      "status": "ACTIVE",
+      "expiresAt": "2026-07-29T12:30:00Z",
+      "createdAt": "2026-07-29T12:00:00Z",
+      "resolvedAt": null,
+      "username": "cliente@exemplo.com"
+    }
+  ],
+  "page": 0, "size": 20, "totalElements": 1, "totalPages": 1
+}
+```
+
+Listagem de reservas de estoque (EST-F013/EST-F021). `sku`, `warehouseCode` e `status` são
+filtros opcionais e se combinam. **Somente leitura**: criar, consumir e liberar reserva é
+orquestração interna (checkout do marketplace na Fatia 9, e a liquidação de pedido online no PDV
+via `POST /pdv/sessions/{id}/orders/{orderId}/settle`), não uma operação disparada por um
+operador via HTTP — daí não haver `POST`/`{id}/release` neste controller.
+
+### GET /estoque/reservations/{id} — Permissão: ESTOQUE_RESERVATION_READ
+
+Consulta uma reserva por id. `404 RESERVATION_NOT_FOUND` se não existir.
+
+---
+
+### GET /estoque/integrity/reservation-mismatch — Permissão: ESTOQUE_STOCK_MANAGE
+
+```
+Query: page (default 0, >= 0), size (default 20, 1..100)
+// Response 200 → PageResult<ReservationIntegrityMismatchResponse>
+```
+
+```json
+{
+  "content": [
+    {
+      "sku": "NARG-001",
+      "warehouseCode": "LOJA-01",
+      "reservedQuantity": 5.000,
+      "activeReservationsTotal": 3.000,
+      "difference": 2.000
+    }
+  ],
+  "page": 0, "size": 20, "totalElements": 1, "totalPages": 1
+}
+```
+
+Diagnóstico de integridade (EST-C013): pares SKU/depósito cujo `stock_balance.reserved_quantity`
+diverge da soma das reservas `ACTIVE` no ledger `stock_reservation` para o mesmo par. Diferente do
+órfão de SKU, essa divergência não aparece em nenhuma tela — o saldo físico bate normalmente, só
+o disponível é que mente. O sintoma é **estoque travado invisível**: a venda recusa por reserva e
+nenhuma reserva ativa a explica (ou o inverso), mais difícil de diagnosticar que o overselling que
+a reserva existe para evitar. `difference` positivo é contador acima do ledger; negativo é ledger
+acima do contador. Somente leitura — a correção de cada linha é decisão humana, no mesmo espírito
+de `GET /estoque/integrity/orphan-skus`. Base íntegra devolve `content` vazio com `200`.
+
+---
+
 ## Compras — `/compras`
 
 ### GET /compras/suppliers — Permissão: COMPRAS_READ
@@ -1438,13 +1512,20 @@ uma devolução, e devolução é entrada de estoque.
 ```json
 {
   "nome": "Maria Silva",           // obrigatório, máx. 255 chars
-  "contato": "11999998888",         // obrigatório, máx. 30 chars
-  "email": "maria@example.com",     // obrigatório, formato de email, máx. 255 chars, único
-  "cpf": "12345678900",             // opcional, exatamente 11 chars
+  "contato": "11999998888",         // opcional (CRM-C005), máx. 30 chars
+  "email": "maria@example.com",     // opcional (CRM-C005), formato de email quando informado, máx. 255 chars, único
+  "cpf": "12345678900",             // opcional, identificador OFICIAL do cadastro, exatamente 11 chars, único
   "origem": "loja-fisica"           // opcional, máx. 100 chars
 }
-// Response 201 + Location → CustomerResponse / 409 CUSTOMER_EMAIL_ALREADY_EXISTS / 400 VALIDATION_ERROR
+// Response 201 + Location → CustomerResponse
+// 409 CUSTOMER_EMAIL_ALREADY_EXISTS / 409 CUSTOMER_CPF_ALREADY_EXISTS
+// 400 VALIDATION_ERROR (nome ausente, ou email/cpf com formato inválido)
+// 400 BAD_REQUEST (nenhum dos três identificadores — cpf, email, contato — foi informado)
 ```
+
+> **CRM-C005:** pelo menos um entre `cpf`, `email` e `contato` é obrigatório — não há mais um
+> campo único obrigatório. Cliente sem `cpf` ("cliente leve", achado só por email/contato) é
+> válido e pesquisável, mas não é elegível a cashback quando o programa existir (Fatia 4).
 
 ```json
 // CustomerResponse — estagio e tags são valores reais (Kanban de atendimento e crm/tags-segmentos).
@@ -1475,6 +1556,23 @@ uma devolução, e devolução é entrada de estoque.
 ```
 // Response 200 → CustomerResponse (tags reais do cliente) / 404 CUSTOMER_NOT_FOUND
 ```
+
+---
+
+### GET /crm/customers/lookup — Permissão: CRM_CUSTOMER_LOOKUP
+
+```
+Query: cpf (opcional), email (opcional), contato (opcional) — informe pelo menos um
+// Response 200 → CustomerResponse
+// 404 CUSTOMER_NOT_FOUND / 400 BAD_REQUEST (nenhum critério informado)
+```
+
+Busca pontual de balcão (CRM-F002) — o "CPF na nota?": o operador tenta achar o cliente antes de
+cadastrar um novo. Permissão própria, separada de `CRM_CUSTOMER_READ`, porque achar **um** cliente
+não é a mesma coisa que listar/exportar a base inteira. Quando mais de um critério vem preenchido,
+a prioridade é `cpf` (identificador oficial) → `email` → `contato`. Não achando, o fluxo normal é
+seguir para `POST /crm/customers` (cadastro rápido) — venda anônima de balcão nunca passa por
+aqui, ela simplesmente não informa `customerId`.
 
 ---
 
@@ -2253,11 +2351,13 @@ interface TotpConfirmResponse {
 | `ESTOQUE_PRODUCT_MANAGE` | Criar/gerenciar produtos do estoque |
 | `ESTOQUE_WAREHOUSE_READ` | Listar depósitos e consultar saldo |
 | `ESTOQUE_WAREHOUSE_MANAGE` | Criar/gerenciar depósitos |
-| `ESTOQUE_STOCK_MANAGE` | `POST`/`GET /estoque/movements`, `PUT /estoque/products/{sku}/reorder-point`, `GET /estoque/integrity/orphan-skus` e todo o `/estoque/stock-counts` (balanço de inventário) |
+| `ESTOQUE_STOCK_MANAGE` | `POST`/`GET /estoque/movements`, `PUT /estoque/products/{sku}/reorder-point`, `GET /estoque/integrity/orphan-skus`, `GET /estoque/integrity/reservation-mismatch` e todo o `/estoque/stock-counts` (balanço de inventário) |
+| `ESTOQUE_RESERVATION_READ` | `GET /estoque/reservations` e `GET /estoque/reservations/{id}` |
 | `ESTOQUE_PRODUCT_MANAGE` | `POST /estoque/products`, `PATCH /estoque/products/{sku}` e `.../active` |
 | `ESTOQUE_WAREHOUSE_MANAGE` | `POST /estoque/warehouses`, `PATCH /estoque/warehouses/{code}` e `.../active` |
 | `CRM_CUSTOMER_READ` | Leituras de `/crm/**` |
 | `CRM_CUSTOMER_MANAGE` | Escritas de `/crm/**` |
+| `CRM_CUSTOMER_LOOKUP` | `GET /crm/customers/lookup` — busca pontual por cpf/email/contato, separada de `CRM_CUSTOMER_READ` |
 | `COMPRAS_READ` | `GET /compras/suppliers` |
 | `COMPRAS_RECEIPT_MANAGE` | `POST /compras/goods-receipts` — recebimento de mercadoria |
 | `PDV_READ` | `GET /pdv/sessions` |

@@ -513,6 +513,53 @@ de um nível é a escolha que dá para expandir depois sem migrar dado.
 
 ---
 
+## 2.11 Funcionalidades e regras para já conectar o PDV ao aplicativo
+
+Se o objetivo é colocar o fluxo em uso sem esperar o marketplace completo, o primeiro release precisa entregar um núcleo mínimo, mas com regras duras. O erro mais comum não é "falta tela"; é permitir que balcão e aplicativo fiquem com lógicas diferentes para o mesmo pedido.
+
+### 2.11.1 Funcionalidades mínimas para uso imediato
+
+- Autenticação única: operador usa login do backoffice e cliente usa login do aplicativo; os dois compartilham o mesmo backend.
+- Catálogo único: produto, SKU, preço, imagem e estoque disponível vêm da mesma fonte para o PDV e para o aplicativo.
+- Venda de balcão: buscar produto por SKU ou código de barras, confirmar quantidade, aplicar desconto autorizado, pagar e emitir comprovante.
+- Checkout no aplicativo: carrinho, seleção de endereço ou retirada, pagamento, confirmação e acompanhamento do pedido.
+- Visibilidade de estado: o aplicativo mostra "aguardando pagamento", "pago", "pronto para retirada" e "cancelado"; o PDV mostra "concluído" e "cancelado" sem precisar de outra base.
+- Histórico: operador e cliente veem o mesmo pedido com número, itens, status e valor final.
+
+### 2.11.2 Regras que precisam existir desde o primeiro uso
+
+- Um só estoque: PDV e aplicativo consomem o mesmo pool; a reserva protege a venda paga do aplicativo enquanto o balcão não vende a última unidade.
+- Preço e custo fixados no servidor: o request não envia `unitPrice`; o preço vem do catálogo e o custo vira snapshot do item.
+- Desconto é um campo separado: o PDV pode conceder desconto com permissão específica; o aplicativo não "escreve preço menor" no payload.
+- Cliente é opcional no PDV e obrigatório no aplicativo: venda anônima pode existir no balcão, mas pedido online sempre tem cliente autenticado.
+- Caixa e sessão: o PDV só vende se a sessão do operador estiver aberta e pertencer ao operador; o aplicativo nunca usa sessão de caixa.
+- Pagamento: o PDV pode aceitar dinheiro, débito, crédito e PIX; o aplicativo usa principalmente PIX ou cartão. O status de pagamento é único para os dois canais.
+- Imutabilidade pós-conclusão: após pago ou concluído, o pedido não muda de valores nem de itens, apenas de status operacional.
+- Idempotência: reenvio de webhook ou reprocessamento de venda não duplica pagamento, estoque nem cashback.
+- Auditoria mínima: toda alteração de estoque, pagamento, sessão de caixa e cancelamento precisa gerar evento auditable.
+
+### 2.11.3 Regras de integração entre os dois canais
+
+- O PDV nunca inventa estoque: consulta o mesmo endpoint de disponibilidade usado pelo aplicativo.
+- O aplicativo nunca assume que o item está disponível só porque ele apareceu no catálogo: a reserva define o "bloqueado" durante o fluxo de checkout.
+- O status do pedido é mapeado em um único enum e não em dois modelos separados.
+- O mesmo número do pedido é usado na interface do operador e do cliente; o aplicativo não cria um "pedido interno" separado do PDV.
+
+### 2.11.4 Escopo de MVP recomendado
+
+Para não atrasar a entrega, o MVP pode começar com:
+
+1. cadastro de produtos, preço e estoque;
+2. abertura e fechamento de caixa;
+3. venda pelo PDV com baixa imediata;
+4. checkout do aplicativo com reserva;
+5. pagamento via PIX e confirmação do pedido;
+6. histórico de pedidos para cliente e operador.
+
+Sem isso, o marketplace vira uma segunda loja sem conexão real com a operação.
+
+---
+
 ## 3. Modelo de domínio proposto
 
 Records imutáveis, compact constructor validando invariantes, par `create`/`of`, mutação por cópia

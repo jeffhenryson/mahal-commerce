@@ -73,6 +73,7 @@ import com.cernecommerce.core.ports.out.estoque.StockIntegrityRepository;
 import com.cernecommerce.core.ports.out.estoque.StockMovementRepository;
 import com.cernecommerce.core.ports.out.estoque.StockReservationRepository;
 import com.cernecommerce.core.ports.out.estoque.WarehouseRepository;
+import com.cernecommerce.core.ports.out.pagamento.OrderPaymentRepository;
 import com.cernecommerce.core.ports.out.pdv.CashMovementRepository;
 import com.cernecommerce.core.ports.out.pdv.CashRegisterRepository;
 import com.cernecommerce.core.ports.out.pedido.OrderRepository;
@@ -208,13 +209,13 @@ class CoreBeanConfig {
     @Bean
     PdvUseCase pdvUseCase(CashRegisterRepository cashRegisterRepository,
             CashMovementRepository cashMovementRepository, OrderRepository orderRepository,
-            EstoqueUseCase estoqueUseCase,
+            OrderPaymentRepository orderPaymentRepository, EstoqueUseCase estoqueUseCase,
             // Teto de desconto por pedido (PDV-F004). Acima dele, 409 em vez de um segundo nível de
             // permissão — dois níveis só criariam a tentação de distribuir o maior. Migra para
             // system_config junto com o painel de configuração.
             @Value("${pdv.sale.max-discount-percent:10}") BigDecimal maxDiscountPercent) {
         return new PdvService(cashRegisterRepository, cashMovementRepository, orderRepository,
-                estoqueUseCase, maxDiscountPercent);
+                orderPaymentRepository, estoqueUseCase, maxDiscountPercent);
     }
 
     @Bean
