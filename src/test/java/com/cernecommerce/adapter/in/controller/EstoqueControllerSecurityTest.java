@@ -482,6 +482,98 @@ public class EstoqueControllerSecurityTest {
     }
 
     // ------------------------------------------------------------------------------------
+    // EST-F013/EST-F021 — reserva de estoque (listagem) e EST-C013 (integridade).
+    // ------------------------------------------------------------------------------------
+
+    @Test
+    void list_reservations_without_auth_returns_401() throws Exception {
+        mockMvc.perform(get("/estoque/reservations"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void list_reservations_with_user_role_only_returns_403() throws Exception {
+        mockMvc.perform(get("/estoque/reservations")
+                .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isForbidden());
+    }
+
+    /** Consultar disponível reservado não é a mesma authority de gerenciar estoque físico. */
+    @Test
+    void list_reservations_with_estoque_stock_manage_only_returns_403() throws Exception {
+        mockMvc.perform(get("/estoque/reservations")
+                .with(user("bob").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_STOCK_MANAGE"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void list_reservations_with_estoque_reservation_read_returns_200() throws Exception {
+        mockMvc.perform(get("/estoque/reservations")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_RESERVATION_READ"))))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void get_reservation_without_auth_returns_401() throws Exception {
+        mockMvc.perform(get("/estoque/reservations/1"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void get_reservation_with_user_role_only_returns_403() throws Exception {
+        mockMvc.perform(get("/estoque/reservations/1")
+                .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isForbidden());
+    }
+
+    /** Sem reserva cadastrada com esse id, a resposta é 404 — o que importa é a authority não barrar antes. */
+    @Test
+    void get_reservation_with_estoque_reservation_read_returns_404_whenNotFound() throws Exception {
+        mockMvc.perform(get("/estoque/reservations/999999")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_RESERVATION_READ"))))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.errorCode").value("RESERVATION_NOT_FOUND"));
+    }
+
+    @Test
+    void list_reservation_mismatches_without_auth_returns_401() throws Exception {
+        mockMvc.perform(get("/estoque/integrity/reservation-mismatch"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void list_reservation_mismatches_with_user_role_only_returns_403() throws Exception {
+        mockMvc.perform(get("/estoque/integrity/reservation-mismatch")
+                .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isForbidden());
+    }
+
+    /** Mesma régua do EST-C011: diagnóstico de integridade exige STOCK_MANAGE, não RESERVATION_READ. */
+    @Test
+    void list_reservation_mismatches_with_reservation_read_only_returns_403() throws Exception {
+        mockMvc.perform(get("/estoque/integrity/reservation-mismatch")
+                .with(user("bob").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_RESERVATION_READ"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void list_reservation_mismatches_with_estoque_stock_manage_returns_200() throws Exception {
+        mockMvc.perform(get("/estoque/integrity/reservation-mismatch")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_STOCK_MANAGE"))))
+                .andExpect(status().isOk());
+    }
+
+    // ------------------------------------------------------------------------------------
     // EST-F019 — precificação exige ESTOQUE_PRODUCT_PRICE_MANAGE além de PRODUCT_MANAGE.
     // A separação existe para que quem mantém o cadastro (nome, categoria, grade) não ganhe
     // de brinde o poder de mexer em preço, que é decisão comercial e não operacional.

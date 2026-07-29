@@ -1,6 +1,8 @@
 package com.cernecommerce.adapter.in.converter;
 
+import com.cernecommerce.adapter.in.dtos.response.ReservationIntegrityMismatchResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.StockReservationResponseDTO;
+import com.cernecommerce.core.domain.model.estoque.ReservationIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.ReservationStatus;
 import com.cernecommerce.core.domain.model.estoque.StockReservation;
 
@@ -34,6 +36,16 @@ public class StockReservationDTOConverter {
         dto.setCreatedAt(reservation.createdAt());
         dto.setResolvedAt(reservation.resolvedAt());
         dto.setUsername(reservation.username());
+        return dto;
+    }
+
+    public ReservationIntegrityMismatchResponseDTO toResponse(ReservationIntegrityMismatch mismatch) {
+        ReservationIntegrityMismatchResponseDTO dto = new ReservationIntegrityMismatchResponseDTO();
+        dto.setSku(mismatch.sku());
+        dto.setWarehouseCode(mismatch.warehouseCode());
+        dto.setReservedQuantity(mismatch.reservedQuantity());
+        dto.setActiveReservationsTotal(mismatch.activeReservationsTotal());
+        dto.setDifference(mismatch.difference());
         return dto;
     }
 }

@@ -2,16 +2,16 @@ package com.cernecommerce.core.ports.out.estoque;
 
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.OrphanSku;
+import com.cernecommerce.core.domain.model.estoque.ReservationIntegrityMismatch;
 
 /**
- * Port de saída para o diagnóstico de integridade referencial do estoque (EST-C011).
+ * Port de saída para os diagnósticos de integridade referencial do estoque (EST-C011, EST-C013).
  *
- * <p>É um port separado dos demais de propósito: a consulta atravessa as cinco tabelas do
- * módulo ({@code stock_balance}, {@code stock_movement}, {@code stock_reorder_point},
- * {@code product}, {@code product_variant}) e não pertence ao agregado de nenhuma delas.</p>
+ * <p>É um port separado dos demais de propósito: as consultas atravessam tabelas de mais de um
+ * agregado e não pertencem a nenhum deles isoladamente.</p>
  *
- * <p><b>Somente leitura.</b> A limpeza dos órfãos é decisão humana — cadastrar o produto que
- * falta ou expurgar a linha —, e por isso não existe aqui nenhuma operação de escrita.</p>
+ * <p><b>Somente leitura.</b> A correção de cada divergência é decisão humana, e por isso não
+ * existe aqui nenhuma operação de escrita.</p>
  */
 public interface StockIntegrityRepository {
 
@@ -21,4 +21,11 @@ public interface StockIntegrityRepository {
      * {@code sku, warehouseCode} — chave única, para a paginação ser estável.
      */
     PageResult<OrphanSku> findOrphanSkus(int page, int size);
+
+    /**
+     * Pares SKU/depósito cujo {@code stock_balance.reserved_quantity} diverge da soma das
+     * reservas {@code ACTIVE} em {@code stock_reservation} (EST-C013). Ordenado por
+     * {@code sku, warehouseCode} — chave única, para a paginação ser estável.
+     */
+    PageResult<ReservationIntegrityMismatch> findReservationMismatches(int page, int size);
 }

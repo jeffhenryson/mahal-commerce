@@ -45,35 +45,34 @@ a base real e decidir, SKU a SKU, entre cadastrar o produto que faltava e expurg
 linha. Se eu for solicitado a "terminar o C011", o que cabe é apresentar a lista — não
 apagar nada.
 
-TRABALHO EM ANDAMENTO — termine antes de abrir item novo
-V63 (product pricing) e V64 (stock reservation) estão no working tree, NÃO commitados.
-A reserva já tem: StockReservation, ReservationStatus, StockBalance com reservedQuantity /
-availableQuantity() / reserve() / consumeReservation() / releaseReservation(), as 7
-operações em EstoqueUseCase e EstoqueService (inclusive expireReservations), a entity, o
-JpaRepository, o RepositoryImpl, os DTOs, o converter, as 3 exceptions e o TTL configurável
-(estoque.reservation.default-ttl, hoje PT30M).
-FALTA: endpoints em EstoqueController, o scheduler de expiração chamando expireReservations
-(o método existe; o job com @SchedulerLock não — use os *CleanupService existentes como
-molde), a suíte de testes inteira (só PricingTest foi escrito) e a documentação/Postman.
-Deixar isso pela metade é o pior estado possível: código que ninguém alcança e migration
-que ninguém validou.
+TRABALHO CONCLUÍDO EM 2026-07-29 — EST-F013/EST-F021/EST-C013
+A reserva estava com o núcleo pronto e sem superfície: StockReservation, ReservationStatus,
+StockBalance com reservedQuantity/availableQuantity()/reserve()/consumeReservation()/
+releaseReservation() (inclusive apply(SAIDA) já validando contra o DISPONÍVEL), as 7
+operações em EstoqueUseCase/EstoqueService (inclusive expireReservations), entity, JpaRepository,
+RepositoryImpl, DTOs, converter, exceptions e TTL configurável — tudo sem endpoint, sem
+scheduler e sem teste. Fechado agora: GET /estoque/reservations + GET /estoque/reservations/{id}
+(ESTOQUE_RESERVATION_READ, só leitura — criar/consumir/liberar é orquestração interna, não
+operação de balcão), StockReservationExpiryCleanupService (@Scheduled a cada 5 min +
+@SchedulerLock), GET /estoque/integrity/reservation-mismatch (EST-C013, ESTOQUE_STOCK_MANAGE,
+molde de EST-C011), handler de StockReservationNotFoundException/NotActiveException, testes de
+domínio/controller/security/IT novos, e docs (README, feature-registry, api-reference).
+GAP QUE FICOU: a suíte de teste do núcleo em si (StockReservation, os 8 métodos de
+EstoqueService, StockBalance.reserve/consumeReservation/releaseReservation) continua sem
+cobertura própria — só a query de integridade e a superfície nova foram testadas. Cabe como
+item isolado antes de EST-F008/F016, que também mexem em StockBalance.
 
-ORDEM SUGERIDA (revisada em 2026-07-28 pelo plano de PDV/marketplace)
- 1. EST-F013 + EST-F021 + EST-C013  terminar a reserva: controller, scheduler de expiração,
-              testes, endpoint de integridade (reserved_quantity × soma das reservas ACTIVE)
-              e docs. Inclui a mudança de apply(SAIDA) para validar contra o DISPONÍVEL —
-              método maduro no caminho crítico de PDV, compras e balanço, então revalide a
-              suíte inteira. reserved = 0 preserva o comportamento atual por construção.
- 2. EST-F014  estorno/devolução de venda (Fatia 5 do plano). Sobe de prioridade: reserva sem
+ORDEM SUGERIDA (revisada em 2026-07-28 pelo plano de PDV/marketplace; F013/F021/C013 fechados em 07-29)
+ 1. EST-F014  estorno/devolução de venda (Fatia 5 do plano). Sobe de prioridade: reserva sem
               cancelamento é armadilha, e a devolução é pré-requisito do cashback estornado.
- 3. EST-F015 + EST-F022  kit virtual de um nível + custo derivado no Pricing (Fatia 6).
- 4. EST-F008  lote e validade. Muda a granularidade do saldo — trate como mudança
+ 2. EST-F015 + EST-F022  kit virtual de um nível + custo derivado no Pricing (Fatia 6).
+ 3. EST-F008  lote e validade. Muda a granularidade do saldo — trate como mudança
               de modelagem, não como campo novo.
- 5. EST-F007  custo médio ponderado. Depois de F008 (o custo entra por lote) e DEPOIS DO
+ 4. EST-F007  custo médio ponderado. Depois de F008 (o custo entra por lote) e DEPOIS DO
               CASHBACK (Fatia 4): o costPrice manual de V63 já dá a ordem de grandeza, que
               é o que decide se a taxa do carvão é 2% ou 8%.
- 6. EST-F016  unidade de medida e conversão — mexe na semântica de quantity em todo lugar.
- 7. EST-F005  entrada por XML de NF-e (NfeXmlImportPort). Por último entre as features
+ 5. EST-F016  unidade de medida e conversão — mexe na semântica de quantity em todo lugar.
+ 6. EST-F005  entrada por XML de NF-e (NfeXmlImportPort). Por último entre as features
               de entrada, porque o XML traz lote e custo — depende de F008 e F007.
 
 DESPRIORIZADOS POR DECISÃO (não são esquecimento — §2.2 e §8.5 do plano)
@@ -120,7 +119,7 @@ ARMADILHAS DESTE PROJETO (já me custaram build quebrado)
 - Testes de contexto real que escrevem estoque precisam cadastrar o SKU antes —
   desde EST-C002 movimentar SKU inexistente é 404.
 
-Comece lendo o README do módulo e me apresentando o plano para terminar a reserva (EST-F013/F021/C013).
+Comece lendo o README do módulo e me apresentando o plano para EST-F014 (estorno/devolução).
 ```
 
 ---

@@ -70,4 +70,52 @@ public interface StockIntegrityJpaRepository extends Repository<StockMovementEnt
             """,
             nativeQuery = true)
     Page<Object[]> findOrphanSkus(Pageable pageable);
+
+    /**
+     * Pares (sku, depósito) em que {@code stock_balance.reserved_quantity} diverge da soma das
+     * reservas {@code ACTIVE} para o mesmo par em {@code stock_reservation} (EST-C013).
+     *
+     * <p>O conjunto de candidatos é a união de quem tem reservado > 0 no contador com quem tem
+     * reserva ativa no ledger — mesma técnica de {@link #findOrphanSkus}, porque a divergência
+     * pode existir de qualquer um dos dois lados: contador sem ledger que o explique, ou ledger
+     * sem contador que o reflita. O predicado final refiltra os falsos candidatos (par presente
+     * em só um dos dois conjuntos, mas cujos totais já batem — não deveria acontecer, mas o
+     * candidato existe só por causa da união).</p>
+     *
+     * <p>Colunas por posição — ver {@code StockIntegrityRepositoryImpl.toMismatch}: {@code 0}
+     * sku, {@code 1} warehouse_code, {@code 2} reserved_quantity, {@code 3} soma das reservas
+     * {@code ACTIVE}.</p>
+     */
+    @Query(value = """
+            SELECT o.sku,
+                   w.code,
+                   COALESCE(b.reserved_quantity, 0),
+                   COALESCE(r.active_total, 0)
+            FROM (SELECT sku, warehouse_id FROM stock_balance WHERE reserved_quantity > 0
+                  UNION
+                  SELECT sku, warehouse_id FROM stock_reservation WHERE status = 'ACTIVE') o
+            JOIN warehouse w ON w.id = o.warehouse_id
+            LEFT JOIN stock_balance b ON b.sku = o.sku AND b.warehouse_id = o.warehouse_id
+            LEFT JOIN (SELECT sku, warehouse_id, SUM(quantity) AS active_total
+                       FROM stock_reservation WHERE status = 'ACTIVE'
+                       GROUP BY sku, warehouse_id) r
+                   ON r.sku = o.sku AND r.warehouse_id = o.warehouse_id
+            WHERE COALESCE(b.reserved_quantity, 0) <> COALESCE(r.active_total, 0)
+            ORDER BY o.sku, w.code
+            """,
+            countQuery = """
+            SELECT COUNT(*)
+            FROM (SELECT sku, warehouse_id FROM stock_balance WHERE reserved_quantity > 0
+                  UNION
+                  SELECT sku, warehouse_id FROM stock_reservation WHERE status = 'ACTIVE') o
+            JOIN warehouse w ON w.id = o.warehouse_id
+            LEFT JOIN stock_balance b ON b.sku = o.sku AND b.warehouse_id = o.warehouse_id
+            LEFT JOIN (SELECT sku, warehouse_id, SUM(quantity) AS active_total
+                       FROM stock_reservation WHERE status = 'ACTIVE'
+                       GROUP BY sku, warehouse_id) r
+                   ON r.sku = o.sku AND r.warehouse_id = o.warehouse_id
+            WHERE COALESCE(b.reserved_quantity, 0) <> COALESCE(r.active_total, 0)
+            """,
+            nativeQuery = true)
+    Page<Object[]> findReservationMismatches(Pageable pageable);
 }

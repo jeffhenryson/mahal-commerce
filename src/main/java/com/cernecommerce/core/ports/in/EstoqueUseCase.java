@@ -6,6 +6,7 @@ import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
+import com.cernecommerce.core.domain.model.estoque.ReservationIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.ReservationStatus;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
 import com.cernecommerce.core.domain.model.estoque.StockCount;
@@ -175,6 +176,19 @@ public interface EstoqueUseCase {
      * <p>Ordenado por {@code sku, warehouseCode}. Página vazia quando a base está íntegra.</p>
      */
     PageResult<OrphanSku> listOrphanSkus(int page, int size);
+
+    /**
+     * Diagnóstico de integridade da reserva (EST-C013): pares SKU/depósito cujo
+     * {@code stock_balance.reserved_quantity} diverge da soma das reservas {@code ACTIVE} no
+     * ledger {@code stock_reservation}.
+     *
+     * <p>Diferente do órfão de SKU, essa divergência é <b>estoque travado invisível</b>: a venda
+     * recusa por reserva e não há reserva ativa que a explique (ou o inverso). Somente leitura —
+     * a correção é decisão humana.</p>
+     *
+     * <p>Ordenado por {@code sku, warehouseCode}. Página vazia quando a base está íntegra.</p>
+     */
+    PageResult<ReservationIntegrityMismatch> listReservationMismatches(int page, int size);
 
     // ---------------------------------------------------------------------------------------
     // Balanço de inventário (EST-F006)

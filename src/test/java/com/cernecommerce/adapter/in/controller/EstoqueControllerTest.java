@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.cernecommerce.adapter.in.converter.ProductDTOConverter;
 import com.cernecommerce.adapter.in.converter.StockCountDTOConverter;
 import com.cernecommerce.adapter.in.converter.StockMovementDTOConverter;
+import com.cernecommerce.adapter.in.converter.StockReservationDTOConverter;
 import com.cernecommerce.adapter.in.converter.WarehouseDTOConverter;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateSkuException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateWarehouseCodeException;
@@ -18,6 +19,7 @@ import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountAlreadyOpenException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountNotOpenException;
+import com.cernecommerce.core.domain.exception.estoque.StockReservationNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
@@ -26,11 +28,14 @@ import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
+import com.cernecommerce.core.domain.model.estoque.ReservationIntegrityMismatch;
+import com.cernecommerce.core.domain.model.estoque.ReservationStatus;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
 import com.cernecommerce.core.domain.model.estoque.StockCount;
 import com.cernecommerce.core.domain.model.estoque.StockCountItem;
 import com.cernecommerce.core.domain.model.estoque.StockCountStatus;
 import com.cernecommerce.core.domain.model.estoque.StockMovement;
+import com.cernecommerce.core.domain.model.estoque.StockReservation;
 import com.cernecommerce.core.domain.model.estoque.Warehouse;
 import com.cernecommerce.core.domain.model.estoque.WarehouseType;
 import com.cernecommerce.core.ports.in.EstoqueUseCase;
@@ -64,7 +69,7 @@ public class EstoqueControllerTest {
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new EstoqueController(estoqueUseCase, new ProductDTOConverter(),
                         new WarehouseDTOConverter(), new StockMovementDTOConverter(),
-                        new StockCountDTOConverter(), publisher))
+                        new StockCountDTOConverter(), new StockReservationDTOConverter(), publisher))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }
@@ -524,6 +529,98 @@ public class EstoqueControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content").isEmpty())
                 .andExpect(jsonPath("$.totalElements").value(0));
+    }
+
+    // ------------------------------------------------------------------------------------
+    // EST-F013/EST-F021 — reserva de estoque (listagem) e EST-C013 (integridade)
+    // ------------------------------------------------------------------------------------
+
+    @Test
+    void listReservations_returns_200_withWarehouseCodeResolved() throws Exception {
+        Warehouse loja = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        StockReservation reservation = StockReservation.of(10L, "NARG-001", 1L, new BigDecimal("2.000"),
+                "CHECKOUT:abc", ReservationStatus.ACTIVE, Instant.parse("2026-07-29T12:30:00Z"),
+                Instant.parse("2026-07-29T12:00:00Z"), null, "cliente@exemplo.com");
+        when(estoqueUseCase.listReservations(null, null, null, 0, 20))
+                .thenReturn(new PageResult<>(List.of(reservation), 0, 20, 1L, 1));
+        when(estoqueUseCase.getWarehouse(1L)).thenReturn(loja);
+
+        mockMvc.perform(get("/estoque/reservations").principal(AUTH))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].id").value(10))
+                .andExpect(jsonPath("$.content[0].sku").value("NARG-001"))
+                .andExpect(jsonPath("$.content[0].warehouseCode").value("LOJA-01"))
+                .andExpect(jsonPath("$.content[0].status").value("ACTIVE"))
+                .andExpect(jsonPath("$.content[0].ownerReference").value("CHECKOUT:abc"))
+                .andExpect(jsonPath("$.totalElements").value(1));
+    }
+
+    @Test
+    void listReservations_passesFiltersThrough() throws Exception {
+        when(estoqueUseCase.listReservations("NARG-001", "LOJA-01", ReservationStatus.ACTIVE, 0, 20))
+                .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0));
+
+        mockMvc.perform(get("/estoque/reservations")
+                        .principal(AUTH)
+                        .param("sku", "NARG-001")
+                        .param("warehouseCode", "LOJA-01")
+                        .param("status", "ACTIVE"))
+                .andExpect(status().isOk());
+
+        verify(estoqueUseCase).listReservations("NARG-001", "LOJA-01", ReservationStatus.ACTIVE, 0, 20);
+    }
+
+    @Test
+    void getReservation_returns_200() throws Exception {
+        Warehouse loja = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        StockReservation reservation = StockReservation.of(10L, "NARG-001", 1L, new BigDecimal("2.000"),
+                "CHECKOUT:abc", ReservationStatus.ACTIVE, Instant.parse("2026-07-29T12:30:00Z"),
+                Instant.parse("2026-07-29T12:00:00Z"), null, "cliente@exemplo.com");
+        when(estoqueUseCase.getStockReservation(10L)).thenReturn(reservation);
+        when(estoqueUseCase.getWarehouse(1L)).thenReturn(loja);
+
+        mockMvc.perform(get("/estoque/reservations/10").principal(AUTH))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(10))
+                .andExpect(jsonPath("$.warehouseCode").value("LOJA-01"));
+    }
+
+    @Test
+    void getReservation_returns_404_whenNotFound() throws Exception {
+        when(estoqueUseCase.getStockReservation(999L))
+                .thenThrow(new StockReservationNotFoundException(999L));
+
+        mockMvc.perform(get("/estoque/reservations/999").principal(AUTH))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.errorCode").value("RESERVATION_NOT_FOUND"));
+    }
+
+    @Test
+    void listReservationMismatches_returns_200_withDiagnosticRows() throws Exception {
+        ReservationIntegrityMismatch mismatch = ReservationIntegrityMismatch.of("NARG-001", "LOJA-01",
+                new BigDecimal("5.000"), new BigDecimal("3.000"));
+        when(estoqueUseCase.listReservationMismatches(0, 20))
+                .thenReturn(new PageResult<>(List.of(mismatch), 0, 20, 1L, 1));
+
+        mockMvc.perform(get("/estoque/integrity/reservation-mismatch").principal(AUTH))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].sku").value("NARG-001"))
+                .andExpect(jsonPath("$.content[0].warehouseCode").value("LOJA-01"))
+                .andExpect(jsonPath("$.content[0].reservedQuantity").value(5.0))
+                .andExpect(jsonPath("$.content[0].activeReservationsTotal").value(3.0))
+                .andExpect(jsonPath("$.content[0].difference").value(2.0))
+                .andExpect(jsonPath("$.totalElements").value(1));
+    }
+
+    /** Base íntegra é 200 com página vazia — não é 404, mesma convenção de listOrphanSkus. */
+    @Test
+    void listReservationMismatches_returns_200_withEmptyPageWhenIntegrityIsFine() throws Exception {
+        when(estoqueUseCase.listReservationMismatches(0, 20))
+                .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0));
+
+        mockMvc.perform(get("/estoque/integrity/reservation-mismatch").principal(AUTH))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isEmpty());
     }
 
     // ------------------------------------------------------------------------------------

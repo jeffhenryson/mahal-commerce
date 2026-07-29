@@ -2,6 +2,7 @@ package com.cernecommerce.adapter.out.persistence.repository;
 
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.OrphanSku;
+import com.cernecommerce.core.domain.model.estoque.ReservationIntegrityMismatch;
 import com.cernecommerce.core.ports.out.estoque.StockIntegrityRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -30,6 +31,22 @@ public class StockIntegrityRepositoryImpl implements StockIntegrityRepository {
         Page<Object[]> result = stockIntegrityJpaRepository.findOrphanSkus(PageRequest.of(page, size));
         return new PageResult<>(result.getContent().stream().map(this::toDomain).toList(),
                 page, size, result.getTotalElements(), result.getTotalPages());
+    }
+
+    @Override
+    public PageResult<ReservationIntegrityMismatch> findReservationMismatches(int page, int size) {
+        Page<Object[]> result = stockIntegrityJpaRepository.findReservationMismatches(PageRequest.of(page, size));
+        return new PageResult<>(result.getContent().stream().map(this::toMismatch).toList(),
+                page, size, result.getTotalElements(), result.getTotalPages());
+    }
+
+    /** Colunas por posição, na ordem declarada na query nativa. */
+    private ReservationIntegrityMismatch toMismatch(Object[] row) {
+        return ReservationIntegrityMismatch.of(
+                (String) row[0],
+                (String) row[1],
+                toBigDecimal(row[2]),
+                toBigDecimal(row[3]));
     }
 
     /** Colunas por posição, na ordem declarada na query nativa. */

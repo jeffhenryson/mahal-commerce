@@ -3,6 +3,7 @@ package com.cernecommerce.adapter.in.controller;
 import com.cernecommerce.adapter.in.converter.ProductDTOConverter;
 import com.cernecommerce.adapter.in.converter.StockCountDTOConverter;
 import com.cernecommerce.adapter.in.converter.StockMovementDTOConverter;
+import com.cernecommerce.adapter.in.converter.StockReservationDTOConverter;
 import com.cernecommerce.adapter.in.converter.WarehouseDTOConverter;
 import com.cernecommerce.adapter.in.dtos.request.ActiveRequest;
 import com.cernecommerce.adapter.in.dtos.request.ProductPatchRequest;
@@ -16,9 +17,11 @@ import com.cernecommerce.adapter.in.dtos.request.WarehouseRequest;
 import com.cernecommerce.adapter.in.dtos.response.OrphanSkuResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.PricingResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.ProductResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.ReservationIntegrityMismatchResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.StockBalanceResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.StockCountResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.StockMovementResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.StockReservationResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.WarehouseResponseDTO;
 import com.cernecommerce.core.domain.event.AuditEvent;
 import com.cernecommerce.core.domain.event.AuditEvent.EventType;
@@ -26,10 +29,12 @@ import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
+import com.cernecommerce.core.domain.model.estoque.ReservationIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
 import com.cernecommerce.core.domain.model.estoque.StockCount;
 import com.cernecommerce.core.domain.model.estoque.StockCountItem;
 import com.cernecommerce.core.domain.model.estoque.StockMovement;
+import com.cernecommerce.core.domain.model.estoque.StockReservation;
 import com.cernecommerce.core.domain.model.estoque.Warehouse;
 import com.cernecommerce.core.ports.in.EstoqueUseCase;
 import io.swagger.v3.oas.annotations.Operation;
@@ -52,6 +57,7 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -71,16 +77,19 @@ public class EstoqueController {
     private final WarehouseDTOConverter warehouseConverter;
     private final StockMovementDTOConverter movementConverter;
     private final StockCountDTOConverter stockCountConverter;
+    private final StockReservationDTOConverter reservationConverter;
     private final ApplicationEventPublisher publisher;
 
     public EstoqueController(EstoqueUseCase estoqueUseCase, ProductDTOConverter converter,
             WarehouseDTOConverter warehouseConverter, StockMovementDTOConverter movementConverter,
-            StockCountDTOConverter stockCountConverter, ApplicationEventPublisher publisher) {
+            StockCountDTOConverter stockCountConverter, StockReservationDTOConverter reservationConverter,
+            ApplicationEventPublisher publisher) {
         this.estoqueUseCase = estoqueUseCase;
         this.converter = converter;
         this.warehouseConverter = warehouseConverter;
         this.movementConverter = movementConverter;
         this.stockCountConverter = stockCountConverter;
+        this.reservationConverter = reservationConverter;
         this.publisher = publisher;
     }
 
@@ -344,6 +353,60 @@ public class EstoqueController {
     }
 
     // ------------------------------------------------------------------------------------
+    // Reserva de estoque (EST-F013/EST-F021). Só leitura aqui: quem cria, consome e libera
+    // reserva hoje é o próprio módulo (checkout futuro e liquidação de pedido online no PDV),
+    // não um operador via HTTP — daí não existirem POST/{id}/release neste controller.
+    // ------------------------------------------------------------------------------------
+
+    @Operation(summary = "Lista reservas de estoque paginadas, mais recentes primeiro",
+            description = "`sku`, `warehouseCode` e `status` são filtros opcionais e se combinam.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "404", description = "Depósito informado não existe", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/reservations")
+    @PreAuthorize("hasAuthority('ESTOQUE_RESERVATION_READ')")
+    public ResponseEntity<PageResult<StockReservationResponseDTO>> listReservations(
+            @RequestParam(required = false) String sku,
+            @RequestParam(required = false) String warehouseCode,
+            @RequestParam(required = false) String status,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+        PageResult<StockReservation> result = estoqueUseCase.listReservations(sku, warehouseCode,
+                reservationConverter.toStatusOrNull(status), page, size);
+        Map<Long, String> warehouseCodeById = new HashMap<>();
+        PageResult<StockReservationResponseDTO> response = new PageResult<>(
+                result.content().stream()
+                        .map(r -> reservationConverter.toResponse(r, warehouseCodeOf(r.warehouseId(), warehouseCodeById)))
+                        .toList(),
+                result.page(), result.size(), result.totalElements(), result.totalPages());
+        return ResponseEntity.ok(response);
+    }
+
+    @Operation(summary = "Consulta uma reserva de estoque")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "404", description = "Reserva não encontrada", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/reservations/{id}")
+    @PreAuthorize("hasAuthority('ESTOQUE_RESERVATION_READ')")
+    public ResponseEntity<StockReservationResponseDTO> getReservation(@PathVariable Long id) {
+        StockReservation reservation = estoqueUseCase.getStockReservation(id);
+        String warehouseCode = estoqueUseCase.getWarehouse(reservation.warehouseId()).code();
+        return ResponseEntity.ok(reservationConverter.toResponse(reservation, warehouseCode));
+    }
+
+    /**
+     * Resolve o código de um depósito com cache local ao request — a listagem de reservas pode
+     * atravessar vários depósitos na mesma página, e cada um só precisa ser resolvido uma vez.
+     */
+    private String warehouseCodeOf(Long warehouseId, Map<Long, String> cache) {
+        return cache.computeIfAbsent(warehouseId, id -> estoqueUseCase.getWarehouse(id).code());
+    }
+
+    // ------------------------------------------------------------------------------------
     // Balanço de inventário (EST-F006). O `warehouseCode` da resposta é ecoado do que chegou
     // na requisição ou relido do balanço, porque o domínio guarda só o warehouseId.
     // ------------------------------------------------------------------------------------
@@ -481,6 +544,31 @@ public class EstoqueController {
         PageResult<OrphanSku> result = estoqueUseCase.listOrphanSkus(page, size);
         PageResult<OrphanSkuResponseDTO> response = new PageResult<>(
                 result.content().stream().map(movementConverter::toResponse).toList(),
+                result.page(), result.size(), result.totalElements(), result.totalPages());
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Diagnóstico de EST-C013. Mesma razão de {@link #listOrphanSkus} para não publicar
+     * {@code AuditEvent}: é leitura.
+     */
+    @Operation(summary = "Lista pares SKU/depósito cujo reservado no saldo diverge da soma das reservas ativas",
+            description = "Diagnóstico de integridade: confronta `stock_balance.reserved_quantity` com a soma das "
+                    + "reservas `ACTIVE` em `stock_reservation` para o mesmo par. Divergência aqui é estoque "
+                    + "travado invisível — a venda recusa por reserva e nenhuma reserva ativa a explica (ou o "
+                    + "inverso). Somente leitura — a correção de cada linha é decisão humana.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK — página vazia se a base está íntegra"),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/integrity/reservation-mismatch")
+    @PreAuthorize("hasAuthority('ESTOQUE_STOCK_MANAGE')")
+    public ResponseEntity<PageResult<ReservationIntegrityMismatchResponseDTO>> listReservationMismatches(
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+        PageResult<ReservationIntegrityMismatch> result = estoqueUseCase.listReservationMismatches(page, size);
+        PageResult<ReservationIntegrityMismatchResponseDTO> response = new PageResult<>(
+                result.content().stream().map(reservationConverter::toResponse).toList(),
                 result.page(), result.size(), result.totalElements(), result.totalPages());
         return ResponseEntity.ok(response);
     }

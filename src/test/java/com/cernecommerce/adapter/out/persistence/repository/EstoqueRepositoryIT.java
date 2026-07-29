@@ -8,11 +8,13 @@ import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.ReorderPoint;
+import com.cernecommerce.core.domain.model.estoque.ReservationIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
 import com.cernecommerce.core.domain.model.estoque.StockCount;
 import com.cernecommerce.core.domain.model.estoque.StockCountItem;
 import com.cernecommerce.core.domain.model.estoque.StockCountStatus;
 import com.cernecommerce.core.domain.model.estoque.StockMovement;
+import com.cernecommerce.core.domain.model.estoque.StockReservation;
 import com.cernecommerce.core.domain.model.estoque.Warehouse;
 import com.cernecommerce.core.domain.model.estoque.WarehouseType;
 import jakarta.persistence.EntityManager;
@@ -62,6 +64,7 @@ class EstoqueRepositoryIT {
     @Autowired ReorderPointRepositoryImpl reorderPointRepository;
     @Autowired StockIntegrityRepositoryImpl stockIntegrityRepository;
     @Autowired StockCountRepositoryImpl stockCountRepository;
+    @Autowired StockReservationRepositoryImpl stockReservationRepository;
 
     @PersistenceContext EntityManager em;
 
@@ -663,5 +666,81 @@ class EstoqueRepositoryIT {
         assertThat(varridos.stream().filter(sku -> sku.startsWith("ORF-PAG-")).toList())
                 .as("cada órfão exatamente uma vez, em ordem de SKU")
                 .containsExactly("ORF-PAG-001", "ORF-PAG-002", "ORF-PAG-003");
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // EST-C013 — diagnóstico de divergência entre o contador de reservado e o ledger de reservas.
+    //
+    // Mesmo espírito do EST-C011 acima: é o único teste que exercita a query nativa de
+    // findReservationMismatches; service e controller só delegam.
+    // ------------------------------------------------------------------------------------------
+
+    /** Varre todas as páginas e devolve só as linhas cujo SKU começa com o prefixo do teste. */
+    private List<ReservationIntegrityMismatch> reservationMismatchesWithPrefix(String prefix) {
+        PageResult<ReservationIntegrityMismatch> first = stockIntegrityRepository.findReservationMismatches(0, 100);
+        List<ReservationIntegrityMismatch> all = new ArrayList<>(first.content());
+        for (int page = 1; page < first.totalPages(); page++) {
+            all.addAll(stockIntegrityRepository.findReservationMismatches(page, 100).content());
+        }
+        return all.stream().filter(m -> m.sku().startsWith(prefix)).toList();
+    }
+
+    @Test
+    void reservationMismatch_detectaContadorAcimaDoLedger() {
+        Warehouse warehouse = givenWarehouse("WH-RSV-CTR");
+        stockBalanceRepository.save(StockBalance.of(null, "RSV-CTR-001", warehouse.id(),
+                new BigDecimal("10.000"), new BigDecimal("5.000"), 0L));
+        stockReservationRepository.save(StockReservation.create("RSV-CTR-001", warehouse.id(),
+                new BigDecimal("3.000"), "CHECKOUT:teste", Instant.now().plusSeconds(3600), "gerente"));
+        flushAndClear();
+
+        assertThat(reservationMismatchesWithPrefix("RSV-CTR-")).singleElement().satisfies(mismatch -> {
+            assertThat(mismatch.reservedQuantity()).isEqualByComparingTo("5.000");
+            assertThat(mismatch.activeReservationsTotal()).isEqualByComparingTo("3.000");
+            assertThat(mismatch.difference()).isEqualByComparingTo("2.000");
+        });
+    }
+
+    @Test
+    void reservationMismatch_detectaLedgerAcimaDoContador() {
+        Warehouse warehouse = givenWarehouse("WH-RSV-LDG");
+        // Nenhum stock_balance salvo de propósito: a divergência pode vir só do lado do ledger.
+        stockReservationRepository.save(StockReservation.create("RSV-LDG-001", warehouse.id(),
+                new BigDecimal("2.000"), "CHECKOUT:teste", Instant.now().plusSeconds(3600), "gerente"));
+        flushAndClear();
+
+        assertThat(reservationMismatchesWithPrefix("RSV-LDG-")).singleElement().satisfies(mismatch -> {
+            assertThat(mismatch.reservedQuantity()).isEqualByComparingTo("0");
+            assertThat(mismatch.activeReservationsTotal()).isEqualByComparingTo("2.000");
+            assertThat(mismatch.difference()).isEqualByComparingTo("-2.000");
+        });
+    }
+
+    @Test
+    void reservationMismatch_naoAcusaQuandoContadorBateComLedger() {
+        Warehouse warehouse = givenWarehouse("WH-RSV-OK");
+        stockBalanceRepository.save(StockBalance.of(null, "RSV-OK-001", warehouse.id(),
+                new BigDecimal("10.000"), new BigDecimal("4.000"), 0L));
+        stockReservationRepository.save(StockReservation.create("RSV-OK-001", warehouse.id(),
+                new BigDecimal("4.000"), "CHECKOUT:teste", Instant.now().plusSeconds(3600), "gerente"));
+        flushAndClear();
+
+        assertThat(reservationMismatchesWithPrefix("RSV-OK-")).isEmpty();
+    }
+
+    @Test
+    void reservationMismatch_ignoraReservaJaResolvida() {
+        Warehouse warehouse = givenWarehouse("WH-RSV-RES");
+        stockBalanceRepository.save(StockBalance.of(null, "RSV-RES-001", warehouse.id(),
+                new BigDecimal("10.000"), BigDecimal.ZERO, 0L));
+        StockReservation resolvida = stockReservationRepository.save(StockReservation.create("RSV-RES-001",
+                warehouse.id(), new BigDecimal("6.000"), "CHECKOUT:teste", Instant.now().plusSeconds(3600),
+                "gerente"));
+        stockReservationRepository.save(resolvida.released());
+        flushAndClear();
+
+        assertThat(reservationMismatchesWithPrefix("RSV-RES-"))
+                .as("reserva RELEASED não conta no ledger ativo, e o contador já foi devolvido a zero")
+                .isEmpty();
     }
 }

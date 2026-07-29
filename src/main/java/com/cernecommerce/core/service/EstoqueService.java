@@ -19,6 +19,7 @@ import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.ReorderAlert;
 import com.cernecommerce.core.domain.model.estoque.ReorderPoint;
+import com.cernecommerce.core.domain.model.estoque.ReservationIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.ReservationStatus;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
 import com.cernecommerce.core.domain.model.estoque.StockCount;
@@ -235,6 +236,12 @@ public class EstoqueService implements EstoqueUseCase {
     @Transactional(readOnly = true)
     public PageResult<OrphanSku> listOrphanSkus(int page, int size) {
         return stockIntegrityRepository.findOrphanSkus(page, size);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResult<ReservationIntegrityMismatch> listReservationMismatches(int page, int size) {
+        return stockIntegrityRepository.findReservationMismatches(page, size);
     }
 
     // ---------------------------------------------------------------------------------------
