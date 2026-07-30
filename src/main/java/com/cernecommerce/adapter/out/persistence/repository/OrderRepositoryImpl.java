@@ -50,6 +50,7 @@ public class OrderRepositoryImpl implements OrderRepository {
         entity.setPaidAt(order.paidAt());
         entity.setConcludedAt(order.concludedAt());
         entity.setCancelledAt(order.cancelledAt());
+        entity.setRefundedAt(order.refundedAt());
 
         // Os itens são reescritos por inteiro: o pedido é imutável depois de concluído, então este
         // caminho só é exercitado antes da conclusão. orphanRemoval limpa os antigos.
@@ -114,7 +115,8 @@ public class OrderRepositoryImpl implements OrderRepository {
                 e.getWarehouseCode(), e.getItems().stream().map(this::toDomain).toList(),
                 e.getTotalAmount(), e.getDiscountAmount(), e.getCashbackRedeemed(), e.getNetAmount(),
                 e.getChangeAmount(), e.getCancelReason(), e.getCreatedAt(), e.getPaidAt(),
-                e.getConcludedAt(), e.getCancelledAt(), e.getVersion() == null ? 0L : e.getVersion());
+                e.getConcludedAt(), e.getCancelledAt(), e.getRefundedAt(),
+                e.getVersion() == null ? 0L : e.getVersion());
     }
 
     private OrderItem toDomain(OrderItemEntity e) {

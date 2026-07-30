@@ -60,6 +60,24 @@ public record OrderPayment(Long id, Long orderId, PaymentMethod method, BigDecim
                 null, now, now, now);
     }
 
+    /**
+     * Estorna um pagamento {@link PaymentStatus#CAPTURED} (PDV-F007): linha nova, nunca um
+     * update na original — mesma regra append-only do resto do ledger. Nasce {@code REFUNDED},
+     * com o MESMO método e valor do original: o que voltou é exatamente o que entrou.
+     *
+     * <p>{@code gatewayRef} não é herdado (fica {@code null}): o estorno é um evento novo, com sua
+     * própria referência quando a Fatia 10 (gateway) existir — herdar arriscaria colidir com um
+     * índice único de referência de gateway no futuro.</p>
+     */
+    public static OrderPayment refunded(OrderPayment original) {
+        if (original.status() != PaymentStatus.CAPTURED) {
+            throw new IllegalArgumentException("só se estorna um pagamento CAPTURED");
+        }
+        Instant now = Instant.now();
+        return new OrderPayment(null, original.orderId(), original.method(), original.amount(),
+                PaymentStatus.REFUNDED, original.installments(), null, now, null, now);
+    }
+
     /** Reconstitui um pagamento a partir de persistência. */
     public static OrderPayment of(Long id, Long orderId, PaymentMethod method, BigDecimal amount,
             PaymentStatus status, Integer installments, String gatewayRef, Instant authorizedAt,

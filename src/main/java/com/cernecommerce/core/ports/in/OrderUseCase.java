@@ -36,18 +36,33 @@ public interface OrderUseCase {
     Order changeStatus(Long orderId, OrderStatus newStatus, String username);
 
     /**
-     * Cancela o pedido e <b>devolve a mercadoria ao estoque</b>, tudo na mesma transação
-     * (EST-F014 chegando pela porta do pedido).
+     * Cancela um pedido ANTES de qualquer pagamento confirmado e <b>libera a reserva de
+     * estoque</b> — nunca houve baixa real para devolver, só reserva (ou nem isso, no balcão, que
+     * nunca reserva).
      *
-     * <p>Cancelar um pedido já entregue é uma <b>devolução</b> — e devolução é entrada de estoque
-     * legítima. O motivo do {@code StockMovement} carrega o número do pedido para a trilha ser
-     * reconstruível.</p>
-     *
-     * <p>O estorno do <b>pagamento</b> depende da Fatia 3 e o {@code REVERSED} do <b>cashback</b>
-     * depende da Fatia 4 — nenhum dos dois acontece aqui ainda.</p>
+     * <p>Cancelar e reembolsar são eventos diferentes (PDV-F007): contá-los juntos esconderia
+     * quanto dinheiro de fato voltou ao cliente. Pedido com pagamento já confirmado usa
+     * {@link #refundOrder}.</p>
      *
      * @throws com.cernecommerce.core.domain.exception.pedido.InvalidOrderStatusTransitionException
-     *         se o pedido já estiver cancelado
+     *         se o pedido já tiver pagamento confirmado (use {@link #refundOrder}) ou já estiver
+     *         {@code CANCELADO}
      */
     Order cancelOrder(Long orderId, String reason, String username);
+
+    /**
+     * Reembolsa um pedido DEPOIS de pagamento confirmado, tudo na mesma transação: devolve a
+     * mercadoria ao estoque (EST-F014 chegando pela porta do pedido), estorna cada pagamento
+     * {@code CAPTURED} com uma linha {@code REFUNDED} do mesmo método e valor, e reverte no ledger
+     * de cashback todo ganho {@code EARNED} do pedido.
+     *
+     * <p>Reembolsar um pedido já entregue é uma <b>devolução</b> — e devolução é entrada de
+     * estoque legítima. O motivo do {@code StockMovement} carrega o número do pedido para a
+     * trilha ser reconstruível.</p>
+     *
+     * @throws com.cernecommerce.core.domain.exception.pedido.InvalidOrderStatusTransitionException
+     *         se o pedido ainda não tiver pagamento confirmado (use {@link #cancelOrder}) ou já
+     *         estiver {@code CANCELADO}/{@code REEMBOLSADO}
+     */
+    Order refundOrder(Long orderId, String reason, String username);
 }

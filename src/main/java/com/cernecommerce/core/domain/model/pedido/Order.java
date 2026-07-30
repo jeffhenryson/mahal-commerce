@@ -56,6 +56,7 @@ public record Order(
         Instant paidAt,
         Instant concludedAt,
         Instant cancelledAt,
+        Instant refundedAt,
         long version) {
 
     public Order {
@@ -112,6 +113,10 @@ public record Order(
             throw new IllegalArgumentException(
                     "status CANCELADO e cancelledAt têm que coexistir: status=" + status + ", cancelledAt=" + cancelledAt);
         }
+        if ((status == OrderStatus.REEMBOLSADO) != (refundedAt != null)) {
+            throw new IllegalArgumentException(
+                    "status REEMBOLSADO e refundedAt têm que coexistir: status=" + status + ", refundedAt=" + refundedAt);
+        }
     }
 
     private static BigDecimal requireNonNegative(BigDecimal value, String field) {
@@ -135,7 +140,7 @@ public record Order(
         Totals totals = Totals.from(items);
         return new Order(null, null, SalesChannel.BALCAO, OrderStatus.CRIADO, customerId, sessionId,
                 warehouseCode, items, totals.gross(), totals.discount(), BigDecimal.ZERO, totals.net(),
-                null, null, Instant.now(), null, null, null, 0L);
+                null, null, Instant.now(), null, null, null, null, 0L);
     }
 
     /**
@@ -146,7 +151,7 @@ public record Order(
         Totals totals = Totals.from(items);
         return new Order(null, null, SalesChannel.MARKETPLACE, OrderStatus.AGUARDANDO_PAGAMENTO, customerId,
                 null, warehouseCode, items, totals.gross(), totals.discount(), BigDecimal.ZERO, totals.net(),
-                null, null, Instant.now(), null, null, null, 0L);
+                null, null, Instant.now(), null, null, null, null, 0L);
     }
 
     /** Reconstitui um pedido a partir de persistência. */
@@ -154,10 +159,10 @@ public record Order(
             Long customerId, Long sessionId, String warehouseCode, List<OrderItem> items,
             BigDecimal grossAmount, BigDecimal discountAmount, BigDecimal cashbackRedeemed,
             BigDecimal netAmount, BigDecimal changeAmount, String cancelReason, Instant createdAt,
-            Instant paidAt, Instant concludedAt, Instant cancelledAt, long version) {
+            Instant paidAt, Instant concludedAt, Instant cancelledAt, Instant refundedAt, long version) {
         return new Order(id, orderNumber, channel, status, customerId, sessionId, warehouseCode, items,
                 grossAmount, discountAmount, cashbackRedeemed, netAmount, changeAmount, cancelReason,
-                createdAt, paidAt, concludedAt, cancelledAt, version);
+                createdAt, paidAt, concludedAt, cancelledAt, refundedAt, version);
     }
 
     /**
@@ -175,7 +180,7 @@ public record Order(
         return new Order(id, orderNumber, channel, OrderStatus.CONCLUIDO, customerId, sessionId,
                 warehouseCode, items, grossAmount, discountAmount, cashbackRedeemed, netAmount,
                 changeAmount, cancelReason, createdAt, paidAt == null ? concludedAt : paidAt,
-                concludedAt, null, version);
+                concludedAt, null, null, version);
     }
 
     /** Marca o pagamento como confirmado — caminho do marketplace, disparado pelo webhook. */
@@ -183,7 +188,7 @@ public record Order(
         requireTransition(OrderStatus.PAGO);
         return new Order(id, orderNumber, channel, OrderStatus.PAGO, customerId, sessionId, warehouseCode,
                 items, grossAmount, discountAmount, cashbackRedeemed, netAmount, changeAmount, cancelReason,
-                createdAt, paidAt, concludedAt, null, version);
+                createdAt, paidAt, concludedAt, null, null, version);
     }
 
     /** Avança o pedido na esteira de fulfillment ({@code SEPARADO → ENVIADO → ENTREGUE}). */
@@ -191,10 +196,15 @@ public record Order(
         requireTransition(newStatus);
         return new Order(id, orderNumber, channel, newStatus, customerId, sessionId, warehouseCode, items,
                 grossAmount, discountAmount, cashbackRedeemed, netAmount, changeAmount, cancelReason,
-                createdAt, paidAt, concludedAt, null, version);
+                createdAt, paidAt, concludedAt, null, null, version);
     }
 
-    /** Cancela o pedido. Os estornos de estoque, cashback e pagamento são responsabilidade do service. */
+    /**
+     * Cancela o pedido ANTES de qualquer pagamento confirmado — nunca houve dinheiro capturado
+     * nem baixa real de estoque para desfazer. A liberação da reserva é responsabilidade do
+     * service. Pedido com pagamento confirmado usa {@link #refunded} — cancelar e reembolsar são
+     * eventos diferentes (PDV-F007).
+     */
     public Order cancelled(String reason, Instant cancelledAt) {
         requireTransition(OrderStatus.CANCELADO);
         if (cancelledAt == null) {
@@ -202,7 +212,22 @@ public record Order(
         }
         return new Order(id, orderNumber, channel, OrderStatus.CANCELADO, customerId, sessionId,
                 warehouseCode, items, grossAmount, discountAmount, cashbackRedeemed, netAmount,
-                changeAmount, reason, createdAt, paidAt, concludedAt, cancelledAt, version);
+                changeAmount, reason, createdAt, paidAt, concludedAt, cancelledAt, null, version);
+    }
+
+    /**
+     * Reembolsa o pedido DEPOIS de pagamento confirmado. Os estornos de estoque, pagamento e
+     * cashback são responsabilidade do service — aqui só se valida a transição e se carimba o
+     * motivo e o instante.
+     */
+    public Order refunded(String reason, Instant refundedAt) {
+        requireTransition(OrderStatus.REEMBOLSADO);
+        if (refundedAt == null) {
+            throw new IllegalArgumentException("refundedAt é obrigatório no reembolso");
+        }
+        return new Order(id, orderNumber, channel, OrderStatus.REEMBOLSADO, customerId, sessionId,
+                warehouseCode, items, grossAmount, discountAmount, cashbackRedeemed, netAmount,
+                changeAmount, reason, createdAt, paidAt, concludedAt, null, refundedAt, version);
     }
 
     /**
@@ -216,7 +241,7 @@ public record Order(
         BigDecimal newNet = grossAmount.subtract(discountAmount).subtract(value);
         return new Order(id, orderNumber, channel, status, customerId, sessionId, warehouseCode, items,
                 grossAmount, discountAmount, value, newNet, changeAmount, cancelReason, createdAt,
-                paidAt, concludedAt, cancelledAt, version);
+                paidAt, concludedAt, cancelledAt, refundedAt, version);
     }
 
     /**
@@ -238,14 +263,14 @@ public record Order(
     public Order withSession(Long newSessionId) {
         return new Order(id, orderNumber, channel, status, customerId, newSessionId, warehouseCode,
                 items, grossAmount, discountAmount, cashbackRedeemed, netAmount, changeAmount,
-                cancelReason, createdAt, paidAt, concludedAt, cancelledAt, version);
+                cancelReason, createdAt, paidAt, concludedAt, cancelledAt, refundedAt, version);
     }
 
     /** Vincula o pedido a um cliente identificado depois da montagem — o "CPF na nota?" do balcão. */
     public Order withCustomer(Long newCustomerId) {
         return new Order(id, orderNumber, channel, status, newCustomerId, sessionId, warehouseCode, items,
                 grossAmount, discountAmount, cashbackRedeemed, netAmount, changeAmount, cancelReason,
-                createdAt, paidAt, concludedAt, cancelledAt, version);
+                createdAt, paidAt, concludedAt, cancelledAt, refundedAt, version);
     }
 
     /** Soma do cashback gerado por todos os itens; ignora itens sem taxa carimbada. */

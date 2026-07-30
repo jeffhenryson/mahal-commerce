@@ -5,15 +5,21 @@ import com.cernecommerce.core.domain.exception.pedido.OrderNotFoundException;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
+import com.cernecommerce.core.domain.model.pagamento.OrderPayment;
+import com.cernecommerce.core.domain.model.pagamento.PaymentMethod;
+import com.cernecommerce.core.domain.model.pagamento.PaymentStatus;
 import com.cernecommerce.core.domain.model.pedido.Order;
 import com.cernecommerce.core.domain.model.pedido.OrderItem;
 import com.cernecommerce.core.domain.model.pedido.OrderStatus;
 import com.cernecommerce.core.domain.model.pedido.SalesChannel;
+import com.cernecommerce.core.ports.in.CashbackUseCase;
 import com.cernecommerce.core.ports.in.EstoqueUseCase;
+import com.cernecommerce.core.ports.out.pagamento.OrderPaymentRepository;
 import com.cernecommerce.core.ports.out.pedido.OrderRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -24,6 +30,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
@@ -35,12 +42,14 @@ class OrderServiceTest {
 
     @Mock OrderRepository orderRepository;
     @Mock EstoqueUseCase estoqueUseCase;
+    @Mock OrderPaymentRepository orderPaymentRepository;
+    @Mock CashbackUseCase cashbackUseCase;
 
     OrderService orderService;
 
     @BeforeEach
     void setUp() {
-        orderService = new OrderService(orderRepository, estoqueUseCase);
+        orderService = new OrderService(orderRepository, estoqueUseCase, orderPaymentRepository, cashbackUseCase);
     }
 
     private static List<OrderItem> twoCharcoals() {
@@ -48,7 +57,7 @@ class OrderServiceTest {
                 Pricing.of(new BigDecimal("18.00"), null, new BigDecimal("22.00")), null));
     }
 
-    /** Venda de balcão já concluída — o caso mais comum de cancelamento. */
+    /** Venda de balcão já concluída — o caso mais comum de reembolso. */
     private static Order concludedBalcao() {
         return Order.openBalcao(1L, "LOJA-01", null, twoCharcoals())
                 .concluded("000001000", null, NOW);
@@ -56,6 +65,11 @@ class OrderServiceTest {
 
     private static Order paidMarketplace() {
         return Order.openMarketplace(42L, "LOJA-01", twoCharcoals()).paid(NOW);
+    }
+
+    /** Pedido de marketplace ainda aguardando pagamento — o caso normal de cancelamento. */
+    private static Order pendingMarketplace() {
+        return Order.openMarketplace(42L, "LOJA-01", twoCharcoals());
     }
 
     // ── Leitura ──────────────────────────────────────────────────────────────────────────────
@@ -108,52 +122,99 @@ class OrderServiceTest {
         verify(orderRepository, never()).save(any());
     }
 
-    // ── Cancelamento com estorno de estoque (EST-F014) ───────────────────────────────────────
+    // ── Cancelamento pré-pagamento (libera reserva, nunca toca estoque real) ─────────────────
 
     @Test
-    void cancelOrder_returnsTheGoodsToStock() {
-        when(orderRepository.findById(1L)).thenReturn(Optional.of(concludedBalcao()));
+    void cancelOrder_releasesTheReservationInsteadOfTouchingRealStock() {
+        when(orderRepository.findById(1L)).thenReturn(Optional.of(pendingMarketplace()));
         when(orderRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any())).thenReturn(null);
+        when(estoqueUseCase.releaseReservationsByOwner(any(), any())).thenReturn(1);
 
         Order cancelled = orderService.cancelOrder(1L, "cliente desistiu", "gerente");
 
         assertThat(cancelled.status()).isEqualTo(OrderStatus.CANCELADO);
         assertThat(cancelled.cancelReason()).isEqualTo("cliente desistiu");
         assertThat(cancelled.cancelledAt()).isNotNull();
+        verify(estoqueUseCase).releaseReservationsByOwner(eq(Order.reservationOwnerReference(1L)), eq("gerente"));
+        // Nunca houve baixa real para devolver: só reserva.
+        verify(estoqueUseCase, never()).adjustStock(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void cancelOrder_refusesToCancelTwiceAndDoesNotReleaseAgain() {
+        Order alreadyCancelled = pendingMarketplace().cancelled("primeiro", NOW);
+        when(orderRepository.findById(1L)).thenReturn(Optional.of(alreadyCancelled));
+
+        assertThatThrownBy(() -> orderService.cancelOrder(1L, "segundo", "gerente"))
+                .isInstanceOf(InvalidOrderStatusTransitionException.class);
+
+        // O ponto do teste: um segundo cancelamento liberaria a reserva de novo.
+        verify(estoqueUseCase, never()).releaseReservationsByOwner(any(), any());
+        verify(orderRepository, never()).save(any());
+    }
+
+    @Test
+    void cancelOrder_propagatesReservationReleaseFailureAndDoesNotPersist() {
+        when(orderRepository.findById(1L)).thenReturn(Optional.of(pendingMarketplace()));
+        when(estoqueUseCase.releaseReservationsByOwner(any(), any()))
+                .thenThrow(new IllegalStateException("reserva não encontrada"));
+
+        assertThatThrownBy(() -> orderService.cancelOrder(1L, "engano", "gerente"))
+                .isInstanceOf(IllegalStateException.class);
+
+        verify(orderRepository, never()).save(any());
+    }
+
+    /**
+     * Cancelar e reembolsar são eventos diferentes (PDV-F007): pedido com pagamento confirmado
+     * usa {@code refundOrder}, nunca {@code cancelOrder}.
+     */
+    @Test
+    void cancelOrder_refusesOrdersThatAlreadyHavePaymentConfirmed() {
+        when(orderRepository.findById(1L)).thenReturn(Optional.of(paidMarketplace()));
+
+        assertThatThrownBy(() -> orderService.cancelOrder(1L, "engano", "gerente"))
+                .isInstanceOf(InvalidOrderStatusTransitionException.class);
+
+        verify(estoqueUseCase, never()).releaseReservationsByOwner(any(), any());
+        verify(orderRepository, never()).save(any());
+    }
+
+    // ── Reembolso pós-pagamento: estoque (EST-F014), pagamento e cashback (PDV-F007) ─────────
+
+    @Test
+    void refundOrder_returnsTheGoodsToStock() {
+        when(orderRepository.findById(1L)).thenReturn(Optional.of(concludedBalcao()));
+        when(orderRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any())).thenReturn(null);
+        when(orderPaymentRepository.findByOrderId(1L)).thenReturn(List.of());
+
+        Order refunded = orderService.refundOrder(1L, "cliente desistiu", "gerente");
+
+        assertThat(refunded.status()).isEqualTo(OrderStatus.REEMBOLSADO);
+        assertThat(refunded.cancelReason()).isEqualTo("cliente desistiu");
+        assertThat(refunded.refundedAt()).isNotNull();
         // ENTRADA, não SAIDA: devolução devolve mercadoria à prateleira.
         verify(estoqueUseCase).adjustStock(eq("CARV-001"), eq("LOJA-01"), eq(MovementType.ENTRADA),
                 eq(new BigDecimal("2.000")), any(), eq("gerente"));
     }
 
     @Test
-    void cancelOrder_stampsTheOrderNumberInTheMovementReason() {
+    void refundOrder_stampsTheOrderNumberInTheMovementReason() {
         when(orderRepository.findById(1L)).thenReturn(Optional.of(concludedBalcao()));
         when(orderRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any())).thenReturn(null);
+        when(orderPaymentRepository.findByOrderId(1L)).thenReturn(List.of());
 
-        orderService.cancelOrder(1L, "engano", "gerente");
+        orderService.refundOrder(1L, "engano", "gerente");
 
         // Sem o número no motivo, a trilha do movimento não é reconstruível.
         verify(estoqueUseCase).adjustStock(any(), any(), any(), any(),
-                eq("Cancelamento do pedido 000001000"), any());
+                eq("Reembolso do pedido 000001000"), any());
     }
 
     @Test
-    void cancelOrder_refusesToCancelTwiceAndDoesNotTouchStock() {
-        Order alreadyCancelled = concludedBalcao().cancelled("primeiro", NOW);
-        when(orderRepository.findById(1L)).thenReturn(Optional.of(alreadyCancelled));
-
-        assertThatThrownBy(() -> orderService.cancelOrder(1L, "segundo", "gerente"))
-                .isInstanceOf(InvalidOrderStatusTransitionException.class);
-
-        // O ponto do teste: um segundo cancelamento devolveria a mercadoria de novo, inflando o saldo.
-        verify(estoqueUseCase, never()).adjustStock(any(), any(), any(), any(), any(), any());
-        verify(orderRepository, never()).save(any());
-    }
-
-    @Test
-    void cancelOrder_worksOnADeliveredOrderBecauseThatIsAReturn() {
+    void refundOrder_worksOnADeliveredOrderBecauseThatIsAReturn() {
         Order delivered = paidMarketplace()
                 .withStatus(OrderStatus.SEPARADO)
                 .withStatus(OrderStatus.ENVIADO)
@@ -161,22 +222,96 @@ class OrderServiceTest {
         when(orderRepository.findById(1L)).thenReturn(Optional.of(delivered));
         when(orderRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any())).thenReturn(null);
+        when(orderPaymentRepository.findByOrderId(1L)).thenReturn(List.of());
 
-        Order cancelled = orderService.cancelOrder(1L, "devolução no prazo", "gerente");
+        Order refunded = orderService.refundOrder(1L, "devolução no prazo", "gerente");
 
-        assertThat(cancelled.status()).isEqualTo(OrderStatus.CANCELADO);
+        assertThat(refunded.status()).isEqualTo(OrderStatus.REEMBOLSADO);
         verify(estoqueUseCase).adjustStock(any(), any(), eq(MovementType.ENTRADA), any(), any(), any());
     }
 
     @Test
-    void cancelOrder_propagatesStockFailureAndDoesNotPersist() {
+    void refundOrder_refusesToRefundTwiceAndDoesNotTouchStock() {
+        Order alreadyRefunded = concludedBalcao().refunded("primeiro", NOW);
+        when(orderRepository.findById(1L)).thenReturn(Optional.of(alreadyRefunded));
+
+        assertThatThrownBy(() -> orderService.refundOrder(1L, "segundo", "gerente"))
+                .isInstanceOf(InvalidOrderStatusTransitionException.class);
+
+        // O ponto do teste: um segundo reembolso devolveria a mercadoria de novo, inflando o saldo.
+        verify(estoqueUseCase, never()).adjustStock(any(), any(), any(), any(), any(), any());
+        verify(orderRepository, never()).save(any());
+    }
+
+    @Test
+    void refundOrder_propagatesStockFailureAndDoesNotPersist() {
         when(orderRepository.findById(1L)).thenReturn(Optional.of(concludedBalcao()));
         when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any()))
                 .thenThrow(new IllegalStateException("depósito inativo"));
 
-        assertThatThrownBy(() -> orderService.cancelOrder(1L, "engano", "gerente"))
+        assertThatThrownBy(() -> orderService.refundOrder(1L, "engano", "gerente"))
                 .isInstanceOf(IllegalStateException.class);
 
+        verify(orderRepository, never()).save(any());
+    }
+
+    @Test
+    void refundOrder_reversesEachCapturedPaymentWithMatchingMethodAndAmount() {
+        when(orderRepository.findById(1L)).thenReturn(Optional.of(concludedBalcao()));
+        when(orderRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any())).thenReturn(null);
+        OrderPayment cash = OrderPayment.captured(1L, PaymentMethod.DINHEIRO, new BigDecimal("50.00"), null);
+        OrderPayment debit = OrderPayment.captured(1L, PaymentMethod.DEBITO, new BigDecimal("30.00"), null);
+        when(orderPaymentRepository.findByOrderId(1L)).thenReturn(List.of(cash, debit));
+        when(orderPaymentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        orderService.refundOrder(1L, "devolução no prazo", "gerente");
+
+        ArgumentCaptor<OrderPayment> captor = ArgumentCaptor.forClass(OrderPayment.class);
+        verify(orderPaymentRepository, times(2)).save(captor.capture());
+        assertThat(captor.getAllValues())
+                .extracting(OrderPayment::method, OrderPayment::amount, OrderPayment::status)
+                .containsExactlyInAnyOrder(
+                        tuple(PaymentMethod.DINHEIRO, new BigDecimal("50.00"), PaymentStatus.REFUNDED),
+                        tuple(PaymentMethod.DEBITO, new BigDecimal("30.00"), PaymentStatus.REFUNDED));
+    }
+
+    @Test
+    void refundOrder_skipsPaymentsThatAreNotCaptured() {
+        when(orderRepository.findById(1L)).thenReturn(Optional.of(concludedBalcao()));
+        when(orderRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any())).thenReturn(null);
+        OrderPayment failed = OrderPayment.of(2L, 1L, PaymentMethod.DINHEIRO, new BigDecimal("10.00"),
+                PaymentStatus.FAILED, null, null, Instant.now(), null, Instant.now());
+        when(orderPaymentRepository.findByOrderId(1L)).thenReturn(List.of(failed));
+
+        orderService.refundOrder(1L, "engano", "gerente");
+
+        verify(orderPaymentRepository, never()).save(any());
+    }
+
+    @Test
+    void refundOrder_invokesCashbackReversalForTheOrder() {
+        Order order = concludedBalcao();
+        when(orderRepository.findById(1L)).thenReturn(Optional.of(order));
+        when(orderRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any())).thenReturn(null);
+        when(orderPaymentRepository.findByOrderId(1L)).thenReturn(List.of());
+
+        orderService.refundOrder(1L, "devolução no prazo", "gerente");
+
+        verify(cashbackUseCase).reverseEarningsForOrder(order);
+    }
+
+    /** Pré-pagamento nunca tem o que reembolsar — só {@code cancelOrder} faz sentido. */
+    @Test
+    void refundOrder_refusesOrdersThatHaveNotBeenPaidYet() {
+        when(orderRepository.findById(1L)).thenReturn(Optional.of(pendingMarketplace()));
+
+        assertThatThrownBy(() -> orderService.refundOrder(1L, "engano", "gerente"))
+                .isInstanceOf(InvalidOrderStatusTransitionException.class);
+
+        verify(estoqueUseCase, never()).adjustStock(any(), any(), any(), any(), any(), any());
         verify(orderRepository, never()).save(any());
     }
 }

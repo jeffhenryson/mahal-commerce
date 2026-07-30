@@ -2,6 +2,7 @@ package com.cernecommerce.adapter.in.controller;
 
 import com.cernecommerce.adapter.in.converter.OrderDTOConverter;
 import com.cernecommerce.adapter.in.dtos.request.OrderCancelRequest;
+import com.cernecommerce.adapter.in.dtos.request.OrderRefundRequest;
 import com.cernecommerce.adapter.in.dtos.request.OrderStatusRequest;
 import com.cernecommerce.adapter.in.dtos.response.OrderAdminResponseDTO;
 import com.cernecommerce.core.domain.event.AuditEvent;
@@ -113,13 +114,14 @@ public class OrdersController {
         return ResponseEntity.ok(orderConverter.toAdminResponse(order));
     }
 
-    @Operation(summary = "Cancela o pedido e devolve a mercadoria ao estoque",
-            description = "O estorno de estoque acontece na mesma transação. O estorno do pagamento "
-                    + "depende da Fatia 3 e o do cashback da Fatia 4 — nenhum dos dois acontece ainda.")
+    @Operation(summary = "Cancela um pedido ANTES de pagamento confirmado e libera a reserva de estoque",
+            description = "Só pedidos sem pagamento confirmado (CRIADO/AGUARDANDO_PAGAMENTO). Pedido "
+                    + "com pagamento confirmado usa /refund — cancelar e reembolsar são eventos "
+                    + "diferentes (PDV-F007).")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Cancelado", content = @Content(schema = @Schema(implementation = OrderAdminResponseDTO.class))),
             @ApiResponse(responseCode = "404", description = "Pedido não encontrado", content = @Content),
-            @ApiResponse(responseCode = "409", description = "Pedido já cancelado", content = @Content)
+            @ApiResponse(responseCode = "409", description = "Transição não permitida: pagamento já confirmado (use /refund), ou já CANCELADO", content = @Content)
     })
     @PostMapping("/{id}/cancel")
     @PreAuthorize("hasAuthority('ORDER_CANCEL')")
@@ -135,6 +137,33 @@ public class OrdersController {
         details.put("skus", order.items().stream().map(item -> item.sku()).toList());
         publisher.publishEvent(
                 AuditEvent.of(EventType.ORDER_CANCELLED, authentication.getName(), details));
+        return ResponseEntity.ok(orderConverter.toAdminResponse(order));
+    }
+
+    @Operation(summary = "Reembolsa um pedido DEPOIS de pagamento confirmado",
+            description = "Devolve a mercadoria ao estoque, estorna cada pagamento CAPTURED com uma "
+                    + "linha REFUNDED do mesmo método e valor, e reverte no ledger de cashback todo "
+                    + "ganho EARNED do pedido — tudo na mesma transação. Só pedidos com pagamento "
+                    + "confirmado (PAGO em diante); pedido pré-pagamento usa /cancel.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Reembolsado", content = @Content(schema = @Schema(implementation = OrderAdminResponseDTO.class))),
+            @ApiResponse(responseCode = "404", description = "Pedido não encontrado", content = @Content),
+            @ApiResponse(responseCode = "409", description = "Transição não permitida: sem pagamento confirmado (use /cancel), ou já CANCELADO/REEMBOLSADO", content = @Content)
+    })
+    @PostMapping("/{id}/refund")
+    @PreAuthorize("hasAuthority('ORDER_REFUND')")
+    public ResponseEntity<OrderAdminResponseDTO> refundOrder(@PathVariable("id") Long orderId,
+            @Valid @RequestBody OrderRefundRequest request, Authentication authentication) {
+        Order before = orderUseCase.getOrder(orderId);
+        Order order = orderUseCase.refundOrder(orderId, request.getReason(), authentication.getName());
+        Map<String, Object> details = new HashMap<>();
+        details.put("orderId", orderId);
+        details.put("orderNumber", String.valueOf(order.orderNumber()));
+        details.put("statusBefore", before.status().name());
+        details.put("reason", request.getReason());
+        details.put("skus", order.items().stream().map(item -> item.sku()).toList());
+        publisher.publishEvent(
+                AuditEvent.of(EventType.ORDER_REFUNDED, authentication.getName(), details));
         return ResponseEntity.ok(orderConverter.toAdminResponse(order));
     }
 }

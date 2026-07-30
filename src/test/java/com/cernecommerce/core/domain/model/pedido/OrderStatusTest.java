@@ -17,21 +17,44 @@ class OrderStatusTest {
     }
 
     @Test
-    void onlyCancelledIsTrulyTerminal() {
+    void cancelledAndRefundedAreTheOnlyTerminalStates() {
         assertThat(OrderStatus.CANCELADO.isTerminal()).isTrue();
+        assertThat(OrderStatus.REEMBOLSADO.isTerminal()).isTrue();
 
-        // ENTREGUE e CONCLUIDO ainda aceitam cancelamento, porque devolução existe.
+        // ENTREGUE e CONCLUIDO ainda aceitam reembolso, porque devolução existe.
         assertThat(OrderStatus.ENTREGUE.isTerminal()).isFalse();
         assertThat(OrderStatus.CONCLUIDO.isTerminal()).isFalse();
     }
 
+    /**
+     * Pré-pagamento (CRIADO/AGUARDANDO_PAGAMENTO) nunca teve dinheiro capturado nem baixa real de
+     * estoque — só CANCELADO faz sentido como saída antecipada.
+     */
     @Test
-    void everyNonTerminalStatusCanBeCancelled() {
-        Arrays.stream(OrderStatus.values())
-                .filter(status -> status != OrderStatus.CANCELADO)
-                .forEach(status -> assertThat(status.canTransitionTo(OrderStatus.CANCELADO))
-                        .as("%s deve poder ser cancelado", status)
-                        .isTrue());
+    void prePaymentStatesCanBeCancelledButNotRefunded() {
+        for (OrderStatus status : new OrderStatus[]{OrderStatus.CRIADO, OrderStatus.AGUARDANDO_PAGAMENTO}) {
+            assertThat(status.canTransitionTo(OrderStatus.CANCELADO))
+                    .as("%s deve poder ser cancelado", status).isTrue();
+            assertThat(status.canTransitionTo(OrderStatus.REEMBOLSADO))
+                    .as("%s não deve poder ser reembolsado", status).isFalse();
+        }
+    }
+
+    /**
+     * Pós-pagamento (PAGO em diante) sempre tem dinheiro capturado e estoque real decrementado —
+     * só REEMBOLSADO faz sentido como saída antecipada. Cancelar e reembolsar são eventos
+     * diferentes (PDV-F007): contá-los juntos esconderia quanto dinheiro voltou de fato.
+     */
+    @Test
+    void postPaymentStatesCanBeRefundedButNotCancelled() {
+        OrderStatus[] postPayment = {OrderStatus.PAGO, OrderStatus.SEPARADO, OrderStatus.ENVIADO,
+                OrderStatus.ENTREGUE, OrderStatus.CONCLUIDO};
+        for (OrderStatus status : postPayment) {
+            assertThat(status.canTransitionTo(OrderStatus.REEMBOLSADO))
+                    .as("%s deve poder ser reembolsado", status).isTrue();
+            assertThat(status.canTransitionTo(OrderStatus.CANCELADO))
+                    .as("%s não deve poder ser cancelado", status).isFalse();
+        }
     }
 
     @Test

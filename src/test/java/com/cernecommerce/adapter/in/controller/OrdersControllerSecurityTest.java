@@ -17,9 +17,10 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
 /**
- * As três permissões de {@code /orders} são separadas porque as operações têm consequências
- * diferentes: ler é inócuo, avançar estágio é expedição, e cancelar <b>devolve mercadoria ao
- * estoque</b>. Estes testes provam que uma não vale pela outra.
+ * As quatro permissões de {@code /orders} são separadas porque as operações têm consequências
+ * diferentes: ler é inócuo, avançar estágio é expedição, cancelar <b>libera reserva de
+ * estoque</b> e reembolsar <b>estorna pagamento, cashback e devolve mercadoria</b>. Estes testes
+ * provam que uma não vale pela outra.
  */
 @SpringBootTest
 @ActiveProfiles("dev")
@@ -32,6 +33,7 @@ public class OrdersControllerSecurityTest {
 
     private static final String STATUS_BODY = "{\"status\":\"SEPARADO\"}";
     private static final String CANCEL_BODY = "{\"reason\":\"cliente desistiu\"}";
+    private static final String REFUND_BODY = "{\"reason\":\"devolução no prazo\"}";
 
     @BeforeEach
     void setup() {
@@ -137,6 +139,35 @@ public class OrdersControllerSecurityTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}")
                 .with(user("gerente").authorities(new SimpleGrantedAuthority("ORDER_CANCEL"))))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void refund_with_order_cancel_returns_403() throws Exception {
+        // Cancelar não autoriza reembolsar: reembolso estorna dinheiro de verdade.
+        mockMvc.perform(post("/orders/999999/refund")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(REFUND_BODY)
+                .with(user("gerente").authorities(new SimpleGrantedAuthority("ORDER_CANCEL"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void refund_with_order_refund_reaches_the_service() throws Exception {
+        mockMvc.perform(post("/orders/999999/refund")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(REFUND_BODY)
+                .with(user("gerente").authorities(new SimpleGrantedAuthority("ORDER_REFUND"))))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void refund_without_reason_returns_400() throws Exception {
+        // Estorno sem justificativa registrada é indistinguível de erro.
+        mockMvc.perform(post("/orders/999999/refund")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}")
+                .with(user("gerente").authorities(new SimpleGrantedAuthority("ORDER_REFUND"))))
                 .andExpect(status().isBadRequest());
     }
 }

@@ -97,7 +97,7 @@ class OrderTest {
         Order settled = Order.of(null, null, SalesChannel.MARKETPLACE,
                 OrderStatus.AGUARDANDO_PAGAMENTO, 7L, 1L, "LOJA-01", twoCharcoals(),
                 new BigDecimal("44.00"), BigDecimal.ZERO, BigDecimal.ZERO, new BigDecimal("44.00"),
-                null, null, NOW, null, null, null, 0L);
+                null, null, NOW, null, null, null, null, 0L);
 
         assertThat(settled.channel()).isEqualTo(SalesChannel.MARKETPLACE);
         assertThat(settled.sessionId()).isEqualTo(1L);
@@ -127,7 +127,7 @@ class OrderTest {
                 null, 1L, "LOJA-01", twoCharcoals(),
                 new BigDecimal("44.00"), new BigDecimal("4.00"), BigDecimal.ZERO,
                 new BigDecimal("44.00"), // deveria ser 40,00
-                null, null, NOW, NOW, NOW, null, 0L))
+                null, null, NOW, NOW, NOW, null, null, 0L))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("netAmount");
     }
@@ -138,7 +138,7 @@ class OrderTest {
                 null, 1L, "LOJA-01", twoCharcoals(), new BigDecimal("44.00"), BigDecimal.ZERO,
                 BigDecimal.ZERO, new BigDecimal("44.00"), null, null, NOW, null, null,
                 null, // CANCELADO sem cancelledAt
-                0L))
+                null, 0L))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("cancelledAt");
     }
@@ -148,7 +148,7 @@ class OrderTest {
         assertThatThrownBy(() -> Order.of(1L, "000001", SalesChannel.MARKETPLACE, OrderStatus.PAGO,
                 7L, null, "LOJA-01", twoCharcoals(), new BigDecimal("44.00"), BigDecimal.ZERO,
                 BigDecimal.ZERO, new BigDecimal("44.00"), new BigDecimal("5.00"), null, NOW, NOW,
-                null, null, 0L))
+                null, null, null, 0L))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("changeAmount");
     }
@@ -192,8 +192,8 @@ class OrderTest {
 
     @Test
     void cancelled_recordsReasonAndTimestamp() {
-        Order cancelled = balcao().concluded("000042", null, NOW)
-                .cancelled("cliente desistiu", NOW);
+        // balcao() está em CRIADO — pré-pagamento, nunca teve dinheiro capturado.
+        Order cancelled = balcao().cancelled("cliente desistiu", NOW);
 
         assertThat(cancelled.isCancelled()).isTrue();
         assertThat(cancelled.cancelReason()).isEqualTo("cliente desistiu");
@@ -207,6 +207,55 @@ class OrderTest {
         assertThatThrownBy(() -> cancelled.cancelled("de novo", NOW))
                 .isInstanceOf(InvalidOrderStatusTransitionException.class)
                 .hasMessageContaining("terminal");
+    }
+
+    /**
+     * Cancelar e reembolsar são eventos diferentes (PDV-F007): pedido com pagamento confirmado só
+     * sai por {@link Order#refunded}, nunca por {@link Order#cancelled}.
+     */
+    @Test
+    void cannotCancelAfterPayment() {
+        Order concluded = balcao().concluded("000042", null, NOW);
+
+        assertThatThrownBy(() -> concluded.cancelled("engano", NOW))
+                .isInstanceOf(InvalidOrderStatusTransitionException.class);
+    }
+
+    @Test
+    void refunded_recordsReasonAndTimestamp() {
+        Order refunded = balcao().concluded("000042", null, NOW)
+                .refunded("devolução no prazo", NOW);
+
+        assertThat(refunded.status()).isEqualTo(OrderStatus.REEMBOLSADO);
+        assertThat(refunded.cancelReason()).isEqualTo("devolução no prazo");
+        assertThat(refunded.refundedAt()).isEqualTo(NOW);
+    }
+
+    @Test
+    void cannotRefundTwice() {
+        Order refunded = balcao().concluded("000042", null, NOW).refunded("engano", NOW);
+
+        assertThatThrownBy(() -> refunded.refunded("de novo", NOW))
+                .isInstanceOf(InvalidOrderStatusTransitionException.class)
+                .hasMessageContaining("terminal");
+    }
+
+    /** Pré-pagamento nunca tem o que reembolsar — só {@link Order#cancelled} faz sentido. */
+    @Test
+    void cannotRefundBeforePayment() {
+        assertThatThrownBy(() -> balcao().refunded("engano", NOW))
+                .isInstanceOf(InvalidOrderStatusTransitionException.class);
+    }
+
+    @Test
+    void refundedStatusAndTimestampMustAgree() {
+        assertThatThrownBy(() -> Order.of(1L, "000001", SalesChannel.BALCAO, OrderStatus.REEMBOLSADO,
+                null, 1L, "LOJA-01", twoCharcoals(), new BigDecimal("44.00"), BigDecimal.ZERO,
+                BigDecimal.ZERO, new BigDecimal("44.00"), null, null, NOW, NOW, NOW, null,
+                null, // REEMBOLSADO sem refundedAt
+                0L))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("refundedAt");
     }
 
     @Test

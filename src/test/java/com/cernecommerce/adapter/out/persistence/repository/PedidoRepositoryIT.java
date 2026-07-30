@@ -177,7 +177,8 @@ class PedidoRepositoryIT {
         // caixa que o liquidou. É a invariante relaxada na Fatia 1.
         Order settled = Order.of(null, null, SalesChannel.MARKETPLACE, OrderStatus.AGUARDANDO_PAGAMENTO,
                 42L, 1L, "LOJA-01", twoCharcoals(null), new BigDecimal("44.00"), BigDecimal.ZERO,
-                BigDecimal.ZERO, new BigDecimal("44.00"), null, null, Instant.now(), null, null, null, 0L);
+                BigDecimal.ZERO, new BigDecimal("44.00"), null, null, Instant.now(), null, null, null,
+                null, 0L);
 
         Order saved = orderRepository.save(settled);
         flushAndClear();

@@ -76,6 +76,9 @@ public class OrderEntity {
     @Column(name = "cancelled_at")
     private Instant cancelledAt;
 
+    @Column(name = "refunded_at")
+    private Instant refundedAt;
+
     /**
      * Bloqueio otimista. A {@code Sale} anterior não tinha — era irrelevante numa tabela
      * insert-only, e passa a importar quando o pedido ganha transição de estado.

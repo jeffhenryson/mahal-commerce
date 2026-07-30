@@ -68,6 +68,33 @@ class OrderPaymentTest {
     }
 
     @Test
+    void refunded_startsAsRefundedWithSameMethodAndAmount() {
+        OrderPayment original = OrderPayment.captured(7L, PaymentMethod.CREDITO, new BigDecimal("44.00"), 3);
+
+        OrderPayment refunded = OrderPayment.refunded(original);
+
+        assertThat(refunded.id()).isNull();
+        assertThat(refunded.orderId()).isEqualTo(7L);
+        assertThat(refunded.method()).isEqualTo(PaymentMethod.CREDITO);
+        assertThat(refunded.amount()).isEqualByComparingTo("44.00");
+        assertThat(refunded.installments()).isEqualTo(3);
+        assertThat(refunded.status()).isEqualTo(PaymentStatus.REFUNDED);
+        assertThat(refunded.capturedAt()).isNull();
+        assertThat(refunded.authorizedAt()).isNotNull();
+        assertThat(refunded.gatewayRef()).isNull();
+    }
+
+    @Test
+    void refunded_rejectsNonCapturedOriginal() {
+        Instant now = Instant.now();
+        OrderPayment pending = OrderPayment.of(1L, 7L, PaymentMethod.DINHEIRO, BigDecimal.TEN,
+                PaymentStatus.PENDING, null, null, null, null, now);
+
+        assertThatThrownBy(() -> OrderPayment.refunded(pending))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("CAPTURED");
+    }
+
+    @Test
     void of_reconstitutesFromPersistence() {
         Instant createdAt = Instant.parse("2026-07-29T14:30:00Z");
         OrderPayment payment = OrderPayment.of(9L, 7L, PaymentMethod.PIX, new BigDecimal("22.00"),

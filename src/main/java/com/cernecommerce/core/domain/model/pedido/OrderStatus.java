@@ -37,12 +37,24 @@ public enum OrderStatus {
 
     /**
      * Finalizada no balcão: mercadoria entregue e dinheiro recebido. Vale tanto para a venda de
-     * balcão quanto para o pedido do app retirado e pago na loja. Terminal, exceto por devolução.
+     * balcão quanto para o pedido do app retirado e pago na loja. Terminal, exceto por reembolso.
      */
     CONCLUIDO,
 
-    /** Cancelado, com os estornos correspondentes já aplicados. Terminal. */
-    CANCELADO;
+    /**
+     * Cancelado ANTES de qualquer pagamento confirmado — nunca houve dinheiro capturado nem baixa
+     * real de estoque para desfazer, só reserva (ou nem isso, no balcão). Terminal.
+     */
+    CANCELADO,
+
+    /**
+     * Reembolsado DEPOIS de pagamento confirmado — com estorno de pagamento, devolução de estoque
+     * e reversão do cashback ganho já aplicados (PDV-F007). Terminal.
+     *
+     * <p>Distinto de {@link #CANCELADO} de propósito: cancelar e reembolsar são eventos diferentes,
+     * e contá-los juntos esconderia quanto dinheiro de fato voltou ao cliente.</p>
+     */
+    REEMBOLSADO;
 
     private static final Map<OrderStatus, Set<OrderStatus>> ALLOWED = Map.of(
             CRIADO, EnumSet.of(CONCLUIDO, CANCELADO),
@@ -51,18 +63,21 @@ public enum OrderStatus {
             // termina — inventar um caminho de "retirada" pela esteira de envio faria o pedido
             // passar por SEPARADO e ENVIADO para uma entrega que aconteceu no balcão.
             AGUARDANDO_PAGAMENTO, EnumSet.of(PAGO, CONCLUIDO, CANCELADO),
-            PAGO, EnumSet.of(SEPARADO, CANCELADO),
-            SEPARADO, EnumSet.of(ENVIADO, CANCELADO),
-            ENVIADO, EnumSet.of(ENTREGUE, CANCELADO),
-            ENTREGUE, EnumSet.of(CANCELADO),
-            CONCLUIDO, EnumSet.of(CANCELADO),
-            CANCELADO, EnumSet.noneOf(OrderStatus.class));
+            // A partir daqui pagamento já foi confirmado: só REEMBOLSADO faz sentido como saída
+            // antecipada, nunca CANCELADO — sempre há dinheiro e estoque real para reverter.
+            PAGO, EnumSet.of(SEPARADO, REEMBOLSADO),
+            SEPARADO, EnumSet.of(ENVIADO, REEMBOLSADO),
+            ENVIADO, EnumSet.of(ENTREGUE, REEMBOLSADO),
+            ENTREGUE, EnumSet.of(REEMBOLSADO),
+            CONCLUIDO, EnumSet.of(REEMBOLSADO),
+            CANCELADO, EnumSet.noneOf(OrderStatus.class),
+            REEMBOLSADO, EnumSet.noneOf(OrderStatus.class));
 
     /**
      * Indica se este estado é final — nenhuma transição parte dele.
      *
-     * <p>Só {@link #CANCELADO} é terminal de verdade. {@link #ENTREGUE} e {@link #CONCLUIDO} ainda
-     * aceitam cancelamento, porque devolução existe e precisa de um caminho.</p>
+     * <p>{@link #CANCELADO} e {@link #REEMBOLSADO} são os dois terminais — um por evento
+     * (cancelamento pré-pagamento ou reembolso pós-pagamento), nunca os dois para o mesmo pedido.</p>
      */
     public boolean isTerminal() {
         return ALLOWED.get(this).isEmpty();
