@@ -10,6 +10,7 @@ import com.cernecommerce.core.domain.exception.pdv.NoOpenCashRegisterSessionExce
 import com.cernecommerce.core.domain.exception.pedido.DiscountLimitExceededException;
 import com.cernecommerce.core.domain.exception.pedido.OrderNotFoundException;
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.cashback.CashbackRate;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.pagamento.OrderPayment;
 import com.cernecommerce.core.domain.model.pagamento.PaymentMethod;
@@ -20,6 +21,7 @@ import com.cernecommerce.core.domain.model.pedido.Order;
 import com.cernecommerce.core.domain.model.pedido.OrderItem;
 import com.cernecommerce.core.domain.model.pedido.OrderStatus;
 import com.cernecommerce.core.domain.model.pedido.SalesChannel;
+import com.cernecommerce.core.ports.in.CashbackUseCase;
 import com.cernecommerce.core.ports.in.EstoqueUseCase;
 import com.cernecommerce.core.ports.in.PdvUseCase;
 import com.cernecommerce.core.ports.out.pagamento.OrderPaymentRepository;
@@ -43,6 +45,7 @@ public class PdvService implements PdvUseCase {
     private final OrderRepository orderRepository;
     private final OrderPaymentRepository orderPaymentRepository;
     private final EstoqueUseCase estoqueUseCase;
+    private final CashbackUseCase cashbackUseCase;
 
     /** Teto de desconto por pedido, em percentual sobre o bruto. */
     private final BigDecimal maxDiscountPercent;
@@ -50,12 +53,13 @@ public class PdvService implements PdvUseCase {
     public PdvService(CashRegisterRepository cashRegisterRepository,
             CashMovementRepository cashMovementRepository, OrderRepository orderRepository,
             OrderPaymentRepository orderPaymentRepository, EstoqueUseCase estoqueUseCase,
-            BigDecimal maxDiscountPercent) {
+            CashbackUseCase cashbackUseCase, BigDecimal maxDiscountPercent) {
         this.cashRegisterRepository = cashRegisterRepository;
         this.cashMovementRepository = cashMovementRepository;
         this.orderRepository = orderRepository;
         this.orderPaymentRepository = orderPaymentRepository;
         this.estoqueUseCase = estoqueUseCase;
+        this.cashbackUseCase = cashbackUseCase;
         this.maxDiscountPercent = maxDiscountPercent;
     }
 
@@ -159,8 +163,15 @@ public class PdvService implements PdvUseCase {
         // as duas checagens acontecem ANTES de qualquer escrita de estoque.
         List<OrderItem> orderItems = new ArrayList<>(items.size());
         for (SaleItemCommand command : items) {
-            orderItems.add(OrderItem.fromCatalog(command.sku(), command.quantity(),
-                    estoqueUseCase.findPricingBySku(command.sku()), command.discountAmount()));
+            OrderItem item = OrderItem.fromCatalog(command.sku(), command.quantity(),
+                    estoqueUseCase.findPricingBySku(command.sku()), command.discountAmount());
+            // CRM-F003: a taxa é resolvida e carimbada aqui — mudar a taxa amanhã não pode
+            // reescrever o cashback gerado por pedidos de ontem.
+            CashbackRate resolvedRate = cashbackUseCase.resolveApplicableRate(command.sku());
+            if (resolvedRate != null) {
+                item = item.withCashbackPercent(resolvedRate.percent());
+            }
+            orderItems.add(item);
         }
 
         // PDV-C004: o depósito vem da SESSÃO, não do request. É o que impede o operador de baixar
@@ -187,6 +198,7 @@ public class PdvService implements PdvUseCase {
             orderPaymentRepository.save(OrderPayment.captured(saved.id(), payment.method(),
                     payment.amount(), payment.installments()));
         }
+        cashbackUseCase.recordEarnedForOrder(saved);
         return saved;
     }
 
@@ -259,9 +271,11 @@ public class PdvService implements PdvUseCase {
         // O canal continua MARKETPLACE — quem muda é o sessionId, que passa a dizer qual caixa
         // recebeu o dinheiro. concluded() valida a transição e recusa pedido que não está
         // aguardando pagamento.
-        return orderRepository.save(order
+        Order saved = orderRepository.save(order
                 .withSession(session.id())
                 .concluded(orderRepository.nextOrderNumber(), null, Instant.now()));
+        cashbackUseCase.recordEarnedForOrder(saved);
+        return saved;
     }
 
     // ── Apoio ────────────────────────────────────────────────────────────────────────────────

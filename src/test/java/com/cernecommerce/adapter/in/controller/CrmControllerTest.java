@@ -5,6 +5,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 import com.cernecommerce.adapter.in.converter.CampaignDTOConverter;
+import com.cernecommerce.adapter.in.converter.CashbackDTOConverter;
 import com.cernecommerce.adapter.in.converter.ChannelStatusDTOConverter;
 import com.cernecommerce.adapter.in.converter.CustomerCsvConverter;
 import com.cernecommerce.adapter.in.converter.CustomerDTOConverter;
@@ -17,6 +18,7 @@ import com.cernecommerce.core.domain.exception.crm.DuplicateCustomerEmailExcepti
 import com.cernecommerce.core.domain.exception.crm.DuplicateTagNameException;
 import com.cernecommerce.core.domain.exception.crm.TagNotFoundException;
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.cashback.CashbackBalance;
 import com.cernecommerce.core.domain.model.crm.CampaignAutomation;
 import com.cernecommerce.core.domain.model.crm.CampaignChannel;
 import com.cernecommerce.core.domain.model.crm.CampaignLogEntry;
@@ -30,6 +32,7 @@ import com.cernecommerce.core.domain.model.crm.CustomerStage;
 import com.cernecommerce.core.domain.model.crm.StageTransition;
 import com.cernecommerce.core.domain.model.crm.Tag;
 import com.cernecommerce.core.domain.model.crm.TagSummary;
+import com.cernecommerce.core.ports.in.CashbackUseCase;
 import com.cernecommerce.core.ports.in.CrmUseCase;
 import com.cernecommerce.infra.handler.GlobalExceptionHandler;
 
@@ -50,6 +53,7 @@ public class CrmControllerTest {
 
     private MockMvc mockMvc;
     private CrmUseCase crmUseCase;
+    private CashbackUseCase cashbackUseCase;
 
     private static final UsernamePasswordAuthenticationToken AUTH =
             new UsernamePasswordAuthenticationToken("admin", null, List.of());
@@ -57,12 +61,13 @@ public class CrmControllerTest {
     @BeforeEach
     void setup() {
         crmUseCase = mock(CrmUseCase.class);
+        cashbackUseCase = mock(CashbackUseCase.class);
         ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new CrmController(crmUseCase, new CustomerDTOConverter(),
+                .standaloneSetup(new CrmController(crmUseCase, cashbackUseCase, new CustomerDTOConverter(),
                         new CustomerNoteDTOConverter(), new StageTransitionDTOConverter(),
                         new TagDTOConverter(), new CustomerCsvConverter(), new CampaignDTOConverter(),
-                        new ChannelStatusDTOConverter(), publisher))
+                        new ChannelStatusDTOConverter(), new CashbackDTOConverter(), publisher))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }
@@ -184,6 +189,8 @@ public class CrmControllerTest {
     @Test
     void get_returns_200() throws Exception {
         when(crmUseCase.findCustomerById(1L)).thenReturn(customer(1L, "maria@example.com"));
+        when(cashbackUseCase.getCustomerBalance(1L))
+                .thenReturn(new CashbackBalance(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO));
 
         mockMvc.perform(get("/crm/customers/1"))
                 .andExpect(status().isOk())
@@ -305,8 +312,10 @@ public class CrmControllerTest {
     }
 
     @Test
-    void listCashback_returns_200_withEmptyPlaceholder() throws Exception {
+    void listCashback_delegatesToCashbackUseCaseAndReturns200() throws Exception {
         when(crmUseCase.findCustomerById(1L)).thenReturn(customer(1L, "maria@example.com"));
+        when(cashbackUseCase.listCustomerEntries(1L, 0, 100))
+                .thenReturn(new PageResult<>(List.of(), 0, 100, 0, 0));
 
         mockMvc.perform(get("/crm/customers/1/cashback"))
                 .andExpect(status().isOk())
@@ -419,6 +428,8 @@ public class CrmControllerTest {
     void get_returns_tags_from_use_case() throws Exception {
         when(crmUseCase.findCustomerById(1L)).thenReturn(customer(1L, "maria@example.com"));
         when(crmUseCase.listCustomerTags(1L)).thenReturn(List.of(Tag.of(1L, "VIP")));
+        when(cashbackUseCase.getCustomerBalance(1L))
+                .thenReturn(new CashbackBalance(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO));
 
         mockMvc.perform(get("/crm/customers/1"))
                 .andExpect(status().isOk())

@@ -1,0 +1,198 @@
+package com.cernecommerce.core.service;
+
+import com.cernecommerce.core.domain.exception.cashback.CashbackRateAlreadyExistsException;
+import com.cernecommerce.core.domain.exception.cashback.CashbackRateNotFoundException;
+import com.cernecommerce.core.domain.exception.crm.CustomerNotFoundException;
+import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.cashback.CashbackBalance;
+import com.cernecommerce.core.domain.model.cashback.CashbackEntry;
+import com.cernecommerce.core.domain.model.cashback.CashbackMarginImpactItem;
+import com.cernecommerce.core.domain.model.cashback.CashbackRate;
+import com.cernecommerce.core.domain.model.cashback.CashbackScope;
+import com.cernecommerce.core.domain.model.crm.Customer;
+import com.cernecommerce.core.domain.model.estoque.Product;
+import com.cernecommerce.core.domain.model.pedido.Order;
+import com.cernecommerce.core.domain.model.pedido.OrderItem;
+import com.cernecommerce.core.ports.in.CashbackUseCase;
+import com.cernecommerce.core.ports.in.EstoqueUseCase;
+import com.cernecommerce.core.ports.out.SystemConfigPort;
+import com.cernecommerce.core.ports.out.cashback.CashbackEntryRepository;
+import com.cernecommerce.core.ports.out.cashback.CashbackRateRepository;
+import com.cernecommerce.core.ports.out.crm.CustomerRepository;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+
+/**
+ * Programa de cashback (CRM-F003, §2.4 do plano de arquitetura).
+ *
+ * <p>Esta fatia cobre ganhar cashback e as consultas de saldo/extrato/margem. Resgate e ajuste
+ * manual ficam para uma fatia seguinte — ver {@link CashbackUseCase}.</p>
+ */
+public class CashbackService implements CashbackUseCase {
+
+    private static final BigDecimal HUNDRED = BigDecimal.valueOf(100);
+    private static final int MARGIN_IMPACT_PAGE_SIZE = 200;
+    private static final int EXPIRING_SOON_WINDOW_DAYS = 30;
+
+    private final CashbackRateRepository cashbackRateRepository;
+    private final CashbackEntryRepository cashbackEntryRepository;
+    private final EstoqueUseCase estoqueUseCase;
+    private final CustomerRepository customerRepository;
+    private final SystemConfigPort systemConfigPort;
+
+    public CashbackService(CashbackRateRepository cashbackRateRepository,
+            CashbackEntryRepository cashbackEntryRepository, EstoqueUseCase estoqueUseCase,
+            CustomerRepository customerRepository, SystemConfigPort systemConfigPort) {
+        this.cashbackRateRepository = cashbackRateRepository;
+        this.cashbackEntryRepository = cashbackEntryRepository;
+        this.estoqueUseCase = estoqueUseCase;
+        this.customerRepository = customerRepository;
+        this.systemConfigPort = systemConfigPort;
+    }
+
+    @Override
+    @Transactional
+    public CashbackRate createRate(CashbackScope scope, String scopeRef, BigDecimal percent,
+            Instant validFrom, Instant validTo) {
+        if (cashbackRateRepository.existsActiveOpenEnded(scope, scopeRef)) {
+            throw new CashbackRateAlreadyExistsException(scope, scopeRef);
+        }
+        Instant from = validFrom == null ? Instant.now() : validFrom;
+        CashbackRate rate = new CashbackRate(null, scope, scopeRef, percent, true, from, validTo, Instant.now());
+        return cashbackRateRepository.save(rate);
+    }
+
+    @Override
+    @Transactional
+    public CashbackRate patchRate(Long id, BigDecimal percent, Boolean active, Instant validTo) {
+        CashbackRate current = cashbackRateRepository.findById(id)
+                .orElseThrow(() -> new CashbackRateNotFoundException(id));
+        return cashbackRateRepository.save(current.withPatch(percent, active, validTo));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResult<CashbackRate> listRates(int page, int size) {
+        return cashbackRateRepository.findAll(page, size);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public CashbackRate resolveApplicableRate(String sku) {
+        Product product = estoqueUseCase.findProductBySku(sku);
+        return cashbackRateRepository.findApplicable(sku, product.category(), Instant.now())
+                .orElse(null);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<CashbackMarginImpactItem> findMarginImpact(BigDecimal maxSharePercent) {
+        List<CashbackMarginImpactItem> result = new ArrayList<>();
+        Instant now = Instant.now();
+        int page = 0;
+        PageResult<Product> products;
+        do {
+            products = estoqueUseCase.listProducts(page, MARGIN_IMPACT_PAGE_SIZE);
+            for (Product product : products.content()) {
+                BigDecimal marginPercent = product.pricing().marginPercent();
+                if (marginPercent == null || marginPercent.signum() == 0) {
+                    continue;
+                }
+                Optional<CashbackRate> rate = cashbackRateRepository.findApplicable(
+                        product.sku(), product.category(), now);
+                if (rate.isEmpty()) {
+                    continue;
+                }
+                BigDecimal cashbackPercent = rate.get().percent();
+                BigDecimal share = cashbackPercent
+                        .divide(marginPercent, 6, RoundingMode.HALF_UP)
+                        .multiply(HUNDRED)
+                        .setScale(2, RoundingMode.HALF_UP);
+                if (share.compareTo(maxSharePercent) > 0) {
+                    result.add(new CashbackMarginImpactItem(product.sku(), product.name(),
+                            marginPercent, cashbackPercent, share));
+                }
+            }
+            page++;
+        } while (page < products.totalPages());
+        return result;
+    }
+
+    @Override
+    @Transactional
+    public void recordEarnedForOrder(Order order) {
+        if (order.customerId() == null) {
+            // Venda anônima de passagem — sem cliente não há para quem lançar o ganho.
+            return;
+        }
+        Customer customer = customerRepository.findById(order.customerId())
+                .orElseThrow(() -> new CustomerNotFoundException(order.customerId()));
+        if (!customer.isOfficiallyRegistered()) {
+            // Cliente "leve" (sem CPF) não acumula cashback — regra de elegibilidade da Fatia 4.
+            return;
+        }
+
+        Instant anchor = order.paidAt() != null ? order.paidAt() : Instant.now();
+        int carenciaDias = systemConfigPort.getInt("cashback.carencia.dias", 7);
+        int expiracaoDias = systemConfigPort.getInt("cashback.expiracao.dias", 180);
+        Instant availableAt = anchor.plus(carenciaDias, ChronoUnit.DAYS);
+        Instant expiresAt = availableAt.plus(expiracaoDias, ChronoUnit.DAYS);
+        Instant now = Instant.now();
+
+        for (OrderItem item : order.items()) {
+            BigDecimal amount = item.cashbackAmount();
+            if (amount != null && amount.signum() > 0) {
+                cashbackEntryRepository.save(CashbackEntry.earned(order.customerId(), order.id(),
+                        item.id(), amount, now, availableAt, expiresAt));
+            }
+        }
+    }
+
+    @Override
+    @Transactional
+    public void reverseEarningsForOrder(Order order) {
+        Instant now = Instant.now();
+        for (CashbackEntry earned : cashbackEntryRepository.findEarnedByOrderId(order.id())) {
+            cashbackEntryRepository.save(CashbackEntry.reversed(earned, now));
+        }
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public CashbackBalance getCustomerBalance(Long customerId) {
+        customerRepository.findById(customerId)
+                .orElseThrow(() -> new CustomerNotFoundException(customerId));
+        Instant now = Instant.now();
+        BigDecimal available = cashbackEntryRepository.sumAvailableByCustomerId(customerId, now);
+        BigDecimal pending = cashbackEntryRepository.sumPendingByCustomerId(customerId, now);
+        BigDecimal expiringSoon = cashbackEntryRepository.sumExpiringSoonByCustomerId(customerId, now,
+                now.plus(EXPIRING_SOON_WINDOW_DAYS, ChronoUnit.DAYS));
+        return new CashbackBalance(available, pending, expiringSoon);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResult<CashbackEntry> listCustomerEntries(Long customerId, int page, int size) {
+        customerRepository.findById(customerId)
+                .orElseThrow(() -> new CustomerNotFoundException(customerId));
+        return cashbackEntryRepository.findByCustomerId(customerId, page, size);
+    }
+
+    @Override
+    @Transactional
+    public int expireEntries(int batchSize) {
+        Instant now = Instant.now();
+        List<CashbackEntry> pendingExpiry = cashbackEntryRepository.findEarnedPendingExpiry(now, batchSize);
+        for (CashbackEntry entry : pendingExpiry) {
+            cashbackEntryRepository.save(CashbackEntry.expired(entry, now));
+        }
+        return pendingExpiry.size();
+    }
+}

@@ -14,6 +14,7 @@ import com.cernecommerce.core.domain.exception.pedido.InvalidOrderStatusTransiti
 import com.cernecommerce.core.domain.exception.pedido.OrderNotFoundException;
 import com.cernecommerce.core.domain.exception.pedido.ProductNotPricedException;
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.cashback.CashbackRate;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
@@ -25,6 +26,7 @@ import com.cernecommerce.core.domain.model.pdv.CashRegisterSession;
 import com.cernecommerce.core.domain.model.pedido.Order;
 import com.cernecommerce.core.domain.model.pedido.OrderStatus;
 import com.cernecommerce.core.domain.model.pedido.SalesChannel;
+import com.cernecommerce.core.ports.in.CashbackUseCase;
 import com.cernecommerce.core.ports.in.EstoqueUseCase;
 import com.cernecommerce.core.ports.in.PdvUseCase.PaymentCommand;
 import com.cernecommerce.core.ports.in.PdvUseCase.PaymentTotal;
@@ -63,13 +65,14 @@ class PdvServiceTest {
     @Mock OrderRepository orderRepository;
     @Mock OrderPaymentRepository orderPaymentRepository;
     @Mock EstoqueUseCase estoqueUseCase;
+    @Mock CashbackUseCase cashbackUseCase;
 
     PdvService pdvService;
 
     @BeforeEach
     void setUp() {
         pdvService = new PdvService(cashRegisterRepository, cashMovementRepository, orderRepository,
-                orderPaymentRepository, estoqueUseCase, MAX_DISCOUNT_PERCENT);
+                orderPaymentRepository, estoqueUseCase, cashbackUseCase, MAX_DISCOUNT_PERCENT);
     }
 
     /** Uma linha de pagamento em dinheiro, exata — o caso comum dos testes que não testam pagamento. */
@@ -100,7 +103,7 @@ class PdvServiceTest {
                     arg.customerId(), arg.sessionId(), arg.warehouseCode(), arg.items(), arg.grossAmount(),
                     arg.discountAmount(), arg.cashbackRedeemed(), arg.netAmount(), arg.changeAmount(),
                     arg.cancelReason(), arg.createdAt(), arg.paidAt(), arg.concludedAt(), arg.cancelledAt(),
-                    arg.version());
+                    arg.refundedAt(), arg.version());
         });
     }
 
@@ -287,7 +290,7 @@ class PdvServiceTest {
                 null, "LOJA-01", List.of(com.cernecommerce.core.domain.model.pedido.OrderItem
                         .fromCatalog("CARV-001", new BigDecimal("2.000"), CARVAO, null)),
                 new BigDecimal("44.00"), BigDecimal.ZERO, BigDecimal.ZERO, new BigDecimal("44.00"),
-                null, null, Instant.now(), null, null, null, 0L);
+                null, null, Instant.now(), null, null, null, null, 0L);
     }
 
     @Test
@@ -379,6 +382,45 @@ class PdvServiceTest {
             assertThat(item.unitPrice()).isEqualByComparingTo("22.00");
             assertThat(item.costPrice()).isEqualByComparingTo("18.00");
         });
+    }
+
+    // ── CRM-F003: cashback ───────────────────────────────────────────────────────────────────
+
+    @Test
+    void registerSale_stampsCashbackPercentWhenARateApplies() {
+        givenOpenSessionAndPersistence();
+        when(estoqueUseCase.findPricingBySku("CARV-001")).thenReturn(CARVAO);
+        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any())).thenReturn(null);
+        when(cashbackUseCase.resolveApplicableRate("CARV-001"))
+                .thenReturn(CashbackRate.global(new BigDecimal("3.0")));
+
+        Order order = pdvService.registerSale(1L, null, List.of(twoCharcoals(null)), cash("44.00"), "caixa1");
+
+        assertThat(order.items()).singleElement()
+                .satisfies(item -> assertThat(item.cashbackPercent()).isEqualByComparingTo("3.0"));
+    }
+
+    @Test
+    void registerSale_leavesCashbackPercentNullWhenNoRateApplies() {
+        givenOpenSessionAndPersistence();
+        when(estoqueUseCase.findPricingBySku("CARV-001")).thenReturn(CARVAO);
+        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any())).thenReturn(null);
+        when(cashbackUseCase.resolveApplicableRate("CARV-001")).thenReturn(null);
+
+        Order order = pdvService.registerSale(1L, null, List.of(twoCharcoals(null)), cash("44.00"), "caixa1");
+
+        assertThat(order.items()).singleElement().satisfies(item -> assertThat(item.cashbackPercent()).isNull());
+    }
+
+    @Test
+    void registerSale_recordsEarnedCashbackAfterSavingTheConcludedOrder() {
+        givenOpenSessionAndPersistence();
+        when(estoqueUseCase.findPricingBySku("CARV-001")).thenReturn(CARVAO);
+        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any())).thenReturn(null);
+
+        Order order = pdvService.registerSale(1L, 42L, List.of(twoCharcoals(null)), cash("44.00"), "caixa1");
+
+        verify(cashbackUseCase).recordEarnedForOrder(order);
     }
 
     @Test
@@ -633,7 +675,7 @@ class PdvServiceTest {
                         new BigDecimal("2.000"), new BigDecimal("22.00"), new BigDecimal("18.00"),
                         BigDecimal.ZERO, null)),
                 new BigDecimal("44.00"), BigDecimal.ZERO, BigDecimal.ZERO, new BigDecimal("44.00"),
-                null, null, Instant.now(), Instant.now(), Instant.now(), null, 0L);
+                null, null, Instant.now(), Instant.now(), Instant.now(), null, null, 0L);
         when(orderRepository.findById(7L)).thenReturn(Optional.of(stored));
         OrderPayment payment = OrderPayment.captured(7L, PaymentMethod.DINHEIRO, new BigDecimal("44.00"), null);
         when(orderPaymentRepository.findByOrderId(7L)).thenReturn(List.of(payment));
@@ -658,7 +700,7 @@ class PdvServiceTest {
                         new BigDecimal("2.000"), new BigDecimal("22.00"), new BigDecimal("18.00"),
                         BigDecimal.ZERO, null)),
                 new BigDecimal("44.00"), BigDecimal.ZERO, BigDecimal.ZERO, new BigDecimal("44.00"),
-                null, null, Instant.now(), Instant.now(), Instant.now(), null, 0L);
+                null, null, Instant.now(), Instant.now(), Instant.now(), null, null, 0L);
         when(orderRepository.findById(7L)).thenReturn(Optional.of(stored));
 
         assertThat(pdvService.getOrder(7L).orderNumber()).isEqualTo("000001000");

@@ -1,6 +1,7 @@
 package com.cernecommerce.adapter.in.controller;
 
 import com.cernecommerce.adapter.in.converter.CampaignDTOConverter;
+import com.cernecommerce.adapter.in.converter.CashbackDTOConverter;
 import com.cernecommerce.adapter.in.converter.ChannelStatusDTOConverter;
 import com.cernecommerce.adapter.in.converter.CustomerCsvConverter;
 import com.cernecommerce.adapter.in.converter.CustomerDTOConverter;
@@ -18,6 +19,7 @@ import com.cernecommerce.adapter.in.dtos.response.CampaignAutomationResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.CampaignLogResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.ChannelStatusResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.CrmDashboardResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.CashbackEntryResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.CustomerNoteResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.CustomerResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.StageTransitionResponseDTO;
@@ -31,6 +33,7 @@ import com.cernecommerce.core.domain.model.crm.CampaignLogEntry;
 import com.cernecommerce.core.domain.model.crm.CrmDashboardOverview;
 import com.cernecommerce.core.domain.model.crm.Customer;
 import com.cernecommerce.core.domain.model.crm.CustomerNote;
+import com.cernecommerce.core.ports.in.CashbackUseCase;
 import com.cernecommerce.core.ports.in.CrmUseCase;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -66,6 +69,7 @@ import java.util.Map;
 public class CrmController {
 
     private final CrmUseCase crmUseCase;
+    private final CashbackUseCase cashbackUseCase;
     private final CustomerDTOConverter converter;
     private final CustomerNoteDTOConverter noteConverter;
     private final StageTransitionDTOConverter stageConverter;
@@ -73,14 +77,16 @@ public class CrmController {
     private final CustomerCsvConverter csvConverter;
     private final CampaignDTOConverter campaignConverter;
     private final ChannelStatusDTOConverter channelStatusConverter;
+    private final CashbackDTOConverter cashbackConverter;
     private final ApplicationEventPublisher publisher;
 
-    public CrmController(CrmUseCase crmUseCase, CustomerDTOConverter converter,
+    public CrmController(CrmUseCase crmUseCase, CashbackUseCase cashbackUseCase, CustomerDTOConverter converter,
             CustomerNoteDTOConverter noteConverter, StageTransitionDTOConverter stageConverter,
             TagDTOConverter tagConverter, CustomerCsvConverter csvConverter,
             CampaignDTOConverter campaignConverter, ChannelStatusDTOConverter channelStatusConverter,
-            ApplicationEventPublisher publisher) {
+            CashbackDTOConverter cashbackConverter, ApplicationEventPublisher publisher) {
         this.crmUseCase = crmUseCase;
+        this.cashbackUseCase = cashbackUseCase;
         this.converter = converter;
         this.noteConverter = noteConverter;
         this.stageConverter = stageConverter;
@@ -88,6 +94,7 @@ public class CrmController {
         this.csvConverter = csvConverter;
         this.campaignConverter = campaignConverter;
         this.channelStatusConverter = channelStatusConverter;
+        this.cashbackConverter = cashbackConverter;
         this.publisher = publisher;
     }
 
@@ -142,7 +149,11 @@ public class CrmController {
         Customer customer = crmUseCase.findCustomerById(id);
         List<String> tagNomes = crmUseCase.listCustomerTags(id).stream()
                 .map(com.cernecommerce.core.domain.model.crm.Tag::nome).toList();
-        return ResponseEntity.ok(converter.toResponse(customer, tagNomes));
+        CustomerResponseDTO dto = converter.toResponse(customer, tagNomes);
+        // CRM-F003: só a busca por id paga a consulta de saldo — a listagem paginada mantém o
+        // placeholder de propósito, para não virar um N+1 de saldo por linha da página.
+        dto.setCashback(cashbackUseCase.getCustomerBalance(id).available());
+        return ResponseEntity.ok(dto);
     }
 
     @Operation(summary = "Lista clientes paginados, com filtro opcional por nome ou contato")
@@ -238,17 +249,21 @@ public class CrmController {
         return ResponseEntity.ok(List.of());
     }
 
-    @Operation(summary = "Extrato de cashback do cliente — placeholder até o domínio de cashback existir")
+    @Operation(summary = "Extrato de cashback do cliente",
+            description = "As 100 entradas mais recentes do ledger — EARNED, REDEEMED, REVERSED e "
+                    + "EXPIRED. Para extrato paginado completo, use GET /cashback/customers/{id}/entries.")
     @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "OK — sempre lista vazia por enquanto"),
+            @ApiResponse(responseCode = "200", description = "OK"),
             @ApiResponse(responseCode = "404", description = "Cliente não encontrado", content = @Content),
             @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
     })
     @GetMapping("/customers/{id}/cashback")
     @PreAuthorize("hasAuthority('CRM_CUSTOMER_READ')")
-    public ResponseEntity<List<Object>> listCashback(@PathVariable Long id) {
+    public ResponseEntity<List<CashbackEntryResponseDTO>> listCashback(@PathVariable Long id) {
         crmUseCase.findCustomerById(id);
-        return ResponseEntity.ok(List.of());
+        List<CashbackEntryResponseDTO> response = cashbackUseCase.listCustomerEntries(id, 0, 100)
+                .content().stream().map(cashbackConverter::toResponse).toList();
+        return ResponseEntity.ok(response);
     }
 
     @Operation(summary = "Move o cliente para um novo estágio no Kanban de atendimento")

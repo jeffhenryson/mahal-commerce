@@ -48,7 +48,9 @@ public record AuditEvent(EventType type, String username, Instant timestamp, Map
         // PDV — ciclo de caixa
         CASH_SESSION_OPENED, CASH_SESSION_CLOSED, CASH_MOVEMENT_REGISTERED,
         // Pedido
-        ORDER_STATUS_CHANGED, ORDER_CANCELLED
+        ORDER_STATUS_CHANGED, ORDER_CANCELLED, ORDER_REFUNDED,
+        // Cashback (CRM-F003)
+        CASHBACK_RATE_CHANGED, CASHBACK_EARNED
     }
 
     public static AuditEvent of(EventType type, String username) {

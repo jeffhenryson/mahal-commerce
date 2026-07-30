@@ -225,6 +225,7 @@ public class PdvController {
                         "type", MovementType.SAIDA.name(),
                         "skus", items.stream().map(SaleItemCommand::sku).toList(),
                         "itemCount", items.size())));
+        publishCashbackEarnedIfAny(order, authentication.getName());
         return ResponseEntity.status(201)
                 .body(orderConverter.toResponse(order, pdvUseCase.getOrderPayments(order.id())));
     }
@@ -316,7 +317,22 @@ public class PdvController {
                         "orderNumber", order.orderNumber(),
                         "warehouseCode", order.warehouseCode(),
                         "type", MovementType.SAIDA.name())));
+        publishCashbackEarnedIfAny(order, authentication.getName());
         return ResponseEntity.ok(orderConverter.toResponse(order, pdvUseCase.getOrderPayments(order.id())));
+    }
+
+    /**
+     * CRM-F003: um evento à parte do {@code STOCK_MOVEMENT_REGISTERED} da venda, e só quando há
+     * ganho de verdade — venda anônima ou cliente sem CPF não gera nada, e não vale poluir a
+     * trilha de auditoria com um evento de valor zero.
+     */
+    private void publishCashbackEarnedIfAny(Order order, String username) {
+        if (order.totalCashbackEarned().signum() > 0) {
+            publisher.publishEvent(AuditEvent.of(EventType.CASHBACK_EARNED, username,
+                    Map.of("orderId", order.id(),
+                            "orderNumber", order.orderNumber(),
+                            "amount", order.totalCashbackEarned())));
+        }
     }
 
     /**
