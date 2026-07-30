@@ -32,11 +32,19 @@ import com.cernecommerce.core.domain.exception.rbac.RoleNotFoundException;
 import com.cernecommerce.core.domain.exception.cashback.CashbackRateAlreadyExistsException;
 import com.cernecommerce.core.domain.exception.cashback.CashbackRateNotFoundException;
 import com.cernecommerce.core.domain.exception.compras.SupplierNotFoundException;
+import com.cernecommerce.core.domain.exception.estoque.DuplicateKitComponentException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateSkuException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateWarehouseCodeException;
+import com.cernecommerce.core.domain.exception.estoque.EmptyKitRecipeException;
 import com.cernecommerce.core.domain.exception.estoque.InactiveProductException;
 import com.cernecommerce.core.domain.exception.estoque.InactiveWarehouseException;
 import com.cernecommerce.core.domain.exception.estoque.InsufficientStockException;
+import com.cernecommerce.core.domain.exception.estoque.KitComponentAlreadyInUseException;
+import com.cernecommerce.core.domain.exception.estoque.KitComponentNotSimpleException;
+import com.cernecommerce.core.domain.exception.estoque.KitCostNotEditableException;
+import com.cernecommerce.core.domain.exception.estoque.KitDirectAdjustmentException;
+import com.cernecommerce.core.domain.exception.estoque.KitHasVariantsException;
+import com.cernecommerce.core.domain.exception.estoque.KitSelfReferenceException;
 import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountAlreadyOpenException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountNotFoundException;
@@ -150,6 +158,51 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ProductNotFoundException.class)
     public ResponseEntity<ApiError> handleProductNotFound(ProductNotFoundException ex, HttpServletRequest req) {
         return error(HttpStatus.NOT_FOUND, ex.getMessage(), "PRODUCT_NOT_FOUND", req);
+    }
+
+    // EST-F015 — kits virtuais, de um nível só.
+    @ExceptionHandler(EmptyKitRecipeException.class)
+    public ResponseEntity<ApiError> handleEmptyKitRecipe(EmptyKitRecipeException ex, HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "KIT_RECIPE_EMPTY", req);
+    }
+
+    @ExceptionHandler(KitHasVariantsException.class)
+    public ResponseEntity<ApiError> handleKitHasVariants(KitHasVariantsException ex, HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "KIT_HAS_VARIANTS", req);
+    }
+
+    @ExceptionHandler(KitComponentAlreadyInUseException.class)
+    public ResponseEntity<ApiError> handleKitComponentAlreadyInUse(KitComponentAlreadyInUseException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "KIT_COMPONENT_ALREADY_IN_USE", req);
+    }
+
+    @ExceptionHandler(KitSelfReferenceException.class)
+    public ResponseEntity<ApiError> handleKitSelfReference(KitSelfReferenceException ex, HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "KIT_SELF_REFERENCE", req);
+    }
+
+    @ExceptionHandler(DuplicateKitComponentException.class)
+    public ResponseEntity<ApiError> handleDuplicateKitComponent(DuplicateKitComponentException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "DUPLICATE_KIT_COMPONENT", req);
+    }
+
+    @ExceptionHandler(KitComponentNotSimpleException.class)
+    public ResponseEntity<ApiError> handleKitComponentNotSimple(KitComponentNotSimpleException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "KIT_COMPONENT_NOT_SIMPLE", req);
+    }
+
+    @ExceptionHandler(KitDirectAdjustmentException.class)
+    public ResponseEntity<ApiError> handleKitDirectAdjustment(KitDirectAdjustmentException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "KIT_DIRECT_ADJUSTMENT", req);
+    }
+
+    @ExceptionHandler(KitCostNotEditableException.class)
+    public ResponseEntity<ApiError> handleKitCostNotEditable(KitCostNotEditableException ex, HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "KIT_COST_NOT_EDITABLE", req);
     }
 
     /**

@@ -65,6 +65,7 @@ import com.cernecommerce.core.service.UserService;
 import com.cernecommerce.core.ports.in.OrderUseCase;
 import com.cernecommerce.core.ports.in.PdvUseCase;
 import com.cernecommerce.core.ports.in.EstoqueUseCase;
+import com.cernecommerce.core.ports.out.estoque.KitComponentRepository;
 import com.cernecommerce.core.ports.out.estoque.ProductRepository;
 import com.cernecommerce.core.ports.out.estoque.ReorderPointRepository;
 import com.cernecommerce.core.ports.out.estoque.StockBalanceRepository;
@@ -233,11 +234,12 @@ class CoreBeanConfig {
             AfterCommitExecutor afterCommitExecutor,
             // 30 min cobre com folga a confirmação de PIX (segundos) e de cartão, sem deixar saldo
             // travado por engano quando o cliente abandona o checkout na tela de pagamento.
-            @Value("${estoque.reservation.default-ttl:PT30M}") Duration defaultReservationTtl) {
+            @Value("${estoque.reservation.default-ttl:PT30M}") Duration defaultReservationTtl,
+            KitComponentRepository kitComponentRepository) {
         return new EstoqueService(productRepository, warehouseRepository, stockBalanceRepository,
                 stockMovementRepository, reorderPointRepository, stockIntegrityRepository,
                 stockCountRepository, stockReservationRepository, notificationUseCase, userRepository,
-                afterCommitExecutor, defaultReservationTtl);
+                afterCommitExecutor, defaultReservationTtl, kitComponentRepository);
     }
 
     @Bean
