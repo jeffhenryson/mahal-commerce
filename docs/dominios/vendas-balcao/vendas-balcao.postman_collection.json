@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "6e9af74b-8f04-5565-a62e-827738736a03",
     "name": "Mahal — Vendas Balcão (PDV)",
-    "description": "Coleção de testes do módulo **Vendas Balcão / PDV** (`/pdv`) do mahal-backend.\n\nCobre o **ciclo de caixa completo** — abertura, venda, sangria/suprimento e fechamento com conferência — e o registro de venda, que **dá baixa automática no estoque** item a item. Se qualquer item não tiver saldo, a venda inteira é revertida.\n\nRode as pastas **na ordem**: elas encadeiam `warehouseCode`, `sku` e `sessionId` por variável de coleção. Não é mais preciso abrir sessão pelo banco — `02 — Abertura de caixa` faz isso pela API.\n\n**O que mudou no contrato (Fatia 0 e 1, 2026-07-28):**\n- `unitPrice` **saiu** do corpo da venda: o preço vem do catálogo (`Pricing`, V63). Produto sem preço recusa a venda com `409 PRODUCT_NOT_PRICED`.\n- `warehouseCode` **saiu** do corpo da venda: vem da sessão de caixa.\n- Desconto é `discountAmount` por item e exige `PDV_SALE_DISCOUNT`.\n- Vender e movimentar dinheiro exigem que a sessão seja **do próprio operador** (`403 SESSION_NOT_OWNED`).\n\n**Sobre o fechamento:** divergência entre contado e esperado **não bloqueia** — é registrada, como no fechamento de um balanço de inventário. `differenceAmount` negativo é falta na gaveta, e é um número legítimo.\n\n⚠️ `expectedAmount` soma **todas** as formas de pagamento enquanto `order_payment` não existir (Fatia 3). Com vendas só em dinheiro o número bate; na primeira venda no cartão ele acusa uma sobra que não existe fisicamente.\n\nPermissões necessárias: `PDV_READ`, `PDV_SALE_MANAGE`, `PDV_SALE_DISCOUNT`, `PDV_SESSION_MANAGE`, `PDV_SESSION_CLOSE` — todas semeadas em `dev`.",
+    "description": "Coleção de testes do módulo **Vendas Balcão / PDV** (`/pdv`) do mahal-backend.\n\nCobre o **ciclo de caixa completo** — abertura, venda, sangria/suprimento e fechamento com conferência — e o registro de venda, que **dá baixa automática no estoque** item a item. Se qualquer item não tiver saldo, a venda inteira é revertida.\n\nRode as pastas **na ordem**: elas encadeiam `warehouseCode`, `sku` e `sessionId` por variável de coleção. Não é mais preciso abrir sessão pelo banco — `02 — Abertura de caixa` faz isso pela API.\n\n**O que mudou no contrato (Fatia 0 e 1, 2026-07-28):**\n- `unitPrice` **saiu** do corpo da venda: o preço vem do catálogo (`Pricing`, V63). Produto sem preço recusa a venda com `409 PRODUCT_NOT_PRICED`.\n- `warehouseCode` **saiu** do corpo da venda: vem da sessão de caixa.\n- Desconto é `discountAmount` por item e exige `PDV_SALE_DISCOUNT`.\n- Vender e movimentar dinheiro exigem que a sessão seja **do próprio operador** (`403 SESSION_NOT_OWNED`).\n\n**Cobertura conhecidamente incompleta (PDV-C001, documentação ainda não auditada):** esta coleção não cobre `GET /pdv/pending-online-orders`, `POST /pdv/sessions/{id}/orders/{orderId}/settle` nem a superfície `/orders` do administrador — todas existem na API desde a Fatia 1, mas ainda não têm exemplo aqui.\n\n**Sobre o fechamento:** divergência entre contado e esperado **não bloqueia** — é registrada, como no fechamento de um balanço de inventário. `differenceAmount` negativo é falta na gaveta, e é um número legítimo.\n\n**Pagamento (Fatia 3, PDV-F006, fechada em 2026-07-29):** `payments` é obrigatório em toda venda (pelo menos uma linha). `expectedAmount` do fechamento soma só o `DINHEIRO` capturado na sessão — débito/crédito/PIX se conferem contra a adquirente, não contra a gaveta. Ver a pasta `07 — Pagamento e comprovante`.\n\nPermissões necessárias: `PDV_READ`, `PDV_SALE_MANAGE`, `PDV_SALE_DISCOUNT`, `PDV_SESSION_MANAGE`, `PDV_SESSION_CLOSE` — todas semeadas em `dev`.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -68,6 +68,11 @@
     },
     {
       "key": "sku",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "orderId",
       "value": "",
       "type": "string"
     }
@@ -718,14 +723,14 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"warehouseCode\": \"{{warehouseCode}}\",\n  \"items\": [\n    {\n      \"sku\": \"{{sku}}\",\n      \"quantity\": 2\n    },\n    {\n      \"sku\": \"{{sku}}\",\n      \"quantity\": 1\n    }\n  ]\n}",
+              "raw": "{\n  \"items\": [\n    {\n      \"sku\": \"{{sku}}\",\n      \"quantity\": 2\n    },\n    {\n      \"sku\": \"{{sku}}\",\n      \"quantity\": 1\n    }\n  ],\n  \"payments\": [\n    {\n      \"method\": \"DINHEIRO\",\n      \"amount\": 61.00\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             },
-            "description": "`PDV_SALE_MANAGE`. Cada item vira um `StockMovement` de `SAIDA` com o motivo *Venda balcão sessão #id*. Total esperado: 2 × 25,50 + 1 × 10,00 = 61,00."
+            "description": "`PDV_SALE_MANAGE`. O depósito vem da sessão (PDV-C004) — não vai mais no corpo. `payments` é obrigatório desde PDV-F006 (pelo menos uma linha); aqui é pago em dinheiro, exato, sem troco. Cada item vira um `StockMovement` de `SAIDA` com o motivo *Venda balcão sessão #id*. Total esperado: 2 × 25,50 + 1 × 10,00 = 61,00."
           },
           "response": [],
           "event": [
@@ -754,7 +759,14 @@
                   "    pm.expect(json.items).to.have.lengthOf(2);",
                   "});",
                   "pm.test('Total calculado no servidor é 61.00',",
-                  "    () => pm.expect(Number(json.totalAmount)).to.eql(61));"
+                  "    () => pm.expect(Number(json.netAmount)).to.eql(61));",
+                  "pm.test('Pagamento em dinheiro capturado, sem troco', () => {",
+                  "    pm.expect(json.payments).to.have.lengthOf(1);",
+                  "    pm.expect(json.payments[0].method).to.eql('DINHEIRO');",
+                  "    pm.expect(json.payments[0].status).to.eql('CAPTURED');",
+                  "    pm.expect(json.changeAmount).to.be.null;",
+                  "});",
+                  "pm.collectionVariables.set('orderId', json.id);"
                 ]
               }
             }
@@ -1051,14 +1063,14 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"warehouseCode\": \"{{warehouseCode}}\",\n  \"items\": [\n    {\n      \"sku\": \"{{sku}}\",\n      \"quantity\": 1\n    },\n    {\n      \"sku\": \"{{sku}}\",\n      \"quantity\": 9999\n    }\n  ]\n}",
+              "raw": "{\n  \"items\": [\n    {\n      \"sku\": \"{{sku}}\",\n      \"quantity\": 1\n    },\n    {\n      \"sku\": \"{{sku}}\",\n      \"quantity\": 9999\n    }\n  ],\n  \"payments\": [\n    {\n      \"method\": \"DINHEIRO\",\n      \"amount\": 1000.00\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             },
-            "description": "O primeiro item tem saldo, o segundo não. Como a baixa acontece dentro da mesma transação, **nenhum** dos dois é gravado — confirme no próximo request."
+            "description": "O primeiro item tem saldo, o segundo não. `payments` presente e generoso de propósito — o teste é sobre estoque, não sobre pagamento; sem essa linha, a requisição barraria antes por payments ausente e mascararia o que este caso quer provar. Como a baixa acontece dentro da mesma transação, **nenhum** dos dois itens é gravado — confirme no próximo request."
           },
           "response": [],
           "event": [
@@ -1174,14 +1186,14 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"warehouseCode\": \"{{warehouseCode}}\",\n  \"items\": [\n    {\n      \"sku\": \"{{sku}}\",\n      \"quantity\": 1\n    }\n  ]\n}",
+              "raw": "{\n  \"items\": [\n    {\n      \"sku\": \"{{sku}}\",\n      \"quantity\": 1\n    }\n  ],\n  \"payments\": [\n    {\n      \"method\": \"DINHEIRO\",\n      \"amount\": 25.50\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             },
-            "description": "A sessão é validada antes de qualquer baixa de estoque."
+            "description": "A sessão é validada antes de qualquer coisa — inclusive antes do pagamento."
           },
           "response": [],
           "event": [
@@ -1226,14 +1238,14 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"warehouseCode\": \"{{warehouseCode}}\",\n  \"items\": []\n}",
+              "raw": "{\n  \"items\": [],\n  \"payments\": [\n    {\n      \"method\": \"DINHEIRO\",\n      \"amount\": 1.00\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             },
-            "description": "`items` é `@NotEmpty`."
+            "description": "`items` é `@NotEmpty`. `payments` presente para isolar especificamente essa violação."
           },
           "response": [],
           "event": [
@@ -1409,6 +1421,383 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('Status 409', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "07 — Pagamento e comprovante (PDV-F006)",
+      "description": "`payments` é obrigatório em toda venda desde PDV-F006. Só DINHEIRO pode ser tendido a mais para gerar troco — débito/crédito/PIX sozinhos não podem passar do total do pedido.",
+      "item": [
+        {
+          "name": "Venda com pagamento dividido e troco",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pdv/sessions/{{sessionId}}/sales",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pdv",
+                "sessions",
+                "{{sessionId}}",
+                "sales"
+              ]
+            },
+            "description": "Item de 25,50: R$15 no débito (exato) + R$20 em dinheiro para cobrir o resto (R$10,50) — troco de R$9,50, atribuível só ao dinheiro.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"sku\": \"{{sku}}\",\n      \"quantity\": 1\n    }\n  ],\n  \"payments\": [\n    {\n      \"method\": \"DEBITO\",\n      \"amount\": 15.00\n    },\n    {\n      \"method\": \"DINHEIRO\",\n      \"amount\": 20.00\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const json = pm.response.json();",
+                  "pm.test('Dois pagamentos capturados', () => pm.expect(json.payments).to.have.lengthOf(2));",
+                  "pm.test('Troco é 9.50', () => pm.expect(Number(json.changeAmount)).to.eql(9.5));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Erro: pagamento insuficiente → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pdv/sessions/{{sessionId}}/sales",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pdv",
+                "sessions",
+                "{{sessionId}}",
+                "sales"
+              ]
+            },
+            "description": "R$1,00 para um item de 25,50 — a soma não cobre o líquido.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"sku\": \"{{sku}}\",\n      \"quantity\": 1\n    }\n  ],\n  \"payments\": [\n    {\n      \"method\": \"DINHEIRO\",\n      \"amount\": 1.00\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('errorCode INSUFFICIENT_PAYMENT', () => pm.expect(pm.response.json().errorCode).to.eql('INSUFFICIENT_PAYMENT'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Erro: débito sozinho acima do total → 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pdv/sessions/{{sessionId}}/sales",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pdv",
+                "sessions",
+                "{{sessionId}}",
+                "sales"
+              ]
+            },
+            "description": "Item de 25,50, débito de 50,00 — só dinheiro pode ser tendido a mais para virar troco; débito sozinho acima do total é erro, não troco.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"sku\": \"{{sku}}\",\n      \"quantity\": 1\n    }\n  ],\n  \"payments\": [\n    {\n      \"method\": \"DEBITO\",\n      \"amount\": 50.00\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 409', () => pm.response.to.have.status(409));",
+                  "pm.test('errorCode PAYMENT_EXCEEDS_ORDER_TOTAL', () => pm.expect(pm.response.json().errorCode).to.eql('PAYMENT_EXCEEDS_ORDER_TOTAL'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Venda sem payments → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pdv/sessions/{{sessionId}}/sales",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pdv",
+                "sessions",
+                "{{sessionId}}",
+                "sales"
+              ]
+            },
+            "description": "`payments` é `@NotEmpty` desde PDV-F006.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"sku\": \"{{sku}}\",\n      \"quantity\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Consultar pedido com pagamentos",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pdv/sales/{{orderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pdv",
+                "sales",
+                "{{orderId}}"
+              ]
+            },
+            "description": "`PDV_READ`. Diferente da listagem, o detalhe traz `payments` preenchido."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Traz os pagamentos', () => {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.payments).to.be.an('array').that.is.not.empty;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Comprovante interno (não fiscal)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pdv/sales/{{orderId}}/receipt",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pdv",
+                "sales",
+                "{{orderId}}",
+                "receipt"
+              ]
+            },
+            "description": "`PDV_READ`. Resumo para imprimir/exportar — itens, valores e formas de pagamento. Não é documento fiscal (isso é a NFC-e, Fatia 11)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Traz itens e pagamentos', () => {",
+                  "    pm.expect(json.items).to.be.an('array').that.is.not.empty;",
+                  "    pm.expect(json.payments).to.be.an('array').that.is.not.empty;",
+                  "    pm.expect(json.orderNumber).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Totais da sessão por forma de pagamento",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pdv/sessions/{{sessionId}}/payment-totals",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pdv",
+                "sessions",
+                "{{sessionId}}",
+                "payment-totals"
+              ]
+            },
+            "description": "`PDV_READ`. Só `CAPTURED` conta. As quatro formas sempre aparecem, mesmo zeradas — é o detalhamento que acompanha o fechamento (só DINHEIRO entra na conferência da gaveta)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Traz as quatro formas', () => {",
+                  "    pm.expect(json).to.have.lengthOf(4);",
+                  "    const metodos = json.map(t => t.method);",
+                  "    ['DINHEIRO', 'DEBITO', 'CREDITO', 'PIX'].forEach(m => pm.expect(metodos).to.include(m));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Sem token → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pdv/sessions/{{sessionId}}/payment-totals",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pdv",
+                "sessions",
+                "{{sessionId}}",
+                "payment-totals"
+              ]
+            },
+            "description": "Mesma proteção do resto do módulo.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));"
                 ]
               }
             }

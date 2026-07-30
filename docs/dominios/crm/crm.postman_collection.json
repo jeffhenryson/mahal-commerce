@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "c772471a-acb1-5700-8669-528c804b586a",
     "name": "Mahal — CRM",
-    "description": "Coleção de testes do módulo **CRM** (`/crm`) do mahal-backend.\n\nCobre o ciclo completo do cadastro de clientes: criação, busca, listagem com filtro,\nexportação CSV, notas, Kanban de estágios com trilha de transições, tags, automações de\ncampanha (criação, disparo manual e log) e o dashboard.\n\n**Como rodar:** importe e use o Collection Runner na ordem das pastas. Cada execução cria um\ncliente e uma tag com sufixo de timestamp, então a coleção é reexecutável. O cliente criado\nnão é removido ao final (o domínio não tem endpoint de exclusão de cliente); a tag e a\nautomação de teste são apagadas.\n\nDocumentação do módulo: `docs/dominios/crm/README.md`.",
+    "description": "Coleção de testes do módulo **CRM** (`/crm`) do mahal-backend.\n\nCobre o ciclo completo do cadastro de clientes: criação, busca, listagem com filtro,\nexportação CSV, notas, Kanban de estágios com trilha de transições, tags, automações de\ncampanha (criação, disparo manual e log) e o dashboard.\n\n**Como rodar:** importe e use o Collection Runner na ordem das pastas. Cada execução cria um\ncliente e uma tag com sufixo de timestamp, então a coleção é reexecutável. O cliente criado\nnão é removido ao final (o domínio não tem endpoint de exclusão de cliente); a tag e a\nautomação de teste são apagadas.\n\n**CRM-C005/F002 (2026-07-29):** `email` e `contato` deixaram de ser obrigatórios — pelo menos um entre `cpf`/`email`/`contato` basta, e CPF é o identificador oficial. Ver a pasta `01b — Cliente leve e busca de balcão`.\n\nDocumentação do módulo: `docs/dominios/crm/README.md`.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -88,6 +88,16 @@
     },
     {
       "key": "automationId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "customerLeveNome",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "customerLeveContato",
       "value": "",
       "type": "string"
     }
@@ -633,6 +643,335 @@
                   "pm.test('Status 404', () => pm.response.to.have.status(404));",
                   "pm.test('errorCode = CUSTOMER_NOT_FOUND',",
                   "    () => pm.expect(pm.response.json().errorCode).to.eql('CUSTOMER_NOT_FOUND'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "01b — Cliente leve e busca de balcão (CRM-C005/F002)",
+      "description": "Desde CRM-C005, `email` e `contato` são opcionais — basta um entre `cpf`, `email` e `contato`. CPF é o identificador OFICIAL do cadastro; um cliente sem CPF (\"cliente leve\") é válido e pesquisável, mas não é elegível a cashback quando o programa existir. `GET /crm/customers/lookup` (CRM-F002) é a busca pontual do balcão — \"CPF na nota?\" — sob a permissão própria `CRM_CUSTOMER_LOOKUP`, separada de `CRM_CUSTOMER_READ`.",
+      "item": [
+        {
+          "name": "Cadastro rápido: cliente leve (só contato)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/customers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "customers"
+              ]
+            },
+            "description": "Sem email, sem cpf — só nome + contato. Válido desde CRM-C005: o compact constructor de `Customer` só exige pelo menos um entre cpf/email/contato.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nome\": \"{{customerLeveNome}}\",\n  \"contato\": \"{{customerLeveContato}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const stamp = Date.now();",
+                  "pm.collectionVariables.set('customerLeveNome', 'Cliente Leve Postman ' + stamp);",
+                  "pm.collectionVariables.set('customerLeveContato', '119' + String(stamp).slice(-8));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const json = pm.response.json();",
+                  "pm.test('Cliente leve criado sem email nem cpf', () => {",
+                  "    pm.expect(json.id).to.be.a('number');",
+                  "    pm.expect(json.email).to.be.null;",
+                  "    pm.expect(json.cpf).to.be.null;",
+                  "    pm.expect(json.contato).to.eql(pm.collectionVariables.get('customerLeveContato'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cadastro sem nenhum identificador → 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/customers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "customers"
+              ]
+            },
+            "description": "Nem cpf, nem email, nem contato — a invariante de `Customer` recusa (400, via o handler genérico de `IllegalArgumentException`).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nome\": \"Sem Identificador\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Buscar por CPF (balcão)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/customers/lookup?cpf=12345678901",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "customers",
+                "lookup"
+              ],
+              "query": [
+                {
+                  "key": "cpf",
+                  "value": "12345678901"
+                }
+              ]
+            },
+            "description": "`CRM_CUSTOMER_LOOKUP`. Mesmo CPF cadastrado por \"Criar cliente\" em 01 — Clientes. Prioridade quando mais de um critério vier preenchido: cpf → email → contato."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Achou pelo CPF', () => pm.expect(pm.response.json().cpf).to.eql('12345678901'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Buscar cliente leve por contato",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/customers/lookup?contato={{customerLeveContato}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "customers",
+                "lookup"
+              ],
+              "query": [
+                {
+                  "key": "contato",
+                  "value": "{{customerLeveContato}}"
+                }
+              ]
+            },
+            "description": "Acha o cliente leve criado acima — a jornada real do balcão para quem voltou sem CPF."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Busca sem resultado → 404",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/customers/lookup?cpf=99999999999",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "customers",
+                "lookup"
+              ],
+              "query": [
+                {
+                  "key": "cpf",
+                  "value": "99999999999"
+                }
+              ]
+            },
+            "description": "`CUSTOMER_NOT_FOUND` — o fluxo normal do balcão é seguir para o cadastro rápido."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));",
+                  "pm.test('errorCode CUSTOMER_NOT_FOUND', () => pm.expect(pm.response.json().errorCode).to.eql('CUSTOMER_NOT_FOUND'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Busca sem nenhum critério → 400",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/customers/lookup",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "customers",
+                "lookup"
+              ]
+            },
+            "description": "Nenhum de cpf/email/contato informado."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Sem token → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/crm/customers/lookup?cpf=12345678901",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "crm",
+                "customers",
+                "lookup"
+              ],
+              "query": [
+                {
+                  "key": "cpf",
+                  "value": "12345678901"
+                }
+              ]
+            },
+            "description": "Mesma proteção do resto do módulo.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));"
                 ]
               }
             }
@@ -1770,7 +2109,7 @@
       ]
     },
     {
-      "name": "07 — Placeholders (domínios ainda não implementados)",
+      "name": "07 — Pedidos (placeholder) e extrato de cashback (CRM-F003)",
       "item": [
         {
           "name": "Histórico de pedidos do cliente",
@@ -1832,7 +2171,7 @@
                 "cashback"
               ]
             },
-            "description": "Sempre lista vazia até o domínio de cashback existir."
+            "description": "Extrato real do ledger de cashback (CRM-F003), até 100 entradas mais recentes — vazio para cliente sem CPF (não elegível) ou sem vendas ainda. Para extrato paginado completo, ver GET /cashback/customers/{id}/entries."
           },
           "response": [],
           "event": [

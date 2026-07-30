@@ -134,7 +134,7 @@ Os itens não são independentes, e a ordem abaixo evita refazer trabalho:
 | ~~C005 e F018~~ ✅ | Feitos em 2026-07-27, antes das features grandes justamente para não reabrir controller e DTOs depois. |
 | ~~F006 **com** C009~~ ✅ | Feitos juntos em 2026-07-27, como previsto: a semântica de `AJUSTE` **era** a modelagem do balanço. `AJUSTE` virou saldo-alvo e o fechamento da contagem é quem o usa em lote. |
 | ~~F012 logo depois de F006/C009~~ | **Revogado em 2026-07-28.** O plano decidiu que o marketplace usa **um pool só** e não separa canal por depósito, então a transferência entre depósitos deixa de ter caso de uso até existir um segundo local físico. Ver §2.2. |
-| Terminar a reserva antes de abrir item novo | V64 já está escrita e o core inteiro também. Meia-reserva é pior que reserva nenhuma: a coluna `reserved_quantity` já existe no schema e ninguém a alimenta pela API, então o disponível e o físico coincidem por acidente, não por desenho. |
+| ~~Terminar a reserva antes de abrir item novo~~ ✅ | Fechado 2026-07-29 (EST-F013/F021/C013): endpoint, scheduler de expiração e diagnóstico de integridade. |
 | F014 antes de o marketplace usar a reserva | Reserva sem cancelamento é armadilha — estoque travado sem como destravar pela operação. O expirador cobre o caso do abandono, não o do pedido pago que precisa ser desfeito. |
 | F008 antes de F007 | O custo entra por lote. Fazer custo médio primeiro e depois introduzir lote significa recalcular a modelagem de custo. |
 | F005 por último entre as entradas | O XML de NF-e traz lote e custo prontos. Implementar o import antes de F008 e F007 seria importar campos que ainda não têm onde ser guardados. |
@@ -160,7 +160,9 @@ Fechar os 7 grupos que restam no roteiro, mais uma decisão registrada sobre os 
 em estoque (F011, C006) e sobre os dois despriorizados (F012, F020). Com isso o backlog do módulo
 zera e `financeiro` fica destravado para o DRE, que hoje espera o custo médio de F007.
 
-**O estoque deixou de ser o módulo da vez.** Depois que a reserva fechar (grupo 1), a prioridade do
-projeto passa para `vendas-balcao` — as Fatias 0 a 3 do plano são todas de lá, e o estoque só volta
-ao centro na Fatia 5 (devolução) e na 6 (kits). Ver
-[`dominios/vendas-balcao/proximos-passos.md`](../vendas-balcao/proximos-passos.md).
+**O estoque deixou de ser o módulo da vez.** A reserva fechou e `vendas-balcao` também fechou suas
+três fatias (0, 1 e 3) em 2026-07-29 — ver
+[`dominios/vendas-balcao/proximos-passos.md`](../vendas-balcao/proximos-passos.md). A prioridade do
+projeto agora é `crm` (Fatia 4, cashback). O estoque volta ao centro em **EST-F014** (devolução,
+abaixo) e na Fatia 6 (kits) — nenhum dos dois bloqueia o cashback, então podem andar em paralelo
+se houver janela.

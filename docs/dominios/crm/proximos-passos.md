@@ -20,17 +20,16 @@ Desenho e justificativa: docs/plano-pdv-marketplace.md — leia §2.4 (cashback 
 §2.5 (cliente) antes de escrever qualquer linha.
 docs/backlog.md é só índice — não adicione itens lá.
 
-ESTADO ATUAL
-As 9 features da série legada F001–F009 foram entregues SEM que a documentação de domínio
-fosse criada — o README não tem Modelo de Domínio, Regras de Negócio, API, Schema nem
-Cobertura de Testes (CRM-C001). Duas coisas específicas travam o resto do projeto:
-- Customer EXIGE email não-nulo e com formato válido (core/domain/model/crm/Customer.java
-  :30-35). O cliente de balcão tem CPF e telefone e frequentemente não quer dar e-mail —
-  identificá-lo hoje exige INVENTAR um e-mail, o que polui a base, quebra o disparo de
-  campanha (CampaignAutomation) e destrói a unicidade por e-mail.
+ESTADO ATUAL (revisado em 2026-07-29)
+CRM-C005 e CRM-F002 estão FECHADOS: Customer não exige mais email — pelo menos um entre
+cpf/email/contato basta, CPF é o identificador oficial, e GET /crm/customers/lookup existe.
+Ver Histórico do README para o desenho final (mais amplo que este roteiro previa).
+O que ainda falta:
 - GET /crm/customers/{id}/orders e /cashback retornam List.of() direto no controller
   (CrmController.java:217,230) e CustomerResponseDTO.cashback é constante zero. São
   placeholders EXPLÍCITOS de F003, não bugs: a rota foi entregue sem fonte de dado.
+- O README não tem Modelo de Domínio, Regras de Negócio, API, Schema nem Cobertura de
+  Testes (CRM-C001) — as 9 features legadas F001-F009 nunca ganharam essa documentação.
 
 ORDEM (revisada em 2026-07-29: CRM-C005 + CRM-F002 fechados)
  1. ~~CRM-C005 — email opcional, unicidade por CPF~~ ✅ Fechado 2026-07-29 — modelo final
@@ -102,19 +101,12 @@ Comece lendo o README do módulo e o §2.4 do plano, e me apresente o plano para
 
 | Agrupamento | Razão |
 |---|---|
-| C005 antes de tudo no módulo | É pré-requisito de cadastro rápido no balcão, que é pré-requisito de cashback no balcão. Enquanto `email` for obrigatório, o operador precisa inventar um e-mail para identificar o cliente — e cada e-mail inventado é uma linha que polui a base para sempre. |
-| C005 e F002 juntos | Formam a Fatia 2 do plano. O `CHECK` do schema e a unicidade por CPF só fazem sentido quando existe o fluxo que os exercita. |
-| F003 (cashback) depois da Fatia 3 (pagamento, no PDV) | O ganho é calculado sobre o **líquido efetivamente pago**. Sem `order_payment`, "quanto o cliente pagou" não é uma pergunta respondível. |
-| F001 por último entre as features | Depende de duas coisas que ainda não existem: a tabela `sales_order` (PDV-F003) e o ledger (`CRM-F003`). Fazer antes significa consultar tabelas vazias. |
-| C002 fora da fila | Não depende de nada e é o maior risco de segurança aberto do módulo — `GET /crm/customers/export` devolve nome, telefone, e-mail e CPF de toda a base, em texto claro, sem auditoria. Pode ser feito em qualquer janela livre, inclusive antes da Fatia 0. |
+| ~~C005 e F002 antes de tudo~~ ✅ | Fechado 2026-07-29. `CampaignAutomation`/`EmailPort` não precisaram de ajuste: `dispatchAutomation` não envia e-mail de verdade ainda (CRM-C003), então o risco cogitado aqui não se materializou. |
+| F003 (cashback) depois da Fatia 3 (pagamento, no PDV) | O ganho é calculado sobre o **líquido efetivamente pago**. `order_payment` já existe (Fatia 3 fechada 2026-07-29) — a pergunta "quanto o cliente pagou" já é respondível. |
+| F001 por último entre as features | Depende de duas coisas: a tabela `sales_order` (PDV-F003, ✅ existe) e o ledger (`CRM-F003`, ainda não). Fazer antes significa consultar tabela vazia. |
+| C002 fora da fila | Não depende de nada e é o maior risco de segurança aberto do módulo — `GET /crm/customers/export` devolve nome, telefone, e-mail e CPF de toda a base, em texto claro, sem auditoria. Pode ser feito em qualquer janela livre. |
 
 ## Riscos a considerar antes de encarar a lista
-
-**CRM-C005 mexe numa invariante de domínio já testada.** Não é adicionar campo: é remover uma
-obrigatoriedade da qual outros pontos podem depender silenciosamente. Antes de mudar, procure todo
-uso de `Customer.email` — em particular `CampaignAutomation` e o `EmailPort`, porque um segmento de
-campanha que assumia e-mail sempre presente passa a poder receber cliente sem e-mail. Decidir o que
-acontece nesse caso (pular o cliente? falhar? mandar por WhatsApp?) faz parte do item.
 
 **O cashback é o maior item isolado do projeto (6–8 dias)** e o único cujo modelo é ponto de
 não-retorno: se o saldo nascer como coluna mutável, o extrato do cliente nunca mais existe, e
@@ -128,7 +120,7 @@ plano semeia `GLOBAL 8%`, e esse default merece uma conversa.
 
 ## O que "módulo fechado" significa aqui
 
-Fechar C005, F002, F003, F001 e C002 — com isso o cliente é identificável no balcão, o cashback
-roda de ponta a ponta e o perfil 360 deixa de mentir. C001 (documentar), C003 (campanha que não
-envia) e C004 (auditoria na automação) são dívida antiga do módulo e não bloqueiam o PDV nem o
-marketplace.
+~~C005, F002~~ ✅ fechados 2026-07-29. Faltam F003 (cashback) e C002 (auditoria do export) para o
+perfil 360 deixar de mentir e o maior risco de segurança do módulo fechar. C001 (documentar), C003
+(campanha que não envia) e C004 (auditoria na automação) são dívida antiga e não bloqueiam o PDV
+nem o marketplace.

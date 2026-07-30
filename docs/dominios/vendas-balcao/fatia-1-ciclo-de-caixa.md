@@ -234,7 +234,7 @@ EST-F014 como parcialmente entregue (estorno pela porta do cancelamento de pedid
 
 | Risco | Mitigação |
 |---|---|
-| A Fatia 0 nunca foi testada além do domínio | Passo 0 é bloqueante |
-| `expected` sem `order_payment` é aproximação | Documentar no README; resolve-se sozinho na Fatia 3 |
+| ~~A Fatia 0 nunca foi testada além do domínio~~ ✅ | Resolvido — suíte completa verde (1485 testes) desde 2026-07-29 |
+| ~~`expected` sem `order_payment` é aproximação~~ ✅ | Resolvido — Fatia 3 (PDV-F006) fechou em 2026-07-29; `expected` agora soma só `DINHEIRO` capturado |
 | Cancelar pedido já entregue devolve ao estoque mercadoria que fisicamente saiu | `ENTREGUE → CANCELADO` **é** devolução, e devolução é entrada de estoque. O comportamento está certo; o que precisa estar certo é o `reason` do movimento dizer que foi devolução, e não venda estornada |
 | Não commitar | O usuário commita manualmente; deixar tudo no working tree |

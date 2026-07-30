@@ -43,7 +43,8 @@ negócio — segurança, infra, CI/CD, testes, migrations, performance, document
 > [ecommerce](dominios/ecommerce/proximos-passos.md) ·
 > [financeiro](dominios/financeiro/proximos-passos.md) ·
 > [plataforma](dominios/plataforma/proximos-passos.md).
-> **O módulo da vez é `vendas-balcao`** — as Fatias 0, 1 e 3 são todas dele.
+> **O módulo da vez é `crm`** — Fatia 4 (cashback, `CRM-F003`) é o próximo item do plano. As
+> Fatias 0, 1, 2 e 3 (vendas-balcao, estoque e crm) fecharam em 2026-07-29.
 
 `pedido` é o domínio do **documento de venda**, comum a balcão e marketplace, criado em
 2026-07-28 na Fatia 1. O pedido nasce em `vendas-balcao` ou `ecommerce`; `pedido` é onde ele é

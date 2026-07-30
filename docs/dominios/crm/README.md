@@ -1,10 +1,12 @@
 # Domínio: crm
 
-**Status:** 🟢 Operacional — roadmap inicial `F001–F009` entregue por completo, mais cliente
-identificável no balcão sem e-mail (CRM-C005/F002, 2026-07-29)
-**Pacote Java:** `com.cernecommerce.core.domain.model.crm`
-**Rota HTTP base:** `/crm`
-**Última atualização deste doc:** 2026-07-29 (CRM-C005/F002)
+**Status:** 🟢 Operacional — roadmap inicial `F001–F009` entregue por completo, cliente
+identificável no balcão sem e-mail (CRM-C005/F002) e programa de cashback — ganho, taxas e
+consultas (CRM-F003), todos em 2026-07-29
+**Pacote Java:** `com.cernecommerce.core.domain.model.crm` (cashback em
+`com.cernecommerce.core.domain.model.cashback`, controller próprio `CashbackController` em `/cashback`)
+**Rota HTTP base:** `/crm` (mais `/cashback`, ver CRM-F003)
+**Última atualização deste doc:** 2026-07-29 (CRM-F003)
 
 > ⚠️ **Este README ainda não passou por auditoria de código.** Ele foi criado em 2026-07-26 na
 > descentralização do `docs/backlog.md` para receber os itens `F001–F009`, que estavam órfãos.
@@ -25,7 +27,11 @@ por WhatsApp/e-mail e tags.
 
 - **Cadastro e base de clientes:** `Customer` com contato, CPF, origem e LTV. ✅ Implementado (F001, F002).
 - **Segmentação RFM:** VIP / Recorrente / Novo / Inativo / Em Risco. ✅ Implementado (F002).
-- **Perfil 360º:** histórico de pedidos, extrato de cashback, notas/interações. ✅ Implementado (F003).
+- **Perfil 360º:** histórico de pedidos (placeholder, CRM-F001), extrato de cashback (real, CRM-F003), notas/interações. ✅ Implementado (F003).
+- **Programa de cashback:** taxa por abrangência (SKU/categoria/global), ledger append-only,
+  ganho na conclusão da venda, expiração automática, saldo/extrato e diagnóstico de margem.
+  ✅ Implementado (CRM-F003, 2026-07-29). Resgate no balcão e ajuste manual ficam para uma fatia
+  seguinte.
 - **Funil de atendimento:** kanban com trilha de auditoria das transições de estágio. ✅ Implementado (F004).
 - **Dashboard:** agregações de clientes ativos, LTV médio, disparos e contagem por segmento. ✅ Implementado (F005).
 - **Automações e campanhas:** regras por gatilho/segmento/canal com template e log de envios. ✅ Implementado (F006).
@@ -53,6 +59,12 @@ Só duas permissões cobrem os **28 endpoints** do `CrmController`, criadas na V
 | `CRM_CUSTOMER_READ` | toda leitura: clientes, notas, pedidos, cashback, histórico de estágio, dashboard, tags, automações, log de disparos, status de canal e **o export CSV** | 13 |
 | `CRM_CUSTOMER_MANAGE` | toda escrita: criar cliente e nota, mover estágio, CRUD de tags e associações, CRUD de automações e disparo manual | 11 |
 | `CRM_CUSTOMER_LOOKUP` | `GET /crm/customers/lookup` — busca pontual por CPF/email/contato (CRM-F002) | 1 |
+
+O programa de cashback (CRM-F003) tem controller e permissões próprios, fora do `CrmController` e
+das duas permissões acima: `CashbackController` em `/cashback`, sob `CASHBACK_RATE_MANAGE`
+(mutação de taxa) e `CASHBACK_READ` (saldo, extrato, diagnóstico de margem). `GET
+/crm/customers/{id}/cashback` continua sob `CRM_CUSTOMER_READ` — delega ao mesmo caso de uso, não
+duplica a checagem.
 
 **Granularidade ainda insuficiente para o resto:** não há como separar "consultar um cliente" de
 "exportar a base inteira", nem "criar nota" de "disparar campanha". `CRM_CUSTOMER_LOOKUP` resolveu
@@ -159,7 +171,7 @@ npx newman run docs/dominios/crm/crm.postman_collection.json \
 | `04 — Tags` | criação, associação ao cliente, listagem com `clientesCount`, remoção da associação, 409 de nome duplicado, 404 de tag inexistente e exclusão |
 | `05 — Automações` | criação, listagem, disparo manual, log de disparos, ativar/desativar, 404 e exclusão |
 | `06 — Dashboard e canais` | overview agregado e status dos canais de envio |
-| `07 — Placeholders` | `orders` e `cashback`, que hoje sempre devolvem lista vazia |
+| `07 — Pedidos (placeholder) e extrato de cashback` | `orders` (placeholder, CRM-F001) e `cashback` (real, CRM-F003 — extrato do ledger) |
 | `08 — Segurança` | 401 sem token |
 
 Cliente, tag e automação são criados com sufixo de timestamp; tag e automação são apagadas ao
@@ -172,8 +184,8 @@ Convenções, variáveis e o environment compartilhado estão em
 
 | ID | Prioridade | Tipo | Item | Descrição | Status |
 |---|---|---|---|---|---|
-| CRM-F001 | 🔴 Alta | Feature | perfil-360-deixa-de-ser-placeholder | `GET /crm/customers/{id}/orders` e `/cashback` retornam `List.of()` no controller (`CrmController.java:217,230`) e `CustomerResponseDTO.cashback` é constante zero — F003 entregou as rotas sem fonte de dado. Passam a consultar `sales_order` e o ledger de cashback. Depende de PDV-F003 (pedido unificado) e CRM-F003. [`plano-pdv-marketplace.md`](../../plano-pdv-marketplace.md) §5.2. | Pendente |
-| CRM-F003 | 🔴 Alta | Feature | programa-de-cashback | Taxas por escopo `GLOBAL`/`CATEGORY`/`SKU` (a mais específica ativa vence) e ledger `cashback_entry` **append-only** — saldo é `SUM`, nunca coluna mutável. Ganho na conclusão do pedido com carência, expiração por scheduler e estorno via `REVERSED`. Resgate é desconto no pedido, **não** forma de pagamento. Inclui `GET /cashback/margin-impact`, que aponta os produtos cuja taxa consome margem demais — sem ele ninguém descobre o carvão a 8% antes do fechamento do mês. Migration V68. Fatia 4, §2.4. | Pendente |
+| CRM-F001 | 🟡 Importante | Feature | perfil-360-deixa-de-ser-placeholder (orders) | ~~`GET /crm/customers/{id}/cashback` e `CustomerResponseDTO.cashback`~~ ✅ fechados por CRM-F003 (2026-07-29) — delegam ao ledger real. Falta só `GET /crm/customers/{id}/orders`, que ainda devolve `List.of()` (`CrmController.java:236`): passar a consultar `sales_order` por `customer_id`. Depende de PDV-F003 (✅ existe). | Pendente |
+| ~~CRM-F003~~ | 🔴 Alta | Feature | ~~programa-de-cashback~~ ✅ Fechado 2026-07-29 (ganhar + consultas) | Taxas por escopo `GLOBAL`/`CATEGORY`/`SKU` (a mais específica ativa e vigente vence) e ledger `cashback_entry` **append-only**, sem coluna `status` (divergência deliberada do rascunho do plano — disponibilidade é sempre derivada de `available_at`; ver Histórico). Ganho lançado na conclusão da venda de balcão e na liquidação de pedido de marketplace, com carência (7d) e expiração (180d, via `CashbackExpiryCleanupService`) configuráveis em `system_config`. `GET /cashback/margin-impact` já entrega o diagnóstico de margem. Migration V70. **Resgate no balcão (`CASHBACK_REDEEM`) e ajuste manual (`CASHBACK_ADJUST`) ficam para uma fatia seguinte, isolada** — os parâmetros (teto 50%, mínimo de saldo R$50 para resgatar) já estão semeados em `system_config`, sem código que os leia ainda. Fatia 4, §2.4. | ✅ Fechado |
 | CRM-C001 | 🟡 Importante | Correção | auditar-e-documentar-o-modulo | Este README não tem Modelo de Domínio, Regras de Negócio, API, Schema nem Cobertura de Testes — as 9 features foram entregues sem que a documentação de domínio fosse criada. Auditar o código e preencher no padrão de `estoque`. | Pendente |
 | CRM-C002 | 🔴 Alta | Correção | export-da-base-sem-auditoria-nem-limite | `GET /crm/customers/export` (`CrmController.java:150`) devolve **toda** a base de clientes — nome, telefone, e-mail e CPF em texto claro — sem paginação, sem rate limit e **sem publicar `AuditEvent`**. Qualquer token com `CRM_CUSTOMER_READ` (a permissão de leitura mais básica do módulo) pode drenar a base em loop sem deixar rastro. No mínimo: publicar evento de auditoria no export, e avaliar permissão dedicada + limite. O rate limit em si é transversal (PLAT-C030). | Pendente |
 | CRM-C003 | 🟢 Melhoria | Correção | disparo-de-campanha-nao-envia-nada | `CrmService.dispatchAutomation` (linha 215) grava uma linha em `campaign_log` por cliente do segmento e **não envia mensagem alguma** — o `EmailPort` injetado só serve ao `getChannelStatus`. A tela de Automações reporta disparo bem-sucedido para um envio que nunca aconteceu. Ou o envio é implementado, ou a resposta/documentação precisa deixar claro que é simulação. | Pendente |
@@ -184,6 +196,42 @@ Novas features e correções do CRM seguem as séries `CRM-F001+` e `CRM-C002+`.
 
 ## Histórico de Implementações
 
+- **2026-07-29** — `programa-de-cashback` (**CRM-F003**, ganhar + consultas): decisões de negócio
+  fechadas com o dono nesta sessão — taxa **GLOBAL semeada em 3%** (não os 8% do rascunho do
+  plano, que consumiam 44% da margem do carvão no exemplo do plano); **nenhuma taxa por categoria
+  semeada** ainda, porque `Product.category` é texto livre e a loja não tem categorias reais
+  cadastradas — semear nomes inventados deixaria a regra morta silenciosamente; carência **7
+  dias** (igual à janela de devolução hoje praticada); expiração **180 dias**; teto de resgate
+  **50%** e mínimo de saldo **R$50 para resgatar** (ambos só parâmetros semeados em
+  `system_config`, sem leitor ainda — resgate é fatia seguinte).
+  Domínio novo em `core/domain/model/cashback`: `CashbackRate` (abrangência `GLOBAL`/`CATEGORY`/
+  `SKU`, resolução pela mais específica ativa e vigente) e `CashbackEntry`, ledger append-only
+  **sem coluna `status`** — divergência deliberada do rascunho do plano: disponibilidade é sempre
+  derivada de `available_at` comparado a `now()`, o que cobre `EARNED` e os futuros `REDEEMED`/
+  `REVERSED`/`EXPIRED` sem precisar mutar a linha original. **`REVERSED` deixou de ser "futuro" em
+  2026-07-29** — é escrito por `CashbackUseCase.reverseEarningsForOrder`, acionado por
+  `OrderService.refundOrder` (Fatia 5, PDV-F007, domínio `vendas-balcao`), não por esta fatia;
+  `REDEEMED` (resgate no balcão) continua pendente. `PdvService.registerSale` resolve e
+  carimba a taxa por item antes de concluir a venda, e `recordEarnedForOrder` lança o `EARNED`
+  logo depois de salvar — mesma transação, mesmo padrão da captura de pagamento; nada é lançado
+  para venda anônima ou cliente sem CPF (`Customer.isOfficiallyRegistered()`).
+  `CashbackExpiryCleanupService` (novo, `infra/scheduler`) expira ganhos vencidos uma vez por dia,
+  molde exato de `StockReservationExpiryCleanupService`. Novo `CashbackController` em `/cashback`
+  (`CASHBACK_RATE_MANAGE`/`CASHBACK_READ`): CRUD de taxa, `GET /cashback/rates/resolve`, `GET
+  /cashback/margin-impact` (usa `Pricing.marginPercent()`, sem matemática nova), saldo e extrato
+  por cliente. `GET /crm/customers/{id}/cashback` e `CustomerResponseDTO.cashback` deixam de ser
+  placeholder — a listagem paginada de clientes mantém o zero de propósito, para não virar um
+  N+1 de saldo por linha da página; só a busca por id paga a consulta real. Migration V70 (V69 já
+  fora consumida por CRM-C005/F002 no mesmo dia).
+  Pequenas extensões de porta para viabilizar a taxa por categoria e os parâmetros configuráveis:
+  `EstoqueUseCase.findProductBySku` (resolve categoria do SKU) e
+  `SystemConfigPort.getInt`/`getDecimal` (espelham `getBoolean` já existente).
+  Coberto por `CashbackRateTest`, `CashbackEntryTest`, `CashbackServiceTest`, casos novos em
+  `PdvServiceTest`, `CashbackFlowIT` (ponta a ponta contra banco real: venda ganha cashback para
+  cliente com CPF, nada é lançado para cliente sem CPF nem venda anônima) e
+  `CashbackControllerSecurityTest`. Conhecido em aberto: nenhum teste dedicado ao scheduler de
+  expiração — mesma lacuna já aceita para `StockReservationExpiryCleanupService`, que também não
+  tem um.
 - **2026-07-29** — `cliente-identificavel-no-balcao-sem-email` (**CRM-C005** + **CRM-F002**):
   `Customer.email` deixou de ser obrigatório. Modelo revisto com o dono, mais amplo que o §2.5
   original do plano (que só prometia "email OU cpf"): **CPF é o identificador oficial** do
@@ -228,8 +276,11 @@ Roteiro completo, com prompt pronto para colar numa sessão nova, em
 
 - [ ] **CRM-C002** — auditoria no export da base; é o maior risco aberto do módulo.
 - [x] **CRM-C005 + CRM-F002** — Fatia 2 de [`plano-pdv-marketplace.md`](../../plano-pdv-marketplace.md):
-      cliente identificável no balcão. Fechado em 2026-07-29 — destrava a Fatia 4.
-- [ ] **CRM-F003** — Fatia 4: programa de cashback. É o pedido nominal do dono. Calibragem da taxa
-      global fica para quando esta fatia começar de verdade (decisão adiada com o usuário).
+      cliente identificável no balcão. Fechado em 2026-07-29 — destravou a Fatia 4.
+- [x] **CRM-F003** — Fatia 4: programa de cashback (ganhar + consultas). Fechado em 2026-07-29 —
+      taxa global calibrada com o dono (3%, não os 8% do rascunho do plano). Resgate no balcão e
+      ajuste manual ficam para uma fatia seguinte, isolada.
+- [ ] **CRM-F001 (orders)** — `GET /crm/customers/{id}/orders` ainda é placeholder; a metade
+      `/cashback` já foi fechada pela CRM-F003.
 - [ ] **CRM-C001** — auditar o código e completar este README (Modelo de Domínio, Regras, API, Schema, Testes).
 - [ ] **CRM-C003** — decidir entre implementar o envio de campanha ou explicitar que é simulação.

@@ -3441,6 +3441,238 @@
       ]
     },
     {
+      "name": "09 — Reserva de estoque",
+      "description": "Reserva de estoque (EST-F013/EST-F021) e diagnóstico de integridade (EST-C013). Só leitura — criar, consumir e liberar reserva é orquestração interna (checkout do marketplace, liquidação de pedido online no PDV via `POST /pdv/sessions/{id}/orders/{orderId}/settle`), não uma operação de balcão pela API.",
+      "item": [
+        {
+          "name": "Listar reservas (paginado)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/reservations?page=0&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "reservations"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "`ESTOQUE_RESERVATION_READ`. `sku`, `warehouseCode` e `status` (ACTIVE/CONSUMED/RELEASED/EXPIRED) são filtros opcionais e se combinam. Como nada nesta coleção cria reserva (a única via é o checkout do marketplace, ainda não implementado), o resultado esperado é `content` vazio — página vazia é o caso normal, não erro."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Devolve uma página', () => {",
+                  "    pm.expect(json).to.have.property('content');",
+                  "    pm.expect(json.content).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Filtrar reservas por SKU",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/reservations?sku={{sku}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "reservations"
+              ],
+              "query": [
+                {
+                  "key": "sku",
+                  "value": "{{sku}}"
+                }
+              ]
+            },
+            "description": "Mesmo endpoint, filtrado por um SKU específico."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reserva inexistente → 404",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/reservations/999999",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "reservations",
+                "999999"
+              ]
+            },
+            "description": "`RESERVATION_NOT_FOUND` — mesma convenção do resto do módulo."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));",
+                  "pm.test('errorCode RESERVATION_NOT_FOUND', () => pm.expect(pm.response.json().errorCode).to.eql('RESERVATION_NOT_FOUND'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Diagnóstico de integridade da reserva",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/integrity/reservation-mismatch?page=0&size=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "integrity",
+                "reservation-mismatch"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "100"
+                }
+              ]
+            },
+            "description": "`ESTOQUE_STOCK_MANAGE`. Pares SKU/depósito cujo `stock_balance.reserved_quantity` diverge da soma das reservas `ACTIVE` no ledger — estoque travado invisível, não overselling. Mesma régua de permissão de `GET /estoque/integrity/orphan-skus`. Base íntegra devolve `content` vazio com 200."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Devolve uma página', () => {",
+                  "    pm.expect(json).to.have.property('content');",
+                  "    pm.expect(json.content).to.be.an('array');",
+                  "});",
+                  "if (json.content.length > 0) {",
+                  "    pm.test('Cada linha traz o contexto da divergência', () => {",
+                  "        const linha = json.content[0];",
+                  "        pm.expect(linha).to.have.property('reservedQuantity');",
+                  "        pm.expect(linha).to.have.property('activeReservationsTotal');",
+                  "        pm.expect(linha).to.have.property('difference');",
+                  "    });",
+                  "    console.log('ATENÇÃO: ' + json.totalElements + ' par(es) SKU/depósito com reservado divergindo do ledger.');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Sem token → 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/reservations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "reservations"
+              ]
+            },
+            "description": "Mesma proteção do resto do módulo.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "99 — Encerramento",
       "item": [
         {

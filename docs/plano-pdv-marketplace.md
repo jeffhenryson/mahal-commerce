@@ -9,18 +9,39 @@ mesmo estoque, com cashback por produto e kits.
 > descartada e o custo de errar. Onde o código contradiz uma premissa do briefing, o código venceu
 > e a divergência está registrada.
 
+> ## Status de execução — atualizado em 2026-07-29
+> **Marco "PDV operável de ponta a ponta" (§6) fechado.** Fatias 0 (fundação do pedido), 1 (ciclo
+> de caixa + `/orders` admin + liquidação cruzada), 2 (cliente identificável no balcão, CRM-C005/
+> F002), 3 (pagamento com troco e comprovante interno), 4 (cashback — ganhar + consultas, CRM-F003;
+> taxa GLOBAL 3%, decisão do dono) e 5 (cancelamento e devolução, PDV-F007 — `REEMBOLSADO` distinto
+> de `CANCELADO`, também pedido do dono) estão implementadas e com a suíte completa verde. Detalhes
+> de cada entrega e as decisões tomadas no caminho — algumas mais amplas que o desenho original
+> abaixo — estão nos Históricos de
+> [`vendas-balcao/README.md`](dominios/vendas-balcao/README.md#histórico-de-implementações),
+> [`estoque/README.md`](dominios/estoque/README.md#histórico-de-implementações) (reserva: F013/F021/C013)
+> e [`crm/README.md`](dominios/crm/README.md#histórico-de-implementações).
+>
+> **Próximo:** Fatia 6 (kits). Resgate de cashback no balcão e ajuste manual (`CASHBACK_REDEEM`/
+> `CASHBACK_ADJUST`) ficam como um item isolado, sem número de fatia — ver
+> `docs/feature-registry.md`. Roteiro vivo em
+> [`docs/dominios/*/proximos-passos.md`](dominios/).
+
 ---
 
 ## 0. Divergências entre o briefing e o código
 
-| # | Briefing | Código | Consequência |
-|---|---|---|---|
-| 1 | Lista o que falta na `Sale` (customerId, pagamento, desconto, cancelamento) | `SaleRepository` (`core/ports/out/pdv/SaleRepository.java:8-11`) expõe **só `save()`** | Venda registrada é **write-only**: não há `GET /pdv/sales`, não há como reler uma venda pela API. Isso é anterior a qualquer campo faltando |
-| 2 | — | `CashRegisterRepository.findOpenByOperator` (`:15`) implementado em `CashRegisterRepositoryImpl.java:34`, **nunca chamado** | Porta morta antecipando PDV-F001. Aproveitar, não recriar |
-| 3 | "Como modelar `customerId` sem tornar obrigatório onde não faz sentido" | `Customer` exige `email` **não-nulo e com formato válido** (`core/domain/model/crm/Customer.java:30-35`) | Cadastro rápido no balcão é **impossível hoje** sem inventar e-mail falso. Precede a decisão 5 |
-| 4 | `CashRegisterSession` "é um stub sem `open()` nem `close()`" | Além disso, **não tem compact constructor nem `create`/`of`** (`:14-23`) | Diverge da convenção do repositório, não só da funcionalidade |
-| 5 | 1269 testes passando | 1259 métodos `@Test` na contagem estática | Compatível com testes parametrizados. **A suíte não foi executada** (sem JDK no ambiente de análise) |
-| 6 | — | `SaleEntity` sem `@Version`; `cash_register_sale.warehouse_code` é `VARCHAR` sem FK (V57:14) | Irrelevante hoje (tabela insert-only); vira problema quando o pedido tiver transição de estado. O `warehouse_code` sem FK repete o passivo de EST-C011 |
+Todas as seis são de leitura do estado em 2026-07-28, antes da Fatia 0. As quatro primeiras foram
+resolvidas nas fatias que se seguiram; ficam registradas porque documentam **por que** o desenho
+das seções seguintes é o que é.
+
+| # | Briefing | Código (em 2026-07-28) | Consequência | Status |
+|---|---|---|---|---|
+| 1 | Lista o que falta na `Sale` (customerId, pagamento, desconto, cancelamento) | `SaleRepository` (`core/ports/out/pdv/SaleRepository.java:8-11`) expõe **só `save()`** | Venda registrada é **write-only**: não há `GET /pdv/sales`, não há como reler uma venda pela API. Isso é anterior a qualquer campo faltando | ✅ Resolvido — Fatia 0. `Order`/`OrderRepository` com leitura completa |
+| 2 | — | `CashRegisterRepository.findOpenByOperator` (`:15`) implementado em `CashRegisterRepositoryImpl.java:34`, **nunca chamado** | Porta morta antecipando PDV-F001. Aproveitar, não recriar | ✅ Resolvido — Fatia 1. Chamada em `PdvService.openSession` |
+| 3 | "Como modelar `customerId` sem tornar obrigatório onde não faz sentido" | `Customer` exige `email` **não-nulo e com formato válido** (`core/domain/model/crm/Customer.java:30-35`) | Cadastro rápido no balcão é **impossível hoje** sem inventar e-mail falso. Precede a decisão 5 | ✅ Resolvido — Fatia 2 (CRM-C005), com desenho mais amplo: CPF é o identificador oficial, email/contato são alternativos |
+| 4 | `CashRegisterSession` "é um stub sem `open()` nem `close()`" | Além disso, **não tem compact constructor nem `create`/`of`** (`:14-23`) | Diverge da convenção do repositório, não só da funcionalidade | ✅ Resolvido — Fatia 1 |
+| 5 | 1269 testes passando | 1259 métodos `@Test` na contagem estática | Compatível com testes parametrizados. **A suíte não foi executada** (sem JDK no ambiente de análise) | ✅ Resolvido — suíte executada e verde (1485 testes) em 2026-07-29 |
+| 6 | — | `SaleEntity` sem `@Version`; `cash_register_sale.warehouse_code` é `VARCHAR` sem FK (V57:14) | Irrelevante hoje (tabela insert-only); vira problema quando o pedido tiver transição de estado | ⚠️ Parcial — `OrderEntity` ganhou `@Version` na Fatia 0. `warehouse_code` continua sem FK, e o pedido **já tem** transição de estado desde a Fatia 0/1 — a condição que tornaria isso um problema já chegou. Backlog, não corrigido (risco #8 do §7) |
 
 Tudo o mais que o briefing afirma foi confirmado no código.
 
@@ -1121,8 +1142,8 @@ Cada fatia deixa o sistema funcionando e testável. Nenhuma deixa o sistema meio
 | **1** | **Ciclo de caixa** | V66; `open`/sangria/suprimento/`close`; sessão amarrada ao operador; depósito vindo da sessão; DTO em `GET /pdv/sessions` (PDV-C002) | Operação real da loja | 0 | **4–5 d** |
 | **2** | **Cliente no balcão** | V67; `email` opcional no `Customer`; lookup por CPF/contato; cadastro rápido; `customerId` no pedido; `GET /crm/customers/{id}/orders` real | Cashback | 0 | **3–4 d** |
 | **3** | **Pagamento de balcão** | V68; `order_payment`; múltiplas formas; troco; fechamento por forma de pagamento | Conferência de caixa confiável, base do DRE | 1 | **4–5 d** |
-| **4** | **Cashback** | V69; taxas por escopo; ledger; ganho na conclusão; resgate no balcão; `/cashback/margin-impact`; `GET /crm/customers/{id}/cashback` real | Programa de fidelidade | 2, 3 | **6–8 d** |
-| **5** | **Cancelamento e devolução** | Transições de estado; estorno de estoque (EST-F014); `REVERSED` no cashback; estorno de pagamento | Correção de erro de operação; pré-requisito da reserva | 3, 4 | **4–5 d** |
+| **4** | **Cashback** | V70; taxas por escopo; ledger; ganho na conclusão; `/cashback/margin-impact`; `GET /crm/customers/{id}/cashback` real. Resgate no balcão e ajuste manual ficaram fora, como item isolado sem número de fatia (ver feature-registry). | Programa de fidelidade | 2, 3 | **6–8 d** |
+| **5** | **Cancelamento e devolução** | V71/V72; `OrderStatus.REEMBOLSADO` distinto de `CANCELADO` (não um único status "cancelado" cobrindo os dois — pedido explícito do dono, PDV-F007); `cancelOrder` (pré-pagamento, libera reserva) e `refundOrder` (pós-pagamento: estorno de estoque/EST-F014, pagamento e `REVERSED` no cashback) como ações separadas | Correção de erro de operação; pré-requisito da reserva | 3, 4 | **4–5 d** |
 | — | *Marco: PDV operável de ponta a ponta* | | | | **~26–34 d** |
 | **6** | **Kits** | V70; `ProductType`; receita; saldo derivado; custo derivado no `Pricing`; explosão na venda | Venda de combo no balcão e no site | 0 | **4–5 d** |
 | **7** | **Reserva de estoque** | V69; `reservedQuantity`; `stock_reservation`; `SAIDA` contra disponível; scheduler de expiração | Marketplace sem overselling | 5 | **5–6 d** |

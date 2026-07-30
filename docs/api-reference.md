@@ -1644,8 +1644,9 @@ Não inclui `ltv`/`cashback`/`segmento` (placeholder) nem `tags` (exigiria query
 ### GET /crm/customers/{id}/cashback — Permissão: CRM_CUSTOMER_READ
 
 ```
-// Placeholder: sempre retorna [] até o domínio de cashback existir no backend.
-// Response 200 → [] / 404 CUSTOMER_NOT_FOUND
+// CRM-F003: extrato real do ledger de cashback, até 100 entradas mais recentes.
+// Delega a CashbackUseCase.listCustomerEntries — mesma fonte de GET /cashback/customers/{id}/entries.
+// Response 200 → CashbackEntryResponse[] (ver seção "Cashback — /cashback") / 404 CUSTOMER_NOT_FOUND
 ```
 
 ---
@@ -1887,6 +1888,142 @@ Cada transição é registrada com autor (username autenticado, nunca informado 
   }
 ]
 ```
+
+---
+
+## Cashback — `/cashback`
+
+CRM-F003, esta fatia cobre **ganhar** cashback (taxa por abrangência, ledger, lançamento na
+conclusão da venda, expiração) e as consultas de saldo/extrato/margem. Resgate no balcão
+(`CASHBACK_REDEEM`) e ajuste manual (`CASHBACK_ADJUST`) ficam para uma fatia seguinte, isolada.
+
+### POST /cashback/rates — Permissão: CASHBACK_RATE_MANAGE
+
+```json
+{
+  "scope": "CATEGORY",       // obrigatório — GLOBAL | CATEGORY | SKU
+  "scopeRef": "narguile",    // obrigatório para CATEGORY/SKU; ausente para GLOBAL
+  "percent": 6.5,            // obrigatório, 0–100
+  "validFrom": null,         // opcional — omitido vale a partir de agora
+  "validTo": null            // opcional — omitido é vigência em aberto
+}
+// Response 201 → CashbackRateResponse
+// 409 CASHBACK_RATE_ALREADY_EXISTS (já existe taxa ativa e em aberto para a mesma abrangência)
+// 400 VALIDATION_ERROR
+```
+
+```json
+// CashbackRateResponse
+{
+  "id": 1,
+  "scope": "GLOBAL",
+  "scopeRef": null,
+  "percent": 3.0,
+  "active": true,
+  "validFrom": "2026-07-29T00:00:00Z",
+  "validTo": null,
+  "createdAt": "2026-07-29T00:00:00Z"
+}
+```
+
+---
+
+### GET /cashback/rates — Permissão: CASHBACK_READ
+
+```
+Query params: page (default 0), size (default 20, máx 100)
+// Response 200 → Page<CashbackRateResponse>
+```
+
+---
+
+### PATCH /cashback/rates/{id} — Permissão: CASHBACK_RATE_MANAGE
+
+```json
+// Campo ausente ou nulo é mantido. Não altera scope/scopeRef.
+{
+  "percent": 4.0,
+  "active": null,
+  "validTo": null
+}
+// Response 200 → CashbackRateResponse / 404 CASHBACK_RATE_NOT_FOUND
+```
+
+---
+
+### GET /cashback/rates/resolve?sku= — Permissão: CASHBACK_READ
+
+```
+// Cadeia SKU → CATEGORY → GLOBAL — devolve a regra ativa e vigente mais específica.
+// Response 200 → CashbackRateResponse (body vazio se nenhuma taxa se aplica) / 404 PRODUCT_NOT_FOUND
+```
+
+---
+
+### GET /cashback/margin-impact?maxShare= — Permissão: CASHBACK_READ
+
+```
+// Produtos cuja taxa vigente consome mais de maxShare% da margem do item (Pricing.marginPercent()).
+// Response 200 → CashbackMarginImpactResponse[] / 400 VALIDATION_ERROR (maxShare ausente/fora de 0–100)
+```
+
+```json
+// CashbackMarginImpactResponse
+{
+  "sku": "CARV-001",
+  "name": "Carvão",
+  "marginPercent": 18.2,
+  "cashbackPercent": 3.0,
+  "marginShareConsumed": 16.48   // cashbackPercent / marginPercent * 100
+}
+```
+
+---
+
+### GET /cashback/customers/{id} — Permissão: CASHBACK_READ
+
+```
+// Response 200 → CashbackBalanceResponse / 404 CUSTOMER_NOT_FOUND
+```
+
+```json
+// CashbackBalanceResponse
+{
+  "available": "0.00",     // SUM(amount) das entradas já liberadas (available_at <= now())
+  "pending": "3.00",       // ganhos EARNED ainda em carência
+  "expiringSoon": "0.00"   // disponível que vence nos próximos 30 dias
+}
+```
+
+---
+
+### GET /cashback/customers/{id}/entries — Permissão: CASHBACK_READ
+
+```
+Query params: page (default 0), size (default 20, máx 100)
+// Extrato paginado, mais recente primeiro.
+// Response 200 → Page<CashbackEntryResponse> / 404 CUSTOMER_NOT_FOUND
+```
+
+```json
+// CashbackEntryResponse
+{
+  "id": 10,
+  "customerId": 42,
+  "orderId": 100,
+  "orderItemId": 9,
+  "type": "EARNED",         // EARNED | REDEEMED | REVERSED | EXPIRED — só EARNED/EXPIRED são escritos nesta fatia
+  "amount": "3.00",
+  "availableAt": "2026-08-05T12:00:00Z",   // paidAt + carência (default 7 dias)
+  "expiresAt": "2027-02-01T12:00:00Z",     // availableAt + expiração (default 180 dias)
+  "reversesEntryId": null,
+  "createdAt": "2026-07-29T12:00:00Z"
+}
+```
+
+Ledger **append-only**: nenhuma linha é atualizada nem deletada. Saldo é sempre
+`SUM(amount) WHERE available_at <= now()` — cobre `EARNED` (positivo) e os futuros `REDEEMED`/
+`REVERSED`/`EXPIRED` (negativos, referenciando a entrada original via `reversesEntryId`).
 
 ---
 
@@ -2358,6 +2495,8 @@ interface TotpConfirmResponse {
 | `CRM_CUSTOMER_READ` | Leituras de `/crm/**` |
 | `CRM_CUSTOMER_MANAGE` | Escritas de `/crm/**` |
 | `CRM_CUSTOMER_LOOKUP` | `GET /crm/customers/lookup` — busca pontual por cpf/email/contato, separada de `CRM_CUSTOMER_READ` |
+| `CASHBACK_RATE_MANAGE` | `POST`/`PATCH /cashback/rates` — criar e alterar taxa de cashback |
+| `CASHBACK_READ` | Leituras de `/cashback/**` — taxas, saldo, extrato e diagnóstico de margem |
 | `COMPRAS_READ` | `GET /compras/suppliers` |
 | `COMPRAS_RECEIPT_MANAGE` | `POST /compras/goods-receipts` — recebimento de mercadoria |
 | `PDV_READ` | `GET /pdv/sessions` |

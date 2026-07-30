@@ -190,7 +190,7 @@ Convenções, variáveis e o environment compartilhado estão em
 
 | ID | Prioridade | Tipo | Item | Descrição | Status |
 |---|---|---|---|---|---|
-| PDV-F007 | 🟢 Baixa | Feature | marcar-pedido-como-reembolsado | Status `REEMBOLSADO`, distinto de `CANCELADO`, com estorno do pagamento e `REVERSED` no ledger de cashback. Cancelar e reembolsar são eventos diferentes: contá-los juntos esconde quanto dinheiro de fato voltou ao cliente. `order_payment` já existe (Fatia 3, 2026-07-29); falta a Fatia 4 (cashback) para ter o que reverter dos dois lados. Acréscimo de enum + `CHECK`, barato agora que as duas existirem. Levantado com o dono em 2026-07-28. | Pendente |
+| PDV-F007 | 🟢 Baixa | Feature | marcar-pedido-como-reembolsado | Status `REEMBOLSADO`, distinto de `CANCELADO`, com estorno do pagamento e `REVERSED` no ledger de cashback. Cancelar e reembolsar são eventos diferentes: contá-los juntos esconde quanto dinheiro de fato voltou ao cliente. `order_payment` já existe (Fatia 3, 2026-07-29); falta a Fatia 4 (cashback) para ter o que reverter dos dois lados. Acréscimo de enum + `CHECK`, barato agora que as duas existirem. Levantado com o dono em 2026-07-28. | ✅ Fechado (Fatia 5, 2026-07-29) — exatamente como especificado: `REEMBOLSADO` separado de `CANCELADO`, `cancelOrder` (pré-pagamento) e `refundOrder` (pós-pagamento, estorna pagamento e cashback) como ações distintas. V71/V72. |
 | PDV-C001 | 🟡 Importante | Correção | auditar-e-documentar-o-modulo | Preencher Regras de Negócio, Schema (V57) e Cobertura de Testes no padrão de `estoque`. | Pendente |
 
 > A permissão `PDV_SALE_MANAGE` está ausente dos seeders de dev — rastreado como
@@ -199,6 +199,22 @@ Convenções, variáveis e o environment compartilhado estão em
 
 ## Histórico de Implementações
 
+- **2026-07-29** — `cancelamento-e-reembolso-do-pedido` (**PDV-F007**, Fatia 5): `OrderStatus`
+  ganha `REEMBOLSADO`, terminal e distinto de `CANCELADO` — exatamente como pedido com o dono em
+  2026-07-28 ("cancelar e reembolsar são eventos diferentes"), não uma fusão dos dois. A máquina
+  fica estritamente partida: pré-pagamento (`CRIADO`/`AGUARDANDO_PAGAMENTO`) só alcança
+  `CANCELADO`; pós-pagamento (`PAGO` em diante) só alcança `REEMBOLSADO`. `cancelOrder` deixou de
+  devolver estoque via `adjustStock` — nunca houve baixa real para desfazer, só reserva — e passou
+  a chamar `EstoqueUseCase.releaseReservationsByOwner` (já existente, idempotente). Novo
+  `refundOrder` (`POST /orders/{id}/refund`, permissão nova `ORDER_REFUND`) devolve a mercadoria ao
+  estoque (o EST-F014 que antes vivia em `cancelOrder`), estorna cada pagamento `CAPTURED` com uma
+  linha `REFUNDED` nova do mesmo método/valor (nunca um update, mesma regra append-only do resto do
+  ledger) e reverte todo ganho `EARNED` ainda não revertido no ledger de cashback. Migrations V71
+  (`refunded_at`, `CHECK` de status) e V72 (`ORDER_REFUND`). Efeito colateral corrigido de
+  passagem: `sumPendingByCustomerId` (domínio `crm`) não excluía ganho já revertido, então um
+  reembolso feito durante a carência continuava contando como pendente. Coberto por
+  `OrderStatusTest`, `OrderTest`, `OrderServiceTest`, `OrderPaymentTest`, `CashbackEntryTest`,
+  `CashbackServiceTest` e o novo `OrderRefundIT`.
 - **2026-07-29** — `pagamento-multiplas-formas-e-troco` (**PDV-F006**): nova tabela `order_payment`
   (V68, um port próprio em `core/ports/out/pagamento`) — uma linha por forma, balcão grava direto
   em `CAPTURED` porque o dinheiro já está na gaveta no instante da venda. `POST
