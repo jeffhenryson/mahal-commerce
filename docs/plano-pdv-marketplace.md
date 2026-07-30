@@ -13,17 +13,21 @@ mesmo estoque, com cashback por produto e kits.
 > **Marco "PDV operável de ponta a ponta" (§6) fechado.** Fatias 0 (fundação do pedido), 1 (ciclo
 > de caixa + `/orders` admin + liquidação cruzada), 2 (cliente identificável no balcão, CRM-C005/
 > F002), 3 (pagamento com troco e comprovante interno), 4 (cashback — ganhar + consultas, CRM-F003;
-> taxa GLOBAL 3%, decisão do dono) e 5 (cancelamento e devolução, PDV-F007 — `REEMBOLSADO` distinto
-> de `CANCELADO`, também pedido do dono) estão implementadas e com a suíte completa verde. Detalhes
-> de cada entrega e as decisões tomadas no caminho — algumas mais amplas que o desenho original
-> abaixo — estão nos Históricos de
+> taxa GLOBAL 3%, decisão do dono), 5 (cancelamento e devolução, PDV-F007 — `REEMBOLSADO` distinto
+> de `CANCELADO`, também pedido do dono) e 6 (kits virtuais, EST-F015/EST-F022 — sem saldo próprio,
+> custo e saldo sempre derivados dos componentes) estão implementadas e com a suíte completa verde.
+> Detalhes de cada entrega e as decisões tomadas no caminho — algumas mais amplas que o desenho
+> original abaixo — estão nos Históricos de
 > [`vendas-balcao/README.md`](dominios/vendas-balcao/README.md#histórico-de-implementações),
-> [`estoque/README.md`](dominios/estoque/README.md#histórico-de-implementações) (reserva: F013/F021/C013)
+> [`estoque/README.md`](dominios/estoque/README.md#histórico-de-implementações) (reserva: F013/F021/C013; kits: F015/F022)
 > e [`crm/README.md`](dominios/crm/README.md#histórico-de-implementações).
 >
-> **Próximo:** Fatia 6 (kits). Resgate de cashback no balcão e ajuste manual (`CASHBACK_REDEEM`/
-> `CASHBACK_ADJUST`) ficam como um item isolado, sem número de fatia — ver
-> `docs/feature-registry.md`. Roteiro vivo em
+> **Próximo:** sem fatia numerada pendente no marco do marketplace. Candidatos em aberto: resgate
+> de cashback no balcão e ajuste manual (`CASHBACK_REDEEM`/`CASHBACK_ADJUST`, isolado, sem número
+> de fatia — ver `docs/feature-registry.md`), `CRM-C002` (auditoria do export) e `PDV-C001`/
+> `EST-C001`-style itens de documentação de cada módulo. Fatias 7 (reserva de estoque — já em boa
+> parte construída, EST-F013/F021) e 8–10 (marketplace) seguem depois, quando o checkout do
+> aplicativo entrar em pauta. Roteiro vivo em
 > [`docs/dominios/*/proximos-passos.md`](dominios/).
 
 ---
@@ -969,7 +973,13 @@ de expiração chamando `expireReservations` (o método existe em `EstoqueServic
 `@SchedulerLock` não), e a suíte de testes. Ver o roteiro em
 [`dominios/estoque/proximos-passos.md`](dominios/estoque/proximos-passos.md).
 
-### V70 — kits
+### V73 — kits
+
+> Numeração deste rascunho previa V70; a real, aplicada em 2026-07-29, é **V73** — V70 foi
+> consumida pela Fatia 4 (cashback) e V71/V72 pela Fatia 5 (reembolso), ambas implementadas antes
+> desta. As migrations `V71`/`V72`/`V74`+ referenciadas mais abaixo neste rascunho (cliente de
+> marketplace em diante) ainda não foram reconciliadas com a numeração real — só valem como
+> estimativa até a fatia correspondente ser de fato implementada.
 
 ```sql
 ALTER TABLE product ADD COLUMN type VARCHAR(20) NOT NULL DEFAULT 'SIMPLES';
@@ -1145,7 +1155,7 @@ Cada fatia deixa o sistema funcionando e testável. Nenhuma deixa o sistema meio
 | **4** | **Cashback** | V70; taxas por escopo; ledger; ganho na conclusão; `/cashback/margin-impact`; `GET /crm/customers/{id}/cashback` real. Resgate no balcão e ajuste manual ficaram fora, como item isolado sem número de fatia (ver feature-registry). | Programa de fidelidade | 2, 3 | **6–8 d** |
 | **5** | **Cancelamento e devolução** | V71/V72; `OrderStatus.REEMBOLSADO` distinto de `CANCELADO` (não um único status "cancelado" cobrindo os dois — pedido explícito do dono, PDV-F007); `cancelOrder` (pré-pagamento, libera reserva) e `refundOrder` (pós-pagamento: estorno de estoque/EST-F014, pagamento e `REVERSED` no cashback) como ações separadas | Correção de erro de operação; pré-requisito da reserva | 3, 4 | **4–5 d** |
 | — | *Marco: PDV operável de ponta a ponta* | | | | **~26–34 d** |
-| **6** | **Kits** | V70; `ProductType`; receita; saldo derivado; custo derivado no `Pricing`; explosão na venda | Venda de combo no balcão e no site | 0 | **4–5 d** |
+| **6** | **Kits** | V73; `ProductType` (`SIMPLES`/`KIT`); `product_kit_component` (um nível só, `ESTOQUE_KIT_MANAGE`); saldo derivado (`min(floor(disponível/receita))`, kit nunca tem linha em `stock_balance`); custo derivado no `Pricing` (soma dos componentes); explosão em `adjustStock` na venda/estorno, transparente para `PdvService`/`OrderService` | Venda de combo no balcão e no site | 0 | **4–5 d** |
 | **7** | **Reserva de estoque** | V69; `reservedQuantity`; `stock_reservation`; `SAIDA` contra disponível; scheduler de expiração | Marketplace sem overselling | 5 | **5–6 d** |
 | **8** | **Autenticação de cliente + catálogo público** | V71; `ROLE_CUSTOMER`; `user_type`; `/shop/catalog`; `/shop/register`; rate limit; ArchUnit exigindo `@PreAuthorize` | Superfície pública | 0 | **6–8 d** |
 | **9** | **Carrinho e checkout** | V72; carrinho; checkout criando pedido + reserva; resgate de cashback online; `/shop/orders` com propriedade validada no service | Pedido online completo (pagamento manual) | 7, 8 | **8–10 d** |
@@ -1258,7 +1268,7 @@ abaixo traz o ID **efetivamente atribuído**.
 | `CRM-F003` | crm | Programa de cashback: taxas por escopo, ledger append-only e `/cashback/margin-impact` | 4 |
 | `EST-F013` | estoque | *(já existe)* `StockReservation` — modelo detalhado em §2.2; migration V64 **já aplicada**; reserva no **checkout**, não no carrinho | 7 |
 | `EST-F014` | estoque | *(já existe)* Estorno/devolução — sobe de prioridade, precede a reserva | 5 |
-| `EST-F015` | estoque | *(já existe)* Kit — decidido virtual, um nível (§2.10) | 6 |
+| `EST-F015` | estoque | ✅ Fechado 2026-07-29 — kit virtual, um nível (§2.10). Ver Histórico de `estoque/README.md`. | 6 |
 | `EST-F021` | estoque | `reservedQuantity` em `StockBalance` e `SAIDA` contra disponível | 7 |
 | `EST-F022` | estoque | Custo derivado de kit em `findPricingBySku` | 6 |
 | `EST-C013` | estoque | Endpoint de integridade para divergência entre `reserved_quantity` e o ledger de reserva | 7 |

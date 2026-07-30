@@ -1076,6 +1076,50 @@ Operação revertida não notifica ninguém.
 
 ---
 
+### PUT /estoque/products/{sku}/kit — Permissão: ESTOQUE_KIT_MANAGE
+
+```json
+{
+  "components": [
+    { "componentSku": "CARV-001", "quantity": 2 },
+    { "componentSku": "ESS-001", "quantity": 1 }
+  ]
+}
+// Response 200 → ProductResponse (type passa a "KIT")
+// 404 PRODUCT_NOT_FOUND (kitSku ou algum componentSku fora do catálogo)
+// 409 KIT_RECIPE_EMPTY / KIT_HAS_VARIANTS / KIT_COMPONENT_ALREADY_IN_USE /
+//     KIT_SELF_REFERENCE / DUPLICATE_KIT_COMPONENT / KIT_COMPONENT_NOT_SIMPLE
+// 400 VALIDATION_ERROR
+```
+
+Define (substitui integralmente) a receita de um kit virtual (EST-F015, um nível só — §2.10 do
+plano) e promove o produto a `KIT` como efeito colateral. **PUT idempotente:** chamar de novo com
+um conjunto diferente de componentes substitui a receita inteira, nunca mescla. Componente
+precisa ser `SIMPLES` — kit dentro de kit é proibido por construção — e o próprio SKU do kit não
+pode já ser componente de outro kit nem ter variações cadastradas.
+
+Kit nunca tem linha própria em `stock_balance`: `GET /estoque/stock-balance` para um SKU `KIT`
+devolve o saldo **derivado**, `min(floor(disponível_componente / quantidade_receita))` sobre os
+componentes. `GET /estoque/products/{sku}/price` devolve o custo **derivado**, soma de
+`costPrice * quantity` dos componentes — o `salePrice` continua sendo o do próprio kit. Uma
+venda do kit (`POST /pdv/sessions/{id}/sales`) e o reembolso correspondente
+(`POST /orders/{id}/refund`) explodem transparentemente em uma movimentação de estoque por
+componente, com o SKU do kit anexado ao `reason` (ex.: `"Venda balcão sessão #42 (kit
+KIT-001)"`) — nenhuma mudança de contrato nesses dois endpoints.
+
+### GET /estoque/products/{sku}/kit — Permissão: ESTOQUE_PRODUCT_READ
+
+```json
+// Response 200 → List<KitComponentResponse> (vazio se o SKU nunca foi promovido a kit)
+[
+  { "componentSku": "CARV-001", "quantity": 2 },
+  { "componentSku": "ESS-001", "quantity": 1 }
+]
+// 404 PRODUCT_NOT_FOUND
+```
+
+---
+
 ### Balanço de inventário — `/estoque/stock-counts` — Permissão: ESTOQUE_STOCK_MANAGE
 
 O balanço (EST-F006) é uma **sessão**: abre-se para um depósito, contam-se os SKUs aos poucos, e o
@@ -2490,6 +2534,7 @@ interface TotpConfirmResponse {
 | `ESTOQUE_WAREHOUSE_MANAGE` | Criar/gerenciar depósitos |
 | `ESTOQUE_STOCK_MANAGE` | `POST`/`GET /estoque/movements`, `PUT /estoque/products/{sku}/reorder-point`, `GET /estoque/integrity/orphan-skus`, `GET /estoque/integrity/reservation-mismatch` e todo o `/estoque/stock-counts` (balanço de inventário) |
 | `ESTOQUE_RESERVATION_READ` | `GET /estoque/reservations` e `GET /estoque/reservations/{id}` |
+| `ESTOQUE_KIT_MANAGE` | `PUT /estoque/products/{sku}/kit` — definir a receita de um kit |
 | `ESTOQUE_PRODUCT_MANAGE` | `POST /estoque/products`, `PATCH /estoque/products/{sku}` e `.../active` |
 | `ESTOQUE_WAREHOUSE_MANAGE` | `POST /estoque/warehouses`, `PATCH /estoque/warehouses/{code}` e `.../active` |
 | `CRM_CUSTOMER_READ` | Leituras de `/crm/**` |

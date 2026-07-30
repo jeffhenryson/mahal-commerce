@@ -62,10 +62,23 @@ EstoqueService, StockBalance.reserve/consumeReservation/releaseReservation) cont
 cobertura própria — só a query de integridade e a superfície nova foram testadas. Cabe como
 item isolado antes de EST-F008/F016, que também mexem em StockBalance.
 
-ORDEM SUGERIDA (revisada em 2026-07-28 pelo plano de PDV/marketplace; F013/F021/C013 fechados em 07-29)
- 1. EST-F014  estorno/devolução de venda (Fatia 5 do plano). Sobe de prioridade: reserva sem
-              cancelamento é armadilha, e a devolução é pré-requisito do cashback estornado.
- 2. EST-F015 + EST-F022  kit virtual de um nível + custo derivado no Pricing (Fatia 6).
+TRABALHO CONCLUÍDO EM 2026-07-29 — EST-F015/EST-F022 (Fatia 6, kits)
+Kit é virtual: ProductType (SIMPLES/KIT) + product_kit_component (um nível só, sem FK — mesmo
+motivo de stock_balance/stock_movement). Ciclo/aninhamento impossíveis por construção:
+defineKitRecipe recusa componente que não seja SIMPLES, recusa promover a KIT um SKU já usado
+como componente de outro kit, recusa kit com variações. getStockBalance deriva o saldo
+(min(floor(disponível/receita))); findPricingBySku deriva o custo (soma dos componentes,
+null se algum componente não tem custo). A explosão mora inteira em EstoqueService.adjustStock
+(chama a si mesmo por componente) — PdvService/OrderService não mudaram. Migration V73. Bug de
+passagem corrigido fora do módulo: CashbackService.findMarginImpact excluía todo kit do
+relatório por ler product.pricing() cru. Próxima migration livre: V74.
+
+ORDEM SUGERIDA (revisada em 2026-07-28 pelo plano de PDV/marketplace; F013/F021/C013 fechados em
+07-29; F014/F015/F022 fechados em 07-29)
+ 1. ~~EST-F014~~ ✅ estorno/devolução de venda (Fatia 5 do plano) — `OrderService.refundOrder`
+    devolve a mercadoria via `adjustStock(ENTRADA)` por item, com `REVERSED` no cashback e
+    estorno de pagamento na mesma transação. Ver `docs/dominios/vendas-balcao/README.md`.
+ 2. ~~EST-F015 + EST-F022~~ ✅ kit virtual de um nível + custo derivado no Pricing (Fatia 6).
  3. EST-F008  lote e validade. Muda a granularidade do saldo — trate como mudança
               de modelagem, não como campo novo.
  4. EST-F007  custo médio ponderado. Depois de F008 (o custo entra por lote) e DEPOIS DO
@@ -160,9 +173,9 @@ Fechar os 7 grupos que restam no roteiro, mais uma decisão registrada sobre os 
 em estoque (F011, C006) e sobre os dois despriorizados (F012, F020). Com isso o backlog do módulo
 zera e `financeiro` fica destravado para o DRE, que hoje espera o custo médio de F007.
 
-**O estoque deixou de ser o módulo da vez.** A reserva fechou e `vendas-balcao` também fechou suas
-três fatias (0, 1 e 3) em 2026-07-29 — ver
-[`dominios/vendas-balcao/proximos-passos.md`](../vendas-balcao/proximos-passos.md). A prioridade do
-projeto agora é `crm` (Fatia 4, cashback). O estoque volta ao centro em **EST-F014** (devolução,
-abaixo) e na Fatia 6 (kits) — nenhum dos dois bloqueia o cashback, então podem andar em paralelo
-se houver janela.
+**O estoque deixou de ser o módulo da vez.** A reserva fechou, `vendas-balcao` fechou suas cinco
+fatias (0, 1, 3, 5 e a parte de reembolso da Fatia 5) e o próprio estoque fechou **EST-F014**
+(devolução, via `OrderService.refundOrder`) e **EST-F015/EST-F022** (kits, Fatia 6) em 2026-07-29
+— ver [`dominios/vendas-balcao/proximos-passos.md`](../vendas-balcao/proximos-passos.md). Sem
+fatia numerada pendente no marco do marketplace; o que resta do backlog deste módulo (F008, F007,
+F016, F005, mais a decisão sobre F011/C006) não bloqueia nada e pode esperar uma janela.

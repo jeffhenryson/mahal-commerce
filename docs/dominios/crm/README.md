@@ -218,7 +218,10 @@ Novas features e correções do CRM seguem as séries `CRM-F001+` e `CRM-C002+`.
   `CashbackExpiryCleanupService` (novo, `infra/scheduler`) expira ganhos vencidos uma vez por dia,
   molde exato de `StockReservationExpiryCleanupService`. Novo `CashbackController` em `/cashback`
   (`CASHBACK_RATE_MANAGE`/`CASHBACK_READ`): CRUD de taxa, `GET /cashback/rates/resolve`, `GET
-  /cashback/margin-impact` (usa `Pricing.marginPercent()`, sem matemática nova), saldo e extrato
+  /cashback/margin-impact` (usa `Pricing.marginPercent()`, sem matemática nova; **corrigido em
+  2026-07-29** para ler via `estoqueUseCase.findPricingBySku(sku)` em vez de `product.pricing()`
+  cru — direto do domínio, um kit virtual (EST-F015, Fatia 6) sempre tem `costPrice` nulo, e a
+  leitura crua excluiria todo kit deste relatório), saldo e extrato
   por cliente. `GET /crm/customers/{id}/cashback` e `CustomerResponseDTO.cashback` deixam de ser
   placeholder — a listagem paginada de clientes mantém o zero de propósito, para não virar um
   N+1 de saldo por linha da página; só a busca por id paga a consulta real. Migration V70 (V69 já
