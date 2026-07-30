@@ -29,6 +29,8 @@ import com.cernecommerce.core.domain.exception.email.EmailDeliveryException;
 import com.cernecommerce.core.domain.exception.email.EmailVerificationCodeExpiredException;
 import com.cernecommerce.core.domain.exception.email.EmailVerificationCodeNotFoundException;
 import com.cernecommerce.core.domain.exception.rbac.RoleNotFoundException;
+import com.cernecommerce.core.domain.exception.cashback.CashbackRateAlreadyExistsException;
+import com.cernecommerce.core.domain.exception.cashback.CashbackRateNotFoundException;
 import com.cernecommerce.core.domain.exception.compras.SupplierNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateSkuException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateWarehouseCodeException;
@@ -197,6 +199,19 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiError> handleStockReservationNotActive(StockReservationNotActiveException ex,
             HttpServletRequest req) {
         return error(HttpStatus.CONFLICT, ex.getMessage(), "RESERVATION_NOT_ACTIVE", req);
+    }
+
+    @ExceptionHandler(CashbackRateNotFoundException.class)
+    public ResponseEntity<ApiError> handleCashbackRateNotFound(CashbackRateNotFoundException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.NOT_FOUND, ex.getMessage(), "CASHBACK_RATE_NOT_FOUND", req);
+    }
+
+    /** Requisição bem formada, conflita é com a taxa já ativa na mesma abrangência — 409, não 400. */
+    @ExceptionHandler(CashbackRateAlreadyExistsException.class)
+    public ResponseEntity<ApiError> handleCashbackRateAlreadyExists(CashbackRateAlreadyExistsException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "CASHBACK_RATE_ALREADY_EXISTS", req);
     }
 
     @ExceptionHandler(SupplierNotFoundException.class)

@@ -84,6 +84,9 @@ import com.cernecommerce.core.ports.in.FinanceiroUseCase;
 import com.cernecommerce.core.ports.in.EcommerceUseCase;
 import com.cernecommerce.core.ports.in.LogisticaUseCase;
 import com.cernecommerce.core.ports.in.CrmUseCase;
+import com.cernecommerce.core.ports.in.CashbackUseCase;
+import com.cernecommerce.core.ports.out.cashback.CashbackEntryRepository;
+import com.cernecommerce.core.ports.out.cashback.CashbackRateRepository;
 import com.cernecommerce.core.ports.out.crm.CampaignAutomationRepository;
 import com.cernecommerce.core.ports.out.crm.CampaignLogRepository;
 import com.cernecommerce.core.ports.out.crm.CustomerNoteRepository;
@@ -99,6 +102,7 @@ import com.cernecommerce.core.service.FinanceiroService;
 import com.cernecommerce.core.service.EcommerceService;
 import com.cernecommerce.core.service.LogisticaService;
 import com.cernecommerce.core.service.CrmService;
+import com.cernecommerce.core.service.CashbackService;
 
 import java.math.BigDecimal;
 import java.nio.file.Path;
@@ -202,20 +206,22 @@ class CoreBeanConfig {
     // correspondentes ganhem implementação.
 
     @Bean
-    OrderUseCase orderUseCase(OrderRepository orderRepository, EstoqueUseCase estoqueUseCase) {
-        return new OrderService(orderRepository, estoqueUseCase);
+    OrderUseCase orderUseCase(OrderRepository orderRepository, EstoqueUseCase estoqueUseCase,
+            OrderPaymentRepository orderPaymentRepository, CashbackUseCase cashbackUseCase) {
+        return new OrderService(orderRepository, estoqueUseCase, orderPaymentRepository, cashbackUseCase);
     }
 
     @Bean
     PdvUseCase pdvUseCase(CashRegisterRepository cashRegisterRepository,
             CashMovementRepository cashMovementRepository, OrderRepository orderRepository,
             OrderPaymentRepository orderPaymentRepository, EstoqueUseCase estoqueUseCase,
+            CashbackUseCase cashbackUseCase,
             // Teto de desconto por pedido (PDV-F004). Acima dele, 409 em vez de um segundo nível de
             // permissão — dois níveis só criariam a tentação de distribuir o maior. Migra para
             // system_config junto com o painel de configuração.
             @Value("${pdv.sale.max-discount-percent:10}") BigDecimal maxDiscountPercent) {
         return new PdvService(cashRegisterRepository, cashMovementRepository, orderRepository,
-                orderPaymentRepository, estoqueUseCase, maxDiscountPercent);
+                orderPaymentRepository, estoqueUseCase, cashbackUseCase, maxDiscountPercent);
     }
 
     @Bean
@@ -253,6 +259,14 @@ class CoreBeanConfig {
     @Bean
     LogisticaUseCase logisticaUseCase() {
         return new LogisticaService();
+    }
+
+    @Bean
+    CashbackUseCase cashbackUseCase(CashbackRateRepository cashbackRateRepository,
+            CashbackEntryRepository cashbackEntryRepository, EstoqueUseCase estoqueUseCase,
+            CustomerRepository customerRepository, SystemConfigPort systemConfigPort) {
+        return new CashbackService(cashbackRateRepository, cashbackEntryRepository, estoqueUseCase,
+                customerRepository, systemConfigPort);
     }
 
     @Bean

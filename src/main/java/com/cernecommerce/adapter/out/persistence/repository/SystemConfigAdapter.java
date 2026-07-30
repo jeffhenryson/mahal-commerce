@@ -8,6 +8,7 @@ import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -54,6 +55,24 @@ public class SystemConfigAdapter implements SystemConfigPort {
     public boolean getBoolean(String key, boolean defaultValue) {
         return jpa.findById(key)
             .map(e -> Boolean.parseBoolean(e.getValue()))
+            .orElse(defaultValue);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    @Cacheable(cacheNames = CACHE_NAME, key = "'int:' + #key + ':' + #defaultValue")
+    public int getInt(String key, int defaultValue) {
+        return jpa.findById(key)
+            .map(e -> Integer.parseInt(e.getValue()))
+            .orElse(defaultValue);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    @Cacheable(cacheNames = CACHE_NAME, key = "'decimal:' + #key + ':' + #defaultValue")
+    public BigDecimal getDecimal(String key, BigDecimal defaultValue) {
+        return jpa.findById(key)
+            .map(e -> new BigDecimal(e.getValue()))
             .orElse(defaultValue);
     }
 

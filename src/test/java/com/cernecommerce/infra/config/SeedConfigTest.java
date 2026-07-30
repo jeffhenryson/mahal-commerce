@@ -1,5 +1,6 @@
 package com.cernecommerce.infra.config;
 
+import com.cernecommerce.core.ports.in.CashbackUseCase;
 import com.cernecommerce.core.ports.in.PermissionUseCase;
 import com.cernecommerce.core.ports.in.RoleUseCase;
 import com.cernecommerce.core.ports.in.UserUseCase;
@@ -27,10 +28,11 @@ class SeedConfigTest {
         UserUseCase userUseCase = mock(UserUseCase.class);
         RoleUseCase roleUseCase = mock(RoleUseCase.class);
         PermissionUseCase permissionUseCase = mock(PermissionUseCase.class);
+        CashbackUseCase cashbackUseCase = mock(CashbackUseCase.class);
         when(userUseCase.findByUsername(anyString())).thenReturn(Optional.empty());
 
         CommandLineRunner runner = seedConfig.seedAll(userUseCase, roleUseCase, permissionUseCase,
-                "Admin@dev1", "User@dev1");
+                cashbackUseCase, "Admin@dev1", "User@dev1");
         runner.run();
 
         verify(permissionUseCase).createPermission("ESTOQUE_PRODUCT_READ");
@@ -57,10 +59,11 @@ class SeedConfigTest {
         UserUseCase userUseCase = mock(UserUseCase.class);
         RoleUseCase roleUseCase = mock(RoleUseCase.class);
         PermissionUseCase permissionUseCase = mock(PermissionUseCase.class);
+        CashbackUseCase cashbackUseCase = mock(CashbackUseCase.class);
         when(userUseCase.findByUsername(anyString())).thenReturn(Optional.empty());
 
         CommandLineRunner runner = seedConfig.seedAll(userUseCase, roleUseCase, permissionUseCase,
-                "Admin@dev1", "User@dev1");
+                cashbackUseCase, "Admin@dev1", "User@dev1");
         runner.run();
 
         verify(permissionUseCase).createPermission("PDV_SALE_MANAGE");

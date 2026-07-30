@@ -71,6 +71,16 @@ public interface EstoqueUseCase {
     Pricing findPricingBySku(String sku);
 
     /**
+     * Resolve o produto (com categoria e precificação) de qualquer SKU do catálogo — pai ou
+     * variação. Usado, por exemplo, pela cadeia de resolução de taxa de cashback (CRM-F003), que
+     * precisa da categoria do produto, não só do preço.
+     *
+     * @throws com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException
+     *         se o SKU não existir no catálogo.
+     */
+    Product findProductBySku(String sku);
+
+    /**
      * Ativa ou desativa um produto (EST-F018). Produto inativo <b>recusa entrada</b> de estoque
      * — manual ou por recebimento de Compras —, mas continua aceitando saída, para escoar o saldo
      * remanescente. Lança

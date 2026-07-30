@@ -5,6 +5,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import com.cernecommerce.adapter.in.converter.CampaignDTOConverter;
+import com.cernecommerce.adapter.in.converter.CashbackDTOConverter;
 import com.cernecommerce.adapter.in.converter.ChannelStatusDTOConverter;
 import com.cernecommerce.adapter.in.converter.CustomerCsvConverter;
 import com.cernecommerce.adapter.in.converter.CustomerDTOConverter;
@@ -120,5 +121,10 @@ class ConverterBeanConfig {
     @Bean
     CashRegisterDTOConverter cashRegisterDTOConverter() {
         return new CashRegisterDTOConverter();
+    }
+
+    @Bean
+    CashbackDTOConverter cashbackDTOConverter() {
+        return new CashbackDTOConverter();
     }
 }

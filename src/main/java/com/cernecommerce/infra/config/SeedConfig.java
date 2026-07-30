@@ -1,5 +1,7 @@
 package com.cernecommerce.infra.config;
 
+import com.cernecommerce.core.domain.model.cashback.CashbackScope;
+import com.cernecommerce.core.ports.in.CashbackUseCase;
 import com.cernecommerce.core.ports.in.PermissionUseCase;
 import com.cernecommerce.core.ports.in.RoleUseCase;
 import com.cernecommerce.core.ports.in.UserUseCase;
@@ -11,6 +13,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 @Configuration
@@ -30,11 +33,12 @@ public class SeedConfig {
         "ESTOQUE_WAREHOUSE_READ", "ESTOQUE_WAREHOUSE_MANAGE",
         "ESTOQUE_STOCK_MANAGE",
         "ESTOQUE_RESERVATION_READ", "ESTOQUE_RESERVATION_MANAGE",
-        "CRM_CUSTOMER_READ", "CRM_CUSTOMER_MANAGE",
+        "CRM_CUSTOMER_READ", "CRM_CUSTOMER_MANAGE", "CRM_CUSTOMER_LOOKUP",
+        "CASHBACK_RATE_MANAGE", "CASHBACK_READ",
         "COMPRAS_READ", "COMPRAS_RECEIPT_MANAGE", "ECOMMERCE_READ", "FINANCEIRO_READ", "LOGISTICA_READ",
         "PDV_READ", "PDV_SALE_MANAGE", "PDV_SALE_DISCOUNT",
         "PDV_SESSION_MANAGE", "PDV_SESSION_CLOSE",
-        "ORDER_READ", "ORDER_FULFILL", "ORDER_CANCEL"
+        "ORDER_READ", "ORDER_FULFILL", "ORDER_CANCEL", "ORDER_REFUND"
     };
 
     // DEV_ONLY_PERMISSIONS e ROLE_DEV são gerenciados pelo DevRoleBootstrapConfig (todos os profiles).
@@ -43,13 +47,24 @@ public class SeedConfig {
     CommandLineRunner seedAll(UserUseCase userUseCase,
                               RoleUseCase roleUseCase,
                               PermissionUseCase permissionUseCase,
+                              CashbackUseCase cashbackUseCase,
                               @Value("${seed.admin.password:Admin@dev1}") String adminPassword,
                               @Value("${seed.user.password:User@dev1}") String userPassword) {
         return args -> {
             seedPermissions(permissionUseCase);
             seedRoles(roleUseCase);
             seedUsers(userUseCase, adminPassword, userPassword);
+            seedCashbackRate(cashbackUseCase);
         };
+    }
+
+    // Espelha o seed da V70 (taxa GLOBAL 3%) para o profile dev: aqui o schema nasce do ddl-auto a
+    // partir das entities (spring.flyway.enabled=false), então a migration nunca roda e a taxa
+    // GLOBAL da V70 jamais existiria sem isto — CashbackFlowIT (e o balcão em dev) ficariam sem
+    // taxa aplicável.
+    private void seedCashbackRate(CashbackUseCase cashbackUseCase) {
+        try { cashbackUseCase.createRate(CashbackScope.GLOBAL, null, new BigDecimal("3.00"), null, null); }
+        catch (Exception e) { log.debug("seed.cashbackRate.skip reason={}", e.getMessage()); }
     }
 
     private void seedPermissions(PermissionUseCase permissionUseCase) {

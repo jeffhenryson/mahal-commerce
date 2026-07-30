@@ -149,6 +149,14 @@ public class EstoqueService implements EstoqueUseCase {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public Product findProductBySku(String sku) {
+        // Mesma razão de findPricingBySku: a variação não tem categoria própria, herda a do pai.
+        return productRepository.findByAnySku(sku)
+                .orElseThrow(() -> new ProductNotFoundException(sku));
+    }
+
+    @Override
     @Transactional
     public Product setProductActive(String sku, boolean active) {
         Product current = productRepository.findBySku(sku)

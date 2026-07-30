@@ -5,6 +5,7 @@ import com.cernecommerce.core.ports.in.SystemConfigUseCase;
 import com.cernecommerce.core.ports.out.SystemConfigPort;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Set;
@@ -53,5 +54,17 @@ public class SystemConfigService implements SystemConfigUseCase {
     @Transactional(readOnly = true)
     public boolean getBoolean(String key, boolean defaultValue) {
         return configPort.getBoolean(key, defaultValue);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public int getInt(String key, int defaultValue) {
+        return configPort.getInt(key, defaultValue);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public BigDecimal getDecimal(String key, BigDecimal defaultValue) {
+        return configPort.getDecimal(key, defaultValue);
     }
 }
