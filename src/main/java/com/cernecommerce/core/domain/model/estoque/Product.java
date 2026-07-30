@@ -19,7 +19,8 @@ public record Product(
     String category,
     boolean active,
     List<ProductVariant> variants,
-    Pricing pricing
+    Pricing pricing,
+    ProductType type
 ) {
 
     public Product {
@@ -31,17 +32,24 @@ public record Product(
         }
         variants = variants == null ? List.of() : List.copyOf(variants);
         pricing = pricing == null ? Pricing.empty() : pricing;
+        type = type == null ? ProductType.SIMPLES : type;
     }
 
-    /** Cria um novo produto sem precificação (sem id, ativo por padrão). */
+    /** Cria um novo produto sem precificação (sem id, ativo por padrão, {@code SIMPLES}). */
     public static Product create(String sku, String name, String category, List<ProductVariant> variants) {
         return create(sku, name, category, variants, Pricing.empty());
     }
 
-    /** Cria um novo produto precificado (sem id, ativo por padrão). */
+    /** Cria um novo produto precificado (sem id, ativo por padrão, {@code SIMPLES}). */
     public static Product create(String sku, String name, String category, List<ProductVariant> variants,
             Pricing pricing) {
-        return new Product(null, sku, name, category, true, variants, pricing);
+        return create(sku, name, category, variants, pricing, ProductType.SIMPLES);
+    }
+
+    /** Cria um novo produto (sem id, ativo por padrão) — forma canônica, com tipo explícito. */
+    public static Product create(String sku, String name, String category, List<ProductVariant> variants,
+            Pricing pricing, ProductType type) {
+        return new Product(null, sku, name, category, true, variants, pricing, type);
     }
 
     /** Reconstitui um produto sem precificação a partir de persistência. */
@@ -53,7 +61,13 @@ public record Product(
     /** Reconstitui um produto a partir de persistência. */
     public static Product of(Long id, String sku, String name, String category, boolean active,
             List<ProductVariant> variants, Pricing pricing) {
-        return new Product(id, sku, name, category, active, variants, pricing);
+        return of(id, sku, name, category, active, variants, pricing, ProductType.SIMPLES);
+    }
+
+    /** Reconstitui um produto a partir de persistência — forma canônica, com tipo explícito. */
+    public static Product of(Long id, String sku, String name, String category, boolean active,
+            List<ProductVariant> variants, Pricing pricing, ProductType type) {
+        return new Product(id, sku, name, category, active, variants, pricing, type);
     }
 
     /**
@@ -73,16 +87,30 @@ public record Product(
         return new Product(id, sku,
                 newName == null ? name : newName,
                 newCategory == null ? category : newCategory,
-                active, variants, pricing);
+                active, variants, pricing, type);
     }
 
     /** Ativa ou desativa o produto, preservando o resto. */
     public Product withActive(boolean newActive) {
-        return new Product(id, sku, name, category, newActive, variants, pricing);
+        return new Product(id, sku, name, category, newActive, variants, pricing, type);
     }
 
     /** Substitui a precificação do produto, preservando o resto. */
     public Product withPricing(Pricing newPricing) {
-        return new Product(id, sku, name, category, active, variants, newPricing);
+        return new Product(id, sku, name, category, active, variants, newPricing, type);
+    }
+
+    /**
+     * Promove/rebaixa o tipo do produto, preservando o resto. Usado só por
+     * {@code EstoqueService.defineKitRecipe} (EST-F015) — não há endpoint que troque o tipo
+     * isoladamente, porque virar {@code KIT} sem uma receita não faz sentido.
+     */
+    public Product withType(ProductType newType) {
+        return new Product(id, sku, name, category, active, variants, pricing, newType);
+    }
+
+    /** Indica se este produto é um kit virtual (EST-F015) — sem saldo próprio, saldo derivado. */
+    public boolean isKit() {
+        return type == ProductType.KIT;
     }
 }

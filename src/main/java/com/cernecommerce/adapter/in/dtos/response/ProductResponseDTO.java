@@ -15,4 +15,7 @@ public class ProductResponseDTO {
 
     /** EST-F019 — nunca nulo; produto sem preço vem com os campos internos nulos. */
     private PricingResponseDTO pricing;
+
+    /** {@code SIMPLES} ou {@code KIT} (EST-F015). */
+    private String type;
 }

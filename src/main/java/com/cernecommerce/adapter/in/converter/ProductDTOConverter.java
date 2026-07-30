@@ -1,16 +1,21 @@
 package com.cernecommerce.adapter.in.converter;
 
+import com.cernecommerce.adapter.in.dtos.request.KitComponentRequest;
+import com.cernecommerce.adapter.in.dtos.request.KitRecipeRequest;
 import com.cernecommerce.adapter.in.dtos.request.PricingRequest;
 import com.cernecommerce.adapter.in.dtos.request.ProductAttributeRequest;
 import com.cernecommerce.adapter.in.dtos.request.ProductVariantRequest;
+import com.cernecommerce.adapter.in.dtos.response.KitComponentResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.PricingResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.ProductAttributeResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.ProductResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.ProductVariantResponseDTO;
+import com.cernecommerce.core.domain.model.estoque.KitComponent;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
+import com.cernecommerce.core.ports.in.EstoqueUseCase.KitComponentCommand;
 
 import java.util.List;
 
@@ -55,6 +60,21 @@ public class ProductDTOConverter {
         dto.setActive(product.active());
         dto.setVariants(product.variants().stream().map(this::toResponse).toList());
         dto.setPricing(toResponse(product.pricing()));
+        dto.setType(product.type().name());
+        return dto;
+    }
+
+    /** Converte a receita do request (EST-F015) no comando que o use case espera. */
+    public List<KitComponentCommand> toKitComponentCommands(KitRecipeRequest request) {
+        return request.getComponents().stream()
+                .map(c -> new KitComponentCommand(c.getComponentSku(), c.getQuantity()))
+                .toList();
+    }
+
+    public KitComponentResponseDTO toKitComponentResponse(KitComponent component) {
+        KitComponentResponseDTO dto = new KitComponentResponseDTO();
+        dto.setComponentSku(component.componentSku());
+        dto.setQuantity(component.quantity());
         return dto;
     }
 

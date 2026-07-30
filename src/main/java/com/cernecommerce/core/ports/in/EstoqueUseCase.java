@@ -1,6 +1,7 @@
 package com.cernecommerce.core.ports.in;
 
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.estoque.KitComponent;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
@@ -330,4 +331,46 @@ public interface EstoqueUseCase {
      * @return quantas reservas foram expiradas nesta passada
      */
     int expireReservations(int batchSize);
+
+    // ---------------------------------------------------------------------------------------
+    // Kits (EST-F015) — virtuais, de um nível só (§2.10 do plano)
+    // ---------------------------------------------------------------------------------------
+
+    /** O que o chamador informa por linha de receita: SKU do componente e quantidade consumida. */
+    record KitComponentCommand(String componentSku, BigDecimal quantity) {
+    }
+
+    /**
+     * Define (substitui integralmente) a receita de um kit e promove o produto a {@code KIT}
+     * como efeito colateral — não é preciso chamar nada além disto para um SKU virar kit.
+     *
+     * <p>PUT idempotente: chamar de novo com uma lista diferente substitui a receita inteira, não
+     * mescla. Componente precisa ser {@code SIMPLES} — kit dentro de kit é proibido por
+     * construção, não detectado por travessia.</p>
+     *
+     * @throws com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException se
+     *         {@code kitSku} não existir como SKU pai, ou se algum {@code componentSku} não
+     *         existir no catálogo
+     * @throws com.cernecommerce.core.domain.exception.estoque.EmptyKitRecipeException se
+     *         {@code components} vier vazio
+     * @throws com.cernecommerce.core.domain.exception.estoque.KitHasVariantsException se o
+     *         produto alvo já tiver variações cadastradas
+     * @throws com.cernecommerce.core.domain.exception.estoque.KitComponentAlreadyInUseException
+     *         se {@code kitSku} já for componente de outro kit
+     * @throws com.cernecommerce.core.domain.exception.estoque.KitSelfReferenceException se algum
+     *         componente for o próprio {@code kitSku}
+     * @throws com.cernecommerce.core.domain.exception.estoque.DuplicateKitComponentException se
+     *         o mesmo {@code componentSku} aparecer mais de uma vez na lista
+     * @throws com.cernecommerce.core.domain.exception.estoque.KitComponentNotSimpleException se
+     *         algum componente não for {@code SIMPLES}
+     */
+    Product defineKitRecipe(String kitSku, List<KitComponentCommand> components);
+
+    /**
+     * Receita vigente de um kit. Lista vazia se o SKU existe mas nunca foi promovido a kit.
+     *
+     * @throws com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException se o SKU
+     *         não existir no catálogo
+     */
+    List<KitComponent> getKitRecipe(String kitSku);
 }

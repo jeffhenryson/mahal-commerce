@@ -50,6 +50,18 @@ public record StockBalance(Long id, String sku, Long warehouseId, BigDecimal qua
     }
 
     /**
+     * Saldo DERIVADO de um kit virtual (EST-F015): nunca corresponde a uma linha real de
+     * {@code stock_balance} — {@code id} nulo e {@code version} zero são placeholders
+     * estruturais, nunca persistidos. {@code reservedQuantity} é sempre zero: reserva de kit não
+     * existe nesta fatia. Existe como fábrica própria (em vez de reaproveitar {@link #zero}) só
+     * para deixar explícito, no call site de {@code EstoqueService}, que aquele saldo é calculado
+     * na hora, não lido do banco.
+     */
+    public static StockBalance derived(String sku, Long warehouseId, BigDecimal quantity) {
+        return new StockBalance(null, sku, warehouseId, quantity, BigDecimal.ZERO, 0L);
+    }
+
+    /**
      * Reconstitui um saldo <b>sem reserva</b> a partir de persistência. Sobrecarga de conveniência
      * para os chamadores anteriores a EST-F021 — equivale a {@code reservedQuantity = 0}.
      */

@@ -101,7 +101,11 @@ public class CashbackService implements CashbackUseCase {
         do {
             products = estoqueUseCase.listProducts(page, MARGIN_IMPACT_PAGE_SIZE);
             for (Product product : products.content()) {
-                BigDecimal marginPercent = product.pricing().marginPercent();
+                // findPricingBySku, não product.pricing() direto: para um kit (EST-F015), o
+                // costPrice cru é sempre nulo (só é derivado na leitura), então ler a Pricing
+                // crua excluiria todo kit deste relatório — justo o contrário do que
+                // marginPercent() promete cobrir "sem uma linha de matemática nova".
+                BigDecimal marginPercent = estoqueUseCase.findPricingBySku(product.sku()).marginPercent();
                 if (marginPercent == null || marginPercent.signum() == 0) {
                     continue;
                 }

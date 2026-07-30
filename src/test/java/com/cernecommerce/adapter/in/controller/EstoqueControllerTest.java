@@ -390,6 +390,92 @@ public class EstoqueControllerTest {
                 .andExpect(jsonPath("$.errorCode").value("WAREHOUSE_NOT_FOUND"));
     }
 
+    // ── Kits (EST-F015) ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    void defineKitRecipe_returns_200_withPromotedProduct() throws Exception {
+        Product kit = Product.of(1L, "KIT-001", "Kit Narguile", "combo", true, List.of(),
+                Pricing.empty(), com.cernecommerce.core.domain.model.estoque.ProductType.KIT);
+        when(estoqueUseCase.defineKitRecipe(eq("KIT-001"), any())).thenReturn(kit);
+
+        mockMvc.perform(put("/estoque/products/KIT-001/kit")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"components\":[{\"componentSku\":\"CARV-001\",\"quantity\":2}]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.type").value("KIT"));
+    }
+
+    @Test
+    void defineKitRecipe_withoutComponents_returns_400() throws Exception {
+        mockMvc.perform(put("/estoque/products/KIT-001/kit")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"components\":[]}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void defineKitRecipe_kitSkuNotFound_returns_404() throws Exception {
+        when(estoqueUseCase.defineKitRecipe(eq("SKU-FANTASMA"), any()))
+                .thenThrow(new ProductNotFoundException("SKU-FANTASMA"));
+
+        mockMvc.perform(put("/estoque/products/SKU-FANTASMA/kit")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"components\":[{\"componentSku\":\"CARV-001\",\"quantity\":2}]}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.errorCode").value("PRODUCT_NOT_FOUND"));
+    }
+
+    @Test
+    void defineKitRecipe_selfReference_returns_409() throws Exception {
+        when(estoqueUseCase.defineKitRecipe(eq("KIT-001"), any()))
+                .thenThrow(new com.cernecommerce.core.domain.exception.estoque.KitSelfReferenceException("KIT-001"));
+
+        mockMvc.perform(put("/estoque/products/KIT-001/kit")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"components\":[{\"componentSku\":\"KIT-001\",\"quantity\":1}]}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.errorCode").value("KIT_SELF_REFERENCE"));
+    }
+
+    @Test
+    void defineKitRecipe_componentNotSimples_returns_409() throws Exception {
+        when(estoqueUseCase.defineKitRecipe(eq("KIT-001"), any()))
+                .thenThrow(new com.cernecommerce.core.domain.exception.estoque.KitComponentNotSimpleException(
+                        "KIT-001", "KIT-002", com.cernecommerce.core.domain.model.estoque.ProductType.KIT));
+
+        mockMvc.perform(put("/estoque/products/KIT-001/kit")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"components\":[{\"componentSku\":\"KIT-002\",\"quantity\":1}]}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.errorCode").value("KIT_COMPONENT_NOT_SIMPLE"));
+    }
+
+    @Test
+    void getKitRecipe_returns_200_withComponentList() throws Exception {
+        when(estoqueUseCase.getKitRecipe("KIT-001")).thenReturn(List.of(
+                com.cernecommerce.core.domain.model.estoque.KitComponent.of(5L, "KIT-001", "CARV-001",
+                        new BigDecimal("2"))));
+
+        mockMvc.perform(get("/estoque/products/KIT-001/kit").principal(AUTH))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].componentSku").value("CARV-001"))
+                .andExpect(jsonPath("$[0].quantity").value(2));
+    }
+
+    @Test
+    void getKitRecipe_skuNotFound_returns_404() throws Exception {
+        when(estoqueUseCase.getKitRecipe("SKU-FANTASMA")).thenThrow(new ProductNotFoundException("SKU-FANTASMA"));
+
+        mockMvc.perform(get("/estoque/products/SKU-FANTASMA/kit").principal(AUTH))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.errorCode").value("PRODUCT_NOT_FOUND"));
+    }
+
     private StockMovement movement(long id, MovementType type, String quantity, String reason) {
         return StockMovement.of(id, "NARG-001", 1L, type, new BigDecimal(quantity), reason, "gerente",
                 Instant.parse("2026-07-26T12:00:00Z"));

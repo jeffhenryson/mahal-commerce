@@ -7,6 +7,7 @@ import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
+import com.cernecommerce.core.domain.model.estoque.ProductType;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.ports.out.estoque.ProductRepository;
 import org.springframework.data.domain.Page;
@@ -38,6 +39,7 @@ public class ProductRepositoryImpl implements ProductRepository {
         entity.setCostPrice(product.pricing().costPrice());
         entity.setMarkupPercent(product.pricing().markupPercent());
         entity.setSalePrice(product.pricing().salePrice());
+        entity.setType(product.type().name());
         for (ProductVariant variant : product.variants()) {
             ProductVariantEntity variantEntity = new ProductVariantEntity();
             variantEntity.setId(variant.id());
@@ -91,7 +93,8 @@ public class ProductRepositoryImpl implements ProductRepository {
                 .map(this::toDomain)
                 .toList();
         Pricing pricing = Pricing.of(e.getCostPrice(), e.getMarkupPercent(), e.getSalePrice());
-        return Product.of(e.getId(), e.getSku(), e.getName(), e.getCategory(), e.isActive(), variants, pricing);
+        ProductType type = ProductType.valueOf(e.getType());
+        return Product.of(e.getId(), e.getSku(), e.getName(), e.getCategory(), e.isActive(), variants, pricing, type);
     }
 
     private ProductVariant toDomain(ProductVariantEntity e) {

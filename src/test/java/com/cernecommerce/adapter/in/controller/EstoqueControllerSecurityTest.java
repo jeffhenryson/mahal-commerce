@@ -661,4 +661,61 @@ public class EstoqueControllerSecurityTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.priced").value(false));
     }
+
+    // ── Kits (EST-F015) ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    void define_kit_recipe_without_auth_returns_401() throws Exception {
+        mockMvc.perform(put("/estoque/products/QUALQUER-SKU/kit")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"components\":[{\"componentSku\":\"CARV-001\",\"quantity\":1}]}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    /** ESTOQUE_PRODUCT_MANAGE não autoriza: definir receita muda o que toda venda futura consome. */
+    @Test
+    void define_kit_recipe_with_product_manage_only_returns_403() throws Exception {
+        mockMvc.perform(put("/estoque/products/QUALQUER-SKU/kit")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"components\":[{\"componentSku\":\"CARV-001\",\"quantity\":1}]}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_MANAGE"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void define_kit_recipe_with_estoque_kit_manage_returns_200() throws Exception {
+        String kitSku = givenProduct();
+        String componentSku = givenProduct();
+
+        mockMvc.perform(put("/estoque/products/" + kitSku + "/kit")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"components\":[{\"componentSku\":\"" + componentSku + "\",\"quantity\":2}]}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_KIT_MANAGE"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.type").value("KIT"));
+    }
+
+    @Test
+    void get_kit_recipe_without_product_read_returns_403() throws Exception {
+        mockMvc.perform(get("/estoque/products/QUALQUER-SKU/kit")
+                .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isForbidden());
+    }
+
+    /** Consultar a receita é leitura de catálogo: PRODUCT_READ basta, não exige a de gerenciar kit. */
+    @Test
+    void get_kit_recipe_with_product_read_returns_200() throws Exception {
+        String sku = givenProduct();
+
+        mockMvc.perform(get("/estoque/products/" + sku + "/kit")
+                .with(user("vendedor").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_READ"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray());
+    }
 }

@@ -6,6 +6,7 @@ import com.cernecommerce.adapter.in.converter.StockMovementDTOConverter;
 import com.cernecommerce.adapter.in.converter.StockReservationDTOConverter;
 import com.cernecommerce.adapter.in.converter.WarehouseDTOConverter;
 import com.cernecommerce.adapter.in.dtos.request.ActiveRequest;
+import com.cernecommerce.adapter.in.dtos.request.KitRecipeRequest;
 import com.cernecommerce.adapter.in.dtos.request.ProductPatchRequest;
 import com.cernecommerce.adapter.in.dtos.request.ProductRequest;
 import com.cernecommerce.adapter.in.dtos.request.ReorderPointRequest;
@@ -14,6 +15,7 @@ import com.cernecommerce.adapter.in.dtos.request.StockCountRequest;
 import com.cernecommerce.adapter.in.dtos.request.StockMovementRequest;
 import com.cernecommerce.adapter.in.dtos.request.WarehousePatchRequest;
 import com.cernecommerce.adapter.in.dtos.request.WarehouseRequest;
+import com.cernecommerce.adapter.in.dtos.response.KitComponentResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.OrphanSkuResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.PricingResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.ProductResponseDTO;
@@ -350,6 +352,45 @@ public class EstoqueController {
                 Map.of("sku", sku, "warehouseCode", request.getWarehouseCode(),
                         "minQuantity", request.getMinQuantity())));
         return ResponseEntity.noContent().build();
+    }
+
+    // ------------------------------------------------------------------------------------
+    // Kits (EST-F015) — virtuais, de um nível só (§2.10 do plano)
+    // ------------------------------------------------------------------------------------
+
+    @Operation(summary = "Define (substitui integralmente) a receita de um kit",
+            description = "PUT idempotente: promove o produto a KIT como efeito colateral. Componente "
+                    + "precisa ser SIMPLES — kit dentro de kit é proibido por construção.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Definida", content = @Content(schema = @Schema(implementation = ProductResponseDTO.class))),
+            @ApiResponse(responseCode = "404", description = "SKU do kit ou de algum componente não encontrado", content = @Content),
+            @ApiResponse(responseCode = "409", description = "Receita vazia, autorreferência, componente duplicado, componente não SIMPLES, kit com variações, ou SKU já é componente de outro kit", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PutMapping("/products/{sku}/kit")
+    @PreAuthorize("hasAuthority('ESTOQUE_KIT_MANAGE')")
+    public ResponseEntity<ProductResponseDTO> defineKitRecipe(
+            @PathVariable @NotBlank @Size(min = 3, max = 50) String sku,
+            @Valid @RequestBody KitRecipeRequest request, Authentication authentication) {
+        Product updated = estoqueUseCase.defineKitRecipe(sku, converter.toKitComponentCommands(request));
+        publisher.publishEvent(AuditEvent.of(EventType.KIT_RECIPE_CHANGED, authentication.getName(),
+                Map.of("sku", sku, "componentCount", request.getComponents().size())));
+        return ResponseEntity.ok(converter.toResponse(updated));
+    }
+
+    @Operation(summary = "Consulta a receita vigente de um kit",
+            description = "Lista vazia se o SKU existe mas nunca foi promovido a kit.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "404", description = "SKU não encontrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/products/{sku}/kit")
+    @PreAuthorize("hasAuthority('ESTOQUE_PRODUCT_READ')")
+    public ResponseEntity<List<KitComponentResponseDTO>> getKitRecipe(
+            @PathVariable @NotBlank @Size(min = 3, max = 50) String sku) {
+        return ResponseEntity.ok(estoqueUseCase.getKitRecipe(sku).stream()
+                .map(converter::toKitComponentResponse).toList());
     }
 
     // ------------------------------------------------------------------------------------

@@ -107,4 +107,29 @@ class ProductTest {
         assertThat(desativado.variants()).hasSize(1);
         assertThat(desativado.withActive(true).active()).isTrue();
     }
+
+    // EST-F015 — kits virtuais
+
+    @Test
+    void type_defaultsToSimplesWhenOmitted() {
+        assertThat(Product.create("NARG-001", "Narguile", "cat", List.of()).type())
+                .isEqualTo(ProductType.SIMPLES);
+        assertThat(product().type()).isEqualTo(ProductType.SIMPLES);
+    }
+
+    @Test
+    void withType_promotesPreservingTheRest() {
+        Product kit = product().withType(ProductType.KIT);
+
+        assertThat(kit.type()).isEqualTo(ProductType.KIT);
+        assertThat(kit.isKit()).isTrue();
+        assertThat(kit.id()).isEqualTo(1L);
+        assertThat(kit.sku()).isEqualTo("NARG-001");
+        assertThat(kit.variants()).hasSize(1);
+    }
+
+    @Test
+    void isKit_falseForSimples() {
+        assertThat(product().isKit()).isFalse();
+    }
 }

@@ -11,11 +11,21 @@ import com.cernecommerce.core.domain.exception.estoque.StockCountNotFoundExcepti
 import com.cernecommerce.core.domain.exception.estoque.StockCountNotOpenException;
 import com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException;
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.exception.estoque.DuplicateKitComponentException;
+import com.cernecommerce.core.domain.exception.estoque.EmptyKitRecipeException;
+import com.cernecommerce.core.domain.exception.estoque.KitComponentAlreadyInUseException;
+import com.cernecommerce.core.domain.exception.estoque.KitComponentNotSimpleException;
+import com.cernecommerce.core.domain.exception.estoque.KitCostNotEditableException;
+import com.cernecommerce.core.domain.exception.estoque.KitDirectAdjustmentException;
+import com.cernecommerce.core.domain.exception.estoque.KitHasVariantsException;
+import com.cernecommerce.core.domain.exception.estoque.KitSelfReferenceException;
+import com.cernecommerce.core.domain.model.estoque.KitComponent;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
+import com.cernecommerce.core.domain.model.estoque.ProductType;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.ReorderPoint;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
@@ -27,7 +37,9 @@ import com.cernecommerce.core.domain.model.estoque.Warehouse;
 import com.cernecommerce.core.domain.model.estoque.WarehouseType;
 import com.cernecommerce.core.domain.model.notification.NotificationType;
 import com.cernecommerce.core.ports.in.NotificationUseCase;
+import com.cernecommerce.core.ports.in.EstoqueUseCase.KitComponentCommand;
 import com.cernecommerce.core.ports.out.AfterCommitExecutor;
+import com.cernecommerce.core.ports.out.estoque.KitComponentRepository;
 import com.cernecommerce.core.ports.out.estoque.ProductRepository;
 import com.cernecommerce.core.ports.out.estoque.ReorderPointRepository;
 import com.cernecommerce.core.ports.out.estoque.StockBalanceRepository;
@@ -73,6 +85,7 @@ class EstoqueServiceTest {
     @Mock StockReservationRepository stockReservationRepository;
     @Mock NotificationUseCase notificationUseCase;
     @Mock UserRepository userRepository;
+    @Mock KitComponentRepository kitComponentRepository;
 
     /** Mesmo default de {@code estoque.reservation.default-ttl} em {@code CoreBeanConfig}. */
     private static final Duration RESERVATION_TTL = Duration.ofMinutes(30);
@@ -96,7 +109,7 @@ class EstoqueServiceTest {
         estoqueService = new EstoqueService(productRepository, warehouseRepository, stockBalanceRepository,
                 stockMovementRepository, reorderPointRepository, stockIntegrityRepository, stockCountRepository,
                 stockReservationRepository, notificationUseCase, userRepository, immediateExecutor,
-                RESERVATION_TTL);
+                RESERVATION_TTL, kitComponentRepository);
         lenient().when(reorderPointRepository.findBySkuAndWarehouseId(any(), any())).thenReturn(Optional.empty());
         // Padrão dos testes: o SKU existe no catálogo, que é a pré-condição das movimentações.
         // Os testes de createProduct e os de SKU desconhecido sobrescrevem este stub.
@@ -314,6 +327,286 @@ class EstoqueServiceTest {
 
         verify(stockMovementRepository, never()).save(any());
         verify(stockBalanceRepository, never()).save(any());
+    }
+
+    // ── Kits (EST-F015) ──────────────────────────────────────────────────────────────────────
+
+    private Product kitProduct(String sku, String salePrice) {
+        return Product.of(1L, sku, "Kit " + sku, "combo", true, List.of(),
+                Pricing.of(null, null, new BigDecimal(salePrice)), ProductType.KIT);
+    }
+
+    private Product simpleProduct(String sku, String costPrice) {
+        BigDecimal cost = costPrice == null ? null : new BigDecimal(costPrice);
+        return Product.of(2L, sku, "Componente " + sku, "insumo", true, List.of(),
+                Pricing.of(cost, null, new BigDecimal("999.00")));
+    }
+
+    @Test
+    void findPricingBySku_kit_sumsComponentCosts() {
+        when(productRepository.findByAnySku("KIT-001")).thenReturn(Optional.of(kitProduct("KIT-001", "80.00")));
+        when(kitComponentRepository.findByKitSku("KIT-001")).thenReturn(List.of(
+                KitComponent.create("KIT-001", "CARV-001", new BigDecimal("2")),
+                KitComponent.create("KIT-001", "ESS-001", BigDecimal.ONE)));
+        when(productRepository.findByAnySku("CARV-001")).thenReturn(Optional.of(simpleProduct("CARV-001", "20.00")));
+        when(productRepository.findByAnySku("ESS-001")).thenReturn(Optional.of(simpleProduct("ESS-001", "15.00")));
+
+        Pricing derived = estoqueService.findPricingBySku("KIT-001");
+
+        // 20,00 x 2 + 15,00 x 1 = 55,00.
+        assertThat(derived.costPrice()).isEqualByComparingTo("55.00");
+        assertThat(derived.salePrice()).isEqualByComparingTo("80.00");
+        assertThat(derived.markupPercent()).isNull();
+    }
+
+    @Test
+    void findPricingBySku_kit_costIsNullWhenAComponentHasNoCost() {
+        when(productRepository.findByAnySku("KIT-001")).thenReturn(Optional.of(kitProduct("KIT-001", "80.00")));
+        when(kitComponentRepository.findByKitSku("KIT-001")).thenReturn(List.of(
+                KitComponent.create("KIT-001", "CARV-001", new BigDecimal("2")),
+                KitComponent.create("KIT-001", "ESS-001", BigDecimal.ONE)));
+        when(productRepository.findByAnySku("CARV-001")).thenReturn(Optional.of(simpleProduct("CARV-001", "20.00")));
+        when(productRepository.findByAnySku("ESS-001")).thenReturn(Optional.of(simpleProduct("ESS-001", null)));
+
+        // Ausência é "desconhecido", nunca zero — mesma convenção de Pricing.
+        assertThat(estoqueService.findPricingBySku("KIT-001").costPrice()).isNull();
+    }
+
+    @Test
+    void getStockBalance_kit_derivesMinFloorAcrossComponents() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(productRepository.findByAnySku("KIT-001")).thenReturn(Optional.of(kitProduct("KIT-001", "80.00")));
+        when(kitComponentRepository.findByKitSku("KIT-001")).thenReturn(List.of(
+                KitComponent.create("KIT-001", "CARV-001", new BigDecimal("2")),
+                KitComponent.create("KIT-001", "ESS-001", new BigDecimal("3"))));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("CARV-001", 1L))
+                .thenReturn(Optional.of(StockBalance.of(10L, "CARV-001", 1L, new BigDecimal("10"), 0L)));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("ESS-001", 1L))
+                .thenReturn(Optional.of(StockBalance.of(11L, "ESS-001", 1L, new BigDecimal("7"), 0L)));
+
+        StockBalance result = estoqueService.getStockBalance("KIT-001", "LOJA-01");
+
+        // CARV-001: 10/2 = 5 kits possíveis; ESS-001: floor(7/3) = 2 kits possíveis; vence o menor.
+        assertThat(result.quantity()).isEqualByComparingTo("2");
+        assertThat(result.id()).isNull();
+    }
+
+    @Test
+    void getStockBalance_kit_returnsZeroWhenRecipeEmpty() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(productRepository.findByAnySku("KIT-001")).thenReturn(Optional.of(kitProduct("KIT-001", "80.00")));
+        when(kitComponentRepository.findByKitSku("KIT-001")).thenReturn(List.of());
+
+        assertThat(estoqueService.getStockBalance("KIT-001", "LOJA-01").quantity())
+                .isEqualByComparingTo(BigDecimal.ZERO);
+    }
+
+    @Test
+    void adjustStock_kit_explodesIntoOneMovementPerComponent() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(productRepository.findByAnySku("KIT-001")).thenReturn(Optional.of(kitProduct("KIT-001", "80.00")));
+        when(kitComponentRepository.findByKitSku("KIT-001")).thenReturn(List.of(
+                KitComponent.create("KIT-001", "CARV-001", new BigDecimal("2"))));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("CARV-001", 1L))
+                .thenReturn(Optional.of(StockBalance.of(10L, "CARV-001", 1L, new BigDecimal("10"), 0L)));
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        estoqueService.adjustStock("KIT-001", "LOJA-01", MovementType.SAIDA, new BigDecimal("3"),
+                "Venda balcão sessão #1", "gerente");
+
+        // 2 (receita) x 3 (kits vendidos) = 6 unidades do componente.
+        verify(stockMovementRepository).save(argThat(m -> m.sku().equals("CARV-001")
+                && m.type() == MovementType.SAIDA
+                && m.quantity().compareTo(new BigDecimal("6")) == 0
+                && m.reason().equals("Venda balcão sessão #1 (kit KIT-001)")));
+        // Kit nunca ganha linha própria em stock_balance.
+        verify(stockMovementRepository, never()).save(argThat(m -> m.sku().equals("KIT-001")));
+    }
+
+    @Test
+    void adjustStock_kit_rejectsDirectAdjustment() {
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(
+                Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true)));
+        when(productRepository.findByAnySku("KIT-001")).thenReturn(Optional.of(kitProduct("KIT-001", "80.00")));
+
+        assertThatThrownBy(() -> estoqueService.adjustStock("KIT-001", "LOJA-01", MovementType.AJUSTE,
+                BigDecimal.TEN, "contagem", "gerente"))
+                .isInstanceOf(KitDirectAdjustmentException.class);
+
+        verify(stockMovementRepository, never()).save(any());
+    }
+
+    @Test
+    void adjustStock_kit_rejectsEmptyRecipe() {
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(
+                Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true)));
+        when(productRepository.findByAnySku("KIT-001")).thenReturn(Optional.of(kitProduct("KIT-001", "80.00")));
+        when(kitComponentRepository.findByKitSku("KIT-001")).thenReturn(List.of());
+
+        assertThatThrownBy(() -> estoqueService.adjustStock("KIT-001", "LOJA-01", MovementType.SAIDA,
+                BigDecimal.ONE, "motivo", "gerente"))
+                .isInstanceOf(EmptyKitRecipeException.class);
+    }
+
+    @Test
+    void defineKitRecipe_promotesProductAndReplacesRecipe() {
+        Product product = Product.of(1L, "KIT-001", "Kit Narguile", "combo", true, List.of());
+        when(productRepository.findBySku("KIT-001")).thenReturn(Optional.of(product));
+        when(kitComponentRepository.isUsedAsComponent("KIT-001")).thenReturn(false);
+        when(productRepository.findByAnySku("CARV-001")).thenReturn(Optional.of(simpleProduct("CARV-001", "20.00")));
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Product result = estoqueService.defineKitRecipe("KIT-001",
+                List.of(new KitComponentCommand("CARV-001", new BigDecimal("2"))));
+
+        assertThat(result.type()).isEqualTo(ProductType.KIT);
+        verify(kitComponentRepository).replaceRecipe(eq("KIT-001"), argThat(recipe -> recipe.size() == 1
+                && recipe.get(0).componentSku().equals("CARV-001")));
+    }
+
+    @Test
+    void defineKitRecipe_throwsWhenKitSkuNotFound() {
+        when(productRepository.findBySku("KIT-001")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.defineKitRecipe("KIT-001",
+                List.of(new KitComponentCommand("CARV-001", BigDecimal.ONE))))
+                .isInstanceOf(ProductNotFoundException.class);
+    }
+
+    @Test
+    void defineKitRecipe_throwsWhenComponentsIsEmpty() {
+        when(productRepository.findBySku("KIT-001")).thenReturn(Optional.of(
+                Product.of(1L, "KIT-001", "Kit", "combo", true, List.of())));
+
+        assertThatThrownBy(() -> estoqueService.defineKitRecipe("KIT-001", List.of()))
+                .isInstanceOf(EmptyKitRecipeException.class);
+        assertThatThrownBy(() -> estoqueService.defineKitRecipe("KIT-001", null))
+                .isInstanceOf(EmptyKitRecipeException.class);
+    }
+
+    @Test
+    void defineKitRecipe_throwsWhenProductHasVariants() {
+        when(productRepository.findBySku("KIT-001")).thenReturn(Optional.of(
+                Product.of(1L, "KIT-001", "Kit", "combo", true, oneVariant())));
+
+        assertThatThrownBy(() -> estoqueService.defineKitRecipe("KIT-001",
+                List.of(new KitComponentCommand("CARV-001", BigDecimal.ONE))))
+                .isInstanceOf(KitHasVariantsException.class);
+    }
+
+    @Test
+    void defineKitRecipe_throwsWhenSkuAlreadyComponentOfAnotherKit() {
+        when(productRepository.findBySku("KIT-001")).thenReturn(Optional.of(
+                Product.of(1L, "KIT-001", "Kit", "combo", true, List.of())));
+        when(kitComponentRepository.isUsedAsComponent("KIT-001")).thenReturn(true);
+
+        assertThatThrownBy(() -> estoqueService.defineKitRecipe("KIT-001",
+                List.of(new KitComponentCommand("CARV-001", BigDecimal.ONE))))
+                .isInstanceOf(KitComponentAlreadyInUseException.class);
+    }
+
+    @Test
+    void defineKitRecipe_throwsOnSelfReference() {
+        when(productRepository.findBySku("KIT-001")).thenReturn(Optional.of(
+                Product.of(1L, "KIT-001", "Kit", "combo", true, List.of())));
+        when(kitComponentRepository.isUsedAsComponent("KIT-001")).thenReturn(false);
+
+        assertThatThrownBy(() -> estoqueService.defineKitRecipe("KIT-001",
+                List.of(new KitComponentCommand("KIT-001", BigDecimal.ONE))))
+                .isInstanceOf(KitSelfReferenceException.class);
+    }
+
+    @Test
+    void defineKitRecipe_throwsOnDuplicateComponent() {
+        when(productRepository.findBySku("KIT-001")).thenReturn(Optional.of(
+                Product.of(1L, "KIT-001", "Kit", "combo", true, List.of())));
+        when(kitComponentRepository.isUsedAsComponent("KIT-001")).thenReturn(false);
+        // A primeira ocorrência de CARV-001 precisa resolver normalmente para o laço chegar até
+        // a segunda, que é quem de fato aciona a checagem de duplicata.
+        when(productRepository.findByAnySku("CARV-001")).thenReturn(Optional.of(simpleProduct("CARV-001", "20.00")));
+
+        assertThatThrownBy(() -> estoqueService.defineKitRecipe("KIT-001", List.of(
+                new KitComponentCommand("CARV-001", BigDecimal.ONE),
+                new KitComponentCommand("CARV-001", new BigDecimal("2")))))
+                .isInstanceOf(DuplicateKitComponentException.class);
+    }
+
+    @Test
+    void defineKitRecipe_throwsWhenComponentSkuDoesNotExist() {
+        when(productRepository.findBySku("KIT-001")).thenReturn(Optional.of(
+                Product.of(1L, "KIT-001", "Kit", "combo", true, List.of())));
+        when(kitComponentRepository.isUsedAsComponent("KIT-001")).thenReturn(false);
+        when(productRepository.findByAnySku("FANTASMA")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.defineKitRecipe("KIT-001",
+                List.of(new KitComponentCommand("FANTASMA", BigDecimal.ONE))))
+                .isInstanceOf(ProductNotFoundException.class);
+    }
+
+    @Test
+    void defineKitRecipe_throwsWhenComponentIsNotSimples() {
+        when(productRepository.findBySku("KIT-001")).thenReturn(Optional.of(
+                Product.of(1L, "KIT-001", "Kit", "combo", true, List.of())));
+        when(kitComponentRepository.isUsedAsComponent("KIT-001")).thenReturn(false);
+        when(productRepository.findByAnySku("KIT-002")).thenReturn(Optional.of(kitProduct("KIT-002", "50.00")));
+
+        assertThatThrownBy(() -> estoqueService.defineKitRecipe("KIT-001",
+                List.of(new KitComponentCommand("KIT-002", BigDecimal.ONE))))
+                .isInstanceOf(KitComponentNotSimpleException.class);
+    }
+
+    @Test
+    void getKitRecipe_returnsCurrentRecipe() {
+        when(productRepository.findBySku("KIT-001")).thenReturn(Optional.of(
+                Product.of(1L, "KIT-001", "Kit", "combo", true, List.of())));
+        when(kitComponentRepository.findByKitSku("KIT-001")).thenReturn(
+                List.of(KitComponent.of(5L, "KIT-001", "CARV-001", new BigDecimal("2"))));
+
+        assertThat(estoqueService.getKitRecipe("KIT-001")).hasSize(1);
+    }
+
+    @Test
+    void getKitRecipe_throwsWhenSkuNotFound() {
+        when(productRepository.findBySku("KIT-001")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.getKitRecipe("KIT-001"))
+                .isInstanceOf(ProductNotFoundException.class);
+    }
+
+    @Test
+    void recordCountedItem_rejectsKitSku() {
+        when(stockCountRepository.findById(1L)).thenReturn(Optional.of(
+                StockCount.open(1L, "gerente")));
+        when(productRepository.findByAnySku("KIT-001")).thenReturn(Optional.of(kitProduct("KIT-001", "80.00")));
+
+        assertThatThrownBy(() -> estoqueService.recordCountedItem(1L, "KIT-001", BigDecimal.TEN))
+                .isInstanceOf(KitDirectAdjustmentException.class);
+    }
+
+    @Test
+    void updateProduct_rejectsCostPriceOnKit() {
+        Product kit = kitProduct("KIT-001", "80.00");
+        when(productRepository.findBySku("KIT-001")).thenReturn(Optional.of(kit));
+
+        assertThatThrownBy(() -> estoqueService.updateProduct("KIT-001", null, null,
+                Pricing.of(new BigDecimal("40.00"), null, null)))
+                .isInstanceOf(KitCostNotEditableException.class);
+        verify(productRepository, never()).save(any());
+    }
+
+    @Test
+    void updateProduct_allowsSalePriceChangeOnKit() {
+        Product kit = kitProduct("KIT-001", "80.00");
+        when(productRepository.findBySku("KIT-001")).thenReturn(Optional.of(kit));
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Product updated = estoqueService.updateProduct("KIT-001", null, null,
+                Pricing.of(null, null, new BigDecimal("90.00")));
+
+        assertThat(updated.pricing().salePrice()).isEqualByComparingTo("90.00");
     }
 
     @Test

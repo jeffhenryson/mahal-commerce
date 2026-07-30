@@ -1,9 +1,17 @@
 package com.cernecommerce.core.service;
 
+import com.cernecommerce.core.domain.exception.estoque.DuplicateKitComponentException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateSkuException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateWarehouseCodeException;
+import com.cernecommerce.core.domain.exception.estoque.EmptyKitRecipeException;
 import com.cernecommerce.core.domain.exception.estoque.InactiveProductException;
 import com.cernecommerce.core.domain.exception.estoque.InactiveWarehouseException;
+import com.cernecommerce.core.domain.exception.estoque.KitComponentAlreadyInUseException;
+import com.cernecommerce.core.domain.exception.estoque.KitComponentNotSimpleException;
+import com.cernecommerce.core.domain.exception.estoque.KitCostNotEditableException;
+import com.cernecommerce.core.domain.exception.estoque.KitDirectAdjustmentException;
+import com.cernecommerce.core.domain.exception.estoque.KitHasVariantsException;
+import com.cernecommerce.core.domain.exception.estoque.KitSelfReferenceException;
 import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountAlreadyOpenException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountNotFoundException;
@@ -12,10 +20,12 @@ import com.cernecommerce.core.domain.exception.estoque.StockReservationNotActive
 import com.cernecommerce.core.domain.exception.estoque.StockReservationNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException;
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.estoque.KitComponent;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.estoque.Product;
+import com.cernecommerce.core.domain.model.estoque.ProductType;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.ReorderAlert;
 import com.cernecommerce.core.domain.model.estoque.ReorderPoint;
@@ -32,6 +42,7 @@ import com.cernecommerce.core.domain.model.notification.NotificationType;
 import com.cernecommerce.core.ports.in.EstoqueUseCase;
 import com.cernecommerce.core.ports.in.NotificationUseCase;
 import com.cernecommerce.core.ports.out.AfterCommitExecutor;
+import com.cernecommerce.core.ports.out.estoque.KitComponentRepository;
 import com.cernecommerce.core.ports.out.estoque.ProductRepository;
 import com.cernecommerce.core.ports.out.estoque.ReorderPointRepository;
 import com.cernecommerce.core.ports.out.estoque.StockBalanceRepository;
@@ -44,6 +55,7 @@ import com.cernecommerce.core.ports.out.user.UserRepository;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -51,6 +63,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 public class EstoqueService implements EstoqueUseCase {
@@ -70,13 +83,15 @@ public class EstoqueService implements EstoqueUseCase {
     private final UserRepository userRepository;
     private final AfterCommitExecutor afterCommitExecutor;
     private final Duration defaultReservationTtl;
+    private final KitComponentRepository kitComponentRepository;
 
     public EstoqueService(ProductRepository productRepository, WarehouseRepository warehouseRepository,
             StockBalanceRepository stockBalanceRepository, StockMovementRepository stockMovementRepository,
             ReorderPointRepository reorderPointRepository, StockIntegrityRepository stockIntegrityRepository,
             StockCountRepository stockCountRepository, StockReservationRepository stockReservationRepository,
             NotificationUseCase notificationUseCase, UserRepository userRepository,
-            AfterCommitExecutor afterCommitExecutor, Duration defaultReservationTtl) {
+            AfterCommitExecutor afterCommitExecutor, Duration defaultReservationTtl,
+            KitComponentRepository kitComponentRepository) {
         this.stockReservationRepository = stockReservationRepository;
         this.defaultReservationTtl = defaultReservationTtl;
         this.productRepository = productRepository;
@@ -89,6 +104,7 @@ public class EstoqueService implements EstoqueUseCase {
         this.notificationUseCase = notificationUseCase;
         this.userRepository = userRepository;
         this.afterCommitExecutor = afterCommitExecutor;
+        this.kitComponentRepository = kitComponentRepository;
     }
 
     @Override
@@ -129,6 +145,12 @@ public class EstoqueService implements EstoqueUseCase {
                 .orElseThrow(() -> new ProductNotFoundException(sku));
         Product updated = current.withDetails(name, category);
         if (pricing != null) {
+            // Custo de kit é sempre derivado da soma dos componentes (EST-F015) — um costPrice
+            // digitado aqui viraria dado morto, sobrescrito na próxima leitura de
+            // findPricingBySku. Rejeitado, não aceito e ignorado.
+            if (current.isKit() && pricing.costPrice() != null) {
+                throw new KitCostNotEditableException(sku);
+            }
             // withPatch e não substituição: um PATCH que manda só o custo não pode apagar o
             // markup e o preço já cadastrados. Cada campo de Pricing carrega a mesma semântica
             // de "nulo mantém" que name e category têm em withDetails.
@@ -143,9 +165,37 @@ public class EstoqueService implements EstoqueUseCase {
     public Pricing findPricingBySku(String sku) {
         // findByAnySku e não findBySku: a variação herda o preço do pai, então o SKU lido no
         // balcão resolve para a Pricing do pai sem o chamador precisar saber se é pai ou filho.
-        return productRepository.findByAnySku(sku)
-                .map(Product::pricing)
+        Product product = productRepository.findByAnySku(sku)
                 .orElseThrow(() -> new ProductNotFoundException(sku));
+        return product.isKit() ? derivedKitPricing(product) : product.pricing();
+    }
+
+    /**
+     * Custo do kit é a soma de {@code costPrice * quantity} dos componentes — nunca digitado
+     * (EST-F015, §2.10). O {@code salePrice} continua sendo o do kit; {@code markupPercent} é
+     * sempre nulo no derivado, porque não é input de ninguém para um kit.
+     *
+     * <p>Um componente sem custo próprio torna o custo do kit inteiro {@code null} — seguindo a
+     * convenção já estabelecida em {@link Pricing} de que ausência é "desconhecido", nunca zero.
+     * Isso propaga honestamente: {@code marginPercent()}/{@code marginAmount()}/
+     * {@code isBelowCost()} do kit também viram {@code null}, sem precisar de matemática nova.</p>
+     */
+    private Pricing derivedKitPricing(Product kit) {
+        List<KitComponent> recipe = kitComponentRepository.findByKitSku(kit.sku());
+        BigDecimal totalCost = BigDecimal.ZERO;
+        for (KitComponent component : recipe) {
+            // Componente é garantidamente SIMPLES (validado em defineKitRecipe) — lê o Pricing
+            // próprio dele direto, sem reentrar em findPricingBySku.
+            Product componentProduct = productRepository.findByAnySku(component.componentSku())
+                    .orElseThrow(() -> new ProductNotFoundException(component.componentSku()));
+            BigDecimal componentCost = componentProduct.pricing().costPrice();
+            if (componentCost == null) {
+                totalCost = null;
+                break;
+            }
+            totalCost = totalCost.add(componentCost.multiply(component.quantity()));
+        }
+        return Pricing.of(totalCost, null, kit.pricing().salePrice());
     }
 
     @Override
@@ -199,8 +249,38 @@ public class EstoqueService implements EstoqueUseCase {
     @Transactional(readOnly = true)
     public StockBalance getStockBalance(String sku, String warehouseCode) {
         Warehouse warehouse = requireWarehouse(warehouseCode);
+        Optional<Product> product = productRepository.findByAnySku(sku);
+        if (product.isPresent() && product.get().isKit()) {
+            return derivedKitBalance(product.get(), warehouse.id());
+        }
         return stockBalanceRepository.findBySkuAndWarehouseId(sku, warehouse.id())
                 .orElseGet(() -> StockBalance.zero(sku, warehouse.id()));
+    }
+
+    /**
+     * {@code min(floor(saldo_componente_disponível / quantidade_na_receita))} sobre os
+     * componentes (EST-F015, §2.10). Usa o <b>disponível</b>, não o físico bruto — consistente
+     * com a regra já estabelecida em EST-F021 de que toda saída nova valida contra o disponível:
+     * um componente reservado para outro pedido não está de fato livre para montar este kit
+     * agora. Recipe vazia (produto ainda não teve receita definida) devolve zero.
+     */
+    private StockBalance derivedKitBalance(Product kit, Long warehouseId) {
+        List<KitComponent> recipe = kitComponentRepository.findByKitSku(kit.sku());
+        if (recipe.isEmpty()) {
+            return StockBalance.derived(kit.sku(), warehouseId, BigDecimal.ZERO);
+        }
+        BigDecimal minKits = null;
+        for (KitComponent component : recipe) {
+            StockBalance componentBalance = stockBalanceRepository
+                    .findBySkuAndWarehouseId(component.componentSku(), warehouseId)
+                    .orElseGet(() -> StockBalance.zero(component.componentSku(), warehouseId));
+            BigDecimal possibleKits = componentBalance.availableQuantity()
+                    .divide(component.quantity(), 0, RoundingMode.FLOOR);
+            if (minKits == null || possibleKits.compareTo(minKits) < 0) {
+                minKits = possibleKits;
+            }
+        }
+        return StockBalance.derived(kit.sku(), warehouseId, minKits);
     }
 
     @Override
@@ -210,6 +290,10 @@ public class EstoqueService implements EstoqueUseCase {
         requireKnownSku(sku);
         Warehouse warehouse = warehouseRepository.findByCode(warehouseCode)
                 .orElseThrow(() -> new WarehouseNotFoundException(warehouseCode));
+        Optional<Product> product = productRepository.findByAnySku(sku);
+        if (product.isPresent() && product.get().isKit()) {
+            return explodeKitMovement(product.get(), warehouse, type, quantity, reason, username);
+        }
         requireActiveForInbound(sku, warehouse, type);
         StockBalance current = stockBalanceRepository.findBySkuAndWarehouseId(sku, warehouse.id())
                 .orElseGet(() -> StockBalance.zero(sku, warehouse.id()));
@@ -218,6 +302,34 @@ public class EstoqueService implements EstoqueUseCase {
         StockBalance saved = stockBalanceRepository.save(updated);
         notifyIfBelowReorderPoint(saved);
         return saved;
+    }
+
+    /**
+     * Explode a movimentação de um kit em uma por componente (EST-F015, §2.10) — venda e
+     * estorno passam por aqui transparentemente, sem que {@code PdvService}/{@code OrderService}
+     * precisem saber que o SKU vendido é um kit. Autoinvocação de {@link #adjustStock} dentro da
+     * mesma classe não passa pelo proxy Spring, então continua na MESMA transação ambiente: a
+     * venda/estorno do kit é atômica com o resto do pedido.
+     */
+    private StockBalance explodeKitMovement(Product kit, Warehouse warehouse, MovementType type,
+            BigDecimal kitQuantity, String reason, String username) {
+        if (type == MovementType.AJUSTE) {
+            // Kit não tem saldo próprio nem contagem física própria — nada para ajustar
+            // diretamente. Balanço de inventário deve contar os componentes.
+            throw new KitDirectAdjustmentException(kit.sku());
+        }
+        List<KitComponent> recipe = kitComponentRepository.findByKitSku(kit.sku());
+        if (recipe.isEmpty()) {
+            throw new EmptyKitRecipeException(kit.sku());
+        }
+        String kitReason = reason + " (kit " + kit.sku() + ")";
+        for (KitComponent component : recipe) {
+            BigDecimal componentQuantity = component.quantity().multiply(kitQuantity);
+            adjustStock(component.componentSku(), warehouse.code(), type, componentQuantity, kitReason, username);
+        }
+        // Kit não tem linha própria em stock_balance: devolve o saldo derivado recalculado,
+        // nunca o de um componente qualquer (seria a unidade errada).
+        return derivedKitBalance(kit, warehouse.id());
     }
 
     @Override
@@ -273,6 +385,11 @@ public class EstoqueService implements EstoqueUseCase {
         // Mesma pré-condição de adjustStock (EST-C002): não adianta contar um SKU que o
         // fechamento não conseguiria ajustar.
         requireKnownSku(sku);
+        // Kit não tem contagem física própria (EST-F015) — rejeitar aqui, na hora do registro,
+        // em vez de deixar o erro só aparecer confusamente quando closeStockCount tentar um
+        // AJUSTE direto no kit e abortar o fechamento inteiro.
+        productRepository.findByAnySku(sku).filter(Product::isKit)
+                .ifPresent(kit -> { throw new KitDirectAdjustmentException(sku); });
         return stockCountRepository.save(count.withCountedItem(sku, countedQuantity));
     }
 
@@ -433,6 +550,63 @@ public class EstoqueService implements EstoqueUseCase {
             stockReservationRepository.save(reservation.expired());
         }
         return expired.size();
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Kits (EST-F015) — virtuais, de um nível só (§2.10 do plano)
+    // ---------------------------------------------------------------------------------------
+
+    @Override
+    @Transactional
+    public Product defineKitRecipe(String kitSku, List<KitComponentCommand> components) {
+        // findBySku, não findByAnySku: kit é sempre SKU pai, nunca uma variação.
+        Product kit = productRepository.findBySku(kitSku)
+                .orElseThrow(() -> new ProductNotFoundException(kitSku));
+        if (components == null || components.isEmpty()) {
+            throw new EmptyKitRecipeException(kitSku);
+        }
+        // Kit e variações são mutuamente exclusivos: não há endpoint para adicionar variação
+        // depois da criação (ver Product.withDetails), então checar aqui, na promoção, fecha o
+        // espaço todo com uma linha só.
+        if (!kit.variants().isEmpty()) {
+            throw new KitHasVariantsException(kitSku);
+        }
+        // Sustenta a invariante de um nível só contra a porta dos fundos: sem isto, promover a
+        // KIT um SKU que já é componente de outro kit criaria kit-dentro-de-kit sem nunca passar
+        // pela checagem "componente precisa ser SIMPLES", que só roda no sentido contrário.
+        if (kitComponentRepository.isUsedAsComponent(kitSku)) {
+            throw new KitComponentAlreadyInUseException(kitSku);
+        }
+
+        Set<String> seen = new LinkedHashSet<>();
+        List<KitComponent> recipe = new ArrayList<>();
+        for (KitComponentCommand command : components) {
+            String componentSku = command.componentSku();
+            if (componentSku.equals(kitSku)) {
+                throw new KitSelfReferenceException(kitSku);
+            }
+            if (!seen.add(componentSku)) {
+                throw new DuplicateKitComponentException(kitSku, componentSku);
+            }
+            Product component = productRepository.findByAnySku(componentSku)
+                    .orElseThrow(() -> new ProductNotFoundException(componentSku));
+            if (component.isKit()) {
+                throw new KitComponentNotSimpleException(kitSku, componentSku, component.type());
+            }
+            recipe.add(KitComponent.create(kitSku, componentSku, command.quantity()));
+        }
+
+        kitComponentRepository.replaceRecipe(kitSku, recipe);
+        return productRepository.save(kit.withType(ProductType.KIT));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<KitComponent> getKitRecipe(String kitSku) {
+        // Confirma que o SKU existe antes de devolver lista vazia — SKU desconhecido é 404, SKU
+        // que existe mas nunca foi kit é lista vazia. Duas coisas diferentes.
+        productRepository.findBySku(kitSku).orElseThrow(() -> new ProductNotFoundException(kitSku));
+        return kitComponentRepository.findByKitSku(kitSku);
     }
 
     private StockReservation releaseInternal(StockReservation reservation) {

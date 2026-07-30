@@ -44,6 +44,11 @@ public class ProductEntity {
     @Column(name = "sale_price", precision = 14, scale = 2)
     private BigDecimal salePrice;
 
+    // EST-F015 (Fatia 6) — SIMPLES ou KIT. Sem @Enumerated: mesma convenção enum-como-string do
+    // resto do projeto (ver OrderEntity.status), conversão manual em ProductRepositoryImpl.
+    @Column(nullable = false, length = 20)
+    private String type;
+
     @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     @ToString.Exclude
     private List<ProductVariantEntity> variants = new ArrayList<>();
