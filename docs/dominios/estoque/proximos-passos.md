@@ -57,10 +57,12 @@ operação de balcão), StockReservationExpiryCleanupService (@Scheduled a cada 
 @SchedulerLock), GET /estoque/integrity/reservation-mismatch (EST-C013, ESTOQUE_STOCK_MANAGE,
 molde de EST-C011), handler de StockReservationNotFoundException/NotActiveException, testes de
 domínio/controller/security/IT novos, e docs (README, feature-registry, api-reference).
-GAP QUE FICOU: a suíte de teste do núcleo em si (StockReservation, os 8 métodos de
-EstoqueService, StockBalance.reserve/consumeReservation/releaseReservation) continua sem
-cobertura própria — só a query de integridade e a superfície nova foram testadas. Cabe como
-item isolado antes de EST-F008/F016, que também mexem em StockBalance.
+GAP FECHADO EM 2026-07-30: a suíte de teste do núcleo (StockReservation, os 8 métodos de
+EstoqueService, StockBalance.reserve/consumeReservation/releaseReservation) que tinha ficado sem
+cobertura própria agora tem StockReservationTest, os casos novos de reservedQuantity em
+StockBalanceTest e os 8 métodos em EstoqueServiceTest. De brinde, StockReservationExpiryCleanupServiceTest
+(único *CleanupService do pacote que ainda não tinha teste). Sem mudança de comportamento ou API.
+Path livre para EST-F008/F016 mexerem em StockBalance sem regressão silenciosa.
 
 TRABALHO CONCLUÍDO EM 2026-07-29 — EST-F015/EST-F022 (Fatia 6, kits)
 Kit é virtual: ProductType (SIMPLES/KIT) + product_kit_component (um nível só, sem FK — mesmo
@@ -73,20 +75,42 @@ null se algum componente não tem custo). A explosão mora inteira em EstoqueSer
 passagem corrigido fora do módulo: CashbackService.findMarginImpact excluía todo kit do
 relatório por ler product.pricing() cru. Próxima migration livre: V74.
 
+TRABALHO CONCLUÍDO EM 2026-07-30 — EST-F008 (lote e validade)
+O núcleo (StockLot, migration V74, FEFO na saída e no consumo de reserva) já estava pronto no
+working tree, sem dois pontos que quebravam assim que um SKU virasse lotTracked=true: receber
+(ComprasService.receiveGoods) ou estornar (OrderService.refundOrder) esse SKU lançava
+MissingLotInfoException e abortava a transação inteira. IMPORTANTE: o desenho que foi escolhido
+é ADITIVO, não a reescrita de StockBalance que a seção "Riscos" deste arquivo descrevia (e que
+foi corrigida abaixo) — stock_lot é uma quebra por lote ao lado do agregado, mantida na mesma
+transação de adjustStock; stock_balance e seu @Version não mudaram, e a reserva continua
+lote-agnóstica (reservar contra o disponível agregado basta; só o consumo real precisa do lote).
+Fechado agora: lotCode/expiryDate opcionais em GoodsReceiptItem/ComprasService.receiveGoods e em
+OrderService.refundOrder (overload com List<RefundItemLot>, casado por SKU); adjustStock recusa
+lote informado num SKU que é kit em vez de descartar em silêncio; recordCountedItem ganhou
+lotCode e closeStockCount reconcilia cada StockLot via reconciledTo (existia desde a V74, nunca
+era chamado) antes de lançar UM AJUSTE agregado; StockLotExpiryAlertService (@Scheduled diário
+0 0 7 * * * + @SchedulerLock) liga o findExpiringSoon que também existia sem chamador;
+GET /estoque/products/{sku}/lots e GET /estoque/integrity/lot-mismatch (LotIntegrityMismatch,
+molde de EST-C011/C013). Migration V75: goods_receipt_item.lot_code/expiry_date;
+stock_count_item.lot_code + dois índices únicos parciais substituindo uk_stock_count_item_count_sku
+(molde de uk_cashback_rate_active_scope da V69 — @UniqueConstraint não expressa WHERE). Próxima
+migration livre: V76. Fora de escopo por decisão: reserva por lote específico não existe, só FEFO
+no consumo. Detalhes completos no Histórico de Implementações do README.
+
 ORDEM SUGERIDA (revisada em 2026-07-28 pelo plano de PDV/marketplace; F013/F021/C013 fechados em
-07-29; F014/F015/F022 fechados em 07-29)
+07-29; F014/F015/F022 fechados em 07-29; F008 fechado em 07-30)
  1. ~~EST-F014~~ ✅ estorno/devolução de venda (Fatia 5 do plano) — `OrderService.refundOrder`
     devolve a mercadoria via `adjustStock(ENTRADA)` por item, com `REVERSED` no cashback e
     estorno de pagamento na mesma transação. Ver `docs/dominios/vendas-balcao/README.md`.
  2. ~~EST-F015 + EST-F022~~ ✅ kit virtual de um nível + custo derivado no Pricing (Fatia 6).
- 3. EST-F008  lote e validade. Muda a granularidade do saldo — trate como mudança
-              de modelagem, não como campo novo.
- 4. EST-F007  custo médio ponderado. Depois de F008 (o custo entra por lote) e DEPOIS DO
-              CASHBACK (Fatia 4): o costPrice manual de V63 já dá a ordem de grandeza, que
-              é o que decide se a taxa do carvão é 2% ou 8%.
+ 3. ~~EST-F008~~ ✅ lote e validade — desenho aditivo (StockLot ao lado de StockBalance), sem
+              reescrever a granularidade do saldo. Ver bloco acima.
+ 4. EST-F007  custo médio ponderado. Agora que F008 fechou, o custo já entra por lote — e
+              DEPOIS DO CASHBACK (Fatia 4, já fechada): o costPrice manual de V63 já dá a ordem
+              de grandeza, que é o que decide se a taxa do carvão é 2% ou 8%.
  5. EST-F016  unidade de medida e conversão — mexe na semântica de quantity em todo lugar.
  6. EST-F005  entrada por XML de NF-e (NfeXmlImportPort). Por último entre as features
-              de entrada, porque o XML traz lote e custo — depende de F008 e F007.
+              de entrada, porque o XML traz lote e custo — depende de F008 (fechado) e F007.
 
 DESPRIORIZADOS POR DECISÃO (não são esquecimento — §2.2 e §8.5 do plano)
 - EST-F012 (transferência entre depósitos) só faz sentido quando existir um SEGUNDO LOCAL
@@ -121,7 +145,7 @@ ARMADILHAS DESTE PROJETO (já me custaram build quebrado)
 - HexagonalArchitectureTest (ArchUnit) barra qualquer import de framework em core/domain
   e core/ports, e em core/service só libera org.springframework.transaction.*.
   ApplicationEventPublisher e TransactionSynchronizationManager ficam em adapter/infra.
-- Migrations: a próxima é V65 (V63 e V64 já existem no working tree). Seeds de permissão precisam de ON CONFLICT DO NOTHING.
+- Migrations: a próxima é V76 (V63-V75 já existem no working tree). Seeds de permissão precisam de ON CONFLICT DO NOTHING.
   O perfil dev NÃO roda Flyway (ddl-auto=create-drop), então permissão nova também tem
   que entrar em SeedConfig e DevRoleBootstrapConfig, senão dá 403 em dev.
 - src/test/resources/application-dev.properties SUBSTITUI o de src/main/resources/,
@@ -132,7 +156,7 @@ ARMADILHAS DESTE PROJETO (já me custaram build quebrado)
 - Testes de contexto real que escrevem estoque precisam cadastrar o SKU antes —
   desde EST-C002 movimentar SKU inexistente é 404.
 
-Comece lendo o README do módulo e me apresentando o plano para EST-F014 (estorno/devolução).
+Comece lendo o README do módulo e me apresentando o plano para EST-F007 (custo médio ponderado).
 ```
 
 ---
@@ -154,28 +178,35 @@ Os itens não são independentes, e a ordem abaixo evita refazer trabalho:
 
 ## Riscos a considerar antes de encarar a lista inteira
 
-**EST-F008 (lote e validade) é o item mais arriscado.** Ele muda a granularidade do saldo de
-`(sku, depósito)` para `(sku, depósito, lote)`. Isso reescreve `StockBalance`, o `@Version` que
-protege o saldo, e todas as integrações de `compras` e `vendas-balcao` — que hoje chamam
-`adjustStock(sku, warehouseCode, ...)` sem qualquer noção de lote. Não é um campo novo numa tabela;
-é uma mudança de modelagem que atravessa três domínios.
+**EST-F008 (lote e validade) fechou em 2026-07-30 sem o risco que esta seção descrevia.** A
+previsão original era mudar a granularidade do saldo de `(sku, depósito)` para
+`(sku, depósito, lote)`, reescrevendo `StockBalance`, o `@Version` que protege o saldo, e toda
+integração de `compras`/`vendas-balcao`. **Não foi isso que aconteceu:** o desenho que entrou é
+**aditivo** — `StockLot` é uma quebra por lote ao lado do agregado, mantida na mesma transação de
+`adjustStock`, sem tocar `StockBalance`/`@Version`/reserva. Registrado aqui como lição, não como
+crítica: o risco real de uma feature pode ser menor do que a modelagem óbvia sugere, e vale
+desenhar antes de assumir que o caminho mais direto é o único.
 
-**EST-F016 (unidade de medida) tem o mesmo perfil**, sobre `quantity`: passa a existir a distinção
-entre a unidade de compra e a de venda, e toda movimentação precisa saber em qual unidade está.
+**EST-F016 (unidade de medida) segue com o perfil de risco que F008 tinha na previsão original**,
+sobre `quantity`: passa a existir a distinção entre a unidade de compra e a de venda, e toda
+movimentação precisa saber em qual unidade está. Vale reavaliar, à luz do que funcionou em F008,
+se dá para um desenho igualmente aditivo antes de assumir que é preciso reescrever `quantity` em
+todo lugar.
 
-Se em algum momento for preciso cortar escopo para migrar de módulo mais cedo, **F008 e F016 são os
-candidatos naturais** a virar backlog de uma fase posterior. Sem eles o módulo continua coerente:
-o que se perde é controle de perecível e venda fracionada, não a integridade do saldo.
+Se em algum momento for preciso cortar escopo para migrar de módulo mais cedo, **F016 é o
+candidato natural** a virar backlog de uma fase posterior. Sem ele o módulo continua coerente: o
+que se perde é venda fracionada, não a integridade do saldo.
 
 ## O que "módulo fechado" significa aqui
 
-Fechar os 7 grupos que restam no roteiro, mais uma decisão registrada sobre os dois que não cabem
+Fechar os grupos que restam no roteiro, mais uma decisão registrada sobre os dois que não cabem
 em estoque (F011, C006) e sobre os dois despriorizados (F012, F020). Com isso o backlog do módulo
 zera e `financeiro` fica destravado para o DRE, que hoje espera o custo médio de F007.
 
 **O estoque deixou de ser o módulo da vez.** A reserva fechou, `vendas-balcao` fechou suas cinco
 fatias (0, 1, 3, 5 e a parte de reembolso da Fatia 5) e o próprio estoque fechou **EST-F014**
-(devolução, via `OrderService.refundOrder`) e **EST-F015/EST-F022** (kits, Fatia 6) em 2026-07-29
-— ver [`dominios/vendas-balcao/proximos-passos.md`](../vendas-balcao/proximos-passos.md). Sem
-fatia numerada pendente no marco do marketplace; o que resta do backlog deste módulo (F008, F007,
-F016, F005, mais a decisão sobre F011/C006) não bloqueia nada e pode esperar uma janela.
+(devolução, via `OrderService.refundOrder`), **EST-F015/EST-F022** (kits, Fatia 6) em 2026-07-29 e
+**EST-F008** (lote e validade) em 2026-07-30 — ver
+[`dominios/vendas-balcao/proximos-passos.md`](../vendas-balcao/proximos-passos.md). Sem fatia
+numerada pendente no marco do marketplace; o que resta do backlog deste módulo (F007, F016, F005,
+mais a decisão sobre F011/C006) não bloqueia nada e pode esperar uma janela.

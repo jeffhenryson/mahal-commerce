@@ -1,9 +1,9 @@
 # Domínio: estoque
 
-**Status:** 🟢 Operacional — grade de produtos, saldo multi-depósito, ledger de movimentações (gravação e consulta) e alerta de ponto de reposição em produção
+**Status:** 🟢 Operacional — grade de produtos, saldo multi-depósito, ledger de movimentações (gravação e consulta), alerta de ponto de reposição, reserva, kits e lote/validade em produção
 **Pacote Java:** `com.cernecommerce.core.domain.model.estoque`
 **Rota HTTP base:** `/estoque`
-**Última atualização deste doc:** 2026-07-27 (sprint de integridade: EST-C002, C003, C004, C007, C008, C010, C011, C012)
+**Última atualização deste doc:** 2026-07-30 (lote e validade — EST-F008)
 
 ## Objetivo
 
@@ -19,7 +19,10 @@ Gerenciamento da grade de produtos e controle de inventário multi-depósito, co
 - **Entrada por XML de NF-e** (`NfeXmlImportPort`). 🟡 Pendente (EST-F005).
 - **Inventário/balanço:** contagem com sessão por depósito, divergência registrada e ajuste em lote no fechamento (`StockCount`). ✅ Implementado (EST-F006).
 - **Precificação:** custo de aquisição, markup desejado e preço praticado por produto, com preço sugerido, margem e markup efetivo derivados. ✅ Implementado (EST-F019).
-- **Lote/validade, custo médio, transferência, reserva, kit, unidade de medida.** 🟡 Pendentes — ver [Backlog do Módulo](#backlog-do-módulo).
+- **Reserva de estoque:** `reservedQuantity` separado do físico, TTL configurável, expiração agendada e diagnóstico de integridade. ✅ Implementado (EST-F013/F021/EST-C013).
+- **Kits virtuais:** combo de um nível, saldo e custo derivados dos componentes, sem linha própria em `stock_balance`. ✅ Implementado (EST-F015/EST-F022).
+- **Lote e validade:** `StockLot` aditivo a `stock_balance`, consumo FEFO na saída, alerta de vencimento agendado e diagnóstico de integridade. ✅ Implementado (EST-F008).
+- **Custo médio, transferência entre depósitos, unidade de medida.** 🟡 Pendentes — ver [Backlog do Módulo](#backlog-do-módulo).
 
 ## Modelo de Domínio
 
@@ -40,8 +43,10 @@ compact constructor e o par de fábricas `create()` (entidade nova, sem `id`) / 
 | `MovementType` | enum | `ENTRADA`, `SAIDA` (delta) e `AJUSTE` (**saldo-alvo**, EST-C009) |
 | `StockCount` | `id, warehouseId, status, username, createdAt, closedAt, items` | Balanço de um depósito; `withCountedItem` é upsert por SKU preservando a posição; `closed()`/`cancelled()` carimbam `closedAt` |
 | `StockCountStatus` | enum | `ABERTA`, `FECHADA`, `CANCELADA` |
-| `StockCountItem` | `id, sku, countedQuantity, expectedQuantity, difference` | `countedQuantity >= 0`; `expectedQuantity`/`difference` só no fechamento; `diverges()` decide se gera movimentação |
+| `StockCountItem` | `id, sku, countedQuantity, expectedQuantity, difference, lotCode` | `countedQuantity >= 0`; `expectedQuantity`/`difference` só no fechamento; `diverges()` decide se gera movimentação; `lotCode` (EST-F008) nulo para SKU não lote-rastreado — cada lote é contado e reconciliado à parte |
 | `ReorderPoint` | `id, sku, warehouseId, minQuantity` | `minQuantity >= 0`; `isBelow(qty)` é comparação **estrita** (`qty < minQuantity`) |
+| `StockLot` | `id, sku, warehouseId, lotCode, expiryDate, quantity, alertedAt, version` | EST-F008. Aditivo a `StockBalance` — `SUM(quantity)` por `(sku, warehouseId)` deve igualar `stock_balance.quantity`, mantido pela mesma transação de `adjustStock`. `receive`/`consume` somam/subtraem; `reconciledTo` é saldo-alvo por lote (fechamento de balanço); `expiryDate` imutável após criado |
+| `LotIntegrityMismatch` | `sku, warehouseCode, balanceQuantity, lotsTotal` | Retrato de leitura (EST-F008), sem persistência própria — diagnóstico de `stock_balance.quantity` divergindo da soma de `stock_lot.quantity` |
 
 **Ponto central do domínio — `StockBalance.apply(MovementType, BigDecimal)`:**
 `ENTRADA` soma e `SAIDA` subtrai — ambas tratam a quantidade como **delta**. Se o resultado
@@ -74,6 +79,10 @@ optimistic locking.
 | `StockCountAlreadyOpenException` | 409 | `STOCK_COUNT_ALREADY_OPEN` |
 | `ObjectOptimisticLockingFailureException` (Spring) | 409 | `STOCK_UPDATE_CONFLICT` |
 | `DataIntegrityViolationException` (Spring) | 409 | `DATA_INTEGRITY_VIOLATION` |
+| `MissingLotInfoException` (EST-F008) | 400 | `LOT_INFO_REQUIRED` |
+| `UnexpectedLotInfoException` (EST-F008) | 400 | `LOT_INFO_NOT_APPLICABLE` |
+| `LotExpiryDateMismatchException` (EST-F008) | 409 | `LOT_EXPIRY_MISMATCH` |
+| `StockLotNotFoundException` (EST-F008) | 404 | `STOCK_LOT_NOT_FOUND` |
 
 ## Regras de Negócio Implementadas
 
@@ -150,11 +159,12 @@ Todos exigem `bearerAuth`. Controller: `adapter/in/controller/EstoqueController.
 | `PATCH` | `/estoque/warehouses/{code}/active` | `ESTOQUE_WAREHOUSE_MANAGE` | Ativa/desativa o depósito. `200`; `404 WAREHOUSE_NOT_FOUND` |
 | `GET` | `/estoque/warehouses` | `ESTOQUE_WAREHOUSE_READ` | Lista depósitos paginados, ordenados por id (`page` = 0, `size` = 20, faixa 1–100) |
 | `GET` | `/estoque/stock-balance` | `ESTOQUE_WAREHOUSE_READ` | Consulta saldo por `sku` + `warehouseCode`. Retorna zero se nunca houve movimentação; `404 WAREHOUSE_NOT_FOUND`; `400 VALIDATION_ERROR` |
-| `POST` | `/estoque/movements` | `ESTOQUE_STOCK_MANAGE` | Registra movimentação manual (`ENTRADA`/`SAIDA`/`AJUSTE`) e devolve o saldo atualizado. `201` + `Location` para o saldo; `400 INSUFFICIENT_STOCK`; `404 WAREHOUSE_NOT_FOUND`; `409 STOCK_UPDATE_CONFLICT` |
+| `POST` | `/estoque/movements` | `ESTOQUE_STOCK_MANAGE` | Registra movimentação manual (`ENTRADA`/`SAIDA`/`AJUSTE`) e devolve o saldo atualizado. Aceita `lotCode`/`expiryDate` opcionais (EST-F008) — obrigatórios juntos numa `ENTRADA` de SKU lote-rastreado, recusados em qualquer outro caso. `201` + `Location` para o saldo; `400 INSUFFICIENT_STOCK`/`LOT_INFO_REQUIRED`/`LOT_INFO_NOT_APPLICABLE`; `404 WAREHOUSE_NOT_FOUND`; `409 STOCK_UPDATE_CONFLICT`/`LOT_EXPIRY_MISMATCH` |
+| `PATCH` | `/estoque/products/{sku}/lot-tracked` | `ESTOQUE_PRODUCT_MANAGE` | Ativa/desativa o rastreamento de lote e validade do SKU (EST-F008), opt-in — kit não pode. `200`; `400` se SKU é `KIT`; `404 PRODUCT_NOT_FOUND` |
 | `GET` | `/estoque/movements` | `ESTOQUE_STOCK_MANAGE` | Histórico paginado do ledger por `sku` + `warehouseCode` (`page` = 0, `size` = 20, teto de 100), mais recentes primeiro. Par nunca movimentado devolve página vazia com `200`; `404 WAREHOUSE_NOT_FOUND`; `400 MISSING_PARAMETER` |
 | `PUT` | `/estoque/products/{sku}/reorder-point` | `ESTOQUE_STOCK_MANAGE` | Define a quantidade mínima do SKU no depósito (upsert). `204 No Content`; `404 WAREHOUSE_NOT_FOUND` |
 | `POST` | `/estoque/stock-counts` | `ESTOQUE_STOCK_MANAGE` | Abre um balanço para o depósito. `201` + `Location`; `404 WAREHOUSE_NOT_FOUND`; `409 STOCK_COUNT_ALREADY_OPEN` |
-| `POST` | `/estoque/stock-counts/{id}/items` | `ESTOQUE_STOCK_MANAGE` | Registra a contagem física de um SKU (upsert por SKU; zero é válido). `200`; `404 PRODUCT_NOT_FOUND`/`STOCK_COUNT_NOT_FOUND`; `409 STOCK_COUNT_NOT_OPEN` |
+| `POST` | `/estoque/stock-counts/{id}/items` | `ESTOQUE_STOCK_MANAGE` | Registra a contagem física de um SKU (upsert; zero é válido). SKU lote-rastreado (EST-F008) exige `lotCode` — upsert então é por `(sku, lotCode)`, cada lote contado à parte. `200`; `404 PRODUCT_NOT_FOUND`/`STOCK_COUNT_NOT_FOUND`/`STOCK_LOT_NOT_FOUND`; `400 LOT_INFO_REQUIRED`/`LOT_INFO_NOT_APPLICABLE`; `409 STOCK_COUNT_NOT_OPEN` |
 | `POST` | `/estoque/stock-counts/{id}/close` | `ESTOQUE_STOCK_MANAGE` | Fecha e aplica os `AJUSTE` dos itens divergentes. `200`; `409 STOCK_COUNT_NOT_OPEN` |
 | `POST` | `/estoque/stock-counts/{id}/cancel` | `ESTOQUE_STOCK_MANAGE` | Abandona o balanço sem tocar em saldo. `200`; `409 STOCK_COUNT_NOT_OPEN` |
 | `GET` | `/estoque/stock-counts/{id}` | `ESTOQUE_STOCK_MANAGE` | Consulta o balanço e seus itens. `200`; `404 STOCK_COUNT_NOT_FOUND` |
@@ -163,6 +173,8 @@ Todos exigem `bearerAuth`. Controller: `adapter/in/controller/EstoqueController.
 | `GET` | `/estoque/reservations` | `ESTOQUE_RESERVATION_READ` | Lista reservas de estoque paginadas, mais recentes primeiro. Filtros opcionais `sku`, `warehouseCode` e `status` (`ACTIVE`/`CONSUMED`/`RELEASED`/`EXPIRED`), combináveis. `404 WAREHOUSE_NOT_FOUND` se `warehouseCode` for informado e não existir |
 | `GET` | `/estoque/reservations/{id}` | `ESTOQUE_RESERVATION_READ` | Consulta uma reserva. `404 RESERVATION_NOT_FOUND` |
 | `GET` | `/estoque/integrity/reservation-mismatch` | `ESTOQUE_STOCK_MANAGE` | Diagnóstico de EST-C013: pares SKU/depósito cujo `stock_balance.reserved_quantity` diverge da soma das reservas `ACTIVE` em `stock_reservation` — estoque travado invisível, não overselling (`page` = 0, `size` = 20, teto de 100). Base íntegra devolve página vazia com `200` |
+| `GET` | `/estoque/products/{sku}/lots` | `ESTOQUE_PRODUCT_READ` | Lista os lotes de um SKU num depósito (EST-F008, `warehouseCode` obrigatório), do que vence primeiro em diante. Lista vazia se não é lote-rastreado ou nunca recebeu lote — não é erro; `404 WAREHOUSE_NOT_FOUND` |
+| `GET` | `/estoque/integrity/lot-mismatch` | `ESTOQUE_STOCK_MANAGE` | Diagnóstico de EST-F008: pares SKU/depósito de SKU lote-rastreado cujo `stock_balance.quantity` diverge da soma de `stock_lot.quantity` (`page` = 0, `size` = 20, teto de 100). Base íntegra devolve página vazia com `200` |
 
 ## Segurança e Infraestrutura
 
@@ -409,8 +421,7 @@ Convenções, variáveis e o environment compartilhado estão em
 | ID | Prioridade | Tipo | Item | Descrição | Status |
 |---|---|---|---|---|---|
 | EST-F005 | 🟡 Média | Feature | importacao-nfe-xml | Entrada de mercadoria por XML de NF-e (`NfeXmlImportPort`) gerando `StockMovement` de entrada — diferencial operacional. | Backlog (Sprint 4) |
-| EST-F007 | 🟡 Média | Feature | valorizacao-custo-medio | Custo médio ponderado por SKU e valor total de estoque — alimenta o DRE do domínio `financeiro`. **Não fazer antes do cashback** ([`plano-pdv-marketplace.md`](../../plano-pdv-marketplace.md) §8.9): o `costPrice` manual de V63 já entrega a ordem de grandeza, e é a ordem de grandeza que decide se a taxa do carvão é 2% ou 8%. Depois do cashback rodando, o custo médio refina; antes, ele atrasa. | Backlog (Sprint 3) |
-| EST-F008 | 🟡 Média | Feature | controle-lote-validade | Lote e validade para essências/perecíveis + alerta de vencimento próximo. | Backlog (Sprint 3) |
+| EST-F007 | 🟡 Média | Feature | valorizacao-custo-medio | Custo médio ponderado por SKU e valor total de estoque — alimenta o DRE do domínio `financeiro`. **Não fazer antes do cashback** ([`plano-pdv-marketplace.md`](../../plano-pdv-marketplace.md) §8.9): o `costPrice` manual de V63 já entrega a ordem de grandeza, e é a ordem de grandeza que decide se a taxa do carvão é 2% ou 8%. Depois do cashback rodando, o custo médio refina; antes, ele atrasa. Agora que EST-F008 fechou, o custo por lote já tem onde entrar. | Backlog (Sprint 3) |
 | EST-F011 | 🟢 Baixa | Feature | curva-abc-giro | Análise ABC e giro de produtos para priorização de compras (domínio `relatorios`). | Backlog (Sprint 6) |
 | EST-F012 | 🟢 Baixa | Feature | transferencia-entre-depositos | `MovementType.TRANSFER`: saída atômica de um `Warehouse` + entrada em outro, distinto do ajuste manual. **Só faz sentido quando existir um segundo local físico de verdade** ([`plano-pdv-marketplace.md`](../../plano-pdv-marketplace.md) §2.2): o marketplace **não** vai usar `WarehouseType.ECOMMERCE` para separar canal — para uma tabacaria de uma loja, a prateleira é uma só, e partir o pool geraria rebalanceamento manual permanente e o absurdo de "o site tem 5 e a loja tem 0" com tudo no mesmo armário. A reserva (EST-F013) é o mecanismo que permite um pool servir dois canais. | Backlog (Sprint 4) |
 | EST-F016 | 🟢 Baixa | Feature | unidade-medida-conversao | Múltiplas unidades por produto (compra em kg, venda em porção/g) com fator de conversão nas movimentações. | Backlog (Sprint 6) |
@@ -464,19 +475,77 @@ Convenções, variáveis e o environment compartilhado estão em
   relatório de impacto na margem por ler `product.pricing()` cru em vez de `findPricingBySku`.
   Coberto por `ProductTest`, novo `KitComponentTest`, casos novos em `EstoqueServiceTest`/
   `EstoqueControllerTest`/`EstoqueControllerSecurityTest`, e o novo `KitSaleFlowIT`.
+- **2026-07-30** — `cobertura-de-teste-do-nucleo-de-reserva`: fecha o gap que a entrega de
+  EST-F013/F021/C013 (2026-07-29) deixou em aberto — o domínio e o service de reserva tinham
+  código em produção sem teste próprio, só a query de integridade e a superfície nova (endpoint,
+  scheduler) tinham cobertura. Novo `StockReservationTest` (compact constructor de
+  `StockReservation` — `expiresAt` posterior a `createdAt`, consistência `status.isActive() ==
+  (resolvedAt == null)` —, `isActive`/`isExpiredAt`, e as três transições `consumed`/`released`/
+  `expired`). `StockBalanceTest` ganhou os casos de `reservedQuantity` que não existiam: o
+  compact constructor (não-negativo, não maior que `quantity`), `reserve`/`releaseReservation`/
+  `consumeReservation`, e os ramos de `apply(SAIDA)`/`apply(AJUSTE)` que hoje lançam
+  `ReservedStockException` quando o físico bastaria mas parte dele está prometida. `EstoqueServiceTest`
+  ganhou os oito métodos de reserva (`reserveStock`, `consumeReservation`, `releaseReservation`,
+  `releaseReservationsByOwner`, `consumeReservationsByOwner`, `getStockReservation`,
+  `listReservations`, `expireReservations`) — inclusive o TTL default vs. informado, o alerta de
+  reposição no caminho de reserva, e o caso de `expireReservations` achar a reserva mas não achar
+  mais o saldo (`ifPresent` que não falha). De brinde, `StockReservationExpiryCleanupServiceTest`,
+  que faltava para este ser o único `*CleanupService` do pacote sem teste próprio. Nenhuma mudança
+  de comportamento ou de API — só a cobertura que já devia existir.
+- **2026-07-30** — `lote-e-validade` (EST-F008): o núcleo (`StockLot`, migration V74, FEFO na
+  saída/reserva) tinha ficado pronto sem dois pontos que quebravam assim que um SKU virasse
+  `lotTracked=true` — receber ou estornar esse SKU lançava `MissingLotInfoException` e abortava a
+  transação. **Desenho aditivo, não a reescrita de `StockBalance` que o roteiro antigo descrevia
+  como risco** ([`proximos-passos.md`](proximos-passos.md)): `stock_lot` é uma quebra por lote ao
+  lado do agregado, mantida na mesma transação de `adjustStock` — `stock_balance` e seu `@Version`
+  não mudaram, nem a reserva, que continua lote-agnóstica de propósito (reservar contra o
+  disponível agregado basta; só o consumo real precisa saber de qual lote sair). **Compras:**
+  `GoodsReceiptItem`/`ComprasService.receiveGoods` ganharam `lotCode`/`expiryDate` opcionais,
+  sempre propagados para a sobrecarga de 8 argumentos de `adjustStock` (nula para SKU não
+  lote-rastreado, idêntica ao caminho antigo). **Estorno:** `OrderService.refundOrder` ganhou uma
+  sobrecarga com `List<RefundItemLot>` — o operador informa em qual lote a mercadoria devolvida
+  volta a ficar, casado por SKU; sem isso o sistema não tem como adivinhar. **Kit:** `adjustStock`
+  recusa (`UnexpectedLotInfoException`) lote informado num SKU que é kit, em vez de descartar a
+  informação em silêncio na recursão de `explodeKitMovement`. **Balanço de inventário:**
+  `recordCountedItem` ganhou `lotCode` opcional e `StockCountItem`/`StockCount.withCountedItem`
+  passaram a fazer upsert por `(sku, lotCode)` — SKU lote-rastreado é contado lote a lote, não
+  agregado. `closeStockCount` reconcilia cada `StockLot` contado via `reconciledTo` (existia desde
+  a V74, nunca era chamado) e só então lança **um** `AJUSTE` agregado pela soma dos lotes — o
+  branch `AJUSTE` de `adjustStock` continua sem saber de lote, porque o lote já foi reconciliado
+  por fora antes da chamada. **Alerta de vencimento:** novo `StockLotExpiryAlertService`
+  (`infra/scheduler`, `@Scheduled` diário `0 0 7 * * *` + `@SchedulerLock`, diferente do
+  varredor de reserva a cada 5 min — validade se mede em dias, não minutos) chama
+  `EstoqueUseCase.alertExpiringLots`, que liga o `StockLotRepository.findExpiringSoon` que
+  existia desde a V74 sem nenhum chamador. **Leitura e integridade:**
+  `GET /estoque/products/{sku}/lots` (`ESTOQUE_PRODUCT_READ`) e novo record
+  `LotIntegrityMismatch` + `StockIntegrityRepository.findLotMismatches` (query nativa no molde de
+  EST-C011/C013 — união de quem já tem lote gravado com quem tem saldo físico e é lote-rastreado
+  agora, SKU pai ou variação) + `GET /estoque/integrity/lot-mismatch` (`ESTOQUE_STOCK_MANAGE`) —
+  fecha o que já estava citado em comentário no código como destino do drift do FEFO. Migration
+  V75: `goods_receipt_item.lot_code`/`expiry_date`; `stock_count_item.lot_code` e a troca do
+  `uk_stock_count_item_count_sku` por dois índices únicos parciais (mesmo molde de
+  `uk_cashback_rate_active_scope`, V69) — `@UniqueConstraint` não expressa `WHERE`, então a
+  entidade ficou sem a anotação e a garantia condicional é só de aplicação + migration, como
+  `CashbackRateEntity`. Próxima migration livre: V76. **Fora de escopo, por decisão:** reserva por
+  lote específico (reservar já garantindo sair do que vence primeiro) não existe — o FEFO só roda
+  no consumo efetivo. Cobertura em todas as camadas: domínio (`GoodsReceiptTest`,
+  `StockCountItemTest`, `StockCountTest`, `LotIntegrityMismatchTest`), service (`EstoqueServiceTest`,
+  `ComprasServiceTest`, `OrderServiceTest`), scheduler (`StockLotExpiryAlertServiceTest`),
+  persistência (`EstoqueRepositoryIT`) e controller/segurança (`EstoqueControllerTest`,
+  `EstoqueControllerSecurityTest`).
 
 ## Próximos passos
 
 A sprint de 2026-07-27 fechou C002, C003, C004, C005, C007, C008, C009, C010, C011, C012, F006 e F018.
 Em 2026-07-29 fecharam também F013/F021/C013 (reserva), F014 (estorno/devolução, via
 `OrderService.refundOrder`) e F015/F022 (kits, Fatia 6) — nenhum item do marco do marketplace
-segue pendente neste módulo.
+segue pendente neste módulo. Em 2026-07-30 fechou também F008 (lote e validade).
 
 O roteiro completo para o que resta — ordem de execução, dependências entre os itens e os dois
 que não cabem em estoque — está em [`proximos-passos.md`](proximos-passos.md). Resumo da
 prioridade imediata (nenhuma bloqueia outro módulo):
 
-1. **EST-F008** (lote e validade) e depois **EST-F007** (custo médio) — o custo entra por lote, e F007 destrava o DRE do `financeiro`.
+1. **EST-F007** (custo médio) — o custo entra por lote (F008 já fechou), e F007 destrava o DRE do `financeiro`.
 2. **EST-F016** (unidade de medida) e **EST-F005** (entrada por XML de NF-e).
 3. **EST-F012** (transferência entre depósitos) e **EST-F020** (preço por variação) seguem despriorizados por decisão — ver `proximos-passos.md`.
 
