@@ -76,4 +76,36 @@ class StockCountItemTest {
         assertThat(item.sku()).isEqualTo("NARG-001");
         assertThat(item.countedQuantity()).isEqualByComparingTo("8.000");
     }
+
+    // ── Lote (EST-F008) ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    void counted_semLote_deixaLotCodeNulo() {
+        StockCountItem item = StockCountItem.counted("NARG-001", new BigDecimal("5.000"));
+
+        assertThat(item.lotCode()).isNull();
+    }
+
+    @Test
+    void counted_comLote_preservaLotCode() {
+        StockCountItem item = StockCountItem.counted("ESS-001", new BigDecimal("5.000"), "LOTE-A");
+
+        assertThat(item.lotCode()).isEqualTo("LOTE-A");
+    }
+
+    @Test
+    void of_comLote_preservaLotCode() {
+        StockCountItem item = StockCountItem.of(7L, "ESS-001", new BigDecimal("5.000"), null, null, "LOTE-A");
+
+        assertThat(item.lotCode()).isEqualTo("LOTE-A");
+    }
+
+    @Test
+    void reconciledWith_preservaLotCode() {
+        StockCountItem item = StockCountItem.counted("ESS-001", new BigDecimal("5.000"), "LOTE-A")
+                .reconciledWith(new BigDecimal("6.000"));
+
+        assertThat(item.lotCode()).isEqualTo("LOTE-A");
+        assertThat(item.difference()).isEqualByComparingTo("-1.000");
+    }
 }

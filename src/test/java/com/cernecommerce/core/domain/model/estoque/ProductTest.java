@@ -132,4 +132,40 @@ class ProductTest {
     void isKit_falseForSimples() {
         assertThat(product().isKit()).isFalse();
     }
+
+    // EST-F008 — lote e validade
+
+    @Test
+    void lotTracked_defaultsToFalseWhenOmitted() {
+        assertThat(Product.create("NARG-001", "Narguile", "cat", List.of()).lotTracked()).isFalse();
+        assertThat(product().lotTracked()).isFalse();
+    }
+
+    @Test
+    void withLotTracked_alternaPreservandoORestante() {
+        Product rastreado = product().withLotTracked(true);
+
+        assertThat(rastreado.lotTracked()).isTrue();
+        assertThat(rastreado.id()).isEqualTo(1L);
+        assertThat(rastreado.sku()).isEqualTo("NARG-001");
+        assertThat(rastreado.type()).isEqualTo(ProductType.SIMPLES);
+        assertThat(rastreado.withLotTracked(false).lotTracked()).isFalse();
+    }
+
+    @Test
+    void kitLoteRastreado_lancaIllegalArgument() {
+        assertThatThrownBy(() -> Product.create("KIT-001", "Kit", "cat", List.of(), null,
+                ProductType.KIT, true))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("kit não pode ser lote-rastreado");
+    }
+
+    @Test
+    void withType_promovendoParaKitQuandoJaLoteRastreado_lancaIllegalArgument() {
+        Product loteRastreado = product().withLotTracked(true);
+
+        assertThatThrownBy(() -> loteRastreado.withType(ProductType.KIT))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("kit não pode ser lote-rastreado");
+    }
 }

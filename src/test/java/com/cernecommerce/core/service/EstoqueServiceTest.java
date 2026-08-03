@@ -9,6 +9,9 @@ import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountAlreadyOpenException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountNotOpenException;
+import com.cernecommerce.core.domain.exception.estoque.StockLotNotFoundException;
+import com.cernecommerce.core.domain.exception.estoque.StockReservationNotActiveException;
+import com.cernecommerce.core.domain.exception.estoque.StockReservationNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateKitComponentException;
@@ -19,7 +22,11 @@ import com.cernecommerce.core.domain.exception.estoque.KitCostNotEditableExcepti
 import com.cernecommerce.core.domain.exception.estoque.KitDirectAdjustmentException;
 import com.cernecommerce.core.domain.exception.estoque.KitHasVariantsException;
 import com.cernecommerce.core.domain.exception.estoque.KitSelfReferenceException;
+import com.cernecommerce.core.domain.exception.estoque.LotExpiryDateMismatchException;
+import com.cernecommerce.core.domain.exception.estoque.MissingLotInfoException;
+import com.cernecommerce.core.domain.exception.estoque.UnexpectedLotInfoException;
 import com.cernecommerce.core.domain.model.estoque.KitComponent;
+import com.cernecommerce.core.domain.model.estoque.LotIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
@@ -28,11 +35,14 @@ import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
 import com.cernecommerce.core.domain.model.estoque.ProductType;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.ReorderPoint;
+import com.cernecommerce.core.domain.model.estoque.ReservationStatus;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
 import com.cernecommerce.core.domain.model.estoque.StockCount;
 import com.cernecommerce.core.domain.model.estoque.StockCountItem;
 import com.cernecommerce.core.domain.model.estoque.StockCountStatus;
+import com.cernecommerce.core.domain.model.estoque.StockLot;
 import com.cernecommerce.core.domain.model.estoque.StockMovement;
+import com.cernecommerce.core.domain.model.estoque.StockReservation;
 import com.cernecommerce.core.domain.model.estoque.Warehouse;
 import com.cernecommerce.core.domain.model.estoque.WarehouseType;
 import com.cernecommerce.core.domain.model.notification.NotificationType;
@@ -45,6 +55,7 @@ import com.cernecommerce.core.ports.out.estoque.ReorderPointRepository;
 import com.cernecommerce.core.ports.out.estoque.StockBalanceRepository;
 import com.cernecommerce.core.ports.out.estoque.StockCountRepository;
 import com.cernecommerce.core.ports.out.estoque.StockIntegrityRepository;
+import com.cernecommerce.core.ports.out.estoque.StockLotRepository;
 import com.cernecommerce.core.ports.out.estoque.StockMovementRepository;
 import com.cernecommerce.core.ports.out.estoque.StockReservationRepository;
 import com.cernecommerce.core.ports.out.estoque.WarehouseRepository;
@@ -59,6 +70,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -86,6 +98,7 @@ class EstoqueServiceTest {
     @Mock NotificationUseCase notificationUseCase;
     @Mock UserRepository userRepository;
     @Mock KitComponentRepository kitComponentRepository;
+    @Mock StockLotRepository stockLotRepository;
 
     /** Mesmo default de {@code estoque.reservation.default-ttl} em {@code CoreBeanConfig}. */
     private static final Duration RESERVATION_TTL = Duration.ofMinutes(30);
@@ -109,7 +122,7 @@ class EstoqueServiceTest {
         estoqueService = new EstoqueService(productRepository, warehouseRepository, stockBalanceRepository,
                 stockMovementRepository, reorderPointRepository, stockIntegrityRepository, stockCountRepository,
                 stockReservationRepository, notificationUseCase, userRepository, immediateExecutor,
-                RESERVATION_TTL, kitComponentRepository);
+                RESERVATION_TTL, kitComponentRepository, stockLotRepository);
         lenient().when(reorderPointRepository.findBySkuAndWarehouseId(any(), any())).thenReturn(Optional.empty());
         // Padrão dos testes: o SKU existe no catálogo, que é a pré-condição das movimentações.
         // Os testes de createProduct e os de SKU desconhecido sobrescrevem este stub.
@@ -329,6 +342,178 @@ class EstoqueServiceTest {
         verify(stockBalanceRepository, never()).save(any());
     }
 
+    // ── Lote e validade (EST-F008) ───────────────────────────────────────────────────────────
+
+    private Product lotTrackedProduct(String sku) {
+        return Product.of(1L, sku, "Essência " + sku, "essencia", true, List.of(),
+                Pricing.empty(), ProductType.SIMPLES, true);
+    }
+
+    @Test
+    void adjustStock_entrada_loteRastreado_semLoteInfo_lancaMissingLotInfo() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(productRepository.findByAnySku("ESS-001")).thenReturn(Optional.of(lotTrackedProduct("ESS-001")));
+
+        assertThatThrownBy(() -> estoqueService.adjustStock("ESS-001", "LOJA-01", MovementType.ENTRADA,
+                new BigDecimal("5.000"), "Recebimento", "gerente", null, null))
+                .isInstanceOf(MissingLotInfoException.class);
+
+        verify(stockMovementRepository, never()).save(any());
+        verify(stockBalanceRepository, never()).save(any());
+        verify(stockLotRepository, never()).save(any());
+    }
+
+    @Test
+    void adjustStock_entrada_loteRastreado_comLoteNovo_criaLinhaDeLote() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        LocalDate expiry = LocalDate.of(2027, 3, 1);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(productRepository.findByAnySku("ESS-001")).thenReturn(Optional.of(lotTrackedProduct("ESS-001")));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("ESS-001", 1L)).thenReturn(Optional.empty());
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(stockLotRepository.findBySkuAndWarehouseIdAndLotCode("ESS-001", 1L, "LOTE-A"))
+                .thenReturn(Optional.empty());
+        when(stockLotRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        StockBalance result = estoqueService.adjustStock("ESS-001", "LOJA-01", MovementType.ENTRADA,
+                new BigDecimal("5.000"), "Recebimento", "gerente", "LOTE-A", expiry);
+
+        assertThat(result.quantity()).isEqualByComparingTo("5.000");
+        verify(stockLotRepository).save(argThat(lot -> lot.lotCode().equals("LOTE-A")
+                && lot.expiryDate().equals(expiry)
+                && lot.quantity().compareTo(new BigDecimal("5.000")) == 0));
+        verify(stockMovementRepository).save(argThat(m -> "LOTE-A".equals(m.lotCode())));
+    }
+
+    @Test
+    void adjustStock_entrada_loteRastreado_comLoteExistente_somaQuantidade() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        LocalDate expiry = LocalDate.of(2027, 3, 1);
+        StockLot existingLot = StockLot.of(9L, "ESS-001", 1L, "LOTE-A", expiry, new BigDecimal("3.000"), null, 0L);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(productRepository.findByAnySku("ESS-001")).thenReturn(Optional.of(lotTrackedProduct("ESS-001")));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("ESS-001", 1L)).thenReturn(Optional.empty());
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(stockLotRepository.findBySkuAndWarehouseIdAndLotCode("ESS-001", 1L, "LOTE-A"))
+                .thenReturn(Optional.of(existingLot));
+        when(stockLotRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        estoqueService.adjustStock("ESS-001", "LOJA-01", MovementType.ENTRADA,
+                new BigDecimal("2.000"), "Recebimento", "gerente", "LOTE-A", expiry);
+
+        verify(stockLotRepository).save(argThat(lot -> lot.id().equals(9L)
+                && lot.quantity().compareTo(new BigDecimal("5.000")) == 0));
+    }
+
+    @Test
+    void adjustStock_entrada_loteRastreado_validadeDivergente_lancaLotExpiryMismatch() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        LocalDate recorded = LocalDate.of(2027, 3, 1);
+        LocalDate informed = LocalDate.of(2027, 4, 1);
+        StockLot existingLot = StockLot.of(9L, "ESS-001", 1L, "LOTE-A", recorded, new BigDecimal("3.000"), null, 0L);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(productRepository.findByAnySku("ESS-001")).thenReturn(Optional.of(lotTrackedProduct("ESS-001")));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("ESS-001", 1L)).thenReturn(Optional.empty());
+        when(stockLotRepository.findBySkuAndWarehouseIdAndLotCode("ESS-001", 1L, "LOTE-A"))
+                .thenReturn(Optional.of(existingLot));
+
+        assertThatThrownBy(() -> estoqueService.adjustStock("ESS-001", "LOJA-01", MovementType.ENTRADA,
+                new BigDecimal("2.000"), "Recebimento", "gerente", "LOTE-A", informed))
+                .isInstanceOf(LotExpiryDateMismatchException.class);
+
+        verify(stockLotRepository, never()).save(any());
+        verify(stockBalanceRepository, never()).save(any());
+    }
+
+    @Test
+    void adjustStock_entrada_naoLoteRastreado_comLoteInfo_lancaUnexpectedLotInfo() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        // findByAnySku não estubado: Optional.empty() por padrão (Mockito), lotTracked = false.
+
+        assertThatThrownBy(() -> estoqueService.adjustStock("NARG-001", "LOJA-01", MovementType.ENTRADA,
+                new BigDecimal("5.000"), "Recebimento", "gerente", "LOTE-A", LocalDate.of(2027, 3, 1)))
+                .isInstanceOf(UnexpectedLotInfoException.class);
+
+        verify(stockBalanceRepository, never()).save(any());
+    }
+
+    @Test
+    void adjustStock_saida_comLoteInfo_lancaUnexpectedLotInfo() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(productRepository.findByAnySku("ESS-001")).thenReturn(Optional.of(lotTrackedProduct("ESS-001")));
+
+        assertThatThrownBy(() -> estoqueService.adjustStock("ESS-001", "LOJA-01", MovementType.SAIDA,
+                new BigDecimal("1.000"), "Venda", "gerente", "LOTE-A", LocalDate.of(2027, 3, 1)))
+                .isInstanceOf(UnexpectedLotInfoException.class);
+
+        verify(stockBalanceRepository, never()).save(any());
+    }
+
+    @Test
+    void adjustStock_saida_loteRastreado_consomeUmLoteSoPorFefo() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        StockBalance existing = StockBalance.of(10L, "ESS-001", 1L, new BigDecimal("10.000"), 0L);
+        StockLot lot = StockLot.of(1L, "ESS-001", 1L, "LOTE-A", LocalDate.of(2027, 3, 1),
+                new BigDecimal("10.000"), null, 0L);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(productRepository.findByAnySku("ESS-001")).thenReturn(Optional.of(lotTrackedProduct("ESS-001")));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("ESS-001", 1L)).thenReturn(Optional.of(existing));
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(stockLotRepository.findBySkuAndWarehouseId("ESS-001", 1L)).thenReturn(List.of(lot));
+        when(stockLotRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        estoqueService.adjustStock("ESS-001", "LOJA-01", MovementType.SAIDA,
+                new BigDecimal("4.000"), "Venda balcão", "gerente");
+
+        verify(stockLotRepository).save(argThat(l -> l.lotCode().equals("LOTE-A")
+                && l.quantity().compareTo(new BigDecimal("6.000")) == 0));
+        // SAIDA nunca carimba lotCode no ledger — pode atravessar mais de um lote.
+        verify(stockMovementRepository).save(argThat(m -> m.lotCode() == null));
+    }
+
+    @Test
+    void adjustStock_saida_loteRastreado_atravessaDoisLotesPorFefo() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        StockBalance existing = StockBalance.of(10L, "ESS-001", 1L, new BigDecimal("10.000"), 0L);
+        // Ordem FEFO já vem pronta do repositório (a ordenação real é testada no *RepositoryIT).
+        StockLot vencePrimeiro = StockLot.of(1L, "ESS-001", 1L, "LOTE-A", LocalDate.of(2026, 8, 1),
+                new BigDecimal("3.000"), null, 0L);
+        StockLot venceDepois = StockLot.of(2L, "ESS-001", 1L, "LOTE-B", LocalDate.of(2027, 1, 1),
+                new BigDecimal("7.000"), null, 0L);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(productRepository.findByAnySku("ESS-001")).thenReturn(Optional.of(lotTrackedProduct("ESS-001")));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("ESS-001", 1L)).thenReturn(Optional.of(existing));
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(stockLotRepository.findBySkuAndWarehouseId("ESS-001", 1L)).thenReturn(List.of(vencePrimeiro, venceDepois));
+        when(stockLotRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        estoqueService.adjustStock("ESS-001", "LOJA-01", MovementType.SAIDA,
+                new BigDecimal("5.000"), "Venda balcão", "gerente");
+
+        // Drena LOTE-A (3) inteiro e tira mais 2 do LOTE-B, que vence depois.
+        verify(stockLotRepository).save(argThat(l -> l.lotCode().equals("LOTE-A")
+                && l.quantity().signum() == 0));
+        verify(stockLotRepository).save(argThat(l -> l.lotCode().equals("LOTE-B")
+                && l.quantity().compareTo(new BigDecimal("5.000")) == 0));
+    }
+
+    @Test
+    void adjustStock_naoLoteRastreado_naoTocaStockLotRepository() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        StockBalance existing = StockBalance.of(10L, "NARG-001", 1L, new BigDecimal("10.000"), 0L);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("NARG-001", 1L)).thenReturn(Optional.of(existing));
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        estoqueService.adjustStock("NARG-001", "LOJA-01", MovementType.SAIDA,
+                new BigDecimal("3.000"), "Venda balcão", "gerente");
+
+        verifyNoInteractions(stockLotRepository);
+    }
+
     // ── Kits (EST-F015) ──────────────────────────────────────────────────────────────────────
 
     private Product kitProduct(String sku, String salePrice) {
@@ -424,6 +609,20 @@ class EstoqueServiceTest {
                 && m.reason().equals("Venda balcão sessão #1 (kit KIT-001)")));
         // Kit nunca ganha linha própria em stock_balance.
         verify(stockMovementRepository, never()).save(argThat(m -> m.sku().equals("KIT-001")));
+    }
+
+    @Test
+    void adjustStock_kit_comLoteInfo_lancaUnexpectedLotInfo() {
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(
+                Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true)));
+        when(productRepository.findByAnySku("KIT-001")).thenReturn(Optional.of(kitProduct("KIT-001", "80.00")));
+
+        assertThatThrownBy(() -> estoqueService.adjustStock("KIT-001", "LOJA-01", MovementType.ENTRADA,
+                BigDecimal.ONE, "motivo", "gerente", "L1", java.time.LocalDate.parse("2027-01-01")))
+                .isInstanceOf(UnexpectedLotInfoException.class);
+
+        verify(stockMovementRepository, never()).save(any());
+        verify(kitComponentRepository, never()).findByKitSku(any());
     }
 
     @Test
@@ -966,6 +1165,39 @@ class EstoqueServiceTest {
     }
 
     @Test
+    void setProductLotTracked_ativaPreservandoORestante() {
+        when(productRepository.findBySku("NARG-001")).thenReturn(Optional.of(existingProduct()));
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Product updated = estoqueService.setProductLotTracked("NARG-001", true);
+
+        assertThat(updated.lotTracked()).isTrue();
+        assertThat(updated.name()).isEqualTo("Narguile Aladin");
+        assertThat(updated.variants()).hasSize(1);
+    }
+
+    @Test
+    void setProductLotTracked_throwsWhenSkuNotFound() {
+        when(productRepository.findBySku("SKU-FANTASMA")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.setProductLotTracked("SKU-FANTASMA", true))
+                .isInstanceOf(ProductNotFoundException.class);
+
+        verify(productRepository, never()).save(any());
+    }
+
+    @Test
+    void setProductLotTracked_emKit_lancaIllegalArgument() {
+        when(productRepository.findBySku("KIT-001")).thenReturn(Optional.of(kitProduct("KIT-001", "80.00")));
+
+        assertThatThrownBy(() -> estoqueService.setProductLotTracked("KIT-001", true))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("kit não pode ser lote-rastreado");
+
+        verify(productRepository, never()).save(any());
+    }
+
+    @Test
     void updateWarehouse_alteraApenasOsCamposInformados() {
         Warehouse current = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
         when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(current));
@@ -1110,6 +1342,63 @@ class EstoqueServiceTest {
         verify(stockMovementRepository, never()).save(any());
         verify(reorderPointRepository, never()).save(any());
         verify(warehouseRepository, never()).findByCode(any());
+    }
+
+    // ── Listagem e integridade de lote (EST-F008) ────────────────────────────────────────
+
+    @Test
+    void listStockLots_delegaParaORepositorioDeLotes() {
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(
+                Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true)));
+        StockLot lot = StockLot.of(1L, "ESS-001", 1L, "LOTE-A", LocalDate.of(2027, 1, 1),
+                new BigDecimal("5.000"), null, 0L);
+        when(stockLotRepository.findBySkuAndWarehouseId("ESS-001", 1L)).thenReturn(List.of(lot));
+
+        List<StockLot> result = estoqueService.listStockLots("ESS-001", "LOJA-01");
+
+        assertThat(result).containsExactly(lot);
+    }
+
+    @Test
+    void listStockLots_semLoteRecebido_retornaListaVazia() {
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(
+                Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true)));
+        when(stockLotRepository.findBySkuAndWarehouseId("ESS-001", 1L)).thenReturn(List.of());
+
+        assertThat(estoqueService.listStockLots("ESS-001", "LOJA-01")).isEmpty();
+    }
+
+    @Test
+    void listStockLots_throwsWhenWarehouseNotFound() {
+        when(warehouseRepository.findByCode("INEXISTENTE")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.listStockLots("ESS-001", "INEXISTENTE"))
+                .isInstanceOf(WarehouseNotFoundException.class);
+    }
+
+    @Test
+    void listLotMismatches_delegatesPagingToTheIntegrityRepository() {
+        LotIntegrityMismatch mismatch = LotIntegrityMismatch.of("ESS-999", "LOJA-01",
+                new BigDecimal("5.000"), new BigDecimal("3.000"));
+        when(stockIntegrityRepository.findLotMismatches(1, 50))
+                .thenReturn(new PageResult<>(List.of(mismatch), 1, 50, 1L, 1));
+
+        PageResult<LotIntegrityMismatch> result = estoqueService.listLotMismatches(1, 50);
+
+        assertThat(result.content()).containsExactly(mismatch);
+        verify(stockIntegrityRepository).findLotMismatches(1, 50);
+    }
+
+    /** Base íntegra é o caso esperado; não é erro. */
+    @Test
+    void listLotMismatches_returnsEmptyPageWhenBaseIsClean() {
+        when(stockIntegrityRepository.findLotMismatches(0, 20))
+                .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0));
+
+        PageResult<LotIntegrityMismatch> result = estoqueService.listLotMismatches(0, 20);
+
+        assertThat(result.content()).isEmpty();
+        assertThat(result.totalElements()).isZero();
     }
 
     // ------------------------------------------------------------------------------------
@@ -1342,6 +1631,139 @@ class EstoqueServiceTest {
         verify(stockMovementRepository, never()).save(any());
     }
 
+    // ── Balanço por lote (EST-F008) ──────────────────────────────────────────────────────────
+
+    @Test
+    void recordCountedItem_loteRastreado_semLoteCode_lancaMissingLotInfo() {
+        when(stockCountRepository.findById(50L)).thenReturn(Optional.of(openCount(List.of())));
+        when(productRepository.findByAnySku("ESS-001")).thenReturn(Optional.of(lotTrackedProduct("ESS-001")));
+
+        assertThatThrownBy(() -> estoqueService.recordCountedItem(50L, "ESS-001", new BigDecimal("5.000")))
+                .isInstanceOf(MissingLotInfoException.class);
+
+        verify(stockCountRepository, never()).save(any());
+    }
+
+    @Test
+    void recordCountedItem_naoLoteRastreado_comLoteCode_lancaUnexpectedLotInfo() {
+        when(stockCountRepository.findById(50L)).thenReturn(Optional.of(openCount(List.of())));
+
+        assertThatThrownBy(() -> estoqueService.recordCountedItem(50L, "NARG-001", new BigDecimal("5.000"), "LOTE-A"))
+                .isInstanceOf(UnexpectedLotInfoException.class);
+
+        verify(stockCountRepository, never()).save(any());
+    }
+
+    @Test
+    void recordCountedItem_loteInexistente_lancaStockLotNotFound() {
+        when(stockCountRepository.findById(50L)).thenReturn(Optional.of(openCount(List.of())));
+        when(productRepository.findByAnySku("ESS-001")).thenReturn(Optional.of(lotTrackedProduct("ESS-001")));
+        when(stockLotRepository.findBySkuAndWarehouseIdAndLotCode("ESS-001", 1L, "LOTE-FANTASMA"))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.recordCountedItem(50L, "ESS-001", new BigDecimal("5.000"),
+                "LOTE-FANTASMA"))
+                .isInstanceOf(StockLotNotFoundException.class);
+
+        verify(stockCountRepository, never()).save(any());
+    }
+
+    @Test
+    void recordCountedItem_loteRastreado_comLoteExistente_registraOContadoPorLote() {
+        when(stockCountRepository.findById(50L)).thenReturn(Optional.of(openCount(List.of())));
+        when(productRepository.findByAnySku("ESS-001")).thenReturn(Optional.of(lotTrackedProduct("ESS-001")));
+        StockLot lot = StockLot.of(1L, "ESS-001", 1L, "LOTE-A", LocalDate.of(2027, 3, 1),
+                new BigDecimal("10.000"), null, 0L);
+        when(stockLotRepository.findBySkuAndWarehouseIdAndLotCode("ESS-001", 1L, "LOTE-A"))
+                .thenReturn(Optional.of(lot));
+        when(stockCountRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        StockCount updated = estoqueService.recordCountedItem(50L, "ESS-001", new BigDecimal("7.000"), "LOTE-A");
+
+        assertThat(updated.items()).singleElement().satisfies(item -> {
+            assertThat(item.sku()).isEqualTo("ESS-001");
+            assertThat(item.lotCode()).isEqualTo("LOTE-A");
+            assertThat(item.countedQuantity()).isEqualByComparingTo("7.000");
+        });
+    }
+
+    /**
+     * Cada lote reconcilia contra o próprio saldo, não contra o agregado: LOTE-A divergiu (tinha
+     * 4, contaram 3) e é ajustado por {@code reconciledTo}; LOTE-B bateu (tinha 5, contaram 5) e
+     * não é salvo de novo. Só depois disso o agregado ganha UM AJUSTE para a soma dos lotes
+     * contados (8.000), não um por lote.
+     */
+    @Test
+    void closeStockCount_loteRastreado_reconciliaCadaLoteEAgregado() {
+        StockCount count = openCount(List.of(
+                StockCountItem.of(1L, "ESS-001", new BigDecimal("3.000"), null, null, "LOTE-A"),
+                StockCountItem.of(2L, "ESS-001", new BigDecimal("5.000"), null, null, "LOTE-B")));
+        when(stockCountRepository.findById(50L)).thenReturn(Optional.of(count));
+        when(warehouseRepository.findById(1L)).thenReturn(Optional.of(LOJA));
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(LOJA));
+        when(productRepository.findByAnySku("ESS-001")).thenReturn(Optional.of(lotTrackedProduct("ESS-001")));
+
+        StockLot loteA = StockLot.of(10L, "ESS-001", 1L, "LOTE-A", LocalDate.of(2027, 1, 1),
+                new BigDecimal("4.000"), null, 0L);
+        StockLot loteB = StockLot.of(11L, "ESS-001", 1L, "LOTE-B", LocalDate.of(2027, 6, 1),
+                new BigDecimal("5.000"), null, 0L);
+        when(stockLotRepository.findBySkuAndWarehouseIdAndLotCode("ESS-001", 1L, "LOTE-A"))
+                .thenReturn(Optional.of(loteA));
+        when(stockLotRepository.findBySkuAndWarehouseIdAndLotCode("ESS-001", 1L, "LOTE-B"))
+                .thenReturn(Optional.of(loteB));
+        when(stockLotRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        when(stockBalanceRepository.findBySkuAndWarehouseId("ESS-001", 1L))
+                .thenReturn(Optional.of(StockBalance.of(20L, "ESS-001", 1L, new BigDecimal("9.000"), 0L)));
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(stockCountRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        StockCount closed = estoqueService.closeStockCount(50L, "gerente");
+
+        verify(stockLotRepository).save(argThat(l -> l.lotCode().equals("LOTE-A")
+                && l.quantity().compareTo(new BigDecimal("3.000")) == 0));
+        verify(stockLotRepository, never()).save(argThat(l -> l.lotCode().equals("LOTE-B")));
+
+        ArgumentCaptor<StockMovement> captor = ArgumentCaptor.forClass(StockMovement.class);
+        verify(stockMovementRepository).save(captor.capture());
+        assertThat(captor.getValue().type()).isEqualTo(MovementType.AJUSTE);
+        assertThat(captor.getValue().quantity()).isEqualByComparingTo("8.000");
+
+        assertThat(closed.items()).extracting(StockCountItem::lotCode, StockCountItem::expectedQuantity,
+                        StockCountItem::difference)
+                .containsExactlyInAnyOrder(
+                        tuple("LOTE-A", new BigDecimal("4.000"), new BigDecimal("-1.000")),
+                        tuple("LOTE-B", new BigDecimal("5.000"), new BigDecimal("0.000")));
+    }
+
+    @Test
+    void closeStockCount_loteRastreado_semDivergencia_naoGeraAjuste() {
+        StockCount count = openCount(List.of(
+                StockCountItem.of(1L, "ESS-001", new BigDecimal("4.000"), null, null, "LOTE-A"),
+                StockCountItem.of(2L, "ESS-001", new BigDecimal("5.000"), null, null, "LOTE-B")));
+        when(stockCountRepository.findById(50L)).thenReturn(Optional.of(count));
+        when(warehouseRepository.findById(1L)).thenReturn(Optional.of(LOJA));
+
+        StockLot loteA = StockLot.of(10L, "ESS-001", 1L, "LOTE-A", LocalDate.of(2027, 1, 1),
+                new BigDecimal("4.000"), null, 0L);
+        StockLot loteB = StockLot.of(11L, "ESS-001", 1L, "LOTE-B", LocalDate.of(2027, 6, 1),
+                new BigDecimal("5.000"), null, 0L);
+        when(stockLotRepository.findBySkuAndWarehouseIdAndLotCode("ESS-001", 1L, "LOTE-A"))
+                .thenReturn(Optional.of(loteA));
+        when(stockLotRepository.findBySkuAndWarehouseIdAndLotCode("ESS-001", 1L, "LOTE-B"))
+                .thenReturn(Optional.of(loteB));
+
+        when(stockBalanceRepository.findBySkuAndWarehouseId("ESS-001", 1L))
+                .thenReturn(Optional.of(StockBalance.of(20L, "ESS-001", 1L, new BigDecimal("9.000"), 0L)));
+        when(stockCountRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        estoqueService.closeStockCount(50L, "gerente");
+
+        verify(stockLotRepository, never()).save(any());
+        verify(stockMovementRepository, never()).save(any());
+        verify(stockBalanceRepository, never()).save(any());
+    }
+
     @Test
     void getStockCount_throwsWhenNotFound() {
         when(stockCountRepository.findById(99L)).thenReturn(Optional.empty());
@@ -1366,5 +1788,420 @@ class EstoqueServiceTest {
 
         assertThatThrownBy(() -> estoqueService.listStockCounts("INEXISTENTE", 0, 20))
                 .isInstanceOf(WarehouseNotFoundException.class);
+    }
+
+    // ------------------------------------------------------------------------------------
+    // EST-F013/F021 — reserva de estoque
+    // ------------------------------------------------------------------------------------
+
+    private StockReservation activeReservation(Long id, String sku, Long warehouseId, String quantity,
+            String ownerReference) {
+        return StockReservation.of(id, sku, warehouseId, new BigDecimal(quantity), ownerReference,
+                ReservationStatus.ACTIVE, Instant.parse("2026-07-30T13:00:00Z"),
+                Instant.parse("2026-07-30T12:30:00Z"), null, "checkout");
+    }
+
+    @Test
+    void reserveStock_semSaldoAnterior_lancaInsufficientStockENaoCriaReserva() {
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(LOJA));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("NARG-001", 1L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.reserveStock("NARG-001", "LOJA-01", new BigDecimal("2.000"),
+                "CHECKOUT-1", null, "checkout"))
+                .isInstanceOf(InsufficientStockException.class);
+        verify(stockBalanceRepository, never()).save(any());
+        verify(stockReservationRepository, never()).save(any());
+    }
+
+    @Test
+    void reserveStock_comSaldoDisponivel_criaReservaAtiva() {
+        StockBalance existing = StockBalance.of(10L, "NARG-001", 1L, new BigDecimal("10.000"), 0L);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(LOJA));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("NARG-001", 1L)).thenReturn(Optional.of(existing));
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(stockReservationRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        StockReservation result = estoqueService.reserveStock("NARG-001", "LOJA-01", new BigDecimal("2.000"),
+                "CHECKOUT-1", null, "checkout");
+
+        assertThat(result.sku()).isEqualTo("NARG-001");
+        assertThat(result.warehouseId()).isEqualTo(1L);
+        assertThat(result.quantity()).isEqualByComparingTo("2.000");
+        assertThat(result.ownerReference()).isEqualTo("CHECKOUT-1");
+        assertThat(result.status()).isEqualTo(ReservationStatus.ACTIVE);
+        assertThat(result.username()).isEqualTo("checkout");
+        verify(stockBalanceRepository).save(argThat(b -> b.reservedQuantity().compareTo(new BigDecimal("2.000")) == 0));
+    }
+
+    @Test
+    void reserveStock_semTtlInformado_usaODefault() {
+        Instant before = Instant.now();
+        StockBalance existing = StockBalance.of(10L, "NARG-001", 1L, new BigDecimal("10.000"), 0L);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(LOJA));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("NARG-001", 1L)).thenReturn(Optional.of(existing));
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(stockReservationRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        StockReservation result = estoqueService.reserveStock("NARG-001", "LOJA-01", new BigDecimal("2.000"),
+                "CHECKOUT-1", null, "checkout");
+
+        assertThat(result.expiresAt()).isBetween(before.plus(RESERVATION_TTL), Instant.now().plus(RESERVATION_TTL));
+    }
+
+    @Test
+    void reserveStock_comTtlInformado_sobrescreveODefault() {
+        Instant before = Instant.now();
+        Duration customTtl = Duration.ofHours(2);
+        StockBalance existing = StockBalance.of(10L, "NARG-001", 1L, new BigDecimal("10.000"), 0L);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(LOJA));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("NARG-001", 1L)).thenReturn(Optional.of(existing));
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(stockReservationRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        StockReservation result = estoqueService.reserveStock("NARG-001", "LOJA-01", new BigDecimal("2.000"),
+                "CHECKOUT-1", customTtl, "checkout");
+
+        assertThat(result.expiresAt()).isBetween(before.plus(customTtl), Instant.now().plus(customTtl));
+    }
+
+    @Test
+    void reserveStock_throwsWhenSkuDesconhecido() {
+        when(productRepository.existsBySku("SKU-FANTASMA")).thenReturn(false);
+
+        assertThatThrownBy(() -> estoqueService.reserveStock("SKU-FANTASMA", "LOJA-01", BigDecimal.ONE,
+                "CHECKOUT-1", null, "checkout"))
+                .isInstanceOf(ProductNotFoundException.class);
+        verify(stockReservationRepository, never()).save(any());
+    }
+
+    @Test
+    void reserveStock_throwsWhenWarehouseNotFound() {
+        when(warehouseRepository.findByCode("INEXISTENTE")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.reserveStock("NARG-001", "INEXISTENTE", BigDecimal.ONE,
+                "CHECKOUT-1", null, "checkout"))
+                .isInstanceOf(WarehouseNotFoundException.class);
+        verify(stockReservationRepository, never()).save(any());
+    }
+
+    @Test
+    void reserveStock_acimaDoDisponivel_lancaInsufficientStockENaoCriaReserva() {
+        StockBalance existing = StockBalance.of(10L, "NARG-001", 1L, new BigDecimal("5.000"),
+                new BigDecimal("4.000"), 0L);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(LOJA));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("NARG-001", 1L)).thenReturn(Optional.of(existing));
+
+        assertThatThrownBy(() -> estoqueService.reserveStock("NARG-001", "LOJA-01", new BigDecimal("2.000"),
+                "CHECKOUT-1", null, "checkout"))
+                .isInstanceOf(InsufficientStockException.class);
+        verify(stockBalanceRepository, never()).save(any());
+        verify(stockReservationRepository, never()).save(any());
+    }
+
+    @Test
+    void reserveStock_disponivelAbaixoDoPontoDeReposicao_notifica() {
+        StockBalance existing = StockBalance.of(10L, "NARG-001", 1L, new BigDecimal("10.000"), 0L);
+        ReorderPoint reorderPoint = ReorderPoint.of(1L, "NARG-001", 1L, new BigDecimal("9.000"));
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(LOJA));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("NARG-001", 1L)).thenReturn(Optional.of(existing));
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(stockReservationRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(reorderPointRepository.findBySkuAndWarehouseId("NARG-001", 1L)).thenReturn(Optional.of(reorderPoint));
+        when(userRepository.findUsernamesByPermission("ESTOQUE_STOCK_MANAGE")).thenReturn(Set.of("gerente-estoque"));
+
+        estoqueService.reserveStock("NARG-001", "LOJA-01", new BigDecimal("2.000"), "CHECKOUT-1", null, "checkout");
+
+        verify(notificationUseCase).notify(eq("gerente-estoque"), eq(NotificationType.SYSTEM), any(), any());
+    }
+
+    @Test
+    void consumeReservation_baixaSaldoRegistraMovimentoEMarcaConsumida() {
+        StockReservation reservation = activeReservation(1L, "NARG-001", 1L, "2.000", "CHECKOUT-1");
+        StockBalance existing = StockBalance.of(10L, "NARG-001", 1L, new BigDecimal("10.000"),
+                new BigDecimal("2.000"), 0L);
+        when(stockReservationRepository.findById(1L)).thenReturn(Optional.of(reservation));
+        when(warehouseRepository.findById(1L)).thenReturn(Optional.of(LOJA));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("NARG-001", 1L)).thenReturn(Optional.of(existing));
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(stockReservationRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        StockReservation result = estoqueService.consumeReservation(1L, "caixa");
+
+        assertThat(result.status()).isEqualTo(ReservationStatus.CONSUMED);
+        verify(stockBalanceRepository).save(argThat(b -> b.quantity().compareTo(new BigDecimal("8.000")) == 0
+                && b.reservedQuantity().signum() == 0));
+        verify(stockMovementRepository).save(argThat(m -> m.type() == MovementType.SAIDA
+                && m.quantity().compareTo(new BigDecimal("2.000")) == 0
+                && m.reason().contains("#1")
+                && m.username().equals("caixa")));
+        verifyNoInteractions(stockLotRepository);
+    }
+
+    /**
+     * EST-F008: este caminho não passa por adjustStock (a reserva já descontou o disponível), então
+     * o consumo FEFO precisa disparar aqui também — senão a venda do marketplace nunca desconta
+     * stock_lot, e o saldo por lote fica descolado do agregado.
+     */
+    @Test
+    void consumeReservation_loteRastreado_consomeFefo() {
+        StockReservation reservation = activeReservation(1L, "ESS-001", 1L, "2.000", "CHECKOUT-1");
+        StockBalance existing = StockBalance.of(10L, "ESS-001", 1L, new BigDecimal("10.000"),
+                new BigDecimal("2.000"), 0L);
+        StockLot lot = StockLot.of(1L, "ESS-001", 1L, "LOTE-A", LocalDate.of(2027, 3, 1),
+                new BigDecimal("5.000"), null, 0L);
+        when(stockReservationRepository.findById(1L)).thenReturn(Optional.of(reservation));
+        when(warehouseRepository.findById(1L)).thenReturn(Optional.of(LOJA));
+        when(productRepository.findByAnySku("ESS-001")).thenReturn(Optional.of(lotTrackedProduct("ESS-001")));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("ESS-001", 1L)).thenReturn(Optional.of(existing));
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(stockReservationRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(stockLotRepository.findBySkuAndWarehouseId("ESS-001", 1L)).thenReturn(List.of(lot));
+        when(stockLotRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        estoqueService.consumeReservation(1L, "caixa");
+
+        verify(stockLotRepository).save(argThat(l -> l.lotCode().equals("LOTE-A")
+                && l.quantity().compareTo(new BigDecimal("3.000")) == 0));
+    }
+
+    @Test
+    void consumeReservation_throwsWhenReservaNaoExiste() {
+        when(stockReservationRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.consumeReservation(99L, "caixa"))
+                .isInstanceOf(StockReservationNotFoundException.class);
+        verify(stockBalanceRepository, never()).save(any());
+        verify(stockMovementRepository, never()).save(any());
+    }
+
+    @Test
+    void consumeReservation_throwsWhenReservaJaNaoEstaAtiva() {
+        StockReservation released = activeReservation(1L, "NARG-001", 1L, "2.000", "CHECKOUT-1").released();
+        when(stockReservationRepository.findById(1L)).thenReturn(Optional.of(released));
+
+        assertThatThrownBy(() -> estoqueService.consumeReservation(1L, "caixa"))
+                .isInstanceOf(StockReservationNotActiveException.class);
+        verify(stockBalanceRepository, never()).save(any());
+        verify(stockMovementRepository, never()).save(any());
+        verify(stockReservationRepository, never()).save(any());
+    }
+
+    @Test
+    void releaseReservation_devolveSaldoESemGerarMovimento() {
+        StockReservation reservation = activeReservation(1L, "NARG-001", 1L, "2.000", "CHECKOUT-1");
+        StockBalance existing = StockBalance.of(10L, "NARG-001", 1L, new BigDecimal("10.000"),
+                new BigDecimal("2.000"), 0L);
+        when(stockReservationRepository.findById(1L)).thenReturn(Optional.of(reservation));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("NARG-001", 1L)).thenReturn(Optional.of(existing));
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(stockReservationRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        StockReservation result = estoqueService.releaseReservation(1L, "caixa");
+
+        assertThat(result.status()).isEqualTo(ReservationStatus.RELEASED);
+        verify(stockBalanceRepository).save(argThat(b -> b.reservedQuantity().signum() == 0
+                && b.quantity().compareTo(new BigDecimal("10.000")) == 0));
+        verify(stockMovementRepository, never()).save(any());
+    }
+
+    @Test
+    void releaseReservation_throwsWhenReservaNaoExiste() {
+        when(stockReservationRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.releaseReservation(99L, "caixa"))
+                .isInstanceOf(StockReservationNotFoundException.class);
+        verify(stockBalanceRepository, never()).save(any());
+    }
+
+    @Test
+    void releaseReservation_throwsWhenReservaJaNaoEstaAtiva() {
+        StockReservation consumed = activeReservation(1L, "NARG-001", 1L, "2.000", "CHECKOUT-1").consumed();
+        when(stockReservationRepository.findById(1L)).thenReturn(Optional.of(consumed));
+
+        assertThatThrownBy(() -> estoqueService.releaseReservation(1L, "caixa"))
+                .isInstanceOf(StockReservationNotActiveException.class);
+        verify(stockBalanceRepository, never()).save(any());
+    }
+
+    @Test
+    void releaseReservationsByOwner_liberaTodasAsAtivasDoDonoERetornaQuantidade() {
+        StockReservation r1 = activeReservation(1L, "NARG-001", 1L, "2.000", "CHECKOUT-1");
+        StockReservation r2 = activeReservation(2L, "CARV-001", 1L, "1.000", "CHECKOUT-1");
+        StockBalance balance1 = StockBalance.of(10L, "NARG-001", 1L, new BigDecimal("10.000"),
+                new BigDecimal("2.000"), 0L);
+        StockBalance balance2 = StockBalance.of(11L, "CARV-001", 1L, new BigDecimal("5.000"),
+                new BigDecimal("1.000"), 0L);
+        when(stockReservationRepository.findActiveByOwnerReference("CHECKOUT-1")).thenReturn(List.of(r1, r2));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("NARG-001", 1L)).thenReturn(Optional.of(balance1));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("CARV-001", 1L)).thenReturn(Optional.of(balance2));
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(stockReservationRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        int released = estoqueService.releaseReservationsByOwner("CHECKOUT-1", "caixa");
+
+        assertThat(released).isEqualTo(2);
+        verify(stockReservationRepository, times(2)).save(argThat(r -> r.status() == ReservationStatus.RELEASED));
+        verify(stockMovementRepository, never()).save(any());
+    }
+
+    @Test
+    void releaseReservationsByOwner_semReservaAtiva_retornaZero() {
+        when(stockReservationRepository.findActiveByOwnerReference("CHECKOUT-1")).thenReturn(List.of());
+
+        assertThat(estoqueService.releaseReservationsByOwner("CHECKOUT-1", "caixa")).isZero();
+        verify(stockBalanceRepository, never()).save(any());
+    }
+
+    @Test
+    void consumeReservationsByOwner_consomeTodasAsAtivasDoDonoERetornaQuantidade() {
+        StockReservation r1 = activeReservation(1L, "NARG-001", 1L, "2.000", "CHECKOUT-1");
+        StockReservation r2 = activeReservation(2L, "CARV-001", 1L, "1.000", "CHECKOUT-1");
+        StockBalance balance1 = StockBalance.of(10L, "NARG-001", 1L, new BigDecimal("10.000"),
+                new BigDecimal("2.000"), 0L);
+        StockBalance balance2 = StockBalance.of(11L, "CARV-001", 1L, new BigDecimal("5.000"),
+                new BigDecimal("1.000"), 0L);
+        when(stockReservationRepository.findActiveByOwnerReference("CHECKOUT-1")).thenReturn(List.of(r1, r2));
+        // consumeReservation() refaz a busca por id — mesma reserva já ativa, achada de novo.
+        when(stockReservationRepository.findById(1L)).thenReturn(Optional.of(r1));
+        when(stockReservationRepository.findById(2L)).thenReturn(Optional.of(r2));
+        when(warehouseRepository.findById(1L)).thenReturn(Optional.of(LOJA));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("NARG-001", 1L)).thenReturn(Optional.of(balance1));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("CARV-001", 1L)).thenReturn(Optional.of(balance2));
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(stockReservationRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        int consumed = estoqueService.consumeReservationsByOwner("CHECKOUT-1", "caixa");
+
+        assertThat(consumed).isEqualTo(2);
+        verify(stockReservationRepository, times(2)).save(argThat(r -> r.status() == ReservationStatus.CONSUMED));
+        verify(stockMovementRepository, times(2)).save(argThat(m -> m.type() == MovementType.SAIDA));
+    }
+
+    @Test
+    void consumeReservationsByOwner_semReservaAtiva_retornaZero() {
+        when(stockReservationRepository.findActiveByOwnerReference("CHECKOUT-1")).thenReturn(List.of());
+
+        assertThat(estoqueService.consumeReservationsByOwner("CHECKOUT-1", "caixa")).isZero();
+        verify(stockMovementRepository, never()).save(any());
+    }
+
+    @Test
+    void getStockReservation_retornaQuandoEncontrada() {
+        StockReservation reservation = activeReservation(1L, "NARG-001", 1L, "2.000", "CHECKOUT-1");
+        when(stockReservationRepository.findById(1L)).thenReturn(Optional.of(reservation));
+
+        assertThat(estoqueService.getStockReservation(1L)).isEqualTo(reservation);
+    }
+
+    @Test
+    void getStockReservation_throwsWhenNaoEncontrada() {
+        when(stockReservationRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.getStockReservation(99L))
+                .isInstanceOf(StockReservationNotFoundException.class);
+    }
+
+    @Test
+    void listReservations_comWarehouseCode_resolveParaOId() {
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(LOJA));
+        when(stockReservationRepository.findByFilters("NARG-001", 1L, ReservationStatus.ACTIVE, 0, 20))
+                .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0));
+
+        estoqueService.listReservations("NARG-001", "LOJA-01", ReservationStatus.ACTIVE, 0, 20);
+
+        verify(stockReservationRepository).findByFilters("NARG-001", 1L, ReservationStatus.ACTIVE, 0, 20);
+    }
+
+    @Test
+    void listReservations_semWarehouseCode_naoResolveDeposito() {
+        when(stockReservationRepository.findByFilters(null, null, null, 0, 20))
+                .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0));
+
+        estoqueService.listReservations(null, null, null, 0, 20);
+
+        verify(stockReservationRepository).findByFilters(null, null, null, 0, 20);
+        verify(warehouseRepository, never()).findByCode(any());
+    }
+
+    @Test
+    void listReservations_throwsWhenWarehouseCodeInformadoNaoExiste() {
+        when(warehouseRepository.findByCode("INEXISTENTE")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.listReservations(null, "INEXISTENTE", null, 0, 20))
+                .isInstanceOf(WarehouseNotFoundException.class);
+    }
+
+    @Test
+    void expireReservations_devolveSaldoDeCadaVencidaEMarcaExpired() {
+        StockReservation r1 = activeReservation(1L, "NARG-001", 1L, "2.000", "CHECKOUT-1");
+        StockReservation r2 = activeReservation(2L, "CARV-001", 1L, "1.000", "CHECKOUT-2");
+        StockBalance balance1 = StockBalance.of(10L, "NARG-001", 1L, new BigDecimal("10.000"),
+                new BigDecimal("2.000"), 0L);
+        StockBalance balance2 = StockBalance.of(11L, "CARV-001", 1L, new BigDecimal("5.000"),
+                new BigDecimal("1.000"), 0L);
+        when(stockReservationRepository.findExpired(any(), eq(200))).thenReturn(List.of(r1, r2));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("NARG-001", 1L)).thenReturn(Optional.of(balance1));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("CARV-001", 1L)).thenReturn(Optional.of(balance2));
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(stockReservationRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        int expired = estoqueService.expireReservations(200);
+
+        assertThat(expired).isEqualTo(2);
+        verify(stockBalanceRepository).save(argThat(b -> b.sku().equals("NARG-001") && b.reservedQuantity().signum() == 0));
+        verify(stockBalanceRepository).save(argThat(b -> b.sku().equals("CARV-001") && b.reservedQuantity().signum() == 0));
+        verify(stockReservationRepository, times(2)).save(argThat(r -> r.status() == ReservationStatus.EXPIRED));
+        verify(stockMovementRepository, never()).save(any());
+    }
+
+    @Test
+    void expireReservations_semVencidas_retornaZeroSemEfeitoColateral() {
+        when(stockReservationRepository.findExpired(any(), eq(200))).thenReturn(List.of());
+
+        assertThat(estoqueService.expireReservations(200)).isZero();
+        verify(stockBalanceRepository, never()).save(any());
+        verify(stockReservationRepository, never()).save(any());
+    }
+
+    @Test
+    void expireReservations_saldoAusente_naoFalhaEAindaAssimMarcaExpired() {
+        StockReservation reservation = activeReservation(1L, "NARG-001", 1L, "2.000", "CHECKOUT-1");
+        when(stockReservationRepository.findExpired(any(), eq(200))).thenReturn(List.of(reservation));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("NARG-001", 1L)).thenReturn(Optional.empty());
+        when(stockReservationRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        int expired = estoqueService.expireReservations(200);
+
+        assertThat(expired).isEqualTo(1);
+        verify(stockBalanceRepository, never()).save(any());
+        verify(stockReservationRepository).save(argThat(r -> r.status() == ReservationStatus.EXPIRED));
+    }
+
+    // ── Alerta de vencimento de lote (EST-F008) ─────────────────────────────────────────────
+
+    @Test
+    void alertExpiringLots_notificaEMarcaAlertado() {
+        StockLot lot = StockLot.of(1L, "ESS-001", 1L, "LOTE-A", LocalDate.of(2026, 8, 5),
+                new BigDecimal("5.000"), null, 0L);
+        when(stockLotRepository.findExpiringSoon(any(), eq(200))).thenReturn(List.of(lot));
+        when(stockLotRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(userRepository.findUsernamesByPermission("ESTOQUE_STOCK_MANAGE")).thenReturn(Set.of("gerente-estoque"));
+
+        int alerted = estoqueService.alertExpiringLots(7, 200);
+
+        assertThat(alerted).isEqualTo(1);
+        verify(notificationUseCase).notify(eq("gerente-estoque"), eq(NotificationType.SYSTEM), any(), any());
+        verify(stockLotRepository).save(argThat(l -> l.lotCode().equals("LOTE-A") && l.alertedAt() != null));
+    }
+
+    @Test
+    void alertExpiringLots_semLotesVencendo_naoNotificaERetornaZero() {
+        when(stockLotRepository.findExpiringSoon(any(), eq(200))).thenReturn(List.of());
+
+        int alerted = estoqueService.alertExpiringLots(7, 200);
+
+        assertThat(alerted).isZero();
+        verify(notificationUseCase, never()).notify(any(), any(), any(), any());
+        verify(stockLotRepository, never()).save(any());
     }
 }

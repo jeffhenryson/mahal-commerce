@@ -15,7 +15,10 @@ import com.cernecommerce.core.domain.exception.estoque.DuplicateWarehouseCodeExc
 import com.cernecommerce.core.domain.exception.estoque.InactiveProductException;
 import com.cernecommerce.core.domain.exception.estoque.InactiveWarehouseException;
 import com.cernecommerce.core.domain.exception.estoque.InsufficientStockException;
+import com.cernecommerce.core.domain.exception.estoque.LotExpiryDateMismatchException;
+import com.cernecommerce.core.domain.exception.estoque.MissingLotInfoException;
 import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
+import com.cernecommerce.core.domain.exception.estoque.UnexpectedLotInfoException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountAlreadyOpenException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountNotOpenException;
@@ -26,6 +29,7 @@ import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.estoque.Product;
+import com.cernecommerce.core.domain.model.estoque.ProductType;
 import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.ReservationIntegrityMismatch;
@@ -52,6 +56,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 
 public class EstoqueControllerTest {
@@ -252,6 +257,73 @@ public class EstoqueControllerTest {
                 .andExpect(jsonPath("$.sku").value("NARG-001"))
                 .andExpect(jsonPath("$.warehouseCode").value("LOJA-01"))
                 .andExpect(jsonPath("$.quantity").value(5.0));
+    }
+
+    @Test
+    void registerMovement_comLote_passaLoteAdianteERetorna201() throws Exception {
+        when(estoqueUseCase.adjustStock(eq("ESS-001"), eq("LOJA-01"), eq(MovementType.ENTRADA),
+                eq(new BigDecimal("5.000")), eq("Recebimento"), eq("admin"), eq("LOTE-A"),
+                eq(LocalDate.of(2027, 3, 1))))
+                .thenReturn(StockBalance.of(1L, "ESS-001", 1L, new BigDecimal("5.000"), 1L));
+
+        mockMvc.perform(post("/estoque/movements")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sku\":\"ESS-001\",\"warehouseCode\":\"LOJA-01\",\"type\":\"ENTRADA\","
+                                + "\"quantity\":5.000,\"reason\":\"Recebimento\",\"lotCode\":\"LOTE-A\","
+                                + "\"expiryDate\":\"2027-03-01\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.sku").value("ESS-001"));
+    }
+
+    @Test
+    void registerMovement_loteObrigatorioAusente_returns_400() throws Exception {
+        when(estoqueUseCase.adjustStock(eq("ESS-001"), eq("LOJA-01"), eq(MovementType.ENTRADA),
+                any(), any(), any()))
+                .thenThrow(new MissingLotInfoException("ESS-001"));
+
+        mockMvc.perform(post("/estoque/movements")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sku\":\"ESS-001\",\"warehouseCode\":\"LOJA-01\",\"type\":\"ENTRADA\","
+                                + "\"quantity\":5.000,\"reason\":\"Recebimento\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("LOT_INFO_REQUIRED"));
+    }
+
+    @Test
+    void registerMovement_loteInesperado_returns_400() throws Exception {
+        when(estoqueUseCase.adjustStock(eq("NARG-001"), eq("LOJA-01"), eq(MovementType.ENTRADA),
+                eq(new BigDecimal("5.000")), eq("Recebimento"), eq("admin"), eq("LOTE-A"),
+                eq(LocalDate.of(2027, 3, 1))))
+                .thenThrow(new UnexpectedLotInfoException("NARG-001", "produto não é lote-rastreado"));
+
+        mockMvc.perform(post("/estoque/movements")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sku\":\"NARG-001\",\"warehouseCode\":\"LOJA-01\",\"type\":\"ENTRADA\","
+                                + "\"quantity\":5.000,\"reason\":\"Recebimento\",\"lotCode\":\"LOTE-A\","
+                                + "\"expiryDate\":\"2027-03-01\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("LOT_INFO_NOT_APPLICABLE"));
+    }
+
+    @Test
+    void registerMovement_validadeDivergente_returns_409() throws Exception {
+        when(estoqueUseCase.adjustStock(eq("ESS-001"), eq("LOJA-01"), eq(MovementType.ENTRADA),
+                eq(new BigDecimal("5.000")), eq("Recebimento"), eq("admin"), eq("LOTE-A"),
+                eq(LocalDate.of(2027, 3, 1))))
+                .thenThrow(new LotExpiryDateMismatchException("ESS-001", "LOTE-A",
+                        LocalDate.of(2027, 1, 1), LocalDate.of(2027, 3, 1)));
+
+        mockMvc.perform(post("/estoque/movements")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sku\":\"ESS-001\",\"warehouseCode\":\"LOJA-01\",\"type\":\"ENTRADA\","
+                                + "\"quantity\":5.000,\"reason\":\"Recebimento\",\"lotCode\":\"LOTE-A\","
+                                + "\"expiryDate\":\"2027-03-01\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.errorCode").value("LOT_EXPIRY_MISMATCH"));
     }
 
     @Test
@@ -474,6 +546,40 @@ public class EstoqueControllerTest {
         mockMvc.perform(get("/estoque/products/SKU-FANTASMA/kit").principal(AUTH))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.errorCode").value("PRODUCT_NOT_FOUND"));
+    }
+
+    @Test
+    void listStockLots_returns_200_withLotList() throws Exception {
+        when(estoqueUseCase.listStockLots("ESS-001", "LOJA-01")).thenReturn(List.of(
+                com.cernecommerce.core.domain.model.estoque.StockLot.of(1L, "ESS-001", 1L, "LOTE-A",
+                        java.time.LocalDate.of(2027, 1, 1), new BigDecimal("5.000"), null, 0L)));
+
+        mockMvc.perform(get("/estoque/products/ESS-001/lots").param("warehouseCode", "LOJA-01").principal(AUTH))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].sku").value("ESS-001"))
+                .andExpect(jsonPath("$[0].warehouseCode").value("LOJA-01"))
+                .andExpect(jsonPath("$[0].lotCode").value("LOTE-A"))
+                .andExpect(jsonPath("$[0].quantity").value(5.0))
+                .andExpect(jsonPath("$[0].alertedAt").isEmpty());
+    }
+
+    @Test
+    void listStockLots_semLoteRecebido_returns_200_withEmptyList() throws Exception {
+        when(estoqueUseCase.listStockLots("NARG-001", "LOJA-01")).thenReturn(List.of());
+
+        mockMvc.perform(get("/estoque/products/NARG-001/lots").param("warehouseCode", "LOJA-01").principal(AUTH))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isEmpty());
+    }
+
+    @Test
+    void listStockLots_warehouseNotFound_returns_404() throws Exception {
+        when(estoqueUseCase.listStockLots("ESS-001", "INEXISTENTE"))
+                .thenThrow(new WarehouseNotFoundException("INEXISTENTE"));
+
+        mockMvc.perform(get("/estoque/products/ESS-001/lots").param("warehouseCode", "INEXISTENTE").principal(AUTH))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.errorCode").value("WAREHOUSE_NOT_FOUND"));
     }
 
     private StockMovement movement(long id, MovementType type, String quantity, String reason) {
@@ -709,6 +815,35 @@ public class EstoqueControllerTest {
                 .andExpect(jsonPath("$.content").isEmpty());
     }
 
+    @Test
+    void listLotMismatches_returns_200_withDiagnosticRows() throws Exception {
+        com.cernecommerce.core.domain.model.estoque.LotIntegrityMismatch mismatch =
+                com.cernecommerce.core.domain.model.estoque.LotIntegrityMismatch.of("ESS-001", "LOJA-01",
+                        new BigDecimal("10.000"), new BigDecimal("6.000"));
+        when(estoqueUseCase.listLotMismatches(0, 20))
+                .thenReturn(new PageResult<>(List.of(mismatch), 0, 20, 1L, 1));
+
+        mockMvc.perform(get("/estoque/integrity/lot-mismatch").principal(AUTH))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].sku").value("ESS-001"))
+                .andExpect(jsonPath("$.content[0].warehouseCode").value("LOJA-01"))
+                .andExpect(jsonPath("$.content[0].balanceQuantity").value(10.0))
+                .andExpect(jsonPath("$.content[0].lotsTotal").value(6.0))
+                .andExpect(jsonPath("$.content[0].difference").value(4.0))
+                .andExpect(jsonPath("$.totalElements").value(1));
+    }
+
+    /** Base íntegra é 200 com página vazia — não é 404, mesma convenção dos outros diagnósticos. */
+    @Test
+    void listLotMismatches_returns_200_withEmptyPageWhenIntegrityIsFine() throws Exception {
+        when(estoqueUseCase.listLotMismatches(0, 20))
+                .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0));
+
+        mockMvc.perform(get("/estoque/integrity/lot-mismatch").principal(AUTH))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isEmpty());
+    }
+
     // ------------------------------------------------------------------------------------
     // EST-F018 — PATCH e desativação
     // ------------------------------------------------------------------------------------
@@ -898,6 +1033,44 @@ public class EstoqueControllerTest {
     }
 
     @Test
+    void setProductLotTracked_returns_200() throws Exception {
+        when(estoqueUseCase.setProductLotTracked("ESS-001", true))
+                .thenReturn(Product.of(1L, "ESS-001", "Essência", "essencia", true, List.of(),
+                        Pricing.empty(), ProductType.SIMPLES, true));
+
+        mockMvc.perform(patch("/estoque/products/ESS-001/lot-tracked")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"lotTracked\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.lotTracked").value(true));
+    }
+
+    @Test
+    void setProductLotTracked_semOCampo_returns_400() throws Exception {
+        mockMvc.perform(patch("/estoque/products/ESS-001/lot-tracked")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest());
+
+        verify(estoqueUseCase, never()).setProductLotTracked(any(), anyBoolean());
+    }
+
+    @Test
+    void setProductLotTracked_emKit_returns_400() throws Exception {
+        when(estoqueUseCase.setProductLotTracked("KIT-001", true))
+                .thenThrow(new IllegalArgumentException(
+                        "kit não pode ser lote-rastreado: kit não tem saldo físico próprio (EST-F015)"));
+
+        mockMvc.perform(patch("/estoque/products/KIT-001/lot-tracked")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"lotTracked\":true}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void updateWarehouse_returns_200() throws Exception {
         when(estoqueUseCase.updateWarehouse("LOJA-01", "Loja Reformada", null))
                 .thenReturn(Warehouse.of(1L, "LOJA-01", "Loja Reformada", WarehouseType.LOJA_FISICA, true));
@@ -1036,7 +1209,7 @@ public class EstoqueControllerTest {
     void recordCountedItem_returns_200() throws Exception {
         StockCount updated = count(StockCountStatus.ABERTA,
                 List.of(StockCountItem.of(1L, "NARG-001", new BigDecimal("37.000"), null, null)));
-        when(estoqueUseCase.recordCountedItem(50L, "NARG-001", new BigDecimal("37.000"))).thenReturn(updated);
+        when(estoqueUseCase.recordCountedItem(50L, "NARG-001", new BigDecimal("37.000"), null)).thenReturn(updated);
         when(estoqueUseCase.getWarehouse(1L)).thenReturn(LOJA);
 
         mockMvc.perform(post("/estoque/stock-counts/50/items")
@@ -1055,7 +1228,7 @@ public class EstoqueControllerTest {
     void recordCountedItem_contagemZero_returns_200() throws Exception {
         StockCount updated = count(StockCountStatus.ABERTA,
                 List.of(StockCountItem.of(1L, "NARG-001", BigDecimal.ZERO, null, null)));
-        when(estoqueUseCase.recordCountedItem(eq(50L), eq("NARG-001"), any())).thenReturn(updated);
+        when(estoqueUseCase.recordCountedItem(eq(50L), eq("NARG-001"), any(), isNull())).thenReturn(updated);
         when(estoqueUseCase.getWarehouse(1L)).thenReturn(LOJA);
 
         mockMvc.perform(post("/estoque/stock-counts/50/items")
@@ -1073,12 +1246,12 @@ public class EstoqueControllerTest {
                         .content("{\"sku\":\"NARG-001\",\"countedQuantity\":-1}"))
                 .andExpect(status().isBadRequest());
 
-        verify(estoqueUseCase, never()).recordCountedItem(any(), any(), any());
+        verify(estoqueUseCase, never()).recordCountedItem(any(), any(), any(), any());
     }
 
     @Test
     void recordCountedItem_balancoFechado_returns_409() throws Exception {
-        when(estoqueUseCase.recordCountedItem(eq(50L), any(), any()))
+        when(estoqueUseCase.recordCountedItem(eq(50L), any(), any(), any()))
                 .thenThrow(new StockCountNotOpenException(50L, StockCountStatus.FECHADA));
 
         mockMvc.perform(post("/estoque/stock-counts/50/items")

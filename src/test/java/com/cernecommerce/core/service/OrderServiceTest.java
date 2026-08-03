@@ -14,6 +14,7 @@ import com.cernecommerce.core.domain.model.pedido.OrderStatus;
 import com.cernecommerce.core.domain.model.pedido.SalesChannel;
 import com.cernecommerce.core.ports.in.CashbackUseCase;
 import com.cernecommerce.core.ports.in.EstoqueUseCase;
+import com.cernecommerce.core.ports.in.OrderUseCase;
 import com.cernecommerce.core.ports.out.pagamento.OrderPaymentRepository;
 import com.cernecommerce.core.ports.out.pedido.OrderRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -25,6 +26,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 
@@ -33,6 +35,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -137,7 +140,7 @@ class OrderServiceTest {
         assertThat(cancelled.cancelledAt()).isNotNull();
         verify(estoqueUseCase).releaseReservationsByOwner(eq(Order.reservationOwnerReference(1L)), eq("gerente"));
         // Nunca houve baixa real para devolver: só reserva.
-        verify(estoqueUseCase, never()).adjustStock(any(), any(), any(), any(), any(), any());
+        verify(estoqueUseCase, never()).adjustStock(any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -186,7 +189,7 @@ class OrderServiceTest {
     void refundOrder_returnsTheGoodsToStock() {
         when(orderRepository.findById(1L)).thenReturn(Optional.of(concludedBalcao()));
         when(orderRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any())).thenReturn(null);
+        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(null);
         when(orderPaymentRepository.findByOrderId(1L)).thenReturn(List.of());
 
         Order refunded = orderService.refundOrder(1L, "cliente desistiu", "gerente");
@@ -196,21 +199,21 @@ class OrderServiceTest {
         assertThat(refunded.refundedAt()).isNotNull();
         // ENTRADA, não SAIDA: devolução devolve mercadoria à prateleira.
         verify(estoqueUseCase).adjustStock(eq("CARV-001"), eq("LOJA-01"), eq(MovementType.ENTRADA),
-                eq(new BigDecimal("2.000")), any(), eq("gerente"));
+                eq(new BigDecimal("2.000")), any(), eq("gerente"), isNull(), isNull());
     }
 
     @Test
     void refundOrder_stampsTheOrderNumberInTheMovementReason() {
         when(orderRepository.findById(1L)).thenReturn(Optional.of(concludedBalcao()));
         when(orderRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any())).thenReturn(null);
+        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(null);
         when(orderPaymentRepository.findByOrderId(1L)).thenReturn(List.of());
 
         orderService.refundOrder(1L, "engano", "gerente");
 
         // Sem o número no motivo, a trilha do movimento não é reconstruível.
         verify(estoqueUseCase).adjustStock(any(), any(), any(), any(),
-                eq("Reembolso do pedido 000001000"), any());
+                eq("Reembolso do pedido 000001000"), any(), any(), any());
     }
 
     @Test
@@ -221,13 +224,42 @@ class OrderServiceTest {
                 .withStatus(OrderStatus.ENTREGUE);
         when(orderRepository.findById(1L)).thenReturn(Optional.of(delivered));
         when(orderRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any())).thenReturn(null);
+        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(null);
         when(orderPaymentRepository.findByOrderId(1L)).thenReturn(List.of());
 
         Order refunded = orderService.refundOrder(1L, "devolução no prazo", "gerente");
 
         assertThat(refunded.status()).isEqualTo(OrderStatus.REEMBOLSADO);
-        verify(estoqueUseCase).adjustStock(any(), any(), eq(MovementType.ENTRADA), any(), any(), any());
+        verify(estoqueUseCase).adjustStock(any(), any(), eq(MovementType.ENTRADA), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void refundOrder_comLoteInformado_propagaParaAdjustStock() {
+        when(orderRepository.findById(1L)).thenReturn(Optional.of(concludedBalcao()));
+        when(orderRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(null);
+        when(orderPaymentRepository.findByOrderId(1L)).thenReturn(List.of());
+
+        orderService.refundOrder(1L, "devolução no prazo", "gerente",
+                List.of(new OrderUseCase.RefundItemLot("CARV-001", "L1", LocalDate.parse("2027-01-01"))));
+
+        verify(estoqueUseCase).adjustStock(eq("CARV-001"), eq("LOJA-01"), eq(MovementType.ENTRADA),
+                eq(new BigDecimal("2.000")), any(), eq("gerente"), eq("L1"), eq(LocalDate.parse("2027-01-01")));
+    }
+
+    @Test
+    void refundOrder_comLoteDeOutroSku_naoAfetaItemSemCorrespondencia() {
+        when(orderRepository.findById(1L)).thenReturn(Optional.of(concludedBalcao()));
+        when(orderRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(null);
+        when(orderPaymentRepository.findByOrderId(1L)).thenReturn(List.of());
+
+        // Casamento é por sku: lote de um SKU que não está no pedido não deve vazar para CARV-001.
+        orderService.refundOrder(1L, "devolução no prazo", "gerente",
+                List.of(new OrderUseCase.RefundItemLot("ESSE-001", "L1", LocalDate.parse("2027-01-01"))));
+
+        verify(estoqueUseCase).adjustStock(eq("CARV-001"), eq("LOJA-01"), eq(MovementType.ENTRADA),
+                eq(new BigDecimal("2.000")), any(), eq("gerente"), isNull(), isNull());
     }
 
     @Test
@@ -239,14 +271,14 @@ class OrderServiceTest {
                 .isInstanceOf(InvalidOrderStatusTransitionException.class);
 
         // O ponto do teste: um segundo reembolso devolveria a mercadoria de novo, inflando o saldo.
-        verify(estoqueUseCase, never()).adjustStock(any(), any(), any(), any(), any(), any());
+        verify(estoqueUseCase, never()).adjustStock(any(), any(), any(), any(), any(), any(), any(), any());
         verify(orderRepository, never()).save(any());
     }
 
     @Test
     void refundOrder_propagatesStockFailureAndDoesNotPersist() {
         when(orderRepository.findById(1L)).thenReturn(Optional.of(concludedBalcao()));
-        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any()))
+        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenThrow(new IllegalStateException("depósito inativo"));
 
         assertThatThrownBy(() -> orderService.refundOrder(1L, "engano", "gerente"))
@@ -259,7 +291,7 @@ class OrderServiceTest {
     void refundOrder_reversesEachCapturedPaymentWithMatchingMethodAndAmount() {
         when(orderRepository.findById(1L)).thenReturn(Optional.of(concludedBalcao()));
         when(orderRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any())).thenReturn(null);
+        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(null);
         OrderPayment cash = OrderPayment.captured(1L, PaymentMethod.DINHEIRO, new BigDecimal("50.00"), null);
         OrderPayment debit = OrderPayment.captured(1L, PaymentMethod.DEBITO, new BigDecimal("30.00"), null);
         when(orderPaymentRepository.findByOrderId(1L)).thenReturn(List.of(cash, debit));
@@ -280,7 +312,7 @@ class OrderServiceTest {
     void refundOrder_skipsPaymentsThatAreNotCaptured() {
         when(orderRepository.findById(1L)).thenReturn(Optional.of(concludedBalcao()));
         when(orderRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any())).thenReturn(null);
+        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(null);
         OrderPayment failed = OrderPayment.of(2L, 1L, PaymentMethod.DINHEIRO, new BigDecimal("10.00"),
                 PaymentStatus.FAILED, null, null, Instant.now(), null, Instant.now());
         when(orderPaymentRepository.findByOrderId(1L)).thenReturn(List.of(failed));
@@ -295,7 +327,7 @@ class OrderServiceTest {
         Order order = concludedBalcao();
         when(orderRepository.findById(1L)).thenReturn(Optional.of(order));
         when(orderRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any())).thenReturn(null);
+        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(null);
         when(orderPaymentRepository.findByOrderId(1L)).thenReturn(List.of());
 
         orderService.refundOrder(1L, "devolução no prazo", "gerente");
@@ -311,7 +343,7 @@ class OrderServiceTest {
         assertThatThrownBy(() -> orderService.refundOrder(1L, "engano", "gerente"))
                 .isInstanceOf(InvalidOrderStatusTransitionException.class);
 
-        verify(estoqueUseCase, never()).adjustStock(any(), any(), any(), any(), any(), any());
+        verify(estoqueUseCase, never()).adjustStock(any(), any(), any(), any(), any(), any(), any(), any());
         verify(orderRepository, never()).save(any());
     }
 }

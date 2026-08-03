@@ -1,6 +1,7 @@
 package com.cernecommerce.core.domain.model.estoque;
 
 import com.cernecommerce.core.domain.exception.estoque.InsufficientStockException;
+import com.cernecommerce.core.domain.exception.estoque.ReservedStockException;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -143,5 +144,271 @@ class StockBalanceTest {
         assertThat(result.sku()).isEqualTo("NARG-001");
         assertThat(result.warehouseId()).isEqualTo(3L);
         assertThat(result.version()).as("version preservado para o optimistic locking").isEqualTo(4L);
+    }
+
+    // ── Reserva de estoque (EST-F021) ────────────────────────────────────────────────────────
+
+    @Test
+    void of_semReservedQuantity_defaultaParaZero() {
+        StockBalance balance = StockBalance.of(5L, "NARG-001", 1L, new BigDecimal("12.500"), 3L);
+
+        assertThat(balance.reservedQuantity()).isEqualByComparingTo(BigDecimal.ZERO);
+    }
+
+    @Test
+    void of_comReservedQuantity_reconstituiDoPersistido() {
+        StockBalance balance = StockBalance.of(5L, "NARG-001", 1L, new BigDecimal("12.500"),
+                new BigDecimal("4.000"), 3L);
+
+        assertThat(balance.quantity()).isEqualByComparingTo("12.500");
+        assertThat(balance.reservedQuantity()).isEqualByComparingTo("4.000");
+    }
+
+    @Test
+    void construtor_reservedQuantityNulo_defaultaParaZero() {
+        StockBalance balance = new StockBalance(1L, "NARG-001", 1L, new BigDecimal("5.000"), null, 0L);
+
+        assertThat(balance.reservedQuantity()).isEqualByComparingTo(BigDecimal.ZERO);
+    }
+
+    @Test
+    void throwsWhenReservedQuantityEhNegativa() {
+        assertThatThrownBy(() -> StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("5.000"),
+                new BigDecimal("-1.000"), 0L))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void throwsWhenReservedQuantityMaiorQueQuantity() {
+        assertThatThrownBy(() -> StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("5.000"),
+                new BigDecimal("5.001"), 0L))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("não se reserva o que não existe");
+    }
+
+    @Test
+    void reservedQuantityIgualQuantity_ehPermitido() {
+        StockBalance balance = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("5.000"),
+                new BigDecimal("5.000"), 0L);
+
+        assertThat(balance.availableQuantity()).isEqualByComparingTo(BigDecimal.ZERO);
+    }
+
+    @Test
+    void derived_temReservedQuantitySempreZero() {
+        StockBalance balance = StockBalance.derived("KIT-001", 1L, new BigDecimal("3.000"));
+
+        assertThat(balance.reservedQuantity()).isEqualByComparingTo(BigDecimal.ZERO);
+    }
+
+    @Test
+    void availableQuantity_subtraiReservadoDoFisico() {
+        StockBalance balance = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("10.000"),
+                new BigDecimal("4.000"), 0L);
+
+        assertThat(balance.availableQuantity()).isEqualByComparingTo("6.000");
+    }
+
+    @Test
+    void availableQuantity_semReserva_igualAoFisico() {
+        StockBalance balance = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("10.000"), 0L);
+
+        assertThat(balance.availableQuantity()).isEqualByComparingTo("10.000");
+    }
+
+    @Test
+    void reserve_incrementaReservedQuantitySemMexerNoFisico() {
+        StockBalance balance = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("10.000"),
+                new BigDecimal("2.000"), 3L);
+
+        StockBalance result = balance.reserve(new BigDecimal("3.000"));
+
+        assertThat(result.quantity()).as("físico não muda na reserva").isEqualByComparingTo("10.000");
+        assertThat(result.reservedQuantity()).isEqualByComparingTo("5.000");
+        assertThat(result.version()).isEqualTo(3L);
+    }
+
+    @Test
+    void reserve_ateExatamenteODisponivel_ehPermitido() {
+        StockBalance balance = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("10.000"),
+                new BigDecimal("4.000"), 0L);
+
+        StockBalance result = balance.reserve(new BigDecimal("6.000"));
+
+        assertThat(result.availableQuantity()).isEqualByComparingTo(BigDecimal.ZERO);
+    }
+
+    @Test
+    void reserve_acimaDoDisponivel_lancaInsufficientStock_comMensagemDoDisponivel() {
+        StockBalance balance = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("10.000"),
+                new BigDecimal("4.000"), 0L);
+
+        assertThatThrownBy(() -> balance.reserve(new BigDecimal("7.000")))
+                .isInstanceOf(InsufficientStockException.class);
+    }
+
+    @Test
+    void reserve_quantidadeZero_lancaIllegalArgument() {
+        StockBalance balance = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("10.000"), 0L);
+
+        assertThatThrownBy(() -> balance.reserve(BigDecimal.ZERO))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void reserve_quantidadeNegativa_lancaIllegalArgument() {
+        StockBalance balance = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("10.000"), 0L);
+
+        assertThatThrownBy(() -> balance.reserve(new BigDecimal("-1.000")))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void releaseReservation_devolveAoDisponivelSemMexerNoFisico() {
+        StockBalance balance = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("10.000"),
+                new BigDecimal("5.000"), 2L);
+
+        StockBalance result = balance.releaseReservation(new BigDecimal("2.000"));
+
+        assertThat(result.quantity()).as("físico não muda na liberação").isEqualByComparingTo("10.000");
+        assertThat(result.reservedQuantity()).isEqualByComparingTo("3.000");
+    }
+
+    @Test
+    void releaseReservation_maiorQueOReservado_lancaIllegalArgument() {
+        StockBalance balance = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("10.000"),
+                new BigDecimal("2.000"), 0L);
+
+        assertThatThrownBy(() -> balance.releaseReservation(new BigDecimal("3.000")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("liberação maior que o reservado");
+    }
+
+    @Test
+    void releaseReservation_quantidadeZeroOuNegativa_lancaIllegalArgument() {
+        StockBalance balance = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("10.000"),
+                new BigDecimal("2.000"), 0L);
+
+        assertThatThrownBy(() -> balance.releaseReservation(BigDecimal.ZERO))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> balance.releaseReservation(new BigDecimal("-1.000")))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void consumeReservation_baixaFisicoEReservadoJuntos_disponivelNaoMuda() {
+        StockBalance balance = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("10.000"),
+                new BigDecimal("4.000"), 2L);
+        BigDecimal availableBefore = balance.availableQuantity();
+
+        StockBalance result = balance.consumeReservation(new BigDecimal("4.000"));
+
+        assertThat(result.quantity()).isEqualByComparingTo("6.000");
+        assertThat(result.reservedQuantity()).isEqualByComparingTo(BigDecimal.ZERO);
+        assertThat(result.availableQuantity()).as("já estava descontado desde a reserva")
+                .isEqualByComparingTo(availableBefore);
+    }
+
+    @Test
+    void consumeReservation_parcial_baixaSoAQuantidadeConsumida() {
+        StockBalance balance = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("10.000"),
+                new BigDecimal("4.000"), 0L);
+
+        StockBalance result = balance.consumeReservation(new BigDecimal("1.500"));
+
+        assertThat(result.quantity()).isEqualByComparingTo("8.500");
+        assertThat(result.reservedQuantity()).isEqualByComparingTo("2.500");
+    }
+
+    @Test
+    void consumeReservation_maiorQueOReservado_lancaIllegalArgument() {
+        StockBalance balance = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("10.000"),
+                new BigDecimal("2.000"), 0L);
+
+        assertThatThrownBy(() -> balance.consumeReservation(new BigDecimal("3.000")))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void reserve_depoisConsumeReservation_voltaAoEstadoOriginalDeDisponivel() {
+        StockBalance original = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("10.000"), 0L);
+
+        StockBalance reserved = original.reserve(new BigDecimal("3.000"));
+        StockBalance consumed = reserved.consumeReservation(new BigDecimal("3.000"));
+
+        assertThat(consumed.quantity()).isEqualByComparingTo("7.000");
+        assertThat(consumed.reservedQuantity()).isEqualByComparingTo(BigDecimal.ZERO);
+    }
+
+    @Test
+    void reserve_depoisReleaseReservation_voltaAoFisicoOriginal() {
+        StockBalance original = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("10.000"), 0L);
+
+        StockBalance reserved = original.reserve(new BigDecimal("3.000"));
+        StockBalance released = reserved.releaseReservation(new BigDecimal("3.000"));
+
+        assertThat(released.quantity()).isEqualByComparingTo("10.000");
+        assertThat(released.reservedQuantity()).isEqualByComparingTo(BigDecimal.ZERO);
+    }
+
+    @Test
+    void apply_entrada_naoMexeNoReservedQuantity() {
+        StockBalance balance = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("10.000"),
+                new BigDecimal("4.000"), 0L);
+
+        StockBalance result = balance.apply(MovementType.ENTRADA, new BigDecimal("2.000"));
+
+        assertThat(result.reservedQuantity()).isEqualByComparingTo("4.000");
+    }
+
+    @Test
+    void apply_saida_dentroDoDisponivelApesarDeExistirReserva_ehPermitida() {
+        StockBalance balance = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("10.000"),
+                new BigDecimal("4.000"), 0L);
+
+        StockBalance result = balance.apply(MovementType.SAIDA, new BigDecimal("6.000"));
+
+        assertThat(result.quantity()).isEqualByComparingTo("4.000");
+        assertThat(result.reservedQuantity()).as("SAIDA comum não consome a reserva")
+                .isEqualByComparingTo("4.000");
+    }
+
+    /** Físico bastaria (10), mas 4 já estão prometidas a outro pedido: disponível é só 6. */
+    @Test
+    void apply_saida_fisicoBastaMasReservaImpede_lancaReservedStockException() {
+        StockBalance balance = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("10.000"),
+                new BigDecimal("4.000"), 0L);
+
+        assertThatThrownBy(() -> balance.apply(MovementType.SAIDA, new BigDecimal("7.000")))
+                .isInstanceOf(ReservedStockException.class);
+    }
+
+    @Test
+    void apply_saida_semFisicoSuficiente_continuaLancandoInsufficientStock() {
+        StockBalance balance = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("5.000"),
+                new BigDecimal("1.000"), 0L);
+
+        assertThatThrownBy(() -> balance.apply(MovementType.SAIDA, new BigDecimal("6.000")))
+                .isInstanceOf(InsufficientStockException.class);
+    }
+
+    @Test
+    void apply_ajuste_exatamenteIgualAoReservado_ehPermitido() {
+        StockBalance balance = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("10.000"),
+                new BigDecimal("4.000"), 0L);
+
+        StockBalance result = balance.apply(MovementType.AJUSTE, new BigDecimal("4.000"));
+
+        assertThat(result.quantity()).isEqualByComparingTo("4.000");
+        assertThat(result.reservedQuantity()).isEqualByComparingTo("4.000");
+    }
+
+    @Test
+    void apply_ajuste_abaixoDoReservado_lancaReservedStockException() {
+        StockBalance balance = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("10.000"),
+                new BigDecimal("4.000"), 0L);
+
+        assertThatThrownBy(() -> balance.apply(MovementType.AJUSTE, new BigDecimal("3.000")))
+                .isInstanceOf(ReservedStockException.class);
     }
 }

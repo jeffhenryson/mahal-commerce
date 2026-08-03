@@ -1,6 +1,7 @@
 package com.cernecommerce.adapter.out.persistence.repository;
 
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.estoque.LotIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
@@ -13,6 +14,7 @@ import com.cernecommerce.core.domain.model.estoque.StockBalance;
 import com.cernecommerce.core.domain.model.estoque.StockCount;
 import com.cernecommerce.core.domain.model.estoque.StockCountItem;
 import com.cernecommerce.core.domain.model.estoque.StockCountStatus;
+import com.cernecommerce.core.domain.model.estoque.StockLot;
 import com.cernecommerce.core.domain.model.estoque.StockMovement;
 import com.cernecommerce.core.domain.model.estoque.StockReservation;
 import com.cernecommerce.core.domain.model.estoque.Warehouse;
@@ -27,12 +29,14 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 /**
  * Testa os adapters de persistência de estoque contra banco real (EST-C007).
@@ -65,6 +69,7 @@ class EstoqueRepositoryIT {
     @Autowired StockIntegrityRepositoryImpl stockIntegrityRepository;
     @Autowired StockCountRepositoryImpl stockCountRepository;
     @Autowired StockReservationRepositoryImpl stockReservationRepository;
+    @Autowired StockLotRepositoryImpl stockLotRepository;
 
     @PersistenceContext EntityManager em;
 
@@ -95,6 +100,16 @@ class EstoqueRepositoryIT {
                     assertThat(v.sku()).isEqualTo("RT-001-M");
                     assertThat(v.attributes()).containsExactly(new ProductAttribute("sabor", "menta"));
                 });
+    }
+
+    @Test
+    void product_roundTrip_preservaLotTracked() {
+        productRepository.save(Product.create("RT-LOT-001", "Essência", "essencia", List.of())
+                .withLotTracked(true));
+        flushAndClear();
+
+        assertThat(productRepository.findBySku("RT-LOT-001")).isPresent()
+                .get().satisfies(p -> assertThat(p.lotTracked()).isTrue());
     }
 
     // ---------- EST-F019 — precificação ----------
@@ -387,6 +402,92 @@ class EstoqueRepositoryIT {
     }
 
     @Test
+    void stockMovement_roundTrip_preservaLotCode() {
+        Warehouse warehouse = givenWarehouse("WH-LOT-MOV");
+        stockMovementRepository.save(StockMovement.create("LOT-MOV-001", warehouse.id(), MovementType.ENTRADA,
+                new BigDecimal("5.000"), "Recebimento", "gerente", "LOTE-A"));
+        flushAndClear();
+
+        PageResult<StockMovement> page =
+                stockMovementRepository.findBySkuAndWarehouseId("LOT-MOV-001", warehouse.id(), 0, 10);
+
+        assertThat(page.content()).singleElement()
+                .satisfies(m -> assertThat(m.lotCode()).isEqualTo("LOTE-A"));
+    }
+
+    // ---------- EST-F008 — lote e validade ----------
+
+    @Test
+    void stockLot_roundTrip_persisteEReconstitui() {
+        Warehouse warehouse = givenWarehouse("WH-LOT");
+        StockLot inserted = stockLotRepository.save(
+                StockLot.create("LOT-001", warehouse.id(), "LOTE-A", LocalDate.of(2027, 3, 1))
+                        .receive(new BigDecimal("10.000")));
+        flushAndClear();
+
+        assertThat(inserted.id()).isNotNull();
+
+        StockLot reread = stockLotRepository
+                .findBySkuAndWarehouseIdAndLotCode("LOT-001", warehouse.id(), "LOTE-A").orElseThrow();
+        assertThat(reread.quantity()).isEqualByComparingTo("10.000");
+        assertThat(reread.expiryDate()).isEqualTo(LocalDate.of(2027, 3, 1));
+        assertThat(reread.alertedAt()).isNull();
+
+        stockLotRepository.save(reread.consume(new BigDecimal("4.000")));
+        flushAndClear();
+
+        StockLot afterUpdate = stockLotRepository
+                .findBySkuAndWarehouseIdAndLotCode("LOT-001", warehouse.id(), "LOTE-A").orElseThrow();
+        assertThat(afterUpdate.quantity()).isEqualByComparingTo("6.000");
+        assertThat(afterUpdate.version())
+                .as("o @Version tem que avançar a cada escrita, mesmo padrão de stock_balance")
+                .isGreaterThan(reread.version());
+    }
+
+    @Test
+    void stockLot_findBySkuAndWarehouseId_ordenaPorFefo() {
+        Warehouse warehouse = givenWarehouse("WH-FEFO");
+        // Grava fora de ordem de vencimento de propósito — a consulta é quem tem que ordenar.
+        stockLotRepository.save(StockLot.create("FEFO-001", warehouse.id(), "LOTE-C", LocalDate.of(2027, 6, 1))
+                .receive(BigDecimal.ONE));
+        stockLotRepository.save(StockLot.create("FEFO-001", warehouse.id(), "LOTE-A", LocalDate.of(2027, 1, 1))
+                .receive(BigDecimal.ONE));
+        stockLotRepository.save(StockLot.create("FEFO-001", warehouse.id(), "LOTE-B", LocalDate.of(2027, 3, 1))
+                .receive(BigDecimal.ONE));
+        flushAndClear();
+
+        List<StockLot> lots = stockLotRepository.findBySkuAndWarehouseId("FEFO-001", warehouse.id());
+
+        assertThat(lots).extracting(StockLot::lotCode)
+                .as("do que vence primeiro para o que vence por último")
+                .containsExactly("LOTE-A", "LOTE-B", "LOTE-C");
+    }
+
+    @Test
+    void stockLot_findExpiringSoon_respeitaCutoffQuantityEAlertedAt() {
+        Warehouse warehouse = givenWarehouse("WH-EXP");
+        stockLotRepository.save(StockLot.create("EXP-001", warehouse.id(), "LOTE-VENCIDO", LocalDate.of(2026, 1, 1))
+                .receive(BigDecimal.TEN));
+        stockLotRepository.save(StockLot.create("EXP-001", warehouse.id(), "LOTE-LONGE", LocalDate.of(2030, 1, 1))
+                .receive(BigDecimal.TEN));
+        StockLot semSaldo = stockLotRepository.save(
+                StockLot.create("EXP-001", warehouse.id(), "LOTE-ZERADO", LocalDate.of(2026, 1, 1))
+                        .receive(BigDecimal.TEN));
+        stockLotRepository.save(semSaldo.consume(BigDecimal.TEN));
+        StockLot jaAlertado = stockLotRepository.save(
+                StockLot.create("EXP-001", warehouse.id(), "LOTE-ALERTADO", LocalDate.of(2026, 1, 1))
+                        .receive(BigDecimal.TEN));
+        stockLotRepository.save(jaAlertado.alerted());
+        flushAndClear();
+
+        List<StockLot> expiring = stockLotRepository.findExpiringSoon(LocalDate.of(2026, 12, 31), 10);
+
+        assertThat(expiring).extracting(StockLot::lotCode)
+                .as("vencido entra, sem saldo e já alertado ficam de fora, e o que vence longe não entra")
+                .containsExactly("LOTE-VENCIDO");
+    }
+
+    @Test
     void reorderPoint_upsertReaproveitaOId() {
         Warehouse warehouse = givenWarehouse("WH-RP");
         ReorderPoint created = reorderPointRepository.save(
@@ -486,6 +587,31 @@ class EstoqueRepositoryIT {
         assertThat(stockCountRepository.findById(aberta.id())).get().satisfies(c ->
                 assertThat(c.items()).as("uk_stock_count_item_count_sku").singleElement()
                         .satisfies(item -> assertThat(item.countedQuantity()).isEqualByComparingTo("9.000")));
+    }
+
+    /**
+     * EST-F008: lote diferente do mesmo SKU é linha nova; recontar o mesmo lote sobrescreve —
+     * espelha {@code stockCount_recontagemNaoDuplicaLinhaDoMesmoSku}, mas por
+     * {@code (sku, lotCode)} em vez de só {@code sku}.
+     */
+    @Test
+    void stockCount_recontagemPorLote_naoDuplicaLinhaDoMesmoLoteEPreservaLotesDiferentes() {
+        Warehouse warehouse = givenWarehouse("WH-CNT-LOT");
+        StockCount aberta = stockCountRepository.save(StockCount.open(warehouse.id(), "gerente")
+                .withCountedItem("CNT-LOT-001", new BigDecimal("3.000"), "LOTE-A")
+                .withCountedItem("CNT-LOT-001", new BigDecimal("5.000"), "LOTE-B"));
+        flushAndClear();
+
+        StockCount carregada = stockCountRepository.findById(aberta.id()).orElseThrow();
+        stockCountRepository.save(carregada.withCountedItem("CNT-LOT-001", new BigDecimal("9.000"), "LOTE-A"));
+        flushAndClear();
+
+        assertThat(stockCountRepository.findById(aberta.id())).get().satisfies(c ->
+                assertThat(c.items()).extracting(StockCountItem::lotCode, StockCountItem::countedQuantity)
+                        .as("LOTE-A recontado sobrescreve, LOTE-B continua intacto — nunca 3 linhas")
+                        .containsExactlyInAnyOrder(
+                                tuple("LOTE-A", new BigDecimal("9.000")),
+                                tuple("LOTE-B", new BigDecimal("5.000"))));
     }
 
     @Test
@@ -742,5 +868,84 @@ class EstoqueRepositoryIT {
         assertThat(reservationMismatchesWithPrefix("RSV-RES-"))
                 .as("reserva RELEASED não conta no ledger ativo, e o contador já foi devolvido a zero")
                 .isEmpty();
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // EST-F008 — diagnóstico de divergência entre o agregado (stock_balance) e a soma dos lotes
+    // (stock_lot). Mesmo espírito do EST-C011/C013 acima: é o único teste que exercita a query
+    // nativa de findLotMismatches; service e controller só delegam.
+    // ------------------------------------------------------------------------------------------
+
+    /** Varre todas as páginas e devolve só as linhas cujo SKU começa com o prefixo do teste. */
+    private List<LotIntegrityMismatch> lotMismatchesWithPrefix(String prefix) {
+        PageResult<LotIntegrityMismatch> first = stockIntegrityRepository.findLotMismatches(0, 100);
+        List<LotIntegrityMismatch> all = new ArrayList<>(first.content());
+        for (int page = 1; page < first.totalPages(); page++) {
+            all.addAll(stockIntegrityRepository.findLotMismatches(page, 100).content());
+        }
+        return all.stream().filter(m -> m.sku().startsWith(prefix)).toList();
+    }
+
+    @Test
+    void lotMismatch_detectaAgregadoAcimaDosLotes() {
+        Warehouse warehouse = givenWarehouse("WH-LOT-AGG");
+        productRepository.save(Product.create("LOT-AGG-001", "Essência", "essencia", List.of())
+                .withLotTracked(true));
+        stockBalanceRepository.save(StockBalance.of(null, "LOT-AGG-001", warehouse.id(),
+                new BigDecimal("10.000"), 0L));
+        stockLotRepository.save(StockLot.create("LOT-AGG-001", warehouse.id(), "LOTE-A", LocalDate.of(2027, 1, 1))
+                .receive(new BigDecimal("6.000")));
+        flushAndClear();
+
+        assertThat(lotMismatchesWithPrefix("LOT-AGG-")).singleElement().satisfies(mismatch -> {
+            assertThat(mismatch.balanceQuantity()).isEqualByComparingTo("10.000");
+            assertThat(mismatch.lotsTotal()).isEqualByComparingTo("6.000");
+            assertThat(mismatch.difference()).isEqualByComparingTo("4.000");
+        });
+    }
+
+    @Test
+    void lotMismatch_detectaLotesAcimaDoAgregado() {
+        Warehouse warehouse = givenWarehouse("WH-LOT-LTS");
+        // Nenhum stock_balance salvo de propósito: a divergência pode vir só do lado dos lotes.
+        stockLotRepository.save(StockLot.create("LOT-LTS-001", warehouse.id(), "LOTE-A", LocalDate.of(2027, 1, 1))
+                .receive(new BigDecimal("5.000")));
+        flushAndClear();
+
+        assertThat(lotMismatchesWithPrefix("LOT-LTS-")).singleElement().satisfies(mismatch -> {
+            assertThat(mismatch.balanceQuantity()).isEqualByComparingTo("0");
+            assertThat(mismatch.lotsTotal()).isEqualByComparingTo("5.000");
+            assertThat(mismatch.difference()).isEqualByComparingTo("-5.000");
+        });
+    }
+
+    @Test
+    void lotMismatch_naoAcusaQuandoAgregadoBateComLotes() {
+        Warehouse warehouse = givenWarehouse("WH-LOT-OK");
+        productRepository.save(Product.create("LOT-OK-001", "Essência", "essencia", List.of())
+                .withLotTracked(true));
+        stockBalanceRepository.save(StockBalance.of(null, "LOT-OK-001", warehouse.id(),
+                new BigDecimal("6.000"), 0L));
+        stockLotRepository.save(StockLot.create("LOT-OK-001", warehouse.id(), "LOTE-A", LocalDate.of(2027, 1, 1))
+                .receive(new BigDecimal("6.000")));
+        flushAndClear();
+
+        assertThat(lotMismatchesWithPrefix("LOT-OK-")).isEmpty();
+    }
+
+    /**
+     * O filtro por {@code product.lot_tracked} existe justamente para isto: sem ele, todo SKU não
+     * lote-rastreado com saldo (a maioria da base) apareceria como falso positivo, porque nunca
+     * tem lote nenhum em {@code stock_lot}.
+     */
+    @Test
+    void lotMismatch_ignoraProdutoNaoLoteRastreadoComSaldo() {
+        Warehouse warehouse = givenWarehouse("WH-LOT-NT");
+        productRepository.save(Product.create("LOT-NT-001", "Narguilé", "narguile", List.of()));
+        stockBalanceRepository.save(StockBalance.of(null, "LOT-NT-001", warehouse.id(),
+                new BigDecimal("10.000"), 0L));
+        flushAndClear();
+
+        assertThat(lotMismatchesWithPrefix("LOT-NT-")).isEmpty();
     }
 }

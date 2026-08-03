@@ -18,6 +18,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 
@@ -26,6 +27,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -73,10 +75,23 @@ class ComprasServiceTest {
         assertThat(result.warehouseCode()).isEqualTo("LOJA-01");
         assertThat(result.items()).hasSize(2);
         verify(estoqueUseCase).adjustStock(eq("NARG-001"), eq("LOJA-01"), eq(MovementType.ENTRADA),
-                eq(new BigDecimal("10.000")), anyString(), eq("gerente"));
+                eq(new BigDecimal("10.000")), anyString(), eq("gerente"), isNull(), isNull());
         verify(estoqueUseCase).adjustStock(eq("CARV-001"), eq("LOJA-01"), eq(MovementType.ENTRADA),
-                eq(new BigDecimal("5.000")), anyString(), eq("gerente"));
+                eq(new BigDecimal("5.000")), anyString(), eq("gerente"), isNull(), isNull());
         verify(goodsReceiptRepository).save(any());
+    }
+
+    @Test
+    void receiveGoods_loteRastreado_propagaLoteParaAdjustStock() {
+        List<GoodsReceiptItem> items = List.of(
+                new GoodsReceiptItem("ESSE-001", new BigDecimal("10.000"), "L1", LocalDate.parse("2027-01-01")));
+        when(supplierRepository.findById(1L)).thenReturn(Optional.of(supplier()));
+        when(goodsReceiptRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        comprasService.receiveGoods(1L, "LOJA-01", items, "gerente");
+
+        verify(estoqueUseCase).adjustStock(eq("ESSE-001"), eq("LOJA-01"), eq(MovementType.ENTRADA),
+                eq(new BigDecimal("10.000")), anyString(), eq("gerente"), eq("L1"), eq(LocalDate.parse("2027-01-01")));
     }
 
     @Test
@@ -87,7 +102,7 @@ class ComprasServiceTest {
                 List.of(new GoodsReceiptItem("NARG-001", BigDecimal.ONE)), "gerente"))
                 .isInstanceOf(SupplierNotFoundException.class);
 
-        verify(estoqueUseCase, never()).adjustStock(any(), any(), any(), any(), any(), any());
+        verify(estoqueUseCase, never()).adjustStock(any(), any(), any(), any(), any(), any(), any(), any());
         verify(goodsReceiptRepository, never()).save(any());
     }
 
@@ -96,7 +111,7 @@ class ComprasServiceTest {
         // EST-C002: recebimento com SKU não cadastrado agora reverte tudo, em vez de dar entrada
         // de saldo num SKU que não existe no catálogo.
         when(supplierRepository.findById(1L)).thenReturn(Optional.of(supplier()));
-        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any()))
+        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenThrow(new ProductNotFoundException("SKU-FANTASMA"));
 
         assertThatThrownBy(() -> comprasService.receiveGoods(1L, "LOJA-01",
@@ -109,7 +124,7 @@ class ComprasServiceTest {
     @Test
     void receiveGoods_propagatesExceptionFromEstoqueAndDoesNotSaveReceipt() {
         when(supplierRepository.findById(1L)).thenReturn(Optional.of(supplier()));
-        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any()))
+        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenThrow(new WarehouseNotFoundException("INEXISTENTE"));
 
         assertThatThrownBy(() -> comprasService.receiveGoods(1L, "INEXISTENTE",

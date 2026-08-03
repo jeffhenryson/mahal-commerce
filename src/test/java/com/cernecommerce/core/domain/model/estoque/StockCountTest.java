@@ -8,6 +8,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
 class StockCountTest {
 
@@ -78,6 +79,46 @@ class StockCountTest {
         StockCount count = StockCount.open(1L, "gerente").withCountedItem("A", BigDecimal.ZERO);
 
         assertThat(count.items().getFirst().countedQuantity()).isEqualByComparingTo("0");
+    }
+
+    // ── Contagem por lote (EST-F008) ─────────────────────────────────────────────────────────
+
+    @Test
+    void withCountedItem_comLote_acrescentaLinhaComLotCode() {
+        StockCount count = StockCount.open(1L, "gerente")
+                .withCountedItem("ESS-001", new BigDecimal("3.000"), "LOTE-A");
+
+        assertThat(count.items()).singleElement().satisfies(item -> {
+            assertThat(item.sku()).isEqualTo("ESS-001");
+            assertThat(item.lotCode()).isEqualTo("LOTE-A");
+            assertThat(item.countedQuantity()).isEqualByComparingTo("3.000");
+        });
+    }
+
+    /** Cada lote é uma contagem própria: mesmo SKU, lote diferente, é linha nova, não sobrescrita. */
+    @Test
+    void withCountedItem_mesmoSkuLoteDiferente_acrescentaLinhaNova() {
+        StockCount count = StockCount.open(1L, "gerente")
+                .withCountedItem("ESS-001", new BigDecimal("3.000"), "LOTE-A")
+                .withCountedItem("ESS-001", new BigDecimal("5.000"), "LOTE-B");
+
+        assertThat(count.items()).hasSize(2);
+        assertThat(count.items()).extracting(StockCountItem::lotCode).containsExactly("LOTE-A", "LOTE-B");
+    }
+
+    /** Recontar o mesmo lote é o caso normal, igual à recontagem por SKU: sobrescreve. */
+    @Test
+    void withCountedItem_mesmoSkuMesmoLote_sobrescreve() {
+        StockCount count = StockCount.open(1L, "gerente")
+                .withCountedItem("ESS-001", new BigDecimal("3.000"), "LOTE-A")
+                .withCountedItem("ESS-001", new BigDecimal("5.000"), "LOTE-B")
+                .withCountedItem("ESS-001", new BigDecimal("9.000"), "LOTE-A");
+
+        assertThat(count.items()).hasSize(2);
+        assertThat(count.items()).extracting(StockCountItem::lotCode, StockCountItem::countedQuantity)
+                .containsExactly(
+                        tuple("LOTE-A", new BigDecimal("9.000")),
+                        tuple("LOTE-B", new BigDecimal("5.000")));
     }
 
     @Test

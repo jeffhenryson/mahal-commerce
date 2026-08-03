@@ -348,6 +348,30 @@ public class EstoqueControllerSecurityTest {
     }
 
     @Test
+    void patch_product_lotTracked_with_product_read_only_returns_403() throws Exception {
+        mockMvc.perform(patch("/estoque/products/QUALQUER-SKU/lot-tracked")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"lotTracked\":true}")
+                .with(user("bob").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_READ"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void patch_product_lotTracked_with_product_manage_returns_200() throws Exception {
+        String sku = givenProduct();
+
+        mockMvc.perform(patch("/estoque/products/" + sku + "/lot-tracked")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"lotTracked\":true}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_MANAGE"))))
+                .andExpect(status().isOk());
+    }
+
+    @Test
     void patch_warehouse_with_warehouse_read_only_returns_403() throws Exception {
         mockMvc.perform(patch("/estoque/warehouses/QUALQUER")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -567,6 +591,75 @@ public class EstoqueControllerSecurityTest {
     @Test
     void list_reservation_mismatches_with_estoque_stock_manage_returns_200() throws Exception {
         mockMvc.perform(get("/estoque/integrity/reservation-mismatch")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_STOCK_MANAGE"))))
+                .andExpect(status().isOk());
+    }
+
+    // ------------------------------------------------------------------------------------
+    // EST-F008 — lote e validade: listagem de lote e diagnóstico de integridade.
+    // ------------------------------------------------------------------------------------
+
+    @Test
+    void list_stock_lots_without_auth_returns_401() throws Exception {
+        mockMvc.perform(get("/estoque/products/QUALQUER-SKU/lots").param("warehouseCode", "LOJA-01"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void list_stock_lots_with_user_role_only_returns_403() throws Exception {
+        mockMvc.perform(get("/estoque/products/QUALQUER-SKU/lots").param("warehouseCode", "LOJA-01")
+                .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isForbidden());
+    }
+
+    /** Mesma régua da receita de kit: leitura de catálogo, PRODUCT_READ basta. */
+    @Test
+    void list_stock_lots_with_product_read_returns_200() throws Exception {
+        String code = "LOJA_LOT_SEC_" + System.nanoTime();
+        mockMvc.perform(post("/estoque/warehouses")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"code\":\"" + code + "\",\"name\":\"Loja Teste\",\"type\":\"LOJA_FISICA\"}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_WAREHOUSE_MANAGE"))))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(get("/estoque/products/QUALQUER-SKU/lots").param("warehouseCode", code)
+                .with(user("vendedor").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_READ"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray());
+    }
+
+    @Test
+    void list_lot_mismatches_without_auth_returns_401() throws Exception {
+        mockMvc.perform(get("/estoque/integrity/lot-mismatch"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void list_lot_mismatches_with_user_role_only_returns_403() throws Exception {
+        mockMvc.perform(get("/estoque/integrity/lot-mismatch")
+                .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isForbidden());
+    }
+
+    /** Mesma régua dos outros diagnósticos: exige STOCK_MANAGE, não PRODUCT_READ. */
+    @Test
+    void list_lot_mismatches_with_product_read_only_returns_403() throws Exception {
+        mockMvc.perform(get("/estoque/integrity/lot-mismatch")
+                .with(user("bob").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_READ"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void list_lot_mismatches_with_estoque_stock_manage_returns_200() throws Exception {
+        mockMvc.perform(get("/estoque/integrity/lot-mismatch")
                 .with(user("gerente").authorities(
                         new SimpleGrantedAuthority("ROLE_ADMIN"),
                         new SimpleGrantedAuthority("ESTOQUE_STOCK_MANAGE"))))

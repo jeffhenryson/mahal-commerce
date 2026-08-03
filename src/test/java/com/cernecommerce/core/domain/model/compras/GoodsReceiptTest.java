@@ -73,4 +73,21 @@ class GoodsReceiptTest {
         assertThatThrownBy(() -> new GoodsReceiptItem("NARG-001", new BigDecimal("-1")))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    void item_construtorDeDoisArgumentos_deixaLoteNulo() {
+        GoodsReceiptItem item = new GoodsReceiptItem("NARG-001", BigDecimal.TEN);
+
+        assertThat(item.lotCode()).isNull();
+        assertThat(item.expiryDate()).isNull();
+    }
+
+    @Test
+    void item_comLote_preservaLotCodeEExpiryDate() {
+        GoodsReceiptItem item = new GoodsReceiptItem("ESSE-001", BigDecimal.TEN, "L1",
+                java.time.LocalDate.parse("2027-01-01"));
+
+        assertThat(item.lotCode()).isEqualTo("L1");
+        assertThat(item.expiryDate()).isEqualTo(java.time.LocalDate.parse("2027-01-01"));
+    }
 }
