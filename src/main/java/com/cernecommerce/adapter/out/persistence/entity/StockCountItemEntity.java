@@ -11,8 +11,12 @@ import java.math.BigDecimal;
 @NoArgsConstructor
 @Entity
 @EqualsAndHashCode(onlyExplicitlyIncluded = true)
-@Table(name = "stock_count_item", uniqueConstraints = @UniqueConstraint(
-        name = "uk_stock_count_item_count_sku", columnNames = {"stock_count_id", "sku"}))
+// Sem @UniqueConstraint aqui de propósito (mesmo caso de CashbackRateEntity/uk_cashback_rate_
+// active_scope): a unicidade real é condicional — (stock_count_id, sku) só quando lot_code é
+// nulo, (stock_count_id, sku, lot_code) quando não é — e @UniqueConstraint não expressa WHERE.
+// Os dois índices únicos parciais vivem só na migration (V75); aqui a garantia é de aplicação,
+// em EstoqueService.recordCountedItem/StockCount.withCountedItem.
+@Table(name = "stock_count_item")
 public class StockCountItemEntity {
 
     @Id
@@ -37,4 +41,7 @@ public class StockCountItemEntity {
 
     @Column(precision = 14, scale = 3)
     private BigDecimal difference;
+
+    @Column(name = "lot_code", length = 50)
+    private String lotCode;
 }

@@ -22,6 +22,7 @@ public class StockMovementDTOConverter {
         dto.setReason(movement.reason());
         dto.setUsername(movement.username());
         dto.setCreatedAt(movement.createdAt());
+        dto.setLotCode(movement.lotCode());
         return dto;
     }
 

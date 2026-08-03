@@ -6,6 +6,8 @@ import com.cernecommerce.core.domain.model.pedido.OrderStatus;
 import com.cernecommerce.core.domain.model.pedido.SalesChannel;
 
 import java.time.Instant;
+import java.time.LocalDate;
+import java.util.List;
 
 /**
  * Port de entrada da visão de <b>pedidos do administrador</b> — atravessa canais.
@@ -60,9 +62,27 @@ public interface OrderUseCase {
      * estoque legítima. O motivo do {@code StockMovement} carrega o número do pedido para a
      * trilha ser reconstruível.</p>
      *
+     * <p>Equivale a {@link #refundOrder(Long, String, String, List)} sem nenhum item lote-rastreado
+     * — se o pedido tiver algum, o reembolso falha com
+     * {@code MissingLotInfoException} (o mesmo erro de {@code adjustStock}), porque não tem como
+     * o sistema adivinhar em qual lote a mercadoria devolvida volta a ficar.</p>
+     *
      * @throws com.cernecommerce.core.domain.exception.pedido.InvalidOrderStatusTransitionException
      *         se o pedido ainda não tiver pagamento confirmado (use {@link #cancelOrder}) ou já
      *         estiver {@code CANCELADO}/{@code REEMBOLSADO}
      */
     Order refundOrder(Long orderId, String reason, String username);
+
+    /** O lote em que a mercadoria devolvida de {@code sku} volta a ficar (EST-F008). */
+    record RefundItemLot(String sku, String lotCode, LocalDate expiryDate) {
+    }
+
+    /**
+     * Mesmo que {@link #refundOrder(Long, String, String)}, com o lote de retorno explícito por
+     * SKU para item lote-rastreado — o casamento é por {@code sku}: se o pedido tiver duas linhas
+     * do mesmo SKU, as duas recebem a mesma info de lote. SKU sem entrada em {@code itemLots} usa
+     * o overload sem lote de {@code adjustStock}, o que só é válido se o SKU não for
+     * lote-rastreado.
+     */
+    Order refundOrder(Long orderId, String reason, String username, List<RefundItemLot> itemLots);
 }

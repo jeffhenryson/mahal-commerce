@@ -1,6 +1,7 @@
 package com.cernecommerce.adapter.out.persistence.repository;
 
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.estoque.LotIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.ReservationIntegrityMismatch;
 import com.cernecommerce.core.ports.out.estoque.StockIntegrityRepository;
@@ -40,9 +41,25 @@ public class StockIntegrityRepositoryImpl implements StockIntegrityRepository {
                 page, size, result.getTotalElements(), result.getTotalPages());
     }
 
+    @Override
+    public PageResult<LotIntegrityMismatch> findLotMismatches(int page, int size) {
+        Page<Object[]> result = stockIntegrityJpaRepository.findLotMismatches(PageRequest.of(page, size));
+        return new PageResult<>(result.getContent().stream().map(this::toLotMismatch).toList(),
+                page, size, result.getTotalElements(), result.getTotalPages());
+    }
+
     /** Colunas por posição, na ordem declarada na query nativa. */
     private ReservationIntegrityMismatch toMismatch(Object[] row) {
         return ReservationIntegrityMismatch.of(
+                (String) row[0],
+                (String) row[1],
+                toBigDecimal(row[2]),
+                toBigDecimal(row[3]));
+    }
+
+    /** Colunas por posição, na ordem declarada na query nativa. */
+    private LotIntegrityMismatch toLotMismatch(Object[] row) {
+        return LotIntegrityMismatch.of(
                 (String) row[0],
                 (String) row[1],
                 toBigDecimal(row[2]),

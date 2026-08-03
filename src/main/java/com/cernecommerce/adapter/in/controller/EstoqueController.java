@@ -6,6 +6,7 @@ import com.cernecommerce.adapter.in.converter.StockMovementDTOConverter;
 import com.cernecommerce.adapter.in.converter.StockReservationDTOConverter;
 import com.cernecommerce.adapter.in.converter.WarehouseDTOConverter;
 import com.cernecommerce.adapter.in.dtos.request.ActiveRequest;
+import com.cernecommerce.adapter.in.dtos.request.LotTrackedRequest;
 import com.cernecommerce.adapter.in.dtos.request.KitRecipeRequest;
 import com.cernecommerce.adapter.in.dtos.request.ProductPatchRequest;
 import com.cernecommerce.adapter.in.dtos.request.ProductRequest;
@@ -16,18 +17,21 @@ import com.cernecommerce.adapter.in.dtos.request.StockMovementRequest;
 import com.cernecommerce.adapter.in.dtos.request.WarehousePatchRequest;
 import com.cernecommerce.adapter.in.dtos.request.WarehouseRequest;
 import com.cernecommerce.adapter.in.dtos.response.KitComponentResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.LotIntegrityMismatchResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.OrphanSkuResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.PricingResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.ProductResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.ReservationIntegrityMismatchResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.StockBalanceResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.StockCountResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.StockLotResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.StockMovementResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.StockReservationResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.WarehouseResponseDTO;
 import com.cernecommerce.core.domain.event.AuditEvent;
 import com.cernecommerce.core.domain.event.AuditEvent.EventType;
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.estoque.LotIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
@@ -203,6 +207,44 @@ public class EstoqueController {
         return ResponseEntity.ok(converter.toResponse(updated));
     }
 
+    @Operation(summary = "Ativa ou desativa o rastreamento de lote e validade de um produto (EST-F008)",
+            description = "Opt-in por SKU — só essência/carvão/perecível costuma precisar. A partir daqui, "
+                    + "ENTRADA deste SKU em POST /estoque/movements passa a exigir lotCode e expiryDate.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Alterado", content = @Content(schema = @Schema(implementation = ProductResponseDTO.class))),
+            @ApiResponse(responseCode = "400", description = "Campo 'lotTracked' ausente, ou SKU é KIT", content = @Content),
+            @ApiResponse(responseCode = "404", description = "SKU não encontrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PatchMapping("/products/{sku}/lot-tracked")
+    @PreAuthorize("hasAuthority('ESTOQUE_PRODUCT_MANAGE')")
+    public ResponseEntity<ProductResponseDTO> setProductLotTracked(
+            @PathVariable @NotBlank @Size(min = 3, max = 50) String sku,
+            @Valid @RequestBody LotTrackedRequest request, Authentication authentication) {
+        Product updated = estoqueUseCase.setProductLotTracked(sku, request.getLotTracked());
+        publisher.publishEvent(AuditEvent.of(
+                request.getLotTracked() ? EventType.PRODUCT_LOT_TRACKED_ENABLED : EventType.PRODUCT_LOT_TRACKED_DISABLED,
+                authentication.getName(), Map.of("sku", updated.sku())));
+        return ResponseEntity.ok(converter.toResponse(updated));
+    }
+
+    @Operation(summary = "Lista os lotes de um SKU em um depósito (EST-F008)",
+            description = "Do que vence primeiro em diante. Lista vazia se o SKU não é lote-rastreado ou "
+                    + "ainda não recebeu nenhum lote — não é erro.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK — lista vazia se não houver lote"),
+            @ApiResponse(responseCode = "404", description = "Depósito não encontrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/products/{sku}/lots")
+    @PreAuthorize("hasAuthority('ESTOQUE_PRODUCT_READ')")
+    public ResponseEntity<List<StockLotResponseDTO>> listStockLots(
+            @PathVariable @NotBlank @Size(min = 3, max = 50) String sku,
+            @RequestParam @NotBlank @Size(min = 2, max = 50) String warehouseCode) {
+        return ResponseEntity.ok(estoqueUseCase.listStockLots(sku, warehouseCode).stream()
+                .map(lot -> converter.toResponse(lot, warehouseCode)).toList());
+    }
+
     @Operation(summary = "Cria um depósito (loja física ou e-commerce)")
     @ApiResponses({
             @ApiResponse(responseCode = "201", description = "Criado", content = @Content(schema = @Schema(implementation = WarehouseResponseDTO.class))),
@@ -305,9 +347,15 @@ public class EstoqueController {
     @PreAuthorize("hasAuthority('ESTOQUE_STOCK_MANAGE')")
     public ResponseEntity<StockBalanceResponseDTO> registerMovement(@Valid @RequestBody StockMovementRequest request,
             Authentication authentication) {
-        StockBalance updated = estoqueUseCase.adjustStock(request.getSku(), request.getWarehouseCode(),
-                movementConverter.toType(request.getType()), request.getQuantity(), request.getReason(),
-                authentication.getName());
+        // Só usa a sobrecarga com lote quando o request de fato traz lotCode/expiryDate — mantém
+        // o caminho sem lote (a maioria dos SKUs) idêntico ao de antes do EST-F008.
+        StockBalance updated = request.getLotCode() == null && request.getExpiryDate() == null
+                ? estoqueUseCase.adjustStock(request.getSku(), request.getWarehouseCode(),
+                        movementConverter.toType(request.getType()), request.getQuantity(), request.getReason(),
+                        authentication.getName())
+                : estoqueUseCase.adjustStock(request.getSku(), request.getWarehouseCode(),
+                        movementConverter.toType(request.getType()), request.getQuantity(), request.getReason(),
+                        authentication.getName(), request.getLotCode(), request.getExpiryDate());
         publisher.publishEvent(AuditEvent.of(EventType.STOCK_MOVEMENT_REGISTERED, authentication.getName(),
                 Map.of("sku", request.getSku(), "warehouseCode", request.getWarehouseCode(),
                         "type", request.getType(), "quantity", request.getQuantity())));
@@ -483,7 +531,8 @@ public class EstoqueController {
     @PreAuthorize("hasAuthority('ESTOQUE_STOCK_MANAGE')")
     public ResponseEntity<StockCountResponseDTO> recordCountedItem(@PathVariable Long id,
             @Valid @RequestBody StockCountItemRequest request) {
-        StockCount updated = estoqueUseCase.recordCountedItem(id, request.getSku(), request.getCountedQuantity());
+        StockCount updated = estoqueUseCase.recordCountedItem(id, request.getSku(), request.getCountedQuantity(),
+                request.getLotCode());
         return ResponseEntity.ok(stockCountConverter.toResponse(updated, warehouseCodeOf(updated)));
     }
 
@@ -610,6 +659,32 @@ public class EstoqueController {
         PageResult<ReservationIntegrityMismatch> result = estoqueUseCase.listReservationMismatches(page, size);
         PageResult<ReservationIntegrityMismatchResponseDTO> response = new PageResult<>(
                 result.content().stream().map(reservationConverter::toResponse).toList(),
+                result.page(), result.size(), result.totalElements(), result.totalPages());
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Diagnóstico de EST-F008. Mesma razão de {@link #listOrphanSkus} para não publicar
+     * {@code AuditEvent}: é leitura.
+     */
+    @Operation(summary = "Lista pares SKU/depósito de SKU lote-rastreado cujo saldo diverge da soma dos lotes",
+            description = "Diagnóstico de integridade: confronta `stock_balance.quantity` com a soma de "
+                    + "`stock_lot.quantity` para o mesmo par, em SKU lote-rastreado. `stock_lot` é aditivo, sem "
+                    + "FK que force a igualdade — o caminho conhecido de drift é uma SAIDA cujo FEFO não achou "
+                    + "saldo suficiente nos lotes para cobrir o que o agregado já validou. Somente leitura — a "
+                    + "correção de cada linha é decisão humana.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK — página vazia se a base está íntegra"),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/integrity/lot-mismatch")
+    @PreAuthorize("hasAuthority('ESTOQUE_STOCK_MANAGE')")
+    public ResponseEntity<PageResult<LotIntegrityMismatchResponseDTO>> listLotMismatches(
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+        PageResult<LotIntegrityMismatch> result = estoqueUseCase.listLotMismatches(page, size);
+        PageResult<LotIntegrityMismatchResponseDTO> response = new PageResult<>(
+                result.content().stream().map(converter::toResponse).toList(),
                 result.page(), result.size(), result.totalElements(), result.totalPages());
         return ResponseEntity.ok(response);
     }

@@ -5,6 +5,8 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
+import java.util.List;
+
 @Data
 public class OrderRefundRequest {
 
@@ -15,4 +17,9 @@ public class OrderRefundRequest {
             + "indistinguível de erro.",
             example = "devolução no prazo")
     private String reason;
+
+    @Schema(description = "Lote de retorno por SKU (EST-F008). Só é necessário para item "
+            + "lote-rastreado — sem entrada aqui para um SKU desses, o reembolso falha com "
+            + "LOT_INFO_REQUIRED.")
+    private List<RefundItemLotRequest> itemLots;
 }

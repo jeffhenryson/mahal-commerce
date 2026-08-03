@@ -5,6 +5,7 @@ import lombok.*;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 
 @Getter
 @Setter
@@ -12,8 +13,9 @@ import java.time.Instant;
 @NoArgsConstructor
 @Entity
 @EqualsAndHashCode(onlyExplicitlyIncluded = true)
-@Table(name = "stock_movement")
-public class StockMovementEntity {
+@Table(name = "stock_lot", uniqueConstraints = @UniqueConstraint(
+        name = "uk_stock_lot_sku_warehouse_lot", columnNames = {"sku", "warehouse_id", "lot_code"}))
+public class StockLotEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -26,21 +28,19 @@ public class StockMovementEntity {
     @Column(name = "warehouse_id", nullable = false)
     private Long warehouseId;
 
-    @Column(nullable = false, length = 10)
-    private String type;
+    @Column(name = "lot_code", nullable = false, length = 50)
+    private String lotCode;
+
+    @Column(name = "expiry_date", nullable = false)
+    private LocalDate expiryDate;
 
     @Column(nullable = false, precision = 14, scale = 3)
     private BigDecimal quantity;
 
-    @Column(nullable = false, length = 255)
-    private String reason;
+    @Column(name = "alerted_at")
+    private Instant alertedAt;
 
-    @Column(nullable = false, length = 80)
-    private String username;
-
-    @Column(name = "created_at", nullable = false)
-    private Instant createdAt;
-
-    @Column(name = "lot_code", length = 50)
-    private String lotCode;
+    @Version
+    @Column(nullable = false)
+    private long version;
 }

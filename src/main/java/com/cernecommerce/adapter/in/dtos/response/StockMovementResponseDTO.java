@@ -19,4 +19,5 @@ public class StockMovementResponseDTO {
     private String reason;
     private String username;
     private Instant createdAt;
+    private String lotCode;
 }

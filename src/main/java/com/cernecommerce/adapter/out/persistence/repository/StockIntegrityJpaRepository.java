@@ -118,4 +118,59 @@ public interface StockIntegrityJpaRepository extends Repository<StockMovementEnt
             """,
             nativeQuery = true)
     Page<Object[]> findReservationMismatches(Pageable pageable);
+
+    /**
+     * Pares (sku, depósito) de SKU lote-rastreado em que {@code stock_balance.quantity} diverge da
+     * soma de {@code stock_lot.quantity} para o mesmo par (EST-F008).
+     *
+     * <p>O conjunto de candidatos é a união de quem já tem lote gravado (toda linha em
+     * {@code stock_lot} nasce de um SKU que era lote-rastreado no momento do recebimento) com quem
+     * tem saldo físico e é lote-rastreado agora — mesma técnica de {@link #findReservationMismatches},
+     * porque a divergência pode existir de qualquer um dos dois lados: agregado sem lote nenhum que
+     * o explique (SKU virou lote-rastreado depois de já ter saldo), ou lote sem o agregado
+     * refletir. A resolução de "lote-rastreado" cobre SKU pai e SKU de variação, mesma lógica de
+     * {@link #findOrphanSkus}.</p>
+     *
+     * <p>Colunas por posição — ver {@code StockIntegrityRepositoryImpl.toLotMismatch}: {@code 0}
+     * sku, {@code 1} warehouse_code, {@code 2} stock_balance.quantity, {@code 3} soma de
+     * stock_lot.quantity.</p>
+     */
+    @Query(value = """
+            SELECT o.sku,
+                   w.code,
+                   COALESCE(b.quantity, 0),
+                   COALESCE(l.lots_total, 0)
+            FROM (SELECT sku, warehouse_id FROM stock_lot
+                  UNION
+                  SELECT sb.sku, sb.warehouse_id FROM stock_balance sb
+                  WHERE sb.quantity > 0
+                    AND (EXISTS (SELECT 1 FROM product p WHERE p.sku = sb.sku AND p.lot_tracked = TRUE)
+                         OR EXISTS (SELECT 1 FROM product_variant v JOIN product p ON p.id = v.product_id
+                                    WHERE v.sku = sb.sku AND p.lot_tracked = TRUE))) o
+            JOIN warehouse w ON w.id = o.warehouse_id
+            LEFT JOIN stock_balance b ON b.sku = o.sku AND b.warehouse_id = o.warehouse_id
+            LEFT JOIN (SELECT sku, warehouse_id, SUM(quantity) AS lots_total
+                       FROM stock_lot GROUP BY sku, warehouse_id) l
+                   ON l.sku = o.sku AND l.warehouse_id = o.warehouse_id
+            WHERE COALESCE(b.quantity, 0) <> COALESCE(l.lots_total, 0)
+            ORDER BY o.sku, w.code
+            """,
+            countQuery = """
+            SELECT COUNT(*)
+            FROM (SELECT sku, warehouse_id FROM stock_lot
+                  UNION
+                  SELECT sb.sku, sb.warehouse_id FROM stock_balance sb
+                  WHERE sb.quantity > 0
+                    AND (EXISTS (SELECT 1 FROM product p WHERE p.sku = sb.sku AND p.lot_tracked = TRUE)
+                         OR EXISTS (SELECT 1 FROM product_variant v JOIN product p ON p.id = v.product_id
+                                    WHERE v.sku = sb.sku AND p.lot_tracked = TRUE))) o
+            JOIN warehouse w ON w.id = o.warehouse_id
+            LEFT JOIN stock_balance b ON b.sku = o.sku AND b.warehouse_id = o.warehouse_id
+            LEFT JOIN (SELECT sku, warehouse_id, SUM(quantity) AS lots_total
+                       FROM stock_lot GROUP BY sku, warehouse_id) l
+                   ON l.sku = o.sku AND l.warehouse_id = o.warehouse_id
+            WHERE COALESCE(b.quantity, 0) <> COALESCE(l.lots_total, 0)
+            """,
+            nativeQuery = true)
+    Page<Object[]> findLotMismatches(Pageable pageable);
 }

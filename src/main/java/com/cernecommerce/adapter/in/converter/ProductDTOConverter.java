@@ -6,15 +6,19 @@ import com.cernecommerce.adapter.in.dtos.request.PricingRequest;
 import com.cernecommerce.adapter.in.dtos.request.ProductAttributeRequest;
 import com.cernecommerce.adapter.in.dtos.request.ProductVariantRequest;
 import com.cernecommerce.adapter.in.dtos.response.KitComponentResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.LotIntegrityMismatchResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.PricingResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.ProductAttributeResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.ProductResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.ProductVariantResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.StockLotResponseDTO;
 import com.cernecommerce.core.domain.model.estoque.KitComponent;
+import com.cernecommerce.core.domain.model.estoque.LotIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
+import com.cernecommerce.core.domain.model.estoque.StockLot;
 import com.cernecommerce.core.ports.in.EstoqueUseCase.KitComponentCommand;
 
 import java.util.List;
@@ -61,6 +65,7 @@ public class ProductDTOConverter {
         dto.setVariants(product.variants().stream().map(this::toResponse).toList());
         dto.setPricing(toResponse(product.pricing()));
         dto.setType(product.type().name());
+        dto.setLotTracked(product.lotTracked());
         return dto;
     }
 
@@ -107,6 +112,32 @@ public class ProductDTOConverter {
         ProductAttributeResponseDTO dto = new ProductAttributeResponseDTO();
         dto.setType(attribute.type());
         dto.setValue(attribute.value());
+        return dto;
+    }
+
+    /**
+     * @param warehouseCode resolvido pelo controller — o domínio guarda {@code warehouseId}, e a
+     *        API fala em código de depósito em toda parte (EST-F008)
+     */
+    public StockLotResponseDTO toResponse(StockLot lot, String warehouseCode) {
+        StockLotResponseDTO dto = new StockLotResponseDTO();
+        dto.setId(lot.id());
+        dto.setSku(lot.sku());
+        dto.setWarehouseCode(warehouseCode);
+        dto.setLotCode(lot.lotCode());
+        dto.setExpiryDate(lot.expiryDate());
+        dto.setQuantity(lot.quantity());
+        dto.setAlertedAt(lot.alertedAt());
+        return dto;
+    }
+
+    public LotIntegrityMismatchResponseDTO toResponse(LotIntegrityMismatch mismatch) {
+        LotIntegrityMismatchResponseDTO dto = new LotIntegrityMismatchResponseDTO();
+        dto.setSku(mismatch.sku());
+        dto.setWarehouseCode(mismatch.warehouseCode());
+        dto.setBalanceQuantity(mismatch.balanceQuantity());
+        dto.setLotsTotal(mismatch.lotsTotal());
+        dto.setDifference(mismatch.difference());
         return dto;
     }
 }

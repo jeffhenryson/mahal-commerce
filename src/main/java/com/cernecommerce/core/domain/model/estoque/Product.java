@@ -20,7 +20,8 @@ public record Product(
     boolean active,
     List<ProductVariant> variants,
     Pricing pricing,
-    ProductType type
+    ProductType type,
+    boolean lotTracked
 ) {
 
     public Product {
@@ -33,6 +34,10 @@ public record Product(
         variants = variants == null ? List.of() : List.copyOf(variants);
         pricing = pricing == null ? Pricing.empty() : pricing;
         type = type == null ? ProductType.SIMPLES : type;
+        if (type == ProductType.KIT && lotTracked) {
+            throw new IllegalArgumentException(
+                    "kit não pode ser lote-rastreado: kit não tem saldo físico próprio (EST-F015)");
+        }
     }
 
     /** Cria um novo produto sem precificação (sem id, ativo por padrão, {@code SIMPLES}). */
@@ -46,10 +51,16 @@ public record Product(
         return create(sku, name, category, variants, pricing, ProductType.SIMPLES);
     }
 
-    /** Cria um novo produto (sem id, ativo por padrão) — forma canônica, com tipo explícito. */
+    /** Cria um novo produto (sem id, ativo por padrão) — tipo explícito, sem rastreio de lote. */
     public static Product create(String sku, String name, String category, List<ProductVariant> variants,
             Pricing pricing, ProductType type) {
-        return new Product(null, sku, name, category, true, variants, pricing, type);
+        return create(sku, name, category, variants, pricing, type, false);
+    }
+
+    /** Cria um novo produto (sem id, ativo por padrão) — forma canônica, com tipo e lote explícitos. */
+    public static Product create(String sku, String name, String category, List<ProductVariant> variants,
+            Pricing pricing, ProductType type, boolean lotTracked) {
+        return new Product(null, sku, name, category, true, variants, pricing, type, lotTracked);
     }
 
     /** Reconstitui um produto sem precificação a partir de persistência. */
@@ -64,10 +75,16 @@ public record Product(
         return of(id, sku, name, category, active, variants, pricing, ProductType.SIMPLES);
     }
 
-    /** Reconstitui um produto a partir de persistência — forma canônica, com tipo explícito. */
+    /** Reconstitui um produto a partir de persistência — tipo explícito, sem rastreio de lote. */
     public static Product of(Long id, String sku, String name, String category, boolean active,
             List<ProductVariant> variants, Pricing pricing, ProductType type) {
-        return new Product(id, sku, name, category, active, variants, pricing, type);
+        return of(id, sku, name, category, active, variants, pricing, type, false);
+    }
+
+    /** Reconstitui um produto a partir de persistência — forma canônica, com tipo e lote explícitos. */
+    public static Product of(Long id, String sku, String name, String category, boolean active,
+            List<ProductVariant> variants, Pricing pricing, ProductType type, boolean lotTracked) {
+        return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked);
     }
 
     /**
@@ -87,17 +104,17 @@ public record Product(
         return new Product(id, sku,
                 newName == null ? name : newName,
                 newCategory == null ? category : newCategory,
-                active, variants, pricing, type);
+                active, variants, pricing, type, lotTracked);
     }
 
     /** Ativa ou desativa o produto, preservando o resto. */
     public Product withActive(boolean newActive) {
-        return new Product(id, sku, name, category, newActive, variants, pricing, type);
+        return new Product(id, sku, name, category, newActive, variants, pricing, type, lotTracked);
     }
 
     /** Substitui a precificação do produto, preservando o resto. */
     public Product withPricing(Pricing newPricing) {
-        return new Product(id, sku, name, category, active, variants, newPricing, type);
+        return new Product(id, sku, name, category, active, variants, newPricing, type, lotTracked);
     }
 
     /**
@@ -106,7 +123,16 @@ public record Product(
      * isoladamente, porque virar {@code KIT} sem uma receita não faz sentido.
      */
     public Product withType(ProductType newType) {
-        return new Product(id, sku, name, category, active, variants, pricing, newType);
+        return new Product(id, sku, name, category, active, variants, pricing, newType, lotTracked);
+    }
+
+    /**
+     * Ativa/desativa o rastreamento de lote e validade (EST-F008). Opt-in por produto: só
+     * essência/perecível precisa — narguilé e acessório não têm validade. Kit nunca pode ser
+     * lote-rastreado (kit não tem saldo físico próprio; checado no compact constructor).
+     */
+    public Product withLotTracked(boolean newLotTracked) {
+        return new Product(id, sku, name, category, active, variants, pricing, type, newLotTracked);
     }
 
     /** Indica se este produto é um kit virtual (EST-F015) — sem saldo próprio, saldo derivado. */

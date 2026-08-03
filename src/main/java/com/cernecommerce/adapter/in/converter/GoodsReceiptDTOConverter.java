@@ -12,7 +12,7 @@ public class GoodsReceiptDTOConverter {
 
     public List<GoodsReceiptItem> toItems(List<GoodsReceiptItemRequest> requests) {
         return requests.stream()
-                .map(r -> new GoodsReceiptItem(r.getSku(), r.getQuantity()))
+                .map(r -> new GoodsReceiptItem(r.getSku(), r.getQuantity(), r.getLotCode(), r.getExpiryDate()))
                 .toList();
     }
 
@@ -31,6 +31,8 @@ public class GoodsReceiptDTOConverter {
         GoodsReceiptItemResponseDTO dto = new GoodsReceiptItemResponseDTO();
         dto.setSku(item.sku());
         dto.setQuantity(item.quantity());
+        dto.setLotCode(item.lotCode());
+        dto.setExpiryDate(item.expiryDate());
         return dto;
     }
 }

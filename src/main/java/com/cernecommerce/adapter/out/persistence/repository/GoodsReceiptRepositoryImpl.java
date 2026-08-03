@@ -31,6 +31,8 @@ public class GoodsReceiptRepositoryImpl implements GoodsReceiptRepository {
             itemEntity.setGoodsReceipt(entity);
             itemEntity.setSku(item.sku());
             itemEntity.setQuantity(item.quantity());
+            itemEntity.setLotCode(item.lotCode());
+            itemEntity.setExpiryDate(item.expiryDate());
             entity.getItems().add(itemEntity);
         }
         return toDomain(goodsReceiptJpaRepository.save(entity));
@@ -42,6 +44,6 @@ public class GoodsReceiptRepositoryImpl implements GoodsReceiptRepository {
     }
 
     private GoodsReceiptItem toDomain(GoodsReceiptItemEntity e) {
-        return new GoodsReceiptItem(e.getSku(), e.getQuantity());
+        return new GoodsReceiptItem(e.getSku(), e.getQuantity(), e.getLotCode(), e.getExpiryDate());
     }
 }

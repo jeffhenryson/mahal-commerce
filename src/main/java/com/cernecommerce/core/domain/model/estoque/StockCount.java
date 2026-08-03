@@ -62,14 +62,29 @@ public record StockCount(Long id, Long warehouseId, StockCountStatus status, Str
      * quando um item é recontado.</p>
      */
     public StockCount withCountedItem(String sku, BigDecimal countedQuantity) {
-        Map<String, StockCountItem> bySku = new LinkedHashMap<>();
-        items.forEach(item -> bySku.put(item.sku(), item));
-        StockCountItem existing = bySku.get(sku);
-        bySku.put(sku, existing == null
-                ? StockCountItem.counted(sku, countedQuantity)
-                : new StockCountItem(existing.id(), sku, countedQuantity, null, null));
+        return withCountedItem(sku, countedQuantity, null);
+    }
+
+    /**
+     * Mesmo que {@link #withCountedItem(String, BigDecimal)}, com lote explícito (EST-F008). A
+     * chave do upsert passa a ser {@code (sku, lotCode)}: recontar o mesmo lote sobrescreve, mas
+     * contar um lote diferente do mesmo SKU acrescenta uma linha nova — cada lote é uma contagem
+     * própria, com seu próprio confronto contra {@code StockLot} no fechamento.
+     */
+    public StockCount withCountedItem(String sku, BigDecimal countedQuantity, String lotCode) {
+        Map<String, StockCountItem> byKey = new LinkedHashMap<>();
+        items.forEach(item -> byKey.put(itemKey(item.sku(), item.lotCode()), item));
+        String key = itemKey(sku, lotCode);
+        StockCountItem existing = byKey.get(key);
+        byKey.put(key, existing == null
+                ? StockCountItem.counted(sku, countedQuantity, lotCode)
+                : new StockCountItem(existing.id(), sku, countedQuantity, null, null, lotCode));
         return new StockCount(id, warehouseId, status, username, createdAt, closedAt,
-                new ArrayList<>(bySku.values()));
+                new ArrayList<>(byKey.values()));
+    }
+
+    private static String itemKey(String sku, String lotCode) {
+        return sku + "|" + (lotCode == null ? "" : lotCode);
     }
 
     /** Substitui os itens pelos já confrontados com o saldo do sistema. */

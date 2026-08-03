@@ -17,6 +17,10 @@ import com.cernecommerce.core.ports.out.pedido.OrderRepository;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 public class OrderService implements OrderUseCase {
 
@@ -73,6 +77,12 @@ public class OrderService implements OrderUseCase {
     @Override
     @Transactional
     public Order refundOrder(Long orderId, String reason, String username) {
+        return refundOrder(orderId, reason, username, List.of());
+    }
+
+    @Override
+    @Transactional
+    public Order refundOrder(Long orderId, String reason, String username, List<RefundItemLot> itemLots) {
         Order order = getOrder(orderId);
 
         // refunded() valida a transição (só sai de estado pós-pagamento) e recusa reembolsar duas
@@ -80,12 +90,21 @@ public class OrderService implements OrderUseCase {
         // reembolso de estornar tudo de novo.
         Order refunded = order.refunded(reason, Instant.now());
 
+        // Casamento por sku: pedido com duas linhas do mesmo SKU recebem a mesma info de lote.
+        Map<String, RefundItemLot> lotBySku = itemLots.stream()
+                .collect(Collectors.toMap(RefundItemLot::sku, Function.identity(), (first, second) -> first));
+
         // Devolução é entrada de estoque legítima, inclusive para pedido já entregue. O motivo
         // carrega o número do pedido: sem ele, a trilha do movimento não é reconstruível.
         String movementReason = "Reembolso do pedido " + order.orderNumber();
         for (OrderItem item : order.items()) {
+            RefundItemLot lot = lotBySku.get(item.sku());
+            // Sempre a sobrecarga de 8 argumentos (EST-F008): sem entrada em lotBySku, lotCode/
+            // expiryDate chegam nulos e o comportamento é idêntico ao overload antigo — válido só
+            // se o SKU não for lote-rastreado (senão adjustStock lança MissingLotInfoException).
             estoqueUseCase.adjustStock(item.sku(), order.warehouseCode(), MovementType.ENTRADA,
-                    item.quantity(), movementReason, username);
+                    item.quantity(), movementReason, username,
+                    lot == null ? null : lot.lotCode(), lot == null ? null : lot.expiryDate());
         }
 
         // Cada pagamento CAPTURED ganha uma linha REFUNDED do mesmo valor — nunca um update, pelo

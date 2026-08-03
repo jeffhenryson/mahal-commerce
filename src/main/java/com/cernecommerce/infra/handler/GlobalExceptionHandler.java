@@ -45,12 +45,16 @@ import com.cernecommerce.core.domain.exception.estoque.KitCostNotEditableExcepti
 import com.cernecommerce.core.domain.exception.estoque.KitDirectAdjustmentException;
 import com.cernecommerce.core.domain.exception.estoque.KitHasVariantsException;
 import com.cernecommerce.core.domain.exception.estoque.KitSelfReferenceException;
+import com.cernecommerce.core.domain.exception.estoque.LotExpiryDateMismatchException;
+import com.cernecommerce.core.domain.exception.estoque.MissingLotInfoException;
 import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountAlreadyOpenException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountNotOpenException;
+import com.cernecommerce.core.domain.exception.estoque.StockLotNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.StockReservationNotActiveException;
 import com.cernecommerce.core.domain.exception.estoque.StockReservationNotFoundException;
+import com.cernecommerce.core.domain.exception.estoque.UnexpectedLotInfoException;
 import com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException;
 import com.cernecommerce.core.domain.exception.crm.CampaignAutomationNotFoundException;
 import com.cernecommerce.core.domain.exception.crm.CustomerNotFoundException;
@@ -239,6 +243,28 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(InsufficientStockException.class)
     public ResponseEntity<ApiError> handleInsufficientStock(InsufficientStockException ex, HttpServletRequest req) {
         return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "INSUFFICIENT_STOCK", req);
+    }
+
+    // EST-F008 — lote e validade.
+    @ExceptionHandler(MissingLotInfoException.class)
+    public ResponseEntity<ApiError> handleMissingLotInfo(MissingLotInfoException ex, HttpServletRequest req) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "LOT_INFO_REQUIRED", req);
+    }
+
+    @ExceptionHandler(UnexpectedLotInfoException.class)
+    public ResponseEntity<ApiError> handleUnexpectedLotInfo(UnexpectedLotInfoException ex, HttpServletRequest req) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "LOT_INFO_NOT_APPLICABLE", req);
+    }
+
+    @ExceptionHandler(LotExpiryDateMismatchException.class)
+    public ResponseEntity<ApiError> handleLotExpiryDateMismatch(LotExpiryDateMismatchException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "LOT_EXPIRY_MISMATCH", req);
+    }
+
+    @ExceptionHandler(StockLotNotFoundException.class)
+    public ResponseEntity<ApiError> handleStockLotNotFound(StockLotNotFoundException ex, HttpServletRequest req) {
+        return error(HttpStatus.NOT_FOUND, ex.getMessage(), "STOCK_LOT_NOT_FOUND", req);
     }
 
     @ExceptionHandler(StockReservationNotFoundException.class)

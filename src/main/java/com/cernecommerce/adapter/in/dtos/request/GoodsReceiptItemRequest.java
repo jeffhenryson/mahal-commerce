@@ -6,6 +6,7 @@ import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 
 @Data
 public class GoodsReceiptItemRequest {
@@ -15,4 +16,9 @@ public class GoodsReceiptItemRequest {
     @NotNull
     @DecimalMin(value = "0.0", inclusive = false)
     private BigDecimal quantity;
+
+    /** Obrigatório junto com {@code expiryDate} só quando o SKU é lote-rastreado (EST-F008). */
+    private String lotCode;
+
+    private LocalDate expiryDate;
 }

@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import lombok.*;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 
 @Getter
 @Setter
@@ -30,4 +31,10 @@ public class GoodsReceiptItemEntity {
 
     @Column(nullable = false, precision = 14, scale = 3)
     private BigDecimal quantity;
+
+    @Column(name = "lot_code", length = 50)
+    private String lotCode;
+
+    @Column(name = "expiry_date")
+    private LocalDate expiryDate;
 }

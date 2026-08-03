@@ -17,4 +17,6 @@ public class StockCountItemResponseDTO {
     private BigDecimal expectedQuantity;
     /** {@code countedQuantity - expectedQuantity}: negativo é falta, positivo é sobra. */
     private BigDecimal difference;
+    /** Lote contado (EST-F008); nulo para SKU não lote-rastreado. */
+    private String lotCode;
 }

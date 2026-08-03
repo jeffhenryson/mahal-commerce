@@ -30,6 +30,7 @@ public class StockCountDTOConverter {
         dto.setCountedQuantity(item.countedQuantity());
         dto.setExpectedQuantity(item.expectedQuantity());
         dto.setDifference(item.difference());
+        dto.setLotCode(item.lotCode());
         return dto;
     }
 }

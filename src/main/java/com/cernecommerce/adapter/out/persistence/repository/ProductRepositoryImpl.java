@@ -40,6 +40,7 @@ public class ProductRepositoryImpl implements ProductRepository {
         entity.setMarkupPercent(product.pricing().markupPercent());
         entity.setSalePrice(product.pricing().salePrice());
         entity.setType(product.type().name());
+        entity.setLotTracked(product.lotTracked());
         for (ProductVariant variant : product.variants()) {
             ProductVariantEntity variantEntity = new ProductVariantEntity();
             variantEntity.setId(variant.id());
@@ -94,7 +95,8 @@ public class ProductRepositoryImpl implements ProductRepository {
                 .toList();
         Pricing pricing = Pricing.of(e.getCostPrice(), e.getMarkupPercent(), e.getSalePrice());
         ProductType type = ProductType.valueOf(e.getType());
-        return Product.of(e.getId(), e.getSku(), e.getName(), e.getCategory(), e.isActive(), variants, pricing, type);
+        return Product.of(e.getId(), e.getSku(), e.getName(), e.getCategory(), e.isActive(), variants, pricing, type,
+                e.isLotTracked());
     }
 
     private ProductVariant toDomain(ProductVariantEntity e) {

@@ -42,6 +42,7 @@ public class StockCountRepositoryImpl implements StockCountRepository {
             itemEntity.setCountedQuantity(item.countedQuantity());
             itemEntity.setExpectedQuantity(item.expectedQuantity());
             itemEntity.setDifference(item.difference());
+            itemEntity.setLotCode(item.lotCode());
             entity.getItems().add(itemEntity);
         }
         return toDomain(stockCountJpaRepository.save(entity));
@@ -74,7 +75,7 @@ public class StockCountRepositoryImpl implements StockCountRepository {
     private StockCount toDomain(StockCountEntity e) {
         List<StockCountItem> items = e.getItems().stream()
                 .map(i -> StockCountItem.of(i.getId(), i.getSku(), i.getCountedQuantity(),
-                        i.getExpectedQuantity(), i.getDifference()))
+                        i.getExpectedQuantity(), i.getDifference(), i.getLotCode()))
                 .toList();
         return StockCount.of(e.getId(), e.getWarehouseId(), StockCountStatus.valueOf(e.getStatus()),
                 e.getUsername(), e.getCreatedAt(), e.getClosedAt(), items);

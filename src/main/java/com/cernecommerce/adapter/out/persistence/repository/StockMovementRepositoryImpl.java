@@ -31,6 +31,7 @@ public class StockMovementRepositoryImpl implements StockMovementRepository {
         entity.setReason(movement.reason());
         entity.setUsername(movement.username());
         entity.setCreatedAt(movement.createdAt());
+        entity.setLotCode(movement.lotCode());
         return toDomain(stockMovementJpaRepository.save(entity));
     }
 
@@ -45,6 +46,6 @@ public class StockMovementRepositoryImpl implements StockMovementRepository {
 
     private StockMovement toDomain(StockMovementEntity e) {
         return StockMovement.of(e.getId(), e.getSku(), e.getWarehouseId(), MovementType.valueOf(e.getType()),
-                e.getQuantity(), e.getReason(), e.getUsername(), e.getCreatedAt());
+                e.getQuantity(), e.getReason(), e.getUsername(), e.getCreatedAt(), e.getLotCode());
     }
 }

@@ -12,15 +12,20 @@ import com.cernecommerce.core.domain.exception.estoque.KitCostNotEditableExcepti
 import com.cernecommerce.core.domain.exception.estoque.KitDirectAdjustmentException;
 import com.cernecommerce.core.domain.exception.estoque.KitHasVariantsException;
 import com.cernecommerce.core.domain.exception.estoque.KitSelfReferenceException;
+import com.cernecommerce.core.domain.exception.estoque.LotExpiryDateMismatchException;
+import com.cernecommerce.core.domain.exception.estoque.MissingLotInfoException;
 import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountAlreadyOpenException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountNotOpenException;
+import com.cernecommerce.core.domain.exception.estoque.StockLotNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.StockReservationNotActiveException;
 import com.cernecommerce.core.domain.exception.estoque.StockReservationNotFoundException;
+import com.cernecommerce.core.domain.exception.estoque.UnexpectedLotInfoException;
 import com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.KitComponent;
+import com.cernecommerce.core.domain.model.estoque.LotIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
@@ -34,6 +39,7 @@ import com.cernecommerce.core.domain.model.estoque.ReservationStatus;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
 import com.cernecommerce.core.domain.model.estoque.StockCount;
 import com.cernecommerce.core.domain.model.estoque.StockCountItem;
+import com.cernecommerce.core.domain.model.estoque.StockLot;
 import com.cernecommerce.core.domain.model.estoque.StockMovement;
 import com.cernecommerce.core.domain.model.estoque.StockReservation;
 import com.cernecommerce.core.domain.model.estoque.Warehouse;
@@ -48,6 +54,7 @@ import com.cernecommerce.core.ports.out.estoque.ReorderPointRepository;
 import com.cernecommerce.core.ports.out.estoque.StockBalanceRepository;
 import com.cernecommerce.core.ports.out.estoque.StockCountRepository;
 import com.cernecommerce.core.ports.out.estoque.StockIntegrityRepository;
+import com.cernecommerce.core.ports.out.estoque.StockLotRepository;
 import com.cernecommerce.core.ports.out.estoque.StockMovementRepository;
 import com.cernecommerce.core.ports.out.estoque.StockReservationRepository;
 import com.cernecommerce.core.ports.out.estoque.WarehouseRepository;
@@ -58,6 +65,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -84,6 +92,7 @@ public class EstoqueService implements EstoqueUseCase {
     private final AfterCommitExecutor afterCommitExecutor;
     private final Duration defaultReservationTtl;
     private final KitComponentRepository kitComponentRepository;
+    private final StockLotRepository stockLotRepository;
 
     public EstoqueService(ProductRepository productRepository, WarehouseRepository warehouseRepository,
             StockBalanceRepository stockBalanceRepository, StockMovementRepository stockMovementRepository,
@@ -91,7 +100,7 @@ public class EstoqueService implements EstoqueUseCase {
             StockCountRepository stockCountRepository, StockReservationRepository stockReservationRepository,
             NotificationUseCase notificationUseCase, UserRepository userRepository,
             AfterCommitExecutor afterCommitExecutor, Duration defaultReservationTtl,
-            KitComponentRepository kitComponentRepository) {
+            KitComponentRepository kitComponentRepository, StockLotRepository stockLotRepository) {
         this.stockReservationRepository = stockReservationRepository;
         this.defaultReservationTtl = defaultReservationTtl;
         this.productRepository = productRepository;
@@ -105,6 +114,7 @@ public class EstoqueService implements EstoqueUseCase {
         this.userRepository = userRepository;
         this.afterCommitExecutor = afterCommitExecutor;
         this.kitComponentRepository = kitComponentRepository;
+        this.stockLotRepository = stockLotRepository;
     }
 
     @Override
@@ -216,6 +226,16 @@ public class EstoqueService implements EstoqueUseCase {
 
     @Override
     @Transactional
+    public Product setProductLotTracked(String sku, boolean lotTracked) {
+        Product current = productRepository.findBySku(sku)
+                .orElseThrow(() -> new ProductNotFoundException(sku));
+        // Kit x lote-rastreado é mutuamente exclusivo — o compact constructor de Product já barra
+        // isso, então não há checagem duplicada aqui.
+        return productRepository.save(current.withLotTracked(lotTracked));
+    }
+
+    @Override
+    @Transactional
     public Warehouse updateWarehouse(String code, String name, WarehouseType type) {
         Warehouse current = warehouseRepository.findByCode(code)
                 .orElseThrow(() -> new WarehouseNotFoundException(code));
@@ -257,6 +277,13 @@ public class EstoqueService implements EstoqueUseCase {
                 .orElseGet(() -> StockBalance.zero(sku, warehouse.id()));
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public List<StockLot> listStockLots(String sku, String warehouseCode) {
+        Warehouse warehouse = requireWarehouse(warehouseCode);
+        return stockLotRepository.findBySkuAndWarehouseId(sku, warehouse.id());
+    }
+
     /**
      * {@code min(floor(saldo_componente_disponível / quantidade_na_receita))} sobre os
      * componentes (EST-F015, §2.10). Usa o <b>disponível</b>, não o físico bruto — consistente
@@ -287,21 +314,111 @@ public class EstoqueService implements EstoqueUseCase {
     @Transactional
     public StockBalance adjustStock(String sku, String warehouseCode, MovementType type, BigDecimal quantity,
             String reason, String username) {
+        return adjustStock(sku, warehouseCode, type, quantity, reason, username, null, null);
+    }
+
+    @Override
+    @Transactional
+    public StockBalance adjustStock(String sku, String warehouseCode, MovementType type, BigDecimal quantity,
+            String reason, String username, String lotCode, LocalDate expiryDate) {
         requireKnownSku(sku);
         Warehouse warehouse = warehouseRepository.findByCode(warehouseCode)
                 .orElseThrow(() -> new WarehouseNotFoundException(warehouseCode));
         Optional<Product> product = productRepository.findByAnySku(sku);
         if (product.isPresent() && product.get().isKit()) {
+            // Kit não tem lote próprio (EST-F015: sem saldo físico próprio, e Product já barra
+            // lotTracked num kit) — recusar explicitamente em vez de explodeKitMovement descartar
+            // lotCode/expiryDate em silêncio na recursão para os componentes.
+            if ((lotCode != null && !lotCode.isBlank()) || expiryDate != null) {
+                throw new UnexpectedLotInfoException(sku, "kit não tem lote próprio");
+            }
             return explodeKitMovement(product.get(), warehouse, type, quantity, reason, username);
         }
         requireActiveForInbound(sku, warehouse, type);
+        boolean lotTracked = product.map(Product::lotTracked).orElse(false);
+        validateLotInfo(sku, type, lotTracked, lotCode, expiryDate);
+
         StockBalance current = stockBalanceRepository.findBySkuAndWarehouseId(sku, warehouse.id())
                 .orElseGet(() -> StockBalance.zero(sku, warehouse.id()));
         StockBalance updated = current.apply(type, quantity);
-        stockMovementRepository.save(StockMovement.create(sku, warehouse.id(), type, quantity, reason, username));
+
+        String movementLotCode = null;
+        if (lotTracked && type == MovementType.ENTRADA) {
+            receiveIntoLot(sku, warehouse.id(), lotCode, expiryDate, quantity);
+            movementLotCode = lotCode;
+        }
+
+        stockMovementRepository.save(
+                StockMovement.create(sku, warehouse.id(), type, quantity, reason, username, movementLotCode));
         StockBalance saved = stockBalanceRepository.save(updated);
+
+        if (lotTracked && type == MovementType.SAIDA) {
+            consumeLotsFefo(sku, warehouse.id(), quantity);
+        }
+
         notifyIfBelowReorderPoint(saved);
         return saved;
+    }
+
+    /**
+     * Lote/validade só fazem sentido numa {@code ENTRADA} de SKU lote-rastreado (EST-F008):
+     * {@code SAIDA} consome por FEFO automaticamente — o chamador não escolhe o lote — e
+     * {@code AJUSTE} direto num SKU lote-rastreado é barrado à parte (ver
+     * {@code requireActiveForInbound}-like check em bloco futuro). Ausência/presença fora do
+     * esperado é rejeitada explicitamente, não ignorada silenciosamente — mesma régua que
+     * {@code Pricing} usa para "nulo é desconhecido, não é ausência sem consequência".
+     */
+    private void validateLotInfo(String sku, MovementType type, boolean lotTracked, String lotCode,
+            LocalDate expiryDate) {
+        boolean lotInfoProvided = (lotCode != null && !lotCode.isBlank()) || expiryDate != null;
+        if (lotInfoProvided && !lotTracked) {
+            throw new UnexpectedLotInfoException(sku, "produto não é lote-rastreado");
+        }
+        if (lotInfoProvided && type != MovementType.ENTRADA) {
+            throw new UnexpectedLotInfoException(sku, "lote só se aplica a ENTRADA — SAIDA consome por FEFO");
+        }
+        if (lotTracked && type == MovementType.ENTRADA
+                && (lotCode == null || lotCode.isBlank() || expiryDate == null)) {
+            throw new MissingLotInfoException(sku);
+        }
+    }
+
+    /**
+     * Upsert no lote (EST-F008): soma a quantidade recebida, criando a linha se for a primeira
+     * entrada daquele {@code lotCode}. A validade grava na criação e não muda depois — um
+     * reabastecimento do mesmo lote informando outra validade é erro de digitação.
+     */
+    private void receiveIntoLot(String sku, Long warehouseId, String lotCode, LocalDate expiryDate,
+            BigDecimal quantity) {
+        StockLot lot = stockLotRepository.findBySkuAndWarehouseIdAndLotCode(sku, warehouseId, lotCode)
+                .orElseGet(() -> StockLot.create(sku, warehouseId, lotCode, expiryDate));
+        if (!lot.expiryDate().equals(expiryDate)) {
+            throw new LotExpiryDateMismatchException(sku, lotCode, lot.expiryDate(), expiryDate);
+        }
+        stockLotRepository.save(lot.receive(quantity));
+    }
+
+    /**
+     * Consome os lotes do par SKU/depósito por FEFO — do que vence primeiro em diante — até cobrir
+     * {@code quantity}. Quem valida se existe saldo suficiente é {@code stock_balance}, já aplicado
+     * antes desta chamada; se os lotes não cobrirem o total (descompasso entre o agregado e a soma
+     * dos lotes — só possível por drift externo), consome o que existe e não lança erro: a venda já
+     * foi validada contra o agregado, e o descompasso fica visível em
+     * {@code GET /estoque/integrity/lot-mismatch} em vez de derrubar a operação.
+     */
+    private void consumeLotsFefo(String sku, Long warehouseId, BigDecimal quantity) {
+        BigDecimal remaining = quantity;
+        for (StockLot lot : stockLotRepository.findBySkuAndWarehouseId(sku, warehouseId)) {
+            if (remaining.signum() <= 0) {
+                break;
+            }
+            if (lot.quantity().signum() <= 0) {
+                continue;
+            }
+            BigDecimal drawn = lot.quantity().min(remaining);
+            stockLotRepository.save(lot.consume(drawn));
+            remaining = remaining.subtract(drawn);
+        }
     }
 
     /**
@@ -364,6 +481,12 @@ public class EstoqueService implements EstoqueUseCase {
         return stockIntegrityRepository.findReservationMismatches(page, size);
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public PageResult<LotIntegrityMismatch> listLotMismatches(int page, int size) {
+        return stockIntegrityRepository.findLotMismatches(page, size);
+    }
+
     // ---------------------------------------------------------------------------------------
     // Balanço de inventário (EST-F006)
     // ---------------------------------------------------------------------------------------
@@ -381,16 +504,39 @@ public class EstoqueService implements EstoqueUseCase {
     @Override
     @Transactional
     public StockCount recordCountedItem(Long stockCountId, String sku, BigDecimal countedQuantity) {
+        return recordCountedItem(stockCountId, sku, countedQuantity, null);
+    }
+
+    @Override
+    @Transactional
+    public StockCount recordCountedItem(Long stockCountId, String sku, BigDecimal countedQuantity, String lotCode) {
         StockCount count = requireOpenStockCount(stockCountId);
         // Mesma pré-condição de adjustStock (EST-C002): não adianta contar um SKU que o
         // fechamento não conseguiria ajustar.
         requireKnownSku(sku);
+        Optional<Product> product = productRepository.findByAnySku(sku);
         // Kit não tem contagem física própria (EST-F015) — rejeitar aqui, na hora do registro,
         // em vez de deixar o erro só aparecer confusamente quando closeStockCount tentar um
         // AJUSTE direto no kit e abortar o fechamento inteiro.
-        productRepository.findByAnySku(sku).filter(Product::isKit)
-                .ifPresent(kit -> { throw new KitDirectAdjustmentException(sku); });
-        return stockCountRepository.save(count.withCountedItem(sku, countedQuantity));
+        product.filter(Product::isKit).ifPresent(kit -> { throw new KitDirectAdjustmentException(sku); });
+
+        // EST-F008: SKU lote-rastreado é contado por lote, não agregado — mesma régua condicional
+        // de validateLotInfo, mas aqui não há tipo de movimento: a contagem em si já é a operação.
+        boolean lotTracked = product.map(Product::lotTracked).orElse(false);
+        boolean lotInfoProvided = lotCode != null && !lotCode.isBlank();
+        if (lotTracked && !lotInfoProvided) {
+            throw new MissingLotInfoException(sku);
+        }
+        if (!lotTracked && lotInfoProvided) {
+            throw new UnexpectedLotInfoException(sku, "produto não é lote-rastreado");
+        }
+        if (lotInfoProvided) {
+            // Contagem só reconcilia lote que já existe — lote novo entra por recebimento
+            // (adjustStock ENTRADA), não pelo balanço.
+            stockLotRepository.findBySkuAndWarehouseIdAndLotCode(sku, count.warehouseId(), lotCode)
+                    .orElseThrow(() -> new StockLotNotFoundException(sku, lotCode));
+        }
+        return stockCountRepository.save(count.withCountedItem(sku, countedQuantity, lotCode));
     }
 
     @Override
@@ -399,22 +545,74 @@ public class EstoqueService implements EstoqueUseCase {
         StockCount count = requireOpenStockCount(stockCountId);
         Warehouse warehouse = getWarehouse(count.warehouseId());
 
+        Map<String, List<StockCountItem>> bySku = new LinkedHashMap<>();
+        count.items().forEach(item -> bySku.computeIfAbsent(item.sku(), k -> new ArrayList<>()).add(item));
+
         List<StockCountItem> reconciled = new ArrayList<>();
-        for (StockCountItem item : count.items()) {
-            BigDecimal systemQuantity = stockBalanceRepository
-                    .findBySkuAndWarehouseId(item.sku(), warehouse.id())
-                    .map(StockBalance::quantity)
-                    .orElse(BigDecimal.ZERO);
-            StockCountItem confronted = item.reconciledWith(systemQuantity);
-            reconciled.add(confronted);
-            // Contagem que bateu não vira movimentação: o ledger registra o que mudou, e um
-            // AJUSTE de saldo para ele mesmo só faria ruído.
-            if (confronted.diverges()) {
-                adjustStock(item.sku(), warehouse.code(), MovementType.AJUSTE, item.countedQuantity(),
-                        "Balanço de inventário #" + stockCountId, username);
+        for (Map.Entry<String, List<StockCountItem>> entry : bySku.entrySet()) {
+            String sku = entry.getKey();
+            List<StockCountItem> items = entry.getValue();
+            boolean lotTracked = items.stream().anyMatch(i -> i.lotCode() != null);
+            if (lotTracked) {
+                reconciled.addAll(closeLotTrackedSku(stockCountId, warehouse, sku, items, username));
+            } else {
+                reconciled.add(closeAggregateSku(stockCountId, warehouse, items.get(0), username));
             }
         }
         return stockCountRepository.save(count.withReconciledItems(reconciled).closed());
+    }
+
+    /**
+     * Fechamento de um SKU não lote-rastreado: confronta contra o agregado de
+     * {@code stock_balance}, como sempre foi. Contagem que bateu não vira movimentação — um AJUSTE
+     * de saldo para ele mesmo só faria ruído no ledger.
+     */
+    private StockCountItem closeAggregateSku(Long stockCountId, Warehouse warehouse, StockCountItem item,
+            String username) {
+        BigDecimal systemQuantity = stockBalanceRepository
+                .findBySkuAndWarehouseId(item.sku(), warehouse.id())
+                .map(StockBalance::quantity)
+                .orElse(BigDecimal.ZERO);
+        StockCountItem confronted = item.reconciledWith(systemQuantity);
+        if (confronted.diverges()) {
+            adjustStock(item.sku(), warehouse.code(), MovementType.AJUSTE, item.countedQuantity(),
+                    "Balanço de inventário #" + stockCountId, username);
+        }
+        return confronted;
+    }
+
+    /**
+     * Fechamento de um SKU lote-rastreado (EST-F008): cada lote contado é confrontado e
+     * reconciliado contra o próprio {@code StockLot}, não contra o agregado — é isto que mantém
+     * {@code SUM(stock_lot.quantity) == stock_balance.quantity} depois de um balanço, em vez de
+     * deixar a soma dos lotes derivar silenciosamente do agregado (o gap que {@code
+     * StockLot.reconciledTo} existia para fechar e ninguém chamava). Só depois de reconciliar todo
+     * lote do grupo é que o agregado recebe UM AJUSTE para a soma — mesmo formato de ledger que o
+     * SKU não lote-rastreado, um evento por SKU por fechamento, não um por lote.
+     */
+    private List<StockCountItem> closeLotTrackedSku(Long stockCountId, Warehouse warehouse, String sku,
+            List<StockCountItem> items, String username) {
+        List<StockCountItem> reconciled = new ArrayList<>();
+        BigDecimal newTotal = BigDecimal.ZERO;
+        for (StockCountItem item : items) {
+            StockLot lot = stockLotRepository.findBySkuAndWarehouseIdAndLotCode(sku, warehouse.id(), item.lotCode())
+                    .orElseThrow(() -> new StockLotNotFoundException(sku, item.lotCode()));
+            StockCountItem confronted = item.reconciledWith(lot.quantity());
+            reconciled.add(confronted);
+            if (confronted.diverges()) {
+                stockLotRepository.save(lot.reconciledTo(item.countedQuantity()));
+            }
+            newTotal = newTotal.add(item.countedQuantity());
+        }
+
+        BigDecimal systemQuantity = stockBalanceRepository.findBySkuAndWarehouseId(sku, warehouse.id())
+                .map(StockBalance::quantity)
+                .orElse(BigDecimal.ZERO);
+        if (newTotal.compareTo(systemQuantity) != 0) {
+            adjustStock(sku, warehouse.code(), MovementType.AJUSTE, newTotal,
+                    "Balanço de inventário #" + stockCountId, username);
+        }
+        return reconciled;
     }
 
     @Override
@@ -500,6 +698,13 @@ public class EstoqueService implements EstoqueUseCase {
                 MovementType.SAIDA, reservation.quantity(),
                 "Consumo da reserva #" + reservationId + " (" + reservation.ownerReference() + ")", username));
 
+        // EST-F008: a mercadoria reservada também sai de um lote de verdade quando o SKU é
+        // lote-rastreado — este caminho não passa por adjustStock, então o FEFO precisa ser
+        // disparado aqui também, senão stock_lot nunca desconta a venda do marketplace.
+        productRepository.findByAnySku(reservation.sku())
+                .filter(Product::lotTracked)
+                .ifPresent(p -> consumeLotsFefo(reservation.sku(), reservation.warehouseId(), reservation.quantity()));
+
         notifyIfBelowReorderPoint(updated);
         return stockReservationRepository.save(reservation.consumed());
     }
@@ -550,6 +755,40 @@ public class EstoqueService implements EstoqueUseCase {
             stockReservationRepository.save(reservation.expired());
         }
         return expired.size();
+    }
+
+    @Override
+    @Transactional
+    public int alertExpiringLots(int cutoffDays, int batchSize) {
+        List<StockLot> expiring = stockLotRepository.findExpiringSoon(LocalDate.now().plusDays(cutoffDays), batchSize);
+        if (expiring.isEmpty()) {
+            return 0;
+        }
+        dispatchLotExpiryAlerts(expiring);
+        expiring.forEach(lot -> stockLotRepository.save(lot.alerted()));
+        return expiring.size();
+    }
+
+    /**
+     * Uma notificação por passada do varredor, não uma por lote — quem recebe não precisa de N
+     * notificações separadas para N lotes vencendo na mesma manhã. Mesmo formato de
+     * {@link #dispatchReorderAlerts}, mas sem passar pelo {@code afterCommitExecutor}: aquele
+     * existe para agrupar chamadas que acontecem no meio de uma transação de negócio maior (venda,
+     * reserva) e só disparar depois do commit; aqui o próprio método já É a transação de topo do
+     * varredor, não há nada maior para esperar committar.
+     */
+    private void dispatchLotExpiryAlerts(List<StockLot> lots) {
+        String title = "Lote de estoque vencendo";
+        StringBuilder body = new StringBuilder(lots.size() == 1
+                ? "O lote a seguir está vencendo:"
+                : lots.size() + " lotes estão vencendo:");
+        lots.forEach(lot -> body.append("\n- ").append(lot.sku())
+                .append(" (lote ").append(lot.lotCode()).append("): vence em ").append(lot.expiryDate())
+                .append(", saldo ").append(lot.quantity()));
+
+        userRepository.findUsernamesByPermission(STOCK_MANAGE_PERMISSION)
+                .forEach(username -> notificationUseCase.notify(username, NotificationType.SYSTEM,
+                        title, body.toString()));
     }
 
     // ---------------------------------------------------------------------------------------

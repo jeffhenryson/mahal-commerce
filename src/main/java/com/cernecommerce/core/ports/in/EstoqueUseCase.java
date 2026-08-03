@@ -2,6 +2,7 @@ package com.cernecommerce.core.ports.in;
 
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.KitComponent;
+import com.cernecommerce.core.domain.model.estoque.LotIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
@@ -11,6 +12,7 @@ import com.cernecommerce.core.domain.model.estoque.ReservationIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.ReservationStatus;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
 import com.cernecommerce.core.domain.model.estoque.StockCount;
+import com.cernecommerce.core.domain.model.estoque.StockLot;
 import com.cernecommerce.core.domain.model.estoque.StockMovement;
 import com.cernecommerce.core.domain.model.estoque.StockReservation;
 import com.cernecommerce.core.domain.model.estoque.Warehouse;
@@ -18,6 +20,7 @@ import com.cernecommerce.core.domain.model.estoque.WarehouseType;
 
 import java.math.BigDecimal;
 import java.time.Duration;
+import java.time.LocalDate;
 import java.util.List;
 
 /**
@@ -91,6 +94,17 @@ public interface EstoqueUseCase {
     Product setProductActive(String sku, boolean active);
 
     /**
+     * Ativa ou desativa o rastreamento de lote e validade de um produto (EST-F008) — opt-in por
+     * SKU, já que só essência/carvão/perecível faz sentido rastrear. A partir daqui,
+     * {@link #adjustStock(String, String, MovementType, BigDecimal, String, String, String, LocalDate)}
+     * passa a exigir lote em toda {@code ENTRADA} deste SKU. Lança
+     * {@link com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException} se o SKU
+     * pai não existir, ou {@link IllegalArgumentException} se o SKU for um {@code KIT} — kit não
+     * tem saldo físico próprio para rastrear.
+     */
+    Product setProductLotTracked(String sku, boolean lotTracked);
+
+    /**
      * Alteração parcial de depósito (EST-F018): {@code name} e/ou {@code type} nulos são mantidos.
      * Não altera {@code code}. Lança
      * {@link com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException}.
@@ -152,6 +166,39 @@ public interface EstoqueUseCase {
             String reason, String username);
 
     /**
+     * Mesmo que {@link #adjustStock(String, String, MovementType, BigDecimal, String, String)}, com
+     * lote e validade explícitos (EST-F008) — só se aplica a {@code ENTRADA} de SKU
+     * {@link com.cernecommerce.core.domain.model.estoque.Product#lotTracked()}.
+     * {@code SAIDA} não recebe lote: o consumo é automático por FEFO (do que vence primeiro em
+     * diante), entre os lotes já recebidos.
+     *
+     * @param lotCode identificador do lote recebido; obrigatório junto com {@code expiryDate}
+     *        quando o SKU é lote-rastreado e o tipo é {@code ENTRADA}.
+     * @param expiryDate validade do lote. Se o {@code lotCode} já existir para o par SKU/depósito
+     *        com outra validade gravada, a chamada falha — o mesmo lote não muda de validade.
+     * @throws com.cernecommerce.core.domain.exception.estoque.MissingLotInfoException se o SKU é
+     *         lote-rastreado, o tipo é {@code ENTRADA} e {@code lotCode}/{@code expiryDate} não
+     *         vierem preenchidos
+     * @throws com.cernecommerce.core.domain.exception.estoque.UnexpectedLotInfoException se
+     *         {@code lotCode}/{@code expiryDate} vierem preenchidos para um SKU não lote-rastreado,
+     *         ou para um tipo diferente de {@code ENTRADA}
+     * @throws com.cernecommerce.core.domain.exception.estoque.LotExpiryDateMismatchException se o
+     *         {@code lotCode} já existir com outra validade
+     */
+    StockBalance adjustStock(String sku, String warehouseCode, MovementType type, BigDecimal quantity,
+            String reason, String username, String lotCode, LocalDate expiryDate);
+
+    /**
+     * Lista os lotes de um SKU num depósito (EST-F008), do que vence primeiro em diante. Lista
+     * vazia se o SKU não é lote-rastreado ou ainda não recebeu nenhum lote — não é erro, é o
+     * estado normal de todo SKU antes do primeiro {@code adjustStock(ENTRADA)} com lote.
+     *
+     * @throws com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException se o
+     *         código do depósito não existir
+     */
+    List<StockLot> listStockLots(String sku, String warehouseCode);
+
+    /**
      * Histórico paginado de movimentações de um SKU em um depósito, mais recentes primeiro.
      * Retorna página vazia se o par SKU/depósito nunca foi movimentado. Lança
      * {@link com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException}
@@ -201,6 +248,21 @@ public interface EstoqueUseCase {
      */
     PageResult<ReservationIntegrityMismatch> listReservationMismatches(int page, int size);
 
+    /**
+     * Diagnóstico de integridade de lote (EST-F008): pares SKU/depósito de SKU lote-rastreado cujo
+     * {@code stock_balance.quantity} diverge da soma de {@code stock_lot.quantity} para o mesmo
+     * par.
+     *
+     * <p>{@code stock_lot} é aditivo (ver javadoc de {@code StockLot}) — mantido pela mesma
+     * transação de {@code adjustStock}, mas sem FK que force a igualdade. O caminho conhecido de
+     * drift é {@code consumeLotsFefo} não achar saldo suficiente nos lotes para cobrir uma SAIDA já
+     * validada contra o agregado (comentário em {@code EstoqueService}) — aqui é onde esse drift
+     * fica visível, em vez de silencioso. Somente leitura — a correção é decisão humana.</p>
+     *
+     * <p>Ordenado por {@code sku, warehouseCode}. Página vazia quando a base está íntegra.</p>
+     */
+    PageResult<LotIntegrityMismatch> listLotMismatches(int page, int size);
+
     // ---------------------------------------------------------------------------------------
     // Balanço de inventário (EST-F006)
     // ---------------------------------------------------------------------------------------
@@ -214,16 +276,41 @@ public interface EstoqueUseCase {
     StockCount openStockCount(String warehouseCode, String username);
 
     /**
-     * Registra o que foi contado de um SKU. É upsert por SKU — recontar sobrescreve. Exige
-     * balanço {@link com.cernecommerce.core.domain.model.estoque.StockCountStatus#ABERTA} e SKU
-     * existente no catálogo.
+     * Registra o que foi contado de um SKU não lote-rastreado. É upsert por SKU — recontar
+     * sobrescreve. Exige balanço {@link com.cernecommerce.core.domain.model.estoque.StockCountStatus#ABERTA}
+     * e SKU existente no catálogo.
+     *
+     * <p>Equivale a {@link #recordCountedItem(Long, String, BigDecimal, String)} com
+     * {@code lotCode = null} — falha se o SKU for lote-rastreado (EST-F008), porque nesse caso a
+     * contagem precisa dizer qual lote.</p>
      */
     StockCount recordCountedItem(Long stockCountId, String sku, BigDecimal countedQuantity);
+
+    /**
+     * Mesmo que {@link #recordCountedItem(Long, String, BigDecimal)}, com o lote contado explícito
+     * (EST-F008). SKU lote-rastreado exige {@code lotCode}; SKU não lote-rastreado recusa se vier
+     * preenchido. É upsert por {@code (sku, lotCode)} — recontar o mesmo lote sobrescreve, contar
+     * um lote diferente do mesmo SKU acrescenta uma linha.
+     *
+     * @throws com.cernecommerce.core.domain.exception.estoque.MissingLotInfoException se o SKU for
+     *         lote-rastreado e {@code lotCode} vier nulo/vazio
+     * @throws com.cernecommerce.core.domain.exception.estoque.UnexpectedLotInfoException se o SKU
+     *         não for lote-rastreado e {@code lotCode} vier preenchido
+     * @throws com.cernecommerce.core.domain.exception.estoque.StockLotNotFoundException se o
+     *         {@code lotCode} não corresponder a nenhum lote existente — a contagem só reconcilia
+     *         lote que já existe; lote novo entra por recebimento, não pelo balanço
+     */
+    StockCount recordCountedItem(Long stockCountId, String sku, BigDecimal countedQuantity, String lotCode);
 
     /**
      * Fecha o balanço e aplica os ajustes: para cada item cuja contagem <b>divirja</b> do saldo do
      * sistema, grava um {@link MovementType#AJUSTE} levando o saldo ao valor contado. Item que
      * bateu não gera movimentação — contagem certa não polui o ledger.
+     *
+     * <p>SKU lote-rastreado (EST-F008) é reconciliado por lote primeiro — cada {@code StockLot}
+     * contado recebe seu próprio {@code reconciledTo}, para {@code SUM(stock_lot.quantity)}
+     * continuar igual a {@code stock_balance.quantity} — e só então o agregado recebe UM
+     * {@code AJUSTE} para a soma dos lotes, no mesmo formato de ledger do SKU não lote-rastreado.</p>
      *
      * <p>Tudo na mesma transação: se um SKU falhar, nenhum ajuste é aplicado e o balanço continua
      * aberto. Os itens ficam com {@code expectedQuantity} e {@code difference} carimbados, que é o
@@ -331,6 +418,16 @@ public interface EstoqueUseCase {
      * @return quantas reservas foram expiradas nesta passada
      */
     int expireReservations(int batchSize);
+
+    /**
+     * Notifica quem tem {@code ESTOQUE_STOCK_MANAGE} sobre todo {@link
+     * com.cernecommerce.core.domain.model.estoque.StockLot} que vence em {@code cutoffDays} dias
+     * ou menos e ainda não foi alertado (EST-F008). Chamado pelo varredor agendado, em lotes —
+     * cada lote alertado é carimbado ({@code StockLot#alerted()}) para o próximo run não repetir.
+     *
+     * @return quantos lotes foram alertados nesta passada
+     */
+    int alertExpiringLots(int cutoffDays, int batchSize);
 
     // ---------------------------------------------------------------------------------------
     // Kits (EST-F015) — virtuais, de um nível só (§2.10 do plano)

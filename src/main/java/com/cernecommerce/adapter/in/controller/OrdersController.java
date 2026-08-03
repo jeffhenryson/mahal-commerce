@@ -4,6 +4,7 @@ import com.cernecommerce.adapter.in.converter.OrderDTOConverter;
 import com.cernecommerce.adapter.in.dtos.request.OrderCancelRequest;
 import com.cernecommerce.adapter.in.dtos.request.OrderRefundRequest;
 import com.cernecommerce.adapter.in.dtos.request.OrderStatusRequest;
+import com.cernecommerce.adapter.in.dtos.request.RefundItemLotRequest;
 import com.cernecommerce.adapter.in.dtos.response.OrderAdminResponseDTO;
 import com.cernecommerce.core.domain.event.AuditEvent;
 import com.cernecommerce.core.domain.event.AuditEvent.EventType;
@@ -38,6 +39,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Instant;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -155,7 +157,11 @@ public class OrdersController {
     public ResponseEntity<OrderAdminResponseDTO> refundOrder(@PathVariable("id") Long orderId,
             @Valid @RequestBody OrderRefundRequest request, Authentication authentication) {
         Order before = orderUseCase.getOrder(orderId);
-        Order order = orderUseCase.refundOrder(orderId, request.getReason(), authentication.getName());
+        List<OrderUseCase.RefundItemLot> itemLots = request.getItemLots() == null ? List.of()
+                : request.getItemLots().stream()
+                        .map(l -> new OrderUseCase.RefundItemLot(l.getSku(), l.getLotCode(), l.getExpiryDate()))
+                        .toList();
+        Order order = orderUseCase.refundOrder(orderId, request.getReason(), authentication.getName(), itemLots);
         Map<String, Object> details = new HashMap<>();
         details.put("orderId", orderId);
         details.put("orderNumber", String.valueOf(order.orderNumber()));

@@ -7,6 +7,7 @@ import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 
 @Data
 public class StockMovementRequest {
@@ -36,4 +37,15 @@ public class StockMovementRequest {
     @NotBlank
     @Size(max = 255)
     private String reason;
+
+    /**
+     * Lote recebido (EST-F008). Só se aplica a {@code ENTRADA} de SKU lote-rastreado — obrigatório
+     * junto com {@code expiryDate} nesse caso, e rejeitado em qualquer outro (SAIDA/AJUSTE, ou SKU
+     * não lote-rastreado): {@code SAIDA} consome por FEFO automaticamente, sem o chamador escolher
+     * o lote.
+     */
+    private String lotCode;
+
+    /** Validade do lote recebido — ver {@link #lotCode}. */
+    private LocalDate expiryDate;
 }

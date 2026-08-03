@@ -1,6 +1,7 @@
 package com.cernecommerce.core.ports.out.estoque;
 
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.estoque.LotIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.ReservationIntegrityMismatch;
 
@@ -28,4 +29,11 @@ public interface StockIntegrityRepository {
      * {@code sku, warehouseCode} — chave única, para a paginação ser estável.
      */
     PageResult<ReservationIntegrityMismatch> findReservationMismatches(int page, int size);
+
+    /**
+     * Pares SKU/depósito de SKU lote-rastreado cujo {@code stock_balance.quantity} diverge da
+     * soma de {@code stock_lot.quantity} para o mesmo par (EST-F008). Ordenado por
+     * {@code sku, warehouseCode} — chave única, para a paginação ser estável.
+     */
+    PageResult<LotIntegrityMismatch> findLotMismatches(int page, int size);
 }

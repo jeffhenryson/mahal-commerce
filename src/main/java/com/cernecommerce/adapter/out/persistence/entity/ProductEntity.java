@@ -49,6 +49,11 @@ public class ProductEntity {
     @Column(nullable = false, length = 20)
     private String type;
 
+    // EST-F008 — opt-in de rastreamento de lote/validade. Kit nunca é lote-rastreado (invariante
+    // no domínio, não no schema — mesma régua de outras regras entre campos deste projeto).
+    @Column(name = "lot_tracked", nullable = false)
+    private boolean lotTracked;
+
     @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     @ToString.Exclude
     private List<ProductVariantEntity> variants = new ArrayList<>();

@@ -23,4 +23,10 @@ public class StockCountItemRequest {
     @NotNull
     @DecimalMin(value = "0.0")
     private BigDecimal countedQuantity;
+
+    /**
+     * Lote contado (EST-F008). Obrigatório para SKU lote-rastreado — cada lote é contado e
+     * reconciliado separadamente; recusado para SKU não lote-rastreado.
+     */
+    private String lotCode;
 }
