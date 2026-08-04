@@ -28,6 +28,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Programa de cashback (CRM-F003, §2.4 do plano de arquitetura).
@@ -46,6 +47,17 @@ public class CashbackService implements CashbackUseCase {
     private final EstoqueUseCase estoqueUseCase;
     private final CustomerRepository customerRepository;
     private final SystemConfigPort systemConfigPort;
+
+    /**
+     * Lock em memória por {@code orderId}, exclusivo de {@link #recordEarnedForOrder} — achado
+     * real de {@code CashbackLedgerConcurrencyIT}: nada impedia duas chamadas concorrentes para o
+     * MESMO pedido de duplicarem o ganho. Nunca removido do mapa (cresce no máximo um lançamento
+     * por pedido que já passou por aqui — irrelevante em memória, e evita a corrida clássica de
+     * limpar uma entrada enquanto outra thread ainda a segura). Protege só contra duas chamadas
+     * concorrentes NESTA instância — não substitui a unicidade que valeria entre processos
+     * diferentes, que este esqueleto de único-processo ainda não precisa.
+     */
+    private final ConcurrentHashMap<Long, Object> earnedLocksByOrderId = new ConcurrentHashMap<>();
 
     public CashbackService(CashbackRateRepository cashbackRateRepository,
             CashbackEntryRepository cashbackEntryRepository, EstoqueUseCase estoqueUseCase,
@@ -143,18 +155,31 @@ public class CashbackService implements CashbackUseCase {
             return;
         }
 
-        Instant anchor = order.paidAt() != null ? order.paidAt() : Instant.now();
-        int carenciaDias = systemConfigPort.getInt("cashback.carencia.dias", 7);
-        int expiracaoDias = systemConfigPort.getInt("cashback.expiracao.dias", 180);
-        Instant availableAt = anchor.plus(carenciaDias, ChronoUnit.DAYS);
-        Instant expiresAt = availableAt.plus(expiracaoDias, ChronoUnit.DAYS);
-        Instant now = Instant.now();
+        // Idempotência por pedido sob chamada concorrente (achado de CashbackLedgerConcurrencyIT):
+        // nenhum caminho de produção hoje chama isto duas vezes para o mesmo pedido de propósito
+        // (registerSale e PaymentWebhookService chamam uma única vez, dentro da transação que
+        // confirma o pedido) — mas nada impedia que chamasse. O lock é por orderId para não
+        // travar pedidos diferentes entre si; a checagem por dentro do lock ignora reversão de
+        // propósito (existsEarnedForOrder, não findEarnedByOrderId) — um pedido já revertido não
+        // pode "ganhar" cashback de novo só porque a entrada original não conta mais como ativa.
+        synchronized (earnedLocksByOrderId.computeIfAbsent(order.id(), id -> new Object())) {
+            if (cashbackEntryRepository.existsEarnedForOrder(order.id())) {
+                return;
+            }
 
-        for (OrderItem item : order.items()) {
-            BigDecimal amount = item.cashbackAmount();
-            if (amount != null && amount.signum() > 0) {
-                cashbackEntryRepository.save(CashbackEntry.earned(order.customerId(), order.id(),
-                        item.id(), amount, now, availableAt, expiresAt));
+            Instant anchor = order.paidAt() != null ? order.paidAt() : Instant.now();
+            int carenciaDias = systemConfigPort.getInt("cashback.carencia.dias", 7);
+            int expiracaoDias = systemConfigPort.getInt("cashback.expiracao.dias", 180);
+            Instant availableAt = anchor.plus(carenciaDias, ChronoUnit.DAYS);
+            Instant expiresAt = availableAt.plus(expiracaoDias, ChronoUnit.DAYS);
+            Instant now = Instant.now();
+
+            for (OrderItem item : order.items()) {
+                BigDecimal amount = item.cashbackAmount();
+                if (amount != null && amount.signum() > 0) {
+                    cashbackEntryRepository.save(CashbackEntry.earned(order.customerId(), order.id(),
+                            item.id(), amount, now, availableAt, expiresAt));
+                }
             }
         }
     }

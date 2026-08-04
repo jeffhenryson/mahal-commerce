@@ -80,6 +80,12 @@ public class CashbackEntryRepositoryImpl implements CashbackEntryRepository {
         return jpaRepository.findEarnedByOrderId(orderId).stream().map(this::toDomain).toList();
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public boolean existsEarnedForOrder(Long orderId) {
+        return jpaRepository.existsByOrderIdAndType(orderId, CashbackEntryType.EARNED.name());
+    }
+
     private CashbackEntry toDomain(CashbackEntryEntity e) {
         return CashbackEntry.of(e.getId(), e.getCustomerId(), e.getOrderId(), e.getOrderItemId(),
                 CashbackEntryType.valueOf(e.getType()), e.getAmount(), e.getAvailableAt(),

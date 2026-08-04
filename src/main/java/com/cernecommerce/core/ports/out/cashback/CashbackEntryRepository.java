@@ -45,4 +45,13 @@ public interface CashbackEntryRepository {
      * duplicaria o débito.
      */
     List<CashbackEntry> findEarnedByOrderId(Long orderId);
+
+    /**
+     * Existe algum lançamento {@code EARNED} para este pedido — revertido ou não. Distinto de
+     * {@link #findEarnedByOrderId}, que propositalmente esconde entradas já revertidas: esta
+     * checagem serve só para a guarda de idempotência de {@code recordEarnedForOrder} (ECM-F004/
+     * achado de {@code CashbackLedgerConcurrencyIT}) — "este pedido já teve cashback lançado
+     * alguma vez" não pode dar falso-negativo só porque o lançamento original já foi revertido.
+     */
+    boolean existsEarnedForOrder(Long orderId);
 }

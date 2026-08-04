@@ -35,6 +35,7 @@ import com.cernecommerce.core.domain.model.crm.Customer;
 import com.cernecommerce.core.domain.model.crm.CustomerNote;
 import com.cernecommerce.core.ports.in.CashbackUseCase;
 import com.cernecommerce.core.ports.in.CrmUseCase;
+import com.cernecommerce.core.ports.out.ratelimit.ResourceRateLimiterPort;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -79,12 +80,14 @@ public class CrmController {
     private final ChannelStatusDTOConverter channelStatusConverter;
     private final CashbackDTOConverter cashbackConverter;
     private final ApplicationEventPublisher publisher;
+    private final ResourceRateLimiterPort resourceRateLimiter;
 
     public CrmController(CrmUseCase crmUseCase, CashbackUseCase cashbackUseCase, CustomerDTOConverter converter,
             CustomerNoteDTOConverter noteConverter, StageTransitionDTOConverter stageConverter,
             TagDTOConverter tagConverter, CustomerCsvConverter csvConverter,
             CampaignDTOConverter campaignConverter, ChannelStatusDTOConverter channelStatusConverter,
-            CashbackDTOConverter cashbackConverter, ApplicationEventPublisher publisher) {
+            CashbackDTOConverter cashbackConverter, ApplicationEventPublisher publisher,
+            ResourceRateLimiterPort resourceRateLimiter) {
         this.crmUseCase = crmUseCase;
         this.cashbackUseCase = cashbackUseCase;
         this.converter = converter;
@@ -96,6 +99,7 @@ public class CrmController {
         this.channelStatusConverter = channelStatusConverter;
         this.cashbackConverter = cashbackConverter;
         this.publisher = publisher;
+        this.resourceRateLimiter = resourceRateLimiter;
     }
 
     @Operation(summary = "Cria um cliente")
@@ -181,10 +185,14 @@ public class CrmController {
     })
     @GetMapping("/customers/export")
     @PreAuthorize("hasAuthority('CRM_CUSTOMER_READ')")
-    public ResponseEntity<byte[]> exportCustomersCsv(@RequestParam(required = false) String search) {
+    public ResponseEntity<byte[]> exportCustomersCsv(@RequestParam(required = false) String search,
+            Authentication authentication) {
+        resourceRateLimiter.checkOrThrow("crm-export", authentication.getName());
         List<Customer> customers = crmUseCase.listCustomersForExport(search);
         String csv = csvConverter.toCsv(customers);
         byte[] body = withUtf8Bom(csv);
+        publisher.publishEvent(AuditEvent.of(EventType.CUSTOMER_LIST_EXPORTED,
+                authentication.getName(), Map.of("search", search == null ? "" : search, "count", String.valueOf(customers.size()))));
         return ResponseEntity.ok()
                 .contentType(new MediaType("text", "csv", StandardCharsets.UTF_8))
                 .header(HttpHeaders.CONTENT_DISPOSITION,
@@ -451,8 +459,11 @@ public class CrmController {
     @PatchMapping("/automacoes/{id}/ativa")
     @PreAuthorize("hasAuthority('CRM_CUSTOMER_MANAGE')")
     public ResponseEntity<CampaignAutomationResponseDTO> setAutomationActive(@PathVariable Long id,
-            @Valid @RequestBody CampaignActiveRequest request) {
+            @Valid @RequestBody CampaignActiveRequest request, Authentication authentication) {
         CampaignAutomation updated = crmUseCase.setAutomationActive(id, request.getAtiva());
+        publisher.publishEvent(AuditEvent.of(EventType.CAMPAIGN_AUTOMATION_TOGGLED,
+                authentication.getName(),
+                Map.of("automationId", String.valueOf(id), "ativa", String.valueOf(request.getAtiva()))));
         return ResponseEntity.ok(campaignConverter.toResponse(updated));
     }
 

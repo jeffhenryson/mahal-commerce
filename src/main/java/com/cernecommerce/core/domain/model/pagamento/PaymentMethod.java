@@ -3,9 +3,12 @@ package com.cernecommerce.core.domain.model.pagamento;
 /**
  * Forma de pagamento de um {@link OrderPayment} (PDV-F006).
  *
- * <p>Só os quatro métodos do balcão físico existem por ora. {@code GATEWAY_PIX}/{@code
- * GATEWAY_CARTAO} da Fatia 10 entram quando o gateway (Mercado Pago ou outro, ainda não decidido)
- * for integrado — adicionar uma constante nova não quebra nada gravado hoje.</p>
+ * <p>Os quatro primeiros métodos são do balcão físico, sempre asserção do operador. {@link
+ * #GATEWAY_PIX} (ECM-F004, Fatia 10, gateway InfinitePay) é distinto de {@link #PIX} de propósito
+ * — trust/auditoria diferentes: {@code PIX} é o operador dizendo "recebi", {@code GATEWAY_PIX} é
+ * confirmado pelo webhook do gateway, sempre reconferido contra a API dele antes de capturar (nunca
+ * confiando no corpo do webhook). {@code GATEWAY_CARTAO} fica para quando/se cartão via gateway
+ * existir — não adicionado agora por não ter uso.</p>
  */
 public enum PaymentMethod {
 
@@ -14,5 +17,7 @@ public enum PaymentMethod {
     DEBITO,
     /** Único método que aceita {@link OrderPayment#installments()}. */
     CREDITO,
-    PIX
+    PIX,
+    /** PIX confirmado pelo webhook do gateway (ECM-F004) — nunca lançado pelo operador. */
+    GATEWAY_PIX
 }

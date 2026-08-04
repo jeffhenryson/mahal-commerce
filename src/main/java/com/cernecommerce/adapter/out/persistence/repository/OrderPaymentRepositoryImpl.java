@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 @Transactional
@@ -50,6 +51,12 @@ public class OrderPaymentRepositoryImpl implements OrderPaymentRepository {
     public BigDecimal sumCapturedAmountBySessionIdAndMethod(Long sessionId, PaymentMethod method) {
         BigDecimal sum = orderPaymentJpaRepository.sumCapturedAmountBySessionIdAndMethod(sessionId, method.name());
         return sum == null ? BigDecimal.ZERO : sum;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<OrderPayment> findByGatewayRef(String gatewayRef) {
+        return orderPaymentJpaRepository.findByGatewayRef(gatewayRef).map(this::toDomain);
     }
 
     private OrderPayment toDomain(OrderPaymentEntity e) {

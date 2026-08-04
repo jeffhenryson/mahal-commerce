@@ -85,4 +85,38 @@ public record OrderPayment(Long id, Long orderId, PaymentMethod method, BigDecim
         return new OrderPayment(id, orderId, method, amount, status, installments, gatewayRef,
                 authorizedAt, capturedAt, createdAt);
     }
+
+    /**
+     * Cobrança de gateway criada no checkout (ECM-F004), aguardando confirmação do webhook.
+     * {@code gatewayRef} ainda não existe aqui de propósito — o InfinitePay só o revela via
+     * webhook, não na criação do link de checkout.
+     */
+    public static OrderPayment pending(Long orderId, PaymentMethod method, BigDecimal amount) {
+        Instant now = Instant.now();
+        return new OrderPayment(null, orderId, method, amount, PaymentStatus.PENDING, null,
+                null, null, null, now);
+    }
+
+    /**
+     * Confirma um pagamento {@link PaymentStatus#PENDING} como {@link PaymentStatus#CAPTURED}
+     * (ECM-F004) — atualiza a MESMA linha, ao contrário de {@link #refunded}. Exceção documentada
+     * à regra append-only do ledger: {@code uk_order_payment_gateway_ref} é único, e diferente do
+     * estorno (que ganha uma referência própria), a confirmação não tem um segundo identificador
+     * para usar — uma segunda linha colidiria no índice. {@code OrderPaymentRepositoryImpl.save}
+     * já faz UPDATE (não INSERT) quando o id não é nulo, então nenhuma mudança de persistência é
+     * necessária além de não gerar um id novo aqui.
+     */
+    public OrderPayment confirmCaptured(String gatewayRef, Instant capturedAt) {
+        if (status != PaymentStatus.PENDING) {
+            throw new IllegalArgumentException("só se confirma um pagamento PENDING");
+        }
+        if (gatewayRef == null || gatewayRef.isBlank()) {
+            throw new IllegalArgumentException("gatewayRef é obrigatório na confirmação");
+        }
+        if (capturedAt == null) {
+            throw new IllegalArgumentException("capturedAt é obrigatório na confirmação");
+        }
+        return new OrderPayment(id, orderId, method, amount, PaymentStatus.CAPTURED, installments,
+                gatewayRef, capturedAt, capturedAt, createdAt);
+    }
 }

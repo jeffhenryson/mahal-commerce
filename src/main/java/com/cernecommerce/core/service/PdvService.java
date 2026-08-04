@@ -144,6 +144,12 @@ public class PdvService implements PdvUseCase {
         getSession(sessionId);
         List<PaymentTotal> totals = new ArrayList<>();
         for (PaymentMethod method : PaymentMethod.values()) {
+            // GATEWAY_PIX (ECM-F004) nunca é lançado pelo operador nem amarrado a uma sessão de
+            // caixa — é capturado pelo webhook do gateway, fora do ciclo de caixa. Incluí-lo aqui
+            // só poluiria o fechamento com uma linha sempre zerada.
+            if (method == PaymentMethod.GATEWAY_PIX) {
+                continue;
+            }
             totals.add(new PaymentTotal(method,
                     orderPaymentRepository.sumCapturedAmountBySessionIdAndMethod(sessionId, method)));
         }

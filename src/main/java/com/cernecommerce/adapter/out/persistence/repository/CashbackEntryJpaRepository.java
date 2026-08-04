@@ -70,4 +70,6 @@ public interface CashbackEntryJpaRepository extends JpaRepository<CashbackEntryE
             ORDER BY e.id ASC
             """)
     List<CashbackEntryEntity> findEarnedByOrderId(@Param("orderId") Long orderId);
+
+    boolean existsByOrderIdAndType(Long orderId, String type);
 }

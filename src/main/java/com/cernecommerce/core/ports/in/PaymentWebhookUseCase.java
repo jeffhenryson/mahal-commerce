@@ -1,0 +1,37 @@
+package com.cernecommerce.core.ports.in;
+
+/**
+ * Port de entrada para notificações de pagamento do gateway (ECM-F004, Fatia 10).
+ *
+ * <p>Separado de {@link ShopUseCase} de propósito: não é superfície de cliente autenticado, é a
+ * confirmação assíncrona do gateway — sem sessão, sem principal, sem propriedade a checar.</p>
+ */
+public interface PaymentWebhookUseCase {
+
+    /**
+     * Resultado do processamento — o controller usa para decidir se publica {@code AuditEvent}
+     * (só quando algo de fato mudou; a maioria das notificações é no-op: retentativa do gateway,
+     * spam, ou pedido que já não estava mais {@code PENDING}). {@code core/service} não pode
+     * publicar evento diretamente (ver {@code HexagonalArchitectureTest
+     * #core_service_may_only_use_spring_transaction} — só {@code @Transactional} é permitido lá).
+     */
+    record WebhookResult(boolean orderPaid, Long orderId, String orderNumber) {
+        public static WebhookResult noop() {
+            return new WebhookResult(false, null, null);
+        }
+    }
+
+    /**
+     * Processa uma notificação de pagamento. Sempre idempotente e tolerante a dados que não
+     * correspondem a nada conhecido — {@code orderNsu} que não resolve a um pedido, ou pedido sem
+     * pagamento {@code PENDING} (já processado, ou nunca existiu), termina em no-op silencioso, não
+     * em exceção. {@code transactionNsu}/{@code invoiceSlug} nunca decidem nada sozinhos: servem
+     * só de chave para reconsultar o gateway (nunca se confia no valor pago do corpo da
+     * notificação).
+     *
+     * @throws com.cernecommerce.core.domain.exception.pagamento.PaymentGatewayException se a
+     *         reconsulta ao gateway falhar (rede, timeout, erro do provider) — sinaliza ao
+     *         controller que a notificação deve ser tentada de novo mais tarde
+     */
+    WebhookResult handleNotification(String orderNsu, String transactionNsu, String invoiceSlug);
+}

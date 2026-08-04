@@ -72,6 +72,13 @@ public class OrderDTOConverter {
         return dto;
     }
 
+    /** Resposta de {@code POST /shop/checkout} (ECM-F004): o único lugar com {@code checkoutUrl}. */
+    public OrderResponseDTO toCheckoutResponse(Order order, String checkoutUrl) {
+        OrderResponseDTO dto = toResponse(order);
+        dto.setCheckoutUrl(checkoutUrl);
+        return dto;
+    }
+
     public PageResult<OrderResponseDTO> toResponse(PageResult<Order> page) {
         return new PageResult<>(page.content().stream().map(this::toResponse).toList(),
                 page.page(), page.size(), page.totalElements(), page.totalPages());

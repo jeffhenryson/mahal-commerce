@@ -7,10 +7,14 @@ import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Optional;
 
 public interface OrderPaymentJpaRepository extends JpaRepository<OrderPaymentEntity, Long> {
 
     List<OrderPaymentEntity> findByOrderIdOrderByIdAsc(Long orderId);
+
+    /** Único por {@code uk_order_payment_gateway_ref} (V68) — derived query é segura aqui. */
+    Optional<OrderPaymentEntity> findByGatewayRef(String gatewayRef);
 
     /**
      * Join implícito com {@code OrderEntity} pelo par {@code order_id = id} — não há

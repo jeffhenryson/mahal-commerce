@@ -70,6 +70,12 @@ public class ProdStartupValidator {
     @Value("${seed.dev.password:}")
     private String devPassword;
 
+    @Value("${payment.gateway.provider:}")
+    private String paymentGatewayProvider;
+
+    @Value("${infinitepay.handle:}")
+    private String infinitePayHandle;
+
     @PostConstruct
     public void validate() {
         List<String> errors = new ArrayList<>();
@@ -122,6 +128,11 @@ public class ProdStartupValidator {
         if (!isBlankOrPlaceholder(devEmail) && isBlankOrPlaceholder(devPassword, "Dev@secure1!")) {
             errors.add("seed.dev.email (DEV_EMAIL) está definido mas seed.dev.password (DEV_PASSWORD) está ausente ou usa "
                     + "o valor default do repositório — isso criaria uma conta ROLE_DEV com senha pública hardcoded; defina DEV_PASSWORD com um valor real");
+        }
+        if ("infinitepay".equalsIgnoreCase(paymentGatewayProvider)
+                && isBlankOrPlaceholder(infinitePayHandle, "dev-placeholder")) {
+            errors.add("infinitepay.handle (INFINITEPAY_HANDLE) está ausente ou usa valor de desenvolvimento — "
+                    + "checkout criaria links de cobrança quebrados");
         }
 
         if (!errors.isEmpty()) {

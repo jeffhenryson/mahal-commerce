@@ -55,4 +55,9 @@ public class OrderResponseDTO {
             + "preenchido em GET /pdv/sales/{id} e nas respostas de registro/liquidação, para não "
             + "gerar uma consulta extra por linha em toda paginação.")
     private List<OrderPaymentResponseDTO> payments;
+
+    @Schema(description = "URL de checkout hospedada pelo gateway (ECM-F004) — para onde o "
+            + "cliente é redirecionado para pagar. Ausente/nulo em toda resposta exceto a de "
+            + "POST /shop/checkout, que é o único momento em que ela existe.")
+    private String checkoutUrl;
 }

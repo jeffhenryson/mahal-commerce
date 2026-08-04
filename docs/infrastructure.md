@@ -218,6 +218,7 @@ Referência em `.env.example` (o `.env` real é gitignored). As sensíveis:
 | `DB_URL` / `DB_USERNAME` / `DB_PASSWORD` | datasource | ✅ `prod`: rejeita `localhost` e `h2:mem` |
 | `REDIS_PASSWORD` / `REDIS_HOST` | Redis | — |
 | `RESEND_API_KEY` / `RESEND_FROM` | `ResendEmailAdapter` | ✅ `prod`: rejeita placeholder |
+| `INFINITEPAY_HANDLE` | `InfinitePayAdapter` (ECM-F004) | ✅ `prod`: rejeita ausência/placeholder — sem API key: `/links`/`payment_check` não exigem uma |
 | `GOOGLE_CLIENT_ID` | `OAuthConfig` | ✅ `prod`: obrigatório |
 | `CORS_ALLOWED_ORIGINS` | `CorsConfigurationSource` | ✅ `prod`: rejeita `*`; o bean rejeita `*` + credentials |
 | `AVATAR_BASE_URL` / `AVATAR_S3_*` | `AvatarProperties`, `S3StorageConfig` | ✅ `hml`/`prod`: rejeita ausente, `localhost`, `example.com` |
