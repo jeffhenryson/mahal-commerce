@@ -18,6 +18,8 @@ import com.cernecommerce.core.ports.in.RoleUseCase;
 import com.cernecommerce.core.ports.in.StatsUseCase;
 import com.cernecommerce.core.ports.in.SystemConfigUseCase;
 import com.cernecommerce.core.ports.in.UserUseCase;
+import com.cernecommerce.core.ports.in.ShopUseCase;
+import com.cernecommerce.core.ports.in.PaymentWebhookUseCase;
 import com.cernecommerce.core.ports.out.AfterCommitExecutor;
 import com.cernecommerce.core.ports.out.SystemConfigPort;
 import com.cernecommerce.core.ports.out.token.AccessTokenPort;
@@ -84,6 +86,8 @@ import com.cernecommerce.core.ports.out.compras.GoodsReceiptRepository;
 import com.cernecommerce.core.ports.out.compras.SupplierRepository;
 import com.cernecommerce.core.ports.in.FinanceiroUseCase;
 import com.cernecommerce.core.ports.in.EcommerceUseCase;
+import com.cernecommerce.core.ports.out.ecommerce.CartRepository;
+import com.cernecommerce.core.ports.out.ecommerce.PaymentGatewayPort;
 import com.cernecommerce.core.ports.in.LogisticaUseCase;
 import com.cernecommerce.core.ports.in.CrmUseCase;
 import com.cernecommerce.core.ports.in.CashbackUseCase;
@@ -102,6 +106,8 @@ import com.cernecommerce.core.service.EstoqueService;
 import com.cernecommerce.core.service.ComprasService;
 import com.cernecommerce.core.service.FinanceiroService;
 import com.cernecommerce.core.service.EcommerceService;
+import com.cernecommerce.core.service.ShopService;
+import com.cernecommerce.core.service.PaymentWebhookService;
 import com.cernecommerce.core.service.LogisticaService;
 import com.cernecommerce.core.service.CrmService;
 import com.cernecommerce.core.service.CashbackService;
@@ -236,11 +242,13 @@ class CoreBeanConfig {
             // 30 min cobre com folga a confirmação de PIX (segundos) e de cartão, sem deixar saldo
             // travado por engano quando o cliente abandona o checkout na tela de pagamento.
             @Value("${estoque.reservation.default-ttl:PT30M}") Duration defaultReservationTtl,
-            KitComponentRepository kitComponentRepository, StockLotRepository stockLotRepository) {
+            KitComponentRepository kitComponentRepository, StockLotRepository stockLotRepository,
+            SystemConfigPort systemConfigPort) {
         return new EstoqueService(productRepository, warehouseRepository, stockBalanceRepository,
                 stockMovementRepository, reorderPointRepository, stockIntegrityRepository,
                 stockCountRepository, stockReservationRepository, notificationUseCase, userRepository,
-                afterCommitExecutor, defaultReservationTtl, kitComponentRepository, stockLotRepository);
+                afterCommitExecutor, defaultReservationTtl, kitComponentRepository, stockLotRepository,
+                systemConfigPort);
     }
 
     @Bean
@@ -257,6 +265,23 @@ class CoreBeanConfig {
     @Bean
     EcommerceUseCase ecommerceUseCase() {
         return new EcommerceService();
+    }
+
+    @Bean
+    ShopUseCase shopUseCase(CrmUseCase crmUseCase, UserUseCase userUseCase, EstoqueUseCase estoqueUseCase,
+            CartRepository cartRepository, OrderRepository orderRepository, OrderUseCase orderUseCase,
+            CashbackUseCase cashbackUseCase, PaymentGatewayPort paymentGatewayPort,
+            OrderPaymentRepository orderPaymentRepository) {
+        return new ShopService(crmUseCase, userUseCase, estoqueUseCase, cartRepository, orderRepository,
+                orderUseCase, cashbackUseCase, paymentGatewayPort, orderPaymentRepository);
+    }
+
+    @Bean
+    PaymentWebhookUseCase paymentWebhookUseCase(OrderRepository orderRepository,
+            OrderPaymentRepository orderPaymentRepository, PaymentGatewayPort paymentGatewayPort,
+            EstoqueUseCase estoqueUseCase, CashbackUseCase cashbackUseCase) {
+        return new PaymentWebhookService(orderRepository, orderPaymentRepository, paymentGatewayPort,
+                estoqueUseCase, cashbackUseCase);
     }
 
     @Bean

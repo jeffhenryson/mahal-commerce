@@ -1,5 +1,6 @@
 package com.cernecommerce.core.service;
 
+import com.cernecommerce.core.domain.exception.estoque.DefaultWarehouseNotConfiguredException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateKitComponentException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateSkuException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateWarehouseCodeException;
@@ -44,10 +45,12 @@ import com.cernecommerce.core.domain.model.estoque.StockMovement;
 import com.cernecommerce.core.domain.model.estoque.StockReservation;
 import com.cernecommerce.core.domain.model.estoque.Warehouse;
 import com.cernecommerce.core.domain.model.estoque.WarehouseType;
+import com.cernecommerce.core.domain.model.config.SystemConfig;
 import com.cernecommerce.core.domain.model.notification.NotificationType;
 import com.cernecommerce.core.ports.in.EstoqueUseCase;
 import com.cernecommerce.core.ports.in.NotificationUseCase;
 import com.cernecommerce.core.ports.out.AfterCommitExecutor;
+import com.cernecommerce.core.ports.out.SystemConfigPort;
 import com.cernecommerce.core.ports.out.estoque.KitComponentRepository;
 import com.cernecommerce.core.ports.out.estoque.ProductRepository;
 import com.cernecommerce.core.ports.out.estoque.ReorderPointRepository;
@@ -78,6 +81,7 @@ public class EstoqueService implements EstoqueUseCase {
 
     private static final String STOCK_MANAGE_PERMISSION = "ESTOQUE_STOCK_MANAGE";
     private static final String REORDER_ALERT_BATCH = "estoque.reorder-alerts";
+    private static final String DEFAULT_WAREHOUSE_CONFIG_KEY = "estoque.warehouse.default-code";
 
     private final ProductRepository productRepository;
     private final WarehouseRepository warehouseRepository;
@@ -93,6 +97,7 @@ public class EstoqueService implements EstoqueUseCase {
     private final Duration defaultReservationTtl;
     private final KitComponentRepository kitComponentRepository;
     private final StockLotRepository stockLotRepository;
+    private final SystemConfigPort systemConfigPort;
 
     public EstoqueService(ProductRepository productRepository, WarehouseRepository warehouseRepository,
             StockBalanceRepository stockBalanceRepository, StockMovementRepository stockMovementRepository,
@@ -100,7 +105,8 @@ public class EstoqueService implements EstoqueUseCase {
             StockCountRepository stockCountRepository, StockReservationRepository stockReservationRepository,
             NotificationUseCase notificationUseCase, UserRepository userRepository,
             AfterCommitExecutor afterCommitExecutor, Duration defaultReservationTtl,
-            KitComponentRepository kitComponentRepository, StockLotRepository stockLotRepository) {
+            KitComponentRepository kitComponentRepository, StockLotRepository stockLotRepository,
+            SystemConfigPort systemConfigPort) {
         this.stockReservationRepository = stockReservationRepository;
         this.defaultReservationTtl = defaultReservationTtl;
         this.productRepository = productRepository;
@@ -115,6 +121,7 @@ public class EstoqueService implements EstoqueUseCase {
         this.afterCommitExecutor = afterCommitExecutor;
         this.kitComponentRepository = kitComponentRepository;
         this.stockLotRepository = stockLotRepository;
+        this.systemConfigPort = systemConfigPort;
     }
 
     @Override
@@ -146,6 +153,12 @@ public class EstoqueService implements EstoqueUseCase {
     @Transactional(readOnly = true)
     public PageResult<Product> listProducts(int page, int size) {
         return productRepository.findAll(page, size);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResult<Product> listActivePricedProducts(int page, int size) {
+        return productRepository.findAllActiveAndPriced(page, size);
     }
 
     @Override
@@ -644,6 +657,16 @@ public class EstoqueService implements EstoqueUseCase {
     @Override
     @Transactional(readOnly = true)
     public Warehouse getWarehouseByCode(String code) {
+        return requireWarehouse(code);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Warehouse getDefaultWarehouse() {
+        String code = systemConfigPort.findByKey(DEFAULT_WAREHOUSE_CONFIG_KEY)
+                .map(SystemConfig::value)
+                .filter(value -> !value.isBlank())
+                .orElseThrow(DefaultWarehouseNotConfiguredException::new);
         return requireWarehouse(code);
     }
 

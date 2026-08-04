@@ -105,7 +105,17 @@ public class SecurityConfig {
                 // Etapa 2 DEV é pública — devToken é a prova de identidade
                 .requestMatchers("/auth/dev/complete").permitAll()
                 .requestMatchers("/auth/**").permitAll()
-                .requestMatchers(org.springframework.http.HttpMethod.GET, "/avatars/*").permitAll();
+                .requestMatchers(org.springframework.http.HttpMethod.GET, "/avatars/*").permitAll()
+                // Fatia 8 (plano-pdv-marketplace.md §2.9): ramo /shop/** público começa aqui.
+                // Cadastro e catálogo são públicos por natureza; carrinho/checkout (Fatia 9) exigem
+                // SHOP_CART_OWN/SHOP_ORDER_OWN via @PreAuthorize, não regra de rota.
+                .requestMatchers(org.springframework.http.HttpMethod.POST, "/shop/register").permitAll()
+                // ECM-F002: catálogo público — GET /shop/catalog e /shop/catalog/{sku}.
+                .requestMatchers(org.springframework.http.HttpMethod.GET, "/shop/catalog", "/shop/catalog/*").permitAll()
+                // ECM-F004 (Fatia 10): notificação do gateway de pagamento — é o próprio gateway
+                // chamando, sem sessão de usuário nenhuma. A defesa mora dentro de
+                // PaymentWebhookService (payment_check sempre reconsulta a verdade), não aqui.
+                .requestMatchers(org.springframework.http.HttpMethod.POST, "/webhooks/payments/*").permitAll();
                 // Em hml/prod management.server.port != server.port: actuator só existe na porta
                 // de management (8081) e é protegido por rede — sem auth JWT necessária.
                 // Em dev (mesma porta): exige DEV_ELEVATED para não expor métricas publicamente.

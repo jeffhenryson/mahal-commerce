@@ -18,6 +18,15 @@ public interface UserUseCase {
     /** Registro externo: cria conta desabilitada e envia código de verificação por email. */
     User registerUser(String username, String rawPassword, String email, List<String> roles);
 
+    /**
+     * Cliente do marketplace (Fatia 8): username = email, {@code ROLE_CUSTOMER}, ligado ao
+     * {@code Customer} do CRM já criado. Nasce habilitado — sem verificação de email.
+     * Lança {@link com.cernecommerce.core.domain.exception.user.UsernameAlreadyExistsException}
+     * ou {@link com.cernecommerce.core.domain.exception.user.EmailAlreadyExistsException} se o
+     * email já é username ou email de QUALQUER usuário, operador ou cliente.
+     */
+    User createCustomerAccount(String email, String rawPassword, Long customerId);
+
     User getUserById(Long id);
 
     Optional<User> findByUsername(String username);

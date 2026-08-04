@@ -42,6 +42,12 @@ public class SeedConfig {
         "ORDER_READ", "ORDER_FULFILL", "ORDER_CANCEL", "ORDER_REFUND"
     };
 
+    // Permissões do cliente do marketplace (Fatia 8/9) — NÃO entram em ADMIN_PERMISSIONS,
+    // ROLE_CUSTOMER é uma role separada com escopo mínimo (plano-pdv-marketplace.md §2.9).
+    private static final String[] SHOP_CUSTOMER_PERMISSIONS = {
+        "SHOP_CART_OWN", "SHOP_ORDER_OWN", "SHOP_CASHBACK_OWN"
+    };
+
     // DEV_ONLY_PERMISSIONS e ROLE_DEV são gerenciados pelo DevRoleBootstrapConfig (todos os profiles).
 
     @Bean
@@ -73,11 +79,15 @@ public class SeedConfig {
             try { permissionUseCase.createPermission(name); }
             catch (Exception e) { log.debug("seed.permission.skip name={} reason={}", name, e.getMessage()); }
         }
+        for (String name : SHOP_CUSTOMER_PERMISSIONS) {
+            try { permissionUseCase.createPermission(name); }
+            catch (Exception e) { log.debug("seed.permission.skip name={} reason={}", name, e.getMessage()); }
+        }
         // DEV_ONLY_PERMISSIONS e ROLE_DEV são gerenciados pelo DevRoleBootstrapConfig (todos os profiles).
     }
 
     private void seedRoles(RoleUseCase roleUseCase) {
-        for (String name : new String[]{"ROLE_ADMIN", "ROLE_USER"}) {
+        for (String name : new String[]{"ROLE_ADMIN", "ROLE_USER", "ROLE_CUSTOMER"}) {
             try { roleUseCase.createRole(name); }
             catch (Exception e) { log.debug("seed.role.skip name={} reason={}", name, e.getMessage()); }
         }
@@ -89,6 +99,11 @@ public class SeedConfig {
 
         try { roleUseCase.assignPermission("ROLE_USER", "USER_READ"); }
         catch (Exception e) { log.debug("seed.role.assignPermission.skip role=ROLE_USER perm=USER_READ reason={}", e.getMessage()); }
+
+        for (String perm : SHOP_CUSTOMER_PERMISSIONS) {
+            try { roleUseCase.assignPermission("ROLE_CUSTOMER", perm); }
+            catch (Exception e) { log.debug("seed.role.assignPermission.skip role=ROLE_CUSTOMER perm={} reason={}", perm, e.getMessage()); }
+        }
     }
 
     private void seedUsers(UserUseCase userUseCase, String adminPassword, String userPassword) {

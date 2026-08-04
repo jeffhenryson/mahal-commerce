@@ -139,6 +139,28 @@ public class UserService implements UserUseCase {
     }
 
     @Override
+    @Transactional
+    public User createCustomerAccount(String email, String rawPassword, Long customerId) {
+        if (!isValidPassword(rawPassword)) throw new InvalidPasswordException();
+        String normalizedEmail = normalizeEmail(email);
+        // Checagem cruzada obrigatória: a constraint composta (user_type, username) da V76
+        // permitiria a coexistência, mas a aplicação nunca deixa a colisão acontecer de fato —
+        // ver comentário da migration. findByUsername já não filtra por tipo, então cobre tanto
+        // um operador quanto outro cliente com o mesmo valor.
+        userRepository.findByUsername(normalizedEmail).ifPresent(u -> {
+            throw new UsernameAlreadyExistsException(normalizedEmail);
+        });
+        userRepository.findByEmail(normalizedEmail).ifPresent(u -> {
+            throw new EmailAlreadyExistsException(normalizedEmail);
+        });
+        Set<Role> roleSet = resolveRoles(List.of("ROLE_CUSTOMER"));
+        User user = User.customer(normalizedEmail, passwordHash.hash(rawPassword), normalizedEmail, customerId, roleSet);
+        User saved = userRepository.save(user);
+        userCachePort.evict(normalizedEmail);
+        return saved;
+    }
+
+    @Override
     @Transactional(noRollbackFor = EmailDeliveryException.class)
     public User registerUser(String username, String rawPassword, String email, List<String> roles) {
         if (!isValidPassword(rawPassword)) throw new InvalidPasswordException();

@@ -89,6 +89,15 @@ public class ProductRepositoryImpl implements ProductRepository {
         return new PageResult<>(content, page, size, idPage.getTotalElements(), idPage.getTotalPages());
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public PageResult<Product> findAllActiveAndPriced(int page, int size) {
+        Page<Long> idPage = productJpaRepository.findActivePricedIds(PageRequest.of(page, size));
+        List<ProductEntity> entities = productJpaRepository.findAllByIdsWithVariants(idPage.getContent());
+        List<Product> content = entities.stream().map(this::toDomain).toList();
+        return new PageResult<>(content, page, size, idPage.getTotalElements(), idPage.getTotalPages());
+    }
+
     private Product toDomain(ProductEntity e) {
         List<ProductVariant> variants = e.getVariants().stream()
                 .map(this::toDomain)

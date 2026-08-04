@@ -19,7 +19,8 @@ public class UserEntityConverter {
                 entity.isEnabled(), entity.getEmail(), entity.isEmailVerified(),
                 entity.getPendingEmail(), entity.getAvatarFilename(),
                 entity.getCreatedAt(), toDomainRoles(entity.getRoles()),
-                entity.getGoogleId(), entity.getAuthProvider());
+                entity.getGoogleId(), entity.getAuthProvider(),
+                entity.getUserType(), entity.getCustomerId());
     }
 
     public UserEntity toEntityBase(User domain) {
@@ -35,6 +36,8 @@ public class UserEntityConverter {
         entity.setAvatarFilename(domain.getAvatarFilename());
         entity.setGoogleId(domain.getGoogleId());
         entity.setAuthProvider(domain.getAuthProvider());
+        entity.setUserType(domain.getUserType());
+        entity.setCustomerId(domain.getCustomerId());
         return entity;
     }
 

@@ -12,6 +12,12 @@ public interface ProductRepository {
 
     PageResult<Product> findAll(int page, int size);
 
+    /**
+     * Só produto ativo e precificado, paginado — a base do catálogo público (ECM-F002). Filtrado
+     * na consulta, não em memória sobre {@link #findAll}, para a página e o total baterem certo.
+     */
+    PageResult<Product> findAllActiveAndPriced(int page, int size);
+
     Optional<Product> findBySku(String sku);
 
     /**

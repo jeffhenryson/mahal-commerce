@@ -73,7 +73,10 @@ public class LoginRateLimitingFilter extends OncePerRequestFilter {
                 && !"/auth/2fa/backup-codes/regenerate".equals(path)
                 && !"/auth/oauth2/google".equals(path)
                 && !"/auth/dev/first-code".equals(path)
-                && !"/auth/dev/complete".equals(path);
+                && !"/auth/dev/complete".equals(path)
+                // PLAT-C030 / Fatia 8: /shop/register cria linhas sem autenticação — mesmo risco
+                // de abuso que /auth/register, mesmo limite.
+                && !"/shop/register".equals(path);
     }
 
     @Override

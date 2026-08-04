@@ -24,6 +24,7 @@ import com.cernecommerce.core.domain.exception.auth.TotpNotConsecutiveException;
 import com.cernecommerce.core.domain.exception.auth.TotpNotEnabledException;
 import com.cernecommerce.core.domain.exception.auth.RefreshTokenExpiredException;
 import com.cernecommerce.core.domain.exception.auth.SessionNotFoundException;
+import com.cernecommerce.core.domain.exception.ratelimit.RateLimitExceededException;
 import com.cernecommerce.core.domain.exception.email.EmailAlreadyVerifiedException;
 import com.cernecommerce.core.domain.exception.email.EmailDeliveryException;
 import com.cernecommerce.core.domain.exception.email.EmailVerificationCodeExpiredException;
@@ -32,6 +33,9 @@ import com.cernecommerce.core.domain.exception.rbac.RoleNotFoundException;
 import com.cernecommerce.core.domain.exception.cashback.CashbackRateAlreadyExistsException;
 import com.cernecommerce.core.domain.exception.cashback.CashbackRateNotFoundException;
 import com.cernecommerce.core.domain.exception.compras.SupplierNotFoundException;
+import com.cernecommerce.core.domain.exception.ecommerce.CartEmptyException;
+import com.cernecommerce.core.domain.exception.ecommerce.CartItemNotFoundException;
+import com.cernecommerce.core.domain.exception.estoque.DefaultWarehouseNotConfiguredException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateKitComponentException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateSkuException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateWarehouseCodeException;
@@ -66,6 +70,7 @@ import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionAlreadyOpe
 import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionClosedException;
 import com.cernecommerce.core.domain.exception.pagamento.InsufficientPaymentException;
 import com.cernecommerce.core.domain.exception.pagamento.PaymentExceedsOrderTotalException;
+import com.cernecommerce.core.domain.exception.pagamento.PaymentGatewayException;
 import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionNotFoundException;
 import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionNotOwnedException;
 import com.cernecommerce.core.domain.exception.pdv.NoOpenCashRegisterSessionException;
@@ -157,6 +162,24 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(WarehouseNotFoundException.class)
     public ResponseEntity<ApiError> handleWarehouseNotFound(WarehouseNotFoundException ex, HttpServletRequest req) {
         return error(HttpStatus.NOT_FOUND, ex.getMessage(), "WAREHOUSE_NOT_FOUND", req);
+    }
+
+    /** ECM-F002: config ausente, não erro do cliente — 503, mesma família de MODULE_DISABLED. */
+    @ExceptionHandler(DefaultWarehouseNotConfiguredException.class)
+    public ResponseEntity<ApiError> handleDefaultWarehouseNotConfigured(DefaultWarehouseNotConfiguredException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), "DEFAULT_WAREHOUSE_NOT_CONFIGURED", req);
+    }
+
+    // ECM-F003 — carrinho do marketplace.
+    @ExceptionHandler(CartEmptyException.class)
+    public ResponseEntity<ApiError> handleCartEmpty(CartEmptyException ex, HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "CART_EMPTY", req);
+    }
+
+    @ExceptionHandler(CartItemNotFoundException.class)
+    public ResponseEntity<ApiError> handleCartItemNotFound(CartItemNotFoundException ex, HttpServletRequest req) {
+        return error(HttpStatus.NOT_FOUND, ex.getMessage(), "CART_ITEM_NOT_FOUND", req);
     }
 
     @ExceptionHandler(ProductNotFoundException.class)
@@ -364,6 +387,13 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                 .header("Retry-After", String.valueOf(lockoutDurationMinutes * 60))
                 .body(ApiError.of(ex.getMessage(), "ACCOUNT_LOCKED", req.getRequestURI(), MDC.get("traceId")));
+    }
+
+    @ExceptionHandler(RateLimitExceededException.class)
+    public ResponseEntity<ApiError> handleRateLimitExceeded(RateLimitExceededException ex, HttpServletRequest req) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header("Retry-After", String.valueOf(ex.retryAfterSeconds()))
+                .body(ApiError.of(ex.getMessage(), "RATE_LIMIT_EXCEEDED", req.getRequestURI(), MDC.get("traceId")));
     }
 
     @ExceptionHandler(AccountDisabledException.class)
@@ -647,6 +677,16 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiError> handlePaymentExceedsOrderTotal(PaymentExceedsOrderTotalException ex,
             HttpServletRequest req) {
         return error(HttpStatus.CONFLICT, ex.getMessage(), "PAYMENT_EXCEEDS_ORDER_TOTAL", req);
+    }
+
+    /**
+     * ECM-F004: falha ao falar com o gateway externo. 502 aqui é o default (usado pelo checkout);
+     * o webhook mapeia esta mesma exceção para 400 localmente, porque o InfinitePay usa 400 como
+     * gatilho de nova tentativa — ver {@code PaymentWebhookController}.
+     */
+    @ExceptionHandler(PaymentGatewayException.class)
+    public ResponseEntity<ApiError> handlePaymentGatewayError(PaymentGatewayException ex, HttpServletRequest req) {
+        return error(HttpStatus.BAD_GATEWAY, ex.getMessage(), "PAYMENT_GATEWAY_ERROR", req);
     }
 
     @ExceptionHandler(InvalidOrderStatusTransitionException.class)

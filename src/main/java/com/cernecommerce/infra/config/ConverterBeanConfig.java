@@ -12,6 +12,8 @@ import com.cernecommerce.adapter.in.converter.CustomerDTOConverter;
 import com.cernecommerce.adapter.in.converter.CustomerNoteDTOConverter;
 import com.cernecommerce.adapter.in.converter.GoodsReceiptDTOConverter;
 import com.cernecommerce.adapter.in.converter.PermissionDTOConverter;
+import com.cernecommerce.adapter.in.converter.ShopCartDTOConverter;
+import com.cernecommerce.adapter.in.converter.ShopCatalogDTOConverter;
 import com.cernecommerce.adapter.in.converter.StageTransitionDTOConverter;
 import com.cernecommerce.adapter.in.converter.TagDTOConverter;
 import com.cernecommerce.adapter.in.converter.ProductDTOConverter;
@@ -126,5 +128,15 @@ class ConverterBeanConfig {
     @Bean
     CashbackDTOConverter cashbackDTOConverter() {
         return new CashbackDTOConverter();
+    }
+
+    @Bean
+    ShopCatalogDTOConverter shopCatalogDTOConverter() {
+        return new ShopCatalogDTOConverter();
+    }
+
+    @Bean
+    ShopCartDTOConverter shopCartDTOConverter() {
+        return new ShopCartDTOConverter();
     }
 }

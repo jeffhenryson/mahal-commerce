@@ -47,6 +47,13 @@ public interface EstoqueUseCase {
     PageResult<Product> listProducts(int page, int size);
 
     /**
+     * Produtos ativos e precificados, paginados — a consulta que o catálogo público consome
+     * (ECM-F002). Filtra no banco, não em memória: paginar depois de filtrar em memória devolveria
+     * contagem de página errada.
+     */
+    PageResult<Product> listActivePricedProducts(int page, int size);
+
+    /**
      * Alteração parcial de produto (EST-F018): {@code name} e/ou {@code category} nulos são
      * mantidos como estão. Não altera {@code sku} (identidade referenciada como texto livre pelas
      * tabelas de estoque) nem as variações. Lança
@@ -143,6 +150,19 @@ public interface EstoqueUseCase {
      * {@link com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException}.
      */
     Warehouse getWarehouseByCode(String code);
+
+    /**
+     * Depósito padrão do marketplace (ECM-F002/F003, plano §2.2): a operação de hoje tem um
+     * depósito físico só, e a superfície pública (catálogo, e futuramente checkout) não tem
+     * sessão de operador para informar um {@code warehouseCode} explícito. Resolvido a partir de
+     * {@code system_config.estoque.warehouse.default-code}.
+     *
+     * @throws com.cernecommerce.core.domain.exception.estoque.DefaultWarehouseNotConfiguredException
+     *         se a chave não estiver configurada (ausente ou em branco)
+     * @throws com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException se o
+     *         código configurado não corresponder a nenhum depósito existente
+     */
+    Warehouse getDefaultWarehouse();
 
     /**
      * Consulta o saldo de um SKU em um depósito. Retorna saldo zero se ainda não houve

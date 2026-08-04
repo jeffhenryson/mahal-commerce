@@ -21,6 +21,8 @@ public class User {
     private Set<Role> roles = new HashSet<>();
     private String googleId;
     private AuthProvider authProvider = AuthProvider.LOCAL;
+    private UserType userType = UserType.OPERATOR;
+    private Long customerId;
 
     User() {
     }
@@ -44,6 +46,21 @@ public class User {
         return u;
     }
 
+    /**
+     * Cliente do marketplace: mesmo {@code UserEntity}, {@code ROLE_CUSTOMER}, ligado 1:1 ao
+     * {@code Customer} do CRM. Nasce habilitado — o cadastro público (Fatia 8) não passa pelo
+     * fluxo de verificação de email dos operadores.
+     */
+    public static User customer(String username, String hashedPassword, String email, Long customerId,
+            Set<Role> roles) {
+        Objects.requireNonNull(customerId, "customerId is required for a customer account");
+        User u = of(username, hashedPassword, roles);
+        u.email = email;
+        u.userType = UserType.CUSTOMER;
+        u.customerId = customerId;
+        return u;
+    }
+
     public static User fromGoogle(String googleId, String username, String email, Set<Role> roles) {
         Objects.requireNonNull(googleId, "googleId is required");
         Objects.requireNonNull(username, "username is required");
@@ -59,10 +76,20 @@ public class User {
         return u;
     }
 
+    /** Overload pré-Fatia-8: operador comum, sem discriminador de tipo nem customerId. */
     public static User fromPersisted(Long id, String username, String hashedPassword,
             boolean enabled, String email, boolean emailVerified, String pendingEmail,
             String avatarFilename, Instant createdAt, Set<Role> roles,
             String googleId, AuthProvider authProvider) {
+        return fromPersisted(id, username, hashedPassword, enabled, email, emailVerified,
+                pendingEmail, avatarFilename, createdAt, roles, googleId, authProvider,
+                UserType.OPERATOR, null);
+    }
+
+    public static User fromPersisted(Long id, String username, String hashedPassword,
+            boolean enabled, String email, boolean emailVerified, String pendingEmail,
+            String avatarFilename, Instant createdAt, Set<Role> roles,
+            String googleId, AuthProvider authProvider, UserType userType, Long customerId) {
         Objects.requireNonNull(id, "id is required for persisted user");
         User u = new User();
         u.id = id;
@@ -77,6 +104,8 @@ public class User {
         u.roles = roles != null ? new HashSet<>(roles) : new HashSet<>();
         u.googleId = googleId;
         u.authProvider = authProvider != null ? authProvider : AuthProvider.LOCAL;
+        u.userType = userType != null ? userType : UserType.OPERATOR;
+        u.customerId = customerId;
         return u;
     }
 
@@ -161,4 +190,7 @@ public class User {
     public Set<Role> getRoles() { return roles; }
     public String getGoogleId() { return googleId; }
     public AuthProvider getAuthProvider() { return authProvider; }
+    public UserType getUserType() { return userType; }
+    public Long getCustomerId() { return customerId; }
+    public boolean isCustomer() { return userType == UserType.CUSTOMER; }
 }

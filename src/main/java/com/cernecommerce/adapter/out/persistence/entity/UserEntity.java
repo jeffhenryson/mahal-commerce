@@ -1,6 +1,7 @@
 package com.cernecommerce.adapter.out.persistence.entity;
 
 import com.cernecommerce.core.domain.model.auth.AuthProvider;
+import com.cernecommerce.core.domain.model.auth.UserType;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
@@ -19,7 +20,7 @@ import java.util.Set;
 @SQLRestriction("deleted_at IS NULL")
 @Table(name = "users",
         uniqueConstraints = {
-                @UniqueConstraint(name = "uk_user_username", columnNames = "username"),
+                @UniqueConstraint(name = "uk_user_username", columnNames = {"user_type", "username"}),
                 @UniqueConstraint(name = "uk_user_email", columnNames = "email")
         })
 public class UserEntity {
@@ -29,7 +30,10 @@ public class UserEntity {
     @EqualsAndHashCode.Include
     private Long id;
 
-    @Column(nullable = false, length = 80, unique = true)
+    // Unicidade composta com user_type (V76) — a aplicação nunca deixa a colisão acontecer de
+    // fato (UserService checa username+email cruzando os dois tipos antes de criar conta de
+    // cliente); a constraint é rede de segurança, não o mecanismo principal.
+    @Column(nullable = false, length = 80)
     private String username;
 
     @Column(length = 255)
@@ -63,6 +67,13 @@ public class UserEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "auth_provider", length = 20, nullable = false)
     private AuthProvider authProvider = AuthProvider.LOCAL;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "user_type", length = 20, nullable = false)
+    private UserType userType = UserType.OPERATOR;
+
+    @Column(name = "customer_id")
+    private Long customerId;
 
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(name = "user_roles",
