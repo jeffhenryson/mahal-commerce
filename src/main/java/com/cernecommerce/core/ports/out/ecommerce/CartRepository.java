@@ -1,20 +1,32 @@
 package com.cernecommerce.core.ports.out.ecommerce;
 
-import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.ecommerce.Cart;
 
+import java.math.BigDecimal;
 import java.util.Optional;
 
 /**
- * Port de saída para persistência de carrinhos.
- *
- * <p>Stub — a ser implementado por um adapter em {@code adapter/out/persistence}.</p>
+ * Port de saída para persistência do carrinho de compras (ECM-F003, Fatia 9).
  */
 public interface CartRepository {
 
-    PageResult<Cart> findAll(int page, int size);
+    /** Carrinho do cliente, se já existir alguma linha. Vazio para quem nunca adicionou nada. */
+    Optional<Cart> findByCustomerId(Long customerId);
 
-    Optional<Cart> findByCustomerRef(String customerRef);
+    /**
+     * Upsert de quantidade (PUT — idempotente): cria o carrinho se for a primeira vez do cliente,
+     * cria a linha se o SKU ainda não estiver nela, ou substitui a quantidade se já estiver.
+     */
+    Cart upsertItem(Long customerId, String sku, BigDecimal quantity);
 
-    Cart save(Cart cart);
+    /**
+     * Remove uma linha do carrinho.
+     *
+     * @return {@code true} se havia uma linha para remover, {@code false} se o SKU não estava no
+     *         carrinho (o service decide se isso é 404 — a repository só relata o fato)
+     */
+    boolean removeItem(Long customerId, String sku);
+
+    /** Esvazia o carrinho — o checkout consome as linhas ao virar pedido. Sem efeito se já vazio. */
+    void clear(Long customerId);
 }
