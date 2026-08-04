@@ -1,9 +1,9 @@
 # Domínio: pedido
 
-**Status:** 🟢 Operacional — visão do administrador entregue; o pedido em si nasce em `vendas-balcao` (balcão) e nascerá em `ecommerce` (marketplace)
+**Status:** 🟢 Operacional — visão do administrador entregue; o pedido nasce em `vendas-balcao` (balcão) e em `ecommerce` (marketplace, checkout + webhook InfinitePay, Fatia 10, entregue em 2026-08-03)
 **Pacote Java:** `com.cernecommerce.core.domain.model.pedido`
 **Rota HTTP base:** `/orders`
-**Última atualização deste doc:** 2026-07-28 (criação, Fatia 1)
+**Última atualização deste doc:** 2026-08-03 (`Order.paid(...)` ganhou seu primeiro caller: o webhook de pagamento do marketplace, ECM-F004)
 
 ## Objetivo
 
@@ -56,22 +56,39 @@ de documento fiscal é problema com o fisco. Pedidos anteriores à V65 têm pref
 ## Estados e transições
 
 ```
-   CRIADO ──────────────────────────────────────────► CONCLUIDO
-      │  (balcão: nasce e termina na mesma transação)      │
-      │                                                    │
+   CRIADO ──────────────────────────────────────────► CONCLUIDO ──┐
+      │  (balcão: nasce e termina na mesma transação)      │      │
+      │                                                    │      │
   AGUARDANDO_PAGAMENTO ──┬── pagamento ──► PAGO ──► SEPARADO ──► ENVIADO ──► ENTREGUE
-      │                  │                                                        │
-      │                  └── retirada e pagamento no balcão ──► CONCLUIDO         │
-      ▼                                                                           ▼
-                              CANCELADO ◄─────────────────────────────────────────┘
+      │                  │                                                     │
+      │                  └── retirada e pagamento no balcão ───────────────────┤
+      ▼                                                                        ▼
+  CANCELADO (só pré-pagamento)                              REEMBOLSADO (só pós-pagamento)
 ```
 
-`CANCELADO` é o único estado **terminal de verdade**. `ENTREGUE` e `CONCLUIDO` ainda aceitam
-cancelamento, porque devolução existe e precisa de um caminho.
+`CANCELADO` e `REEMBOLSADO` são os dois estados **terminais de verdade**, e são mutuamente
+exclusivos por construção: estados pré-pagamento (`CRIADO`, `AGUARDANDO_PAGAMENTO`) só aceitam
+`CANCELADO`; estados pós-pagamento (`PAGO`, `SEPARADO`, `ENVIADO`, `ENTREGUE`, `CONCLUIDO`) só
+aceitam `REEMBOLSADO` — cancelar depois de pago devolveria mercadoria sem estornar o dinheiro já
+recebido. `Order.refunded(reason, refundedAt)` garante essa invariante no próprio construtor
+compacto.
 
 `AGUARDANDO_PAGAMENTO → CONCLUIDO` é a retirada no balcão: terminou exatamente como uma venda de
 balcão termina. Mandá-lo por `SEPARADO`/`ENVIADO` descreveria uma separação e um envio que não
 aconteceram.
+
+### `AGUARDANDO_PAGAMENTO → PAGO`: quem chama `Order.paid(...)`
+
+Dois caminhos levam a `PAGO`, e nenhum dos dois é o cliente afirmando "eu paguei":
+
+- **Liquidação no balcão** (`PdvService.settleOnlineOrder`) — o operador confirma o recebimento
+  presencialmente.
+- **Webhook do gateway** (`PaymentWebhookService.handleNotification`, ECM-F004/Fatia 10) — o
+  InfinitePay notifica, e o service **reconsulta o gateway** (`PaymentGatewayPort.checkPayment`)
+  antes de confiar em qualquer coisa; só chama `.paid(...)` depois de `OrderPayment` já estar
+  `CAPTURED` e o valor pago bater com `netAmount()`. Ver
+  [`ecommerce/README.md`](../ecommerce/README.md#gateway-de-pagamento-infinitepay--webhook-ecm-f004-fatia-10--entregue-2026-08-03)
+  para o desenho completo do webhook — este README só documenta o efeito sobre o pedido.
 
 ## API — Endpoints
 
@@ -80,15 +97,17 @@ aconteceram.
 | `GET` | `/orders` | `ORDER_READ` | Filtros por `channel`, `status`, `customerId`, `from`, `to`; paginado |
 | `GET` | `/orders/{id}` | `ORDER_READ` | Detalhe **com custo e margem** |
 | `POST` | `/orders/{id}/status` | `ORDER_FULFILL` | `SEPARADO`/`ENVIADO`/`ENTREGUE` |
-| `POST` | `/orders/{id}/cancel` | `ORDER_CANCEL` | Cancela e **devolve a mercadoria ao estoque** |
+| `POST` | `/orders/{id}/cancel` | `ORDER_CANCEL` | Cancela (só pré-pagamento) e **devolve a mercadoria ao estoque** |
+| `POST` | `/orders/{id}/refund` | `ORDER_REFUND` | Reembolsa (só pós-pagamento): devolve estoque (com suporte a lote via `itemLots`), estorna cada pagamento `CAPTURED` com uma linha `REFUNDED` nova e reverte o cashback ganho — tudo em uma transação |
 
 Detalhes em [`docs/api-reference.md`](../../api-reference.md#pedidos-visão-do-administrador--orders).
 
-### Três permissões, não uma
+### Quatro permissões, não uma
 
-As consequências são muito diferentes: ler é inócuo, avançar estágio é operação de expedição, e
-cancelar **mexe no estoque** — e, a partir da Fatia 3, vai disparar estorno de pagamento. Uma
-permissão única obrigaria a conceder o cancelamento para quem só precisa despachar pedido.
+As consequências são muito diferentes: ler é inócuo, avançar estágio é operação de expedição,
+cancelar **mexe no estoque**, e reembolsar mexe em estoque **+ pagamento + cashback** de um pedido
+já pago. Uma permissão única obrigaria a conceder o reembolso para quem só precisa despachar
+pedido — ou pior, para quem só cancela pedidos pré-pagamento.
 
 ### Custo e margem só aparecem aqui
 
@@ -104,9 +123,9 @@ não ter número.
 | Domínio | Relação |
 |---|---|
 | `vendas-balcao` | Cria o pedido de canal `BALCAO` e o conclui na mesma transação |
-| `estoque` | O cancelamento devolve mercadoria com `adjustStock(ENTRADA)`; a liquidação de pedido online consome reserva |
-| `ecommerce` | Vai criar o pedido de canal `MARKETPLACE` no checkout (Fatia 9) |
-| `crm` | `customerId` alimenta o extrato do cliente (`CRM-F001`) |
+| `estoque` | O cancelamento e o reembolso devolvem mercadoria com `adjustStock(ENTRADA)` (reembolso com suporte a lote); a liquidação de pedido online consome reserva |
+| `ecommerce` | Cria o pedido de canal `MARKETPLACE` no checkout (`Order.openMarketplace(...)`, Fatia 9) e o leva a `PAGO` via webhook do gateway (`PaymentWebhookService`, Fatia 10) |
+| `crm` | `customerId` alimenta o extrato do cliente (`CRM-F001`); o reembolso reverte o cashback ganho via `cashbackUseCase.reverseEarningsForOrder` |
 | `financeiro` | Consome o pedido para DRE e provisão de cashback (`FIN-F001`) |
 
 ## Schema de Banco (Migrations)
@@ -116,6 +135,8 @@ não ter número.
 | V57 | Criou `cash_register_sale` e `sale_item` |
 | **V65** | Renomeia para `sales_order` / `order_item`, acrescenta canal, status, numeração, cliente, desconto, cashback resgatado, troco, carimbos e `@Version`; cria `order_number_seq` |
 | **V67** | Permissões `ORDER_READ`, `ORDER_FULFILL`, `ORDER_CANCEL` |
+| **V71** | `pedido_reembolso` — coluna `refunded_at` e expansão do `CHECK` de status para aceitar `REEMBOLSADO`, com constraint garantindo `(status = REEMBOLSADO) == (refunded_at IS NOT NULL)` |
+| **V72** | Permissão `ORDER_REFUND`, concedida a `ROLE_ADMIN` |
 
 ## Testes no Postman
 
@@ -139,9 +160,9 @@ ao menos um pedido.
 | PED-C001 | 🟡 Importante | Correção | auditar-e-documentar-o-modulo | Este README foi escrito junto com a entrega, não a partir de auditoria do código. Faltam Regras de Negócio e Cobertura de Testes no padrão de [`estoque`](../estoque/README.md). | Pendente |
 | PED-F001 | 🟢 Baixa | Feature | filtro-por-numero-do-pedido | `GET /orders?orderNumber=` — hoje só dá para achar um pedido pelo id interno, e o número é o que o cliente tem em mãos. | Pendente |
 
-Itens relacionados vivem nos módulos que os originam: `PDV-F007` (marcar como reembolsado) em
-[`vendas-balcao`](../vendas-balcao/README.md), `EST-F014` (estorno/devolução) em
-[`estoque`](../estoque/README.md).
+`PDV-F007` (status `REEMBOLSADO`, distinto de `CANCELADO`) foi entregue em 2026-07-29 — ver
+[Histórico de Implementações](#histórico-de-implementações) abaixo e o registro em
+[`vendas-balcao`](../vendas-balcao/README.md).
 
 ## Histórico de Implementações
 
@@ -150,9 +171,25 @@ Itens relacionados vivem nos módulos que os originam: `PDV-F007` (marcar como r
 - **2026-07-28** — `orders-visao-do-administrador`: `OrderUseCase`/`OrderService`,
   `OrdersController`, quatro endpoints, V67. Coberto por `OrderServiceTest` e
   `OrdersControllerSecurityTest`.
+- **2026-07-29** — `cancelamento-e-reembolso-do-pedido` (`PDV-F007`, Fatia 5): `OrderStatus` ganha
+  `REEMBOLSADO`, mutuamente exclusivo de `CANCELADO` por transição; `POST /orders/{id}/refund`
+  (`ORDER_REFUND`, V72) devolve estoque (com suporte a lote), estorna cada pagamento `CAPTURED`
+  com uma linha `REFUNDED` nova e reverte o cashback ganho, tudo em uma transação; V71 adiciona
+  `refunded_at` e o `CHECK` de consistência do status. Coberto por `OrderServiceTest`,
+  `OrderTest`, `OrderStatusTest` e o IT de ponta a ponta `OrderRefundIT`.
+- **2026-08-03** — gateway InfinitePay + webhook (`ECM-F004`, Fatia 10, detalhado em
+  [`ecommerce/README.md`](../ecommerce/README.md)): `Order.paid(...)` ganha seu primeiro caller
+  fora de teste — `PaymentWebhookService`, chamado por `POST /webhooks/payments/{provider}`.
+  Nenhuma mudança de schema neste domínio; V79 (em `ecommerce`) só amplia o `CHECK` de
+  `order_payment.method` para aceitar `GATEWAY_PIX`.
 
 ## Próximos passos
 
 - [ ] **PED-C001** — auditar o código e completar este README.
-- [ ] Estorno de pagamento no cancelamento (depende da Fatia 3) e `REVERSED` de cashback (Fatia 4).
-- [ ] `PDV-F007` — status `REEMBOLSADO`, distinto de `CANCELADO`.
+- [ ] Nenhum teste de concorrência para reembolso (duas chamadas simultâneas ao mesmo pedido) —
+      gap silencioso, ainda sem item de backlog próprio.
+- [x] Criação de pedido `MARKETPLACE`: entregue (Fatias 8-10, `ECM-F001`-`F004`). `checkout` cria
+      via `Order.openMarketplace(...)`; o webhook do gateway leva a `PAGO` via `Order.paid(...)`.
+- [ ] Gap conhecido, não deste domínio: se um pedido `MARKETPLACE` é cancelado com um link de
+      checkout ainda pendente no InfinitePay, ninguém avisa o gateway — ver "Conhecido, fora desta
+      entrega" em [`ecommerce/README.md`](../ecommerce/README.md).

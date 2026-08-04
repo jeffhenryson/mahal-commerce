@@ -1,20 +1,18 @@
 # E-commerce / marketplace — roteiro para sair do esqueleto
 
 **Criado em:** 2026-07-28, a partir do [`plano-pdv-marketplace.md`](../../plano-pdv-marketplace.md).
-**Para quê:** dar a ordem de execução do marketplace — e, antes disso, deixar registrado **por que
-ele não é o primeiro** a ser construído.
+**Status em 2026-08-03: MARKETPLACE COMPLETO.** Fatias 8, 9 e 10 (ECM-F001–F004) todas entregues —
+cliente se cadastra, navega o catálogo, monta carrinho, faz checkout, paga via InfinitePay
+(webhook confirma automaticamente) e acompanha o pedido. Não há mais fatia numerada pendente
+neste módulo. O prompt abaixo fica como **histórico** de como o módulo foi construído — para
+trabalho novo aqui, veja "O que falta agora" no fim deste arquivo, não o prompt.
 
 O backlog em si continua em [`README.md`](README.md#backlog-do-módulo) — este arquivo é o
 **roteiro**, não a lista.
 
-> **Não comece por aqui.** O balcão fatura hoje e o marketplace não existe. Cada semana gasta no
-> site é uma semana em que o caixa continua sendo aberto por `INSERT` manual. As Fatias 0 a 5 do
-> plano (PDV, CRM, estoque) vêm primeiro; a Fatia 0 já protege o futuro do marketplace — o pedido
-> nasce unificado — sem construí-lo.
-
 ---
 
-## Prompt para colar numa sessão nova
+## Prompt original (histórico — módulo já concluído, não recomece do zero)
 
 ```
 Continue o desenvolvimento do módulo ECOMMERCE (marketplace) do Mahal backend.
@@ -26,36 +24,68 @@ cancelamento). Se não foram, o certo é NÃO trabalhar neste módulo ainda, e m
 FONTE DA VERDADE
 Backlog: docs/dominios/ecommerce/README.md, seção "## Backlog do Módulo".
 Desenho e justificativa: docs/plano-pdv-marketplace.md — leia §2.2, §2.6, §2.9 e §5.4
-antes de escrever qualquer linha.
+antes de escrever qualquer linha. ATENÇÃO: §2.6 supõe Mercado Pago; o gateway real escolhido
+foi InfinitePay — a API de verdade diverge do desenho do plano em vários pontos (ver seção
+"Gateway de pagamento InfinitePay + webhook" no README).
 
-ESTADO ATUAL
-O módulo é um ESQUELETO. Não existe, em nenhuma forma: Order, checkout, pagamento,
-gateway, webhook, frete, catálogo público, autenticação de cliente final, cupom, promoção.
-EcommerceService.listCarts (:20-24) devolve página vazia com um // TODO.
-core/domain/model/ecommerce/Cart.java:11-18 é um record sem comportamento e SEM ITENS —
-não há nada a aproveitar, descarte (ECM-C002) em vez de tentar evoluir.
+ESTADO ATUAL (revisado 2026-08-03) — TODAS AS FATIAS CONCLUÍDAS
+ECM-F001 (autenticação), ECM-F002 (catálogo), ECM-F003+ECM-C002 (carrinho/checkout) e ECM-F004
+(gateway InfinitePay + webhook) JÁ FORAM ENTREGUES — não recomece do zero. Existe: UserType
+{OPERATOR, CUSTOMER}, users.user_type/customer_id (V76), ROLE_CUSTOMER + SHOP_CART_OWN/
+SHOP_ORDER_OWN semeados (SHOP_CASHBACK_OWN semeada mas SEM endpoint ainda, ver nota abaixo),
+ShopController (público: POST /shop/register, GET /shop/catalog, GET /shop/catalog/{sku}),
+ShopAccountController (autenticado: GET/PUT/DELETE /shop/cart[/items/{sku}], POST /shop/checkout,
+GET /shop/orders, GET /shop/orders/{id}, POST /shop/orders/{id}/cancel) e PaymentWebhookController
+(público: POST /webhooks/payments/{provider}). ShopUseCase/ShopService cobre
+registerCustomer/listCatalog/getCatalogItem/getCart/upsertCartItem/removeCartItem/checkout/
+listMyOrders/getMyOrder/cancelMyOrder. Login do cliente é o MESMO POST /auth/login — não crie
+/shop/login.
+cart/cart_item (V78) — o carrinho NÃO guarda preço, só sku+quantidade; Cart.java/CartItem.java
+em core/domain/model/ecommerce. Checkout resolve preço/custo/taxa de cashback do catálogo NA
+HORA (nunca do que estava no carrinho), cria o pedido via Order.openMarketplace (já existia no
+domínio, ganhou o primeiro caller), reserva estoque via EstoqueUseCase.reserveStock com owner
+reference Order.reservationOwnerReference(orderId), cria a cobrança no InfinitePay
+(PaymentGatewayPort.createCheckoutLink, orderNsu = Order.id().toString()) e só esvazia o
+carrinho se tudo suceder na mesma transação.
+NOVO CONCEITO transversal introduzido pelo catálogo (ECM-F002) e REAPROVEITADO pelo checkout
+sem inventar nada: EstoqueUseCase.getDefaultWarehouse() resolve o depósito único da loja a
+partir de system_config.estoque.warehouse.default-code (chave semeada em branco pela V77 —
+nenhuma migration inventa um código real, o operador configura via PUT /system/config/{key}
+depois de criar o depósito em POST /estoque/warehouses). Chave ausente/em branco lança
+DefaultWarehouseNotConfiguredException (503 DEFAULT_WAREHOUSE_NOT_CONFIGURED).
+PaymentWebhookService (core/service) confirma o pagamento: reconsulta o InfinitePay via
+PaymentGatewayPort.checkPayment (nunca confia no corpo da notificação — o InfinitePay não assina
+o webhook), marca OrderPayment CAPTURED (OrderPayment.confirmCaptured, única exceção ao ledger
+append-only), chama Order.paid() e cashbackUseCase.recordEarnedForOrder. GET /shop/cashback
+(saldo/extrato do cliente) segue sem endpoint — não é mais "sequenciamento", é só falta de
+pedido; o cashback já é gravado de verdade desde o webhook.
+EcommerceService.listCarts devolve página vazia com um // TODO — continua stub de propósito, é
+a visão do ADMIN (/ecommerce/carts), nunca fez parte do pedido do cliente final (/shop/**).
 
 O QUE JÁ EXISTE E NÃO DEVE SER RECRIADO
-- A reserva de estoque (EST-F013/EST-F021) JÁ ESTÁ IMPLEMENTADA em core, ports e
-  persistência: EstoqueUseCase.reserveStock / consumeReservation / releaseReservation /
-  releaseReservationsByOwner / expireReservations, com stock_balance.reserved_quantity sob
-  o @Version existente e o ledger stock_reservation (migration V64). O checkout CONSOME
-  essa porta; não escreva um segundo mecanismo de reserva.
-  ATENÇÃO: stock_reservation.owner_reference é VARCHAR(80), texto livre, e o COMMENT da
-  coluna registra a intenção de virar "ORDER:{id}" quando o pedido existir. Use exatamente
-  esse formato no checkout.
+- A reserva de estoque (EST-F013/EST-F021) e o checkout que a consome (ECM-F003) JÁ ESTÃO
+  IMPLEMENTADOS: EstoqueUseCase.reserveStock/consumeReservation/releaseReservation/
+  releaseReservationsByOwner/expireReservations + ShopService.checkout chamando reserveStock
+  por item. stock_reservation.owner_reference usa o formato "ORDER:{id}" via
+  Order.reservationOwnerReference — já em uso, não reinvente.
 - Toda a stack de autenticação (JWT, refresh rotation, TOTP, verificação de e-mail, reset
   de senha, OAuth Google, rate limit de login). Reconstruir isso para o cliente final seria
   o erro mais caro disponível neste projeto.
 - adjustStock como única porta de escrita de saldo, com validação de SKU, depósito ativo,
   @Version e alerta de reposição.
+- Cancelamento de pedido do cliente (POST /shop/orders/{id}/cancel) REAPROVEITA
+  OrderUseCase.cancelOrder (Fatia 5) por inteiro — ShopService só resolve customerId e checa
+  propriedade antes de delegar. Não duplique a lógica de liberar reserva.
+- PaymentGatewayPort/InfinitePayAdapter/StubPaymentGatewayAdapter (ECM-F004) JÁ EXISTEM. Não
+  crie um segundo mecanismo de gateway nem reintroduza Mercado Pago sem decisão explícita do
+  dono do produto — a troca de gateway já foi feita uma vez, custou retrabalho de pesquisa.
 
-ORDEM
- 1. ECM-F001 — autenticação de cliente. Reaproveita UserEntity com ROLE_CUSTOMER e
+ORDEM — TODAS CONCLUÍDAS
+ 1. ECM-F001 — CONCLUÍDO (2026-08-03). Autenticação de cliente: UserEntity com ROLE_CUSTOMER e
     discriminador user_type, ligado 1:1 ao Customer do CRM por users.customer_id.
- 2. ECM-F002 — catálogo público. Junto com a 1 fecha a Fatia 8.
- 3. ECM-F003 + ECM-C002 — carrinho e checkout com reserva (Fatia 9).
- 4. ECM-F004 — gateway e webhook (Fatia 10).
+ 2. ECM-F002 — CONCLUÍDO (2026-08-03). Catálogo público. Fatia 8 fechada.
+ 3. ECM-F003 + ECM-C002 — CONCLUÍDO (2026-08-03). Carrinho e checkout com reserva. Fatia 9 fechada.
+ 4. ECM-F004 — CONCLUÍDO (2026-08-03). Gateway InfinitePay + webhook. Fatia 10 fechada.
 
 DECISÕES JÁ TOMADAS — não reabrir
 - Cliente do marketplace usa o MESMO UserEntity, com ROLE_CUSTOMER e user_type ∈
@@ -82,12 +112,23 @@ DECISÕES JÁ TOMADAS — não reabrir
   de graça), frete e integração logística (retirada + entrega própria por bairro cobre a
   operação regional), PDV offline/PWA, multi-loja/multi-tenant. §8.
 
-PRÉ-REQUISITO TRANSVERSAL
-PLAT-C034 (ArchUnit exigindo @PreAuthorize em todo controller fora de /auth e /shop) e
-PLAT-C030 (rate limit) precisam estar prontos ANTES da Fatia 8. Motivo: SecurityConfig
-termina em anyRequest().authenticated(), então assim que ROLE_CUSTOMER existir, "autenticado"
-passa a incluir cliente final — e qualquer endpoint de operador sem @PreAuthorize vira
-exposição. Hoje é inócuo porque todos têm; a garantia é que precisa existir.
+PRÉ-REQUISITO TRANSVERSAL — RESOLVIDO em 2026-08-03
+PLAT-C034 (ArchUnit exigindo @PreAuthorize em todo controller fora de /auth e /shop): feito,
+arch/SecurityArchitectureTest.java. PLAT-C030 (rate limit) na parte que bloqueava a Fatia 8
+(/shop/register) também: feito, LoginRateLimitingFilter. O restante de PLAT-C030 (demais
+endpoints de negócio, ex. export do CRM) segue aberto e é independente da Fatia 8.
+
+DECISÃO ADICIONAL TOMADA em 2026-08-03 — NÃO REABRIR: colisão de username entre cliente e
+operador. O plano original (§2.9) propunha permitir a colisão de verdade via constraint
+composta (user_type, username). Investigação mostrou que isso obrigaria rate limit, lockout,
+refresh token, TOTP e blocklist — hoje TODOS chaveados só por username puro, em
+AuthService/CustomUserDetailsService/JwtAuthenticationFilter — a virarem cientes do tipo, uma
+mudança bem maior e mais arriscada em código de segurança estável do que o plano estimava.
+Decisão confirmada com o usuário: manter a constraint composta no schema (rede de segurança,
+nunca de fato acionada), mas a aplicação (UserService.createCustomerAccount) IMPEDE a colisão
+real checando o email contra findByUsername E findByEmail, cruzando os dois tipos, antes de
+criar a conta. Nenhuma outra peça da stack de autenticação precisou mudar. Login do cliente é
+o MESMO POST /auth/login — não existe /shop/login.
 
 COMO TRABALHAR
 - Um item por vez. Ao terminar cada um, PARE e me mostre o resultado.

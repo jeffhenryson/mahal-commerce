@@ -2,7 +2,7 @@
 
 **Status:** 🟢 Ativo — série `C001–C022` concluída; resíduos documentados abaixo
 **Escopo:** segurança, infraestrutura, CI/CD, testes, persistência, performance e documentação
-**Última atualização deste doc:** 2026-07-27
+**Última atualização deste doc:** 2026-08-03 (PLAT-C035 revisado — Flyway já roda em CI)
 
 ## Objetivo
 
@@ -43,6 +43,7 @@ sempre `hasAuthority()`, **nunca** `hasRole()`. Roles carregam o prefixo `ROLE_`
 | `ROLE_ADMIN` | `infra/config/SeedConfig.java` | **só `dev`** | os 25 nomes de `ADMIN_PERMISSIONS` |
 | `ROLE_USER` | `infra/config/SeedConfig.java` | **só `dev`** | apenas `USER_READ` |
 | `ROLE_DEV` | `infra/config/DevRoleBootstrapConfig.java` | `dev`, `hml`, `prod` | `ADMIN_PERMISSIONS` + `DEV_ROLE_MANAGE` + `DEV_PERMISSION_MANAGE` |
+| `ROLE_CUSTOMER` | `SeedConfig` (`dev`) / `V76` (`hml`, `prod`) | todos | `SHOP_CART_OWN`, `SHOP_ORDER_OWN`, `SHOP_CASHBACK_OWN` — cliente do marketplace, nunca uma permissão de operador |
 
 Em `hml`/`prod` as permissões vêm das migrations de seed (Flyway); em `dev` não há Flyway
 (`ddl-auto=create-drop`), então `SeedConfig`/`DevRoleBootstrapConfig` são a **única** fonte —
@@ -66,6 +67,7 @@ vazio): o usuário autorregistrado nasce autenticável e sem nenhuma authority.
 | Compras | `COMPRAS_READ`, `COMPRAS_RECEIPT_MANAGE` | V53, V60 |
 | PDV | `PDV_READ`, `PDV_SALE_MANAGE` | V53, V57 |
 | Stubs | `ECOMMERCE_READ`, `FINANCEIRO_READ`, `LOGISTICA_READ` | V53 |
+| Marketplace (`ROLE_CUSTOMER`, não operador) | `SHOP_CART_OWN`, `SHOP_ORDER_OWN`, `SHOP_CASHBACK_OWN` | V76 |
 | **Órfãs** | `ROLE_CREATE`, `ROLE_DELETE`, `PERMISSION_CREATE`, `PERMISSION_DELETE` | V9, V36 — ver PLAT-C033 |
 
 Authorities que **não** existem na tabela `permissions`:
@@ -112,6 +114,8 @@ Definidas em `SecurityConfig.java:74-114`. A **ordem importa**: as regras de `/a
 | Rota | Regra |
 |---|---|
 | `/auth/**` | `permitAll` (catch-all, por último) |
+| `POST /shop/register` | `permitAll` (Fatia 8, ECM-F001 — 2026-08-03) |
+| `GET /shop/catalog`, `GET /shop/catalog/{sku}` | `permitAll` (Fatia 8, ECM-F002 — 2026-08-03) |
 | `/auth/sessions` (GET/DELETE), `/auth/sessions/*` (DELETE) | `authenticated` |
 | `/auth/2fa/setup`, `/auth/2fa/confirm`, `/auth/2fa/replace`, `DELETE /auth/2fa`, `GET /auth/2fa/status`, `/auth/2fa/backup-codes/regenerate` | `authenticated` |
 | `/auth/2fa/verify`, `/auth/dev/complete` | `permitAll` (o token de desafio é a prova de identidade) |
@@ -151,11 +155,16 @@ corpo `ApiError`, e incremento da métrica `auth.rate_limit.blocked.total`.
 Rotas cobertas: `POST` em `/auth/login`, `/auth/register`, `/auth/verify-email`,
 `/auth/resend-verification`, `/auth/refresh`, `/auth/forgot-password`, `/auth/reset-password`,
 `/auth/2fa/verify|confirm|replace`, `/auth/2fa/backup-codes/regenerate`, `/auth/oauth2/google`,
-`/auth/dev/first-code`, `/auth/dev/complete`; `DELETE /auth/2fa`;
+`/auth/dev/first-code`, `/auth/dev/complete`, **`/shop/register`** (Fatia 8, 2026-08-03 — cria
+linha sem autenticação, mesmo risco de abuso que `/auth/register`); `DELETE /auth/2fa`;
 `PUT /notifications/preferences/**`; `GET /notifications/stream`.
 
-❌ **Nenhum endpoint de negócio é limitado** — `/estoque/**`, `/crm/**`, `/compras/**`, `/pdv/**`
-não passam pelo filtro. Ver PLAT-C030.
+❌ **Quase nenhum endpoint de negócio é limitado** — só `/shop/register` (acima) tem freio.
+`/estoque/**`, `/crm/**` (inclusive o export sem paginação), `/compras/**`, `/pdv/**` continuam
+sem passar pelo filtro. **`GET /shop/catalog`/`/shop/catalog/{sku}` (ECM-F002, 2026-08-03) também
+ficaram de fora** — são públicos e sem sessão, então um IP pode varrer o catálogo inteiro sem
+freio; risco menor que `/shop/register` (não cria linha, só lê), mas ainda um scraping/DoS leve
+sem custo nenhum hoje. Ver PLAT-C030.
 
 Implementação: `RedisLoginRateLimiterAdapter` em `hml`/`prod` (script Lua atômico com
 `ZADD`/`ZREMRANGEBYSCORE`/`ZCARD`, chave `rate:login:{ip}`, member com UUID para não colidir em
@@ -290,22 +299,26 @@ deles tinha item de backlog próprio até agora.
 | PLAT-C027 | 🟢 Melhoria | Correção | validar-pipeline-ci-refatorado | A refatoração de C015 (build único + artifact entre `build-test` e `deploy-ecr`) foi validada só por parse YAML e revisão manual — nunca executada de fato no GitHub Actions. A confirmação (pipeline verde, tempo reduzido) depende do próximo push real a `main`. | Pendente |
 | PLAT-C028 | 🔴 Alta | Correção | fallback-totp-key-reintroduzido-no-compose-prod | `docker-compose.prod.yml:60` voltou a ter fallback hardcoded: `${TOTP_ENCRYPTION_KEY:-zNEtKjyPPpEkAIBZBZ29nixcQCcAcA19ExgMgaQVRjg=}` (commit `ca2ee50`). É regressão de **C002**, que removeu exatamente esse padrão. Pior: `ProdStartupValidator.java:22` só conhece a chave antiga (`Vx74sQn7…`), então o boot **não** bloqueia esta — produção sobe silenciosamente com uma chave AES versionada no repositório, e é ela que cifra os secrets TOTP. Distinto de PLAT-C023, que trata da rotação dos valores já expostos. | ✅ Concluído (Sprint 3) |
 | PLAT-C029 | 🟡 Importante | Correção | swagger-spec-publico-em-prod-contradiz-doc | `SecurityConfig.java:75-80` dá `permitAll()` a `/v3/api-docs/**` e `/swagger-ui/**` em todos os ambientes, com comentário afirmando que é intencional. `application-prod.properties:54` afirma o contrário: "spec (`/v3/api-docs/**`) exige ROLE_DEV". Uma das duas está errada e hoje o spec completo da API é público em produção. Decidir e alinhar código, comentário e `docs/api-reference.md`. | ✅ Concluído (Sprint 3) |
-| PLAT-C030 | 🟡 Importante | Correção | sem-rate-limit-em-endpoints-de-negocio | `LoginRateLimitingFilter.shouldNotFilter` (linhas 42-77) cobre apenas rotas de `/auth/**` e 2 de notificação. Nenhum endpoint de negócio é limitado — inclusive `GET /crm/customers/export`, que devolve a base inteira de clientes **sem paginação**, e `GET /estoque/movements`. Um token válido pode drenar a base em loop sem nenhum freio. **Vira bloqueante na Fatia 8** de [`plano-pdv-marketplace.md`](../../plano-pdv-marketplace.md): `/shop/catalog` é público e `/shop/register` cria linhas sem autenticação. | Pendente |
+| PLAT-C030 | 🟡 Importante | Correção | sem-rate-limit-em-endpoints-de-negocio | `LoginRateLimitingFilter.shouldNotFilter` cobre `/auth/**`, 2 de notificação e, desde 2026-08-03, `POST /shop/register` (o único ponto em que este card era bloqueante para a Fatia 8 — resolvido). Continua faltando para o restante dos endpoints de negócio — inclusive `GET /crm/customers/export`, que devolve a base inteira de clientes **sem paginação**, `GET /estoque/movements`, e agora também `GET /shop/catalog`/`/shop/catalog/{sku}` (ECM-F002, 2026-08-03, entregues sem rate limit — risco menor que `/shop/register` por serem só leitura, mas ainda scraping/DoS leve de graça). Um token válido pode drenar a base em loop sem nenhum freio. | Pendente (parcial) |
 | PLAT-C031 | 🟢 Melhoria | Correção | grafana-anonimo-e-embedding-no-compose-hml | `docker-compose.yml` sobe o Grafana com `GF_AUTH_ANONYMOUS_ENABLED: true` (papel Viewer) e `GF_SECURITY_ALLOW_EMBEDDING: true`, publicado em `localhost:3002`. Qualquer um com acesso à rede vê as métricas operacionais sem autenticar. | Pendente |
 | PLAT-C032 | 🟢 Melhoria | Correção | profile-default-dev-sem-bloqueio | `application.properties:10` — `spring.profiles.active=${SPRING_PROFILES_ACTIVE:dev}`. Um deploy que esqueça a variável sobe em `dev`: H2 em memória, CORS `*`, CSP vazio, H2 console aberto e seed com senha do repositório. Há comentário de aviso, mas nenhum mecanismo impede. | ✅ Concluído (Sprint 3) |
 | PLAT-C033 | 🟢 Melhoria | Correção | permissoes-orfas-role-e-permission-crud | `ROLE_CREATE`, `ROLE_DELETE`, `PERMISSION_CREATE` e `PERMISSION_DELETE` são criadas em V9/V36 mas **nenhum `@PreAuthorize` as usa** — o CRUD de role/permissão migrou para `DEV_ROLE_MANAGE`/`DEV_PERMISSION_MANAGE`. Também não constam de `ADMIN_PERMISSIONS` em `SeedConfig`/`DevRoleBootstrapConfig`. Ou são concedidas e não fazem nada, ou poluem a listagem de `GET /permissions`. Decidir entre remover ou voltar a usar. | Pendente |
-| PLAT-C034 | 🟡 Importante | Correção | archunit-exigindo-preauthorize-em-controller | `SecurityConfig.java:117` termina em `anyRequest().authenticated()` — qualquer método de controller sem `@PreAuthorize` explícito é alcançável por **qualquer** usuário autenticado. Hoje é inócuo porque todos têm, mas quando existir `ROLE_CUSTOMER` (ECM-F001) o "autenticado" passa a incluir cliente final, e um endpoint de operador que esqueça a anotação vira exposição. Transformar a convenção em garantia: teste ArchUnit exigindo `@PreAuthorize` em todo método de controller fora de `/auth` e `/shop`, no molde do `HexagonalArchitectureTest` existente. É barato e fecha uma classe inteira de regressão. Precisa estar pronto **antes** da Fatia 8 de [`plano-pdv-marketplace.md`](../../plano-pdv-marketplace.md) §2.9. | Pendente |
-| PLAT-C035 | 🔴 Alta | Correção | migrations-nunca-executadas-nos-testes | **Nenhuma migration Flyway roda na suíte.** O perfil `dev` tem `spring.flyway.enabled=false` e monta o schema por `ddl-auto=create-drop` a partir das entities, então o SQL de V63 a V67 nunca foi executado em lugar algum — erro de sintaxe, `CHECK` inválido ou divergência entre entity e migration só aparecem no primeiro deploy contra Postgres. Já há dívida concreta acumulada: a V65 faz `ALTER TABLE ... RENAME`, backfill e nove constraints; a V66 cria um **índice parcial único** (`uk_cash_register_session_open_operator`) que o H2 nem suporta — a garantia de "uma sessão aberta por operador" sob concorrência não é exercitada por teste nenhum. Correção: um IT com Postgres via Testcontainers que rode o Flyway inteiro. Levantado em 2026-07-28 durante a Fatia 1. | Pendente |
+| PLAT-C034 | 🟡 Importante | Correção | archunit-exigindo-preauthorize-em-controller | `SecurityConfig.java:117` termina em `anyRequest().authenticated()` — qualquer método de controller sem `@PreAuthorize` explícito é alcançável por **qualquer** usuário autenticado. Precisava estar pronto **antes** da Fatia 8 de [`plano-pdv-marketplace.md`](../../plano-pdv-marketplace.md) §2.9, porque é aí que `ROLE_CUSTOMER` passa a existir e "autenticado" deixa de significar "funcionário". Resolvido: `arch/SecurityArchitectureTest.java` (`every_operator_endpoint_declares_preauthorize`) exige `@PreAuthorize` em todo método `@GetMapping`/`@PostMapping`/`@PutMapping`/`@DeleteMapping`/`@PatchMapping` de `adapter.in.controller`, exceto a família `/auth/**` (`AuthController`, `OAuthController`, `RegistrationController`, `DevAuthController`, `TotpController`), os endpoints self-service já documentados acima (`NotificationController`, `NotificationPreferenceController`, `AvatarController`, e os três métodos `/users/me/**` de `UserController`) e `SystemConfigController#getPublicConfig` (`GET /system/config/public`, `permitAll()` em `SecurityConfig`) — esta última só apareceu ao rodar o teste pela primeira vez, confirmando o valor do próprio teste. `ShopController` (cadastro `/shop/register` e, desde ECM-F002, catálogo `/shop/catalog`/`/shop/catalog/{sku}`) já está em `PUBLIC_ROUTE_CONTROLLERS` — criado na mesma sessão que fechou este card. **Fatia 9 (2026-08-03) cumpriu a expectativa registrada aqui:** carrinho/checkout ganharam um controller autenticado PRÓPRIO, `ShopAccountController`, com `@PreAuthorize("hasAuthority('SHOP_CART_OWN')")`/`SHOP_ORDER_OWN` de verdade em todo método — **não foi adicionado** a `PUBLIC_ROUTE_CONTROLLERS` nem a nenhuma outra lista de exceção, exatamente como planejado. | ✅ Concluído (2026-08-03) |
+| PLAT-C035 | 🟡 Importante | Correção | migrations-nunca-executadas-nos-testes | **Revisado em 2026-08-03: a alegação original ("nenhuma migration Flyway roda na suíte") estava desatualizada.** `AuthFlowPostgresIT` (existe desde 2026-05-25) sobe um Postgres real via Testcontainers com `spring.flyway.enabled=true` e `ddl-auto=none`, e o job `verify` do CI (`.github/workflows/ci.yml:25`) já roda com `ENABLE_TC=true` — ou seja, o SQL de todas as migrations **é** executado contra Postgres real a cada push. O que **de fato** continua sem cobertura é o comportamento sob concorrência da V66: seu **índice parcial único** (`uk_cash_register_session_open_operator`, que o H2 nem suporta) nunca foi exercitado por um teste que dispute a mesma sessão de caixa contra Postgres — `AuthFlowPostgresIT` só cobre login/refresh/logout/criação de usuário, nada de PDV. Correção com escopo reduzido: um IT (pode estender o mesmo padrão de `AuthFlowPostgresIT`) que abra duas sessões de caixa concorrentes para o mesmo operador e confirme que o índice barra a segunda. Levantado em 2026-07-28 durante a Fatia 1. | Pendente (escopo reduzido) |
 
 ## Próximos passos
 
 Roteiro completo, com prompt pronto para colar numa sessão nova, em
 [`proximos-passos.md`](proximos-passos.md).
 
-- [ ] **PLAT-C035** — migrations nunca executadas nos testes. É o item de maior risco silencioso do backlog: a suíte fica verde enquanto o SQL pode estar quebrado.
-- [ ] **PLAT-C034** e **PLAT-C030** — os dois únicos itens com prazo: viram bloqueantes na Fatia 8
-      do [plano](../../plano-pdv-marketplace.md), quando `ROLE_CUSTOMER` fizer "autenticado" deixar
-      de ser sinônimo de "funcionário".
+- [ ] **PLAT-C035** — escopo reduzido em 2026-08-03: o Flyway completo já roda em CI via `AuthFlowPostgresIT`/`ENABLE_TC=true`. Falta só um teste de concorrência para o índice parcial único da V66 (`uk_cash_register_session_open_operator`) contra Postgres real.
+- [x] **PLAT-C034** — concluído em 2026-08-03 (`SecurityArchitectureTest`), antes de começar a
+      Fatia 8, como o prazo exigia.
+- [ ] **PLAT-C030** — a parte bloqueante da Fatia 8 (`/shop/register`) já foi resolvida em
+      2026-08-03. `/shop/catalog`/`/shop/catalog/{sku}` (ECM-F002, mesma data) ficaram públicos
+      sem freio também, mas como são só leitura o risco é menor — não bloqueia o fechamento da
+      Fatia 8, só amplia o escopo do restante do card (o mesmo já valia para
+      `/crm/customers/export` e `/estoque/movements`).
 - [ ] **PLAT-C024 + PLAT-C023** — como par: rotacionar segredo sem corrigir o compose que
       efetivamente sobe os containers é rotacionar para nada.
 - [ ] **PLAT-C031**, **PLAT-C026**, **PLAT-C033** — dívida que não piora com o tempo.
@@ -351,3 +364,9 @@ Roteiro completo, com prompt pronto para colar numa sessão nova, em
 - **PLAT-C032** 🟢 `profile-default-dev-sem-bloqueio` — criado `DevStartupValidator` (`@Profile("dev")`), contraparte do validador de prod. Em vez de tentar provar "isto é produção", ele detecta **variáveis de infra remota que o perfil dev ignoraria em silêncio** — `DB_URL` apontando para banco não-local enquanto a datasource efetiva é outra (tipicamente H2), e `CORS_ALLOWED_ORIGINS` com origem remota. Esse é o cenário perigoso: o operador crê ter configurado o banco real e a aplicação sobe sobre um H2 vazio. Escape hatch `DEV_ALLOW_REMOTE_INFRA=true` para quem aponta o ambiente local a um banco compartilhado de propósito.
 
 > **Nota sobre PLAT-C023 (rotação):** confirmado com o usuário que produção ainda não subiu, portanto não há secret TOTP cifrado no banco. Enquanto isso valer, `JWT_SECRET`, `TOTP_ENCRYPTION_KEY` e `REDIS_PASSWORD` podem ser rotacionados ao custo de gerar novos valores e reiniciar. Depois que existirem usuários com 2FA ativo, trocar `TOTP_ENCRYPTION_KEY` passa a exigir reencriptação. O card segue **Pendente** porque a rotação acontece no `.env` (gitignored, fora deste repositório) e `RESEND_API_KEY`/`GOOGLE_CLIENT_ID` dependem dos consoles de terceiros.
+
+### Sprint 4 — 2026-08-03 (pré-requisito da Fatia 8)
+
+- **PLAT-C034** 🟡 `archunit-exigindo-preauthorize-em-controller` — novo `arch/SecurityArchitectureTest.java`, no molde do `HexagonalArchitectureTest` existente. Varre todo método `@GetMapping`/`@PostMapping`/`@PutMapping`/`@DeleteMapping`/`@PatchMapping` de `adapter.in.controller` e exige `@PreAuthorize`, com duas categorias de exceção deliberada (mapeadas 1:1 com a tabela de "Endpoints protegidos apenas por `anyRequest().authenticated()`" acima): a família `/auth/**` (classe inteira) e os self-service por identidade (`NotificationController`, `NotificationPreferenceController`, `AvatarController` inteiros; só os três métodos `/me` de `UserController`). Também revisado nesta sprint: PLAT-C035 tinha uma alegação desatualizada (ver linha da tabela) — corrigida sem mudar código.
+
+Também revisado (não é um card novo, é correção da alegação existente): **PLAT-C035** — a suíte já roda o Flyway completo contra Postgres real via `AuthFlowPostgresIT`/CI (`ENABLE_TC=true`) desde 2026-05-25/07-22, bem antes deste card ter sido aberto em 2026-07-28. Reduzido ao gap real (concorrência da V66 sob Postgres, não coberta).

@@ -1136,14 +1136,6 @@ molde). Um evento por operação, não por item — a convenção já estabeleci
 
 ## 6. Plano de execução
 
-**Premissa das estimativas:** um desenvolvedor, ~6 horas produtivas por dia, mantendo a disciplina
-do repositório — teste unitário de domínio, teste de service com Mockito, teste de controller com
-MockMvc standalone, `*SecurityTest` cobrindo 401/403/sucesso por endpoint, IT com `@SpringBootTest`
-+ `@Transactional`, README do domínio, collection Postman e `feature-registry.md`. Observando as
-entregas anteriores, **teste e documentação são 40–50% do esforço de cada fatia** e estão dentro
-dos números abaixo, não fora. Sem JDK no ambiente de análise, as estimativas são de julgamento, não
-de medição.
-
 Cada fatia deixa o sistema funcionando e testável. Nenhuma deixa o sistema meio migrado.
 
 | # | Fatia | O que entra | Desbloqueia | Depende de | Esforço |
@@ -1168,14 +1160,9 @@ gateway, que são calendário e não esforço.
 
 ### Por que esta ordem
 
-A Fatia 0 vem antes de tudo porque é a **única** que fica mais cara a cada dia de dado real
-acumulado. As fatias 1–3 são o que faz a loja parar de abrir caixa por `INSERT` manual — é o que o
-dono sente na primeira semana. A 4 é o pedido explícito dele. A 5 existe antes do marketplace
-porque reserva sem cancelamento é uma armadilha: estoque travado sem como destravar.
+A Fatia 0 vem antes de tudo porque é a **única** que fica mais cara a cada dia de dado real acumulado. As fatias 1–3 são o que faz a loja parar de abrir caixa por `INSERT` manual — é o que o dono sente na primeira semana. A 4 é o pedido explícito dele. A 5 existe antes do marketplace porque reserva sem cancelamento é uma armadilha: estoque travado sem como destravar.
 
-Kits (6) aparece cedo apesar da prioridade baixa no backlog (EST-F015) porque não depende de nada
-além da Fatia 0 e é uma das duas coisas que o dono pediu nominalmente — vale entregar enquanto o
-marketplace ainda está longe.
+Kits (6) aparece cedo apesar da prioridade baixa no backlog (EST-F015) porque não depende de nada além da Fatia 0 e é uma das duas coisas que o dono pediu nominalmente — vale entregar enquanto o marketplace ainda está longe.
 
 ---
 
