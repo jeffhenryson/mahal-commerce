@@ -170,6 +170,20 @@ class CashbackServiceTest {
     }
 
     @Test
+    void recordEarnedForOrder_isIdempotentWhenAnEarnedEntryAlreadyExistsForTheOrder() {
+        // Guarda de idempotência (achado de CashbackLedgerConcurrencyIT): uma segunda chamada
+        // para o MESMO pedido não pode duplicar o ganho, mesmo fora de qualquer cenário de
+        // concorrência real — existsEarnedForOrder=true já basta para não escrever de novo.
+        Order order = orderWithCustomer(42L);
+        when(customerRepository.findById(42L)).thenReturn(Optional.of(officialCustomer()));
+        when(cashbackEntryRepository.existsEarnedForOrder(order.id())).thenReturn(true);
+
+        cashbackService.recordEarnedForOrder(order);
+
+        verify(cashbackEntryRepository, never()).save(any());
+    }
+
+    @Test
     void recordEarnedForOrder_skipsItemsWithoutAStampedRate() {
         OrderItem noRate = OrderItem.of(9L, "SEM-TAXA", BigDecimal.ONE, new BigDecimal("50.00"),
                 new BigDecimal("40.00"), BigDecimal.ZERO, null);
@@ -181,7 +195,9 @@ class CashbackServiceTest {
 
         cashbackService.recordEarnedForOrder(order);
 
-        verifyNoInteractions(cashbackEntryRepository);
+        // Não verifyNoInteractions: a guarda de idempotência (existsEarnedForOrder) roda antes do
+        // loop de itens, então o repositório É consultado — só o save() é que não deve acontecer.
+        verify(cashbackEntryRepository, never()).save(any());
     }
 
     // ── Saldo e extrato ──────────────────────────────────────────────────────────────────────

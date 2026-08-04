@@ -16,6 +16,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
+import java.math.BigDecimal;
+
 @SpringBootTest
 @ActiveProfiles("dev")
 public class PdvControllerSecurityTest {
@@ -296,5 +298,225 @@ public class PdvControllerSecurityTest {
         mockMvc.perform(get("/pdv/sessions/999999/payment-totals")
                 .with(user("gerente").authorities(new SimpleGrantedAuthority("PDV_READ"))))
                 .andExpect(status().isNotFound());
+    }
+
+    // ── GET /pdv/sessions/{id} e /pdv/sessions/{id}/movements ──────────────────────────────────
+    //
+    // Auditoria de cobertura de testes de segurança (2026-08): nenhum dos dois tinha um único
+    // teste, nem de 401/403 nem de 2xx. Também é aqui que mora o "IDOR" deste sistema — que é
+    // single-tenant, sem isolamento multi-loja, só isolamento por dono do recurso: a sessão de
+    // caixa pertence a quem a abriu. Ver a seção de propriedade horizontal mais abaixo.
+
+    /**
+     * Cadastra um depósito com código único e o devolve — pré-requisito para abrir sessão de
+     * caixa e para estocar produto. Reaproveitado por {@link #givenOpenSession} (via chamador) e
+     * por {@link #givenStockedSessionReadyForSale}.
+     */
+    private String givenWarehouse() throws Exception {
+        String code = "LOJA_PDV_SEC_" + System.nanoTime();
+        mockMvc.perform(post("/estoque/warehouses")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"code\":\"" + code + "\",\"name\":\"Loja Teste\",\"type\":\"LOJA_FISICA\"}")
+                .with(user("gerente-setup").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_WAREHOUSE_MANAGE"))))
+                .andExpect(status().isCreated());
+        return code;
+    }
+
+    /** Abre uma sessão de caixa de verdade para {@code operator} no depósito informado, e devolve o id. */
+    private Long givenOpenSession(String operator, String warehouseCode) throws Exception {
+        String location = mockMvc.perform(post("/pdv/sessions")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"openingAmount\":200.00,\"warehouseCode\":\"" + warehouseCode + "\"}")
+                .with(user(operator).authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("PDV_SESSION_MANAGE"))))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getHeader("Location");
+        return Long.valueOf(location.substring(location.lastIndexOf('/') + 1));
+    }
+
+    @Test
+    void get_session_without_auth_returns_401() throws Exception {
+        mockMvc.perform(get("/pdv/sessions/999999"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void get_session_without_pdv_read_returns_403() throws Exception {
+        mockMvc.perform(get("/pdv/sessions/999999")
+                .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void get_session_with_pdv_read_returns_200() throws Exception {
+        String warehouseCode = givenWarehouse();
+        Long sessionId = givenOpenSession("operador-get-session", warehouseCode);
+
+        mockMvc.perform(get("/pdv/sessions/" + sessionId)
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("PDV_READ"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("OPEN"))
+                .andExpect(jsonPath("$.warehouseCode").value(warehouseCode));
+    }
+
+    @Test
+    void list_cash_movements_without_auth_returns_401() throws Exception {
+        mockMvc.perform(get("/pdv/sessions/999999/movements"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void list_cash_movements_without_pdv_read_returns_403() throws Exception {
+        mockMvc.perform(get("/pdv/sessions/999999/movements")
+                .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void list_cash_movements_with_pdv_read_returns_200() throws Exception {
+        String warehouseCode = givenWarehouse();
+        Long sessionId = givenOpenSession("operador-list-movements", warehouseCode);
+
+        mockMvc.perform(get("/pdv/sessions/" + sessionId + "/movements")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("PDV_READ"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray());
+    }
+
+    // ── Venda completa de ponta a ponta, propriedade horizontal e mass assignment ──────────────
+    //
+    // Até aqui, nenhum teste deste arquivo completava uma venda de verdade: todos usavam a sessão
+    // 999999 (inexistente) e paravam em 403/404 antes de qualquer regra de negócio ser exercitada.
+    // A partir daqui a receita monta depósito + produto precificado + estoque + sessão real, o
+    // suficiente para um POST /pdv/sessions/{id}/sales chegar a 201 de verdade.
+
+    /** SKU e preço nascem do catálogo — é o próprio ponto que PDV-F004 defende (preço não vem do cliente). */
+    private record SaleFixture(Long sessionId, String sku, BigDecimal price) {
+    }
+
+    /**
+     * Depósito com produto precificado e estocado, mais uma sessão de caixa aberta por
+     * {@code operator} nesse depósito — pronta para registrar uma venda de verdade.
+     */
+    private SaleFixture givenStockedSessionReadyForSale(String operator) throws Exception {
+        String warehouseCode = givenWarehouse();
+        String sku = "SKU_PDV_SEC_" + System.nanoTime();
+        BigDecimal price = new BigDecimal("50.00");
+
+        mockMvc.perform(post("/estoque/products")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"sku\":\"" + sku + "\",\"name\":\"Produto PDV Teste\","
+                        + "\"pricing\":{\"salePrice\":" + price + "}}")
+                .with(user("gerente-setup").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_MANAGE"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_PRICE_MANAGE"))))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(post("/estoque/movements")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"sku\":\"" + sku + "\",\"warehouseCode\":\"" + warehouseCode + "\","
+                        + "\"type\":\"ENTRADA\",\"quantity\":10,\"reason\":\"setup teste\"}")
+                .with(user("gerente-setup").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_STOCK_MANAGE"))))
+                .andExpect(status().isCreated());
+
+        Long sessionId = givenOpenSession(operator, warehouseCode);
+        return new SaleFixture(sessionId, sku, price);
+    }
+
+    @Test
+    void register_sale_with_pdv_sale_manage_returns_201() throws Exception {
+        SaleFixture fixture = givenStockedSessionReadyForSale("operador-venda-ok");
+        String body = "{\"items\":[{\"sku\":\"" + fixture.sku() + "\",\"quantity\":1}],"
+                + "\"payments\":[{\"method\":\"DINHEIRO\",\"amount\":" + fixture.price() + "}]}";
+
+        mockMvc.perform(post("/pdv/sessions/" + fixture.sessionId() + "/sales")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body)
+                .with(user("operador-venda-ok").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("PDV_SALE_MANAGE"))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.grossAmount").value(fixture.price().doubleValue()));
+    }
+
+    /**
+     * PDV-C004: o operador que abriu a sessão é o único que pode vender nela — a mesma regra que
+     * {@code PdvServiceTest.registerSale_refusesASessionThatBelongsToAnotherOperator} prova em
+     * nível de serviço, mas que nunca tinha sido exercitada na camada HTTP. Um bug de mapeamento
+     * entre o {@code Authentication} e o {@code username} passado ao service passaria batido por
+     * todos os testes de unidade e só apareceria aqui.
+     *
+     * <p>{@code CashRegisterSessionNotOwnedException} é mapeada pelo {@code GlobalExceptionHandler}
+     * para 403/SESSION_NOT_OWNED (não 404): a sessão existe e o chamador sabe disso, só não é dele.</p>
+     */
+    @Test
+    void register_sale_on_session_owned_by_another_operator_returns_403() throws Exception {
+        SaleFixture fixture = givenStockedSessionReadyForSale("operadorA");
+        String body = "{\"items\":[{\"sku\":\"" + fixture.sku() + "\",\"quantity\":1}],"
+                + "\"payments\":[{\"method\":\"DINHEIRO\",\"amount\":" + fixture.price() + "}]}";
+
+        mockMvc.perform(post("/pdv/sessions/" + fixture.sessionId() + "/sales")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body)
+                .with(user("operadorB").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("PDV_SALE_MANAGE"))))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.errorCode").value("SESSION_NOT_OWNED"));
+    }
+
+    /**
+     * Mesma regra de {@link #register_sale_on_session_owned_by_another_operator_returns_403}, mas
+     * para a liquidação de pedido online. {@code PdvService.settleOnlineOrder} chama
+     * {@code requireOwnOpenSession} ANTES de buscar o pedido — por isso um {@code orderId} fake
+     * (999999) já basta: a checagem de dono nunca chega a olhar se o pedido existe. Confirmado lendo
+     * {@code PdvService.settleOnlineOrder} (a chamada a {@code requireOwnOpenSession} precede
+     * {@code getOrder(orderId)}) e {@code PdvServiceTest.settleOnlineOrder_refusesASessionThatBelongsToAnotherOperator}.
+     */
+    @Test
+    void settle_online_order_on_session_owned_by_another_operator_returns_403() throws Exception {
+        String warehouseCode = givenWarehouse();
+        Long sessionId = givenOpenSession("operadorC", warehouseCode);
+
+        mockMvc.perform(post("/pdv/sessions/" + sessionId + "/orders/999999/settle")
+                .with(user("operadorD").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("PDV_SALE_MANAGE"))))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.errorCode").value("SESSION_NOT_OWNED"));
+    }
+
+    /**
+     * PDV-F004: o comentário sobre {@code unitPrice} em {@link #SALE_BODY} nunca foi provado por
+     * asserção nenhuma — a sessão 999999 barrava antes de qualquer preço ser resolvido.
+     * {@code SaleItemRequest} não tem NENHUM campo de preço (ver a classe): "unitPrice" é
+     * desconhecido do DTO, e o Jackson do Spring Boot ignora campos desconhecidos por padrão. O
+     * valor malicioso de R$1,00 nunca chega ao service — o servidor usa o preço do catálogo
+     * (R$50,00), provado aqui pelo total da resposta.
+     */
+    @Test
+    void register_sale_with_client_supplied_price_is_ignored_and_server_price_is_used() throws Exception {
+        SaleFixture fixture = givenStockedSessionReadyForSale("operador-mass-assignment");
+        String body = "{\"items\":[{\"sku\":\"" + fixture.sku() + "\",\"quantity\":1,\"unitPrice\":1.00}],"
+                + "\"payments\":[{\"method\":\"DINHEIRO\",\"amount\":" + fixture.price() + "}]}";
+
+        mockMvc.perform(post("/pdv/sessions/" + fixture.sessionId() + "/sales")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body)
+                .with(user("operador-mass-assignment").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("PDV_SALE_MANAGE"))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.grossAmount").value(fixture.price().doubleValue()));
     }
 }

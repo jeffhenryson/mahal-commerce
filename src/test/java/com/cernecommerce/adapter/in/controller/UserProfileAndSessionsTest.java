@@ -271,6 +271,44 @@ public class UserProfileAndSessionsTest {
                 .andExpect(jsonPath("$.username").value(newUsername));
     }
 
+    /**
+     * Mass assignment: {@code UserUpdateRequest} não tem campo {@code roles}/{@code authorities}/
+     * {@code permissions} — o Jackson ignora silenciosamente campos desconhecidos no corpo (sem
+     * {@code FAIL_ON_UNKNOWN_PROPERTIES} configurado em lugar nenhum do projeto), então mesmo um
+     * usuário comum enviando esses campos no PATCH da própria conta não consegue se autopromover.
+     */
+    @Test
+    void patch_me_ignores_client_supplied_roles_field() throws Exception {
+        String unique = "massassign_" + System.currentTimeMillis();
+        mockMvc.perform(post("/users")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(String.format("{\"username\":\"%s\",\"password\":\"Pass1@word\"}", unique))
+                .with(user("admin").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("USER_CREATE"))))
+                .andExpect(status().isCreated());
+
+        String beforeJson = mockMvc.perform(get("/users/me")
+                .with(user(unique).authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        @SuppressWarnings("unchecked")
+        java.util.List<String> rolesBefore = (java.util.List<String>) om.readValue(beforeJson, java.util.Map.class).get("roles");
+
+        mockMvc.perform(patch("/users/me")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"username\":\"" + unique
+                        + "\",\"roles\":[\"ADMIN\"],\"authorities\":[\"USER_CREATE\"],\"permissions\":[\"USER_CREATE\"]}")
+                .with(user(unique).authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.roles").value(rolesBefore));
+
+        mockMvc.perform(get("/users/me")
+                .with(user(unique).authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.roles").value(rolesBefore));
+    }
+
     @Test
     void disable_user_returns_204_and_blocks_subsequent_authentication() throws Exception {
         String unique = "disabletest_" + System.currentTimeMillis();

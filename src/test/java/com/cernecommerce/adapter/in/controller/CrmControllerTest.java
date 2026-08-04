@@ -34,6 +34,7 @@ import com.cernecommerce.core.domain.model.crm.Tag;
 import com.cernecommerce.core.domain.model.crm.TagSummary;
 import com.cernecommerce.core.ports.in.CashbackUseCase;
 import com.cernecommerce.core.ports.in.CrmUseCase;
+import com.cernecommerce.core.ports.out.ratelimit.ResourceRateLimiterPort;
 import com.cernecommerce.infra.handler.GlobalExceptionHandler;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -63,11 +64,13 @@ public class CrmControllerTest {
         crmUseCase = mock(CrmUseCase.class);
         cashbackUseCase = mock(CashbackUseCase.class);
         ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
+        ResourceRateLimiterPort resourceRateLimiter = mock(ResourceRateLimiterPort.class);
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new CrmController(crmUseCase, cashbackUseCase, new CustomerDTOConverter(),
                         new CustomerNoteDTOConverter(), new StageTransitionDTOConverter(),
                         new TagDTOConverter(), new CustomerCsvConverter(), new CampaignDTOConverter(),
-                        new ChannelStatusDTOConverter(), new CashbackDTOConverter(), publisher))
+                        new ChannelStatusDTOConverter(), new CashbackDTOConverter(), publisher,
+                        resourceRateLimiter))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }
@@ -570,7 +573,7 @@ public class CrmControllerTest {
     void exportCustomersCsv_returns_200_withCsvContentAndHeaders() throws Exception {
         when(crmUseCase.listCustomersForExport(null)).thenReturn(List.of(customer(1L, "maria@example.com")));
 
-        byte[] body = mockMvc.perform(get("/crm/customers/export"))
+        byte[] body = mockMvc.perform(get("/crm/customers/export").principal(AUTH))
                 .andExpect(status().isOk())
                 .andExpect(header().string("Content-Type", "text/csv;charset=UTF-8"))
                 .andExpect(header().string("Content-Disposition", org.hamcrest.Matchers.containsString("clientes.csv")))
@@ -585,7 +588,7 @@ public class CrmControllerTest {
     void exportCustomersCsv_passesSearchThrough() throws Exception {
         when(crmUseCase.listCustomersForExport("maria")).thenReturn(List.of(customer(1L, "maria@example.com")));
 
-        mockMvc.perform(get("/crm/customers/export").param("search", "maria"))
+        mockMvc.perform(get("/crm/customers/export").param("search", "maria").principal(AUTH))
                 .andExpect(status().isOk());
 
         verify(crmUseCase).listCustomersForExport("maria");
@@ -636,6 +639,7 @@ public class CrmControllerTest {
         when(crmUseCase.setAutomationActive(1L, false)).thenReturn(automation(1L, false));
 
         mockMvc.perform(patch("/crm/automacoes/1/ativa")
+                        .principal(AUTH)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"ativa\":false}"))
                 .andExpect(status().isOk())

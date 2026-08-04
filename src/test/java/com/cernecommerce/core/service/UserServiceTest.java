@@ -135,6 +135,56 @@ class UserServiceTest {
     }
 
     @Test
+    void createCustomerAccount_rejectsWeakPassword() {
+        assertThatThrownBy(() -> userService.createCustomerAccount("alice@test.com", "short", 1L))
+                .isInstanceOf(InvalidPasswordException.class);
+        verifyNoInteractions(userRepository);
+    }
+
+    @Test
+    void createCustomerAccount_rejectsWhenEmailAlreadyUsernameOfAnyone() {
+        // Simula um operador cujo username já é esse email — a checagem é cruzada, não filtrada
+        // por tipo, mesmo com a constraint composta (user_type, username) na V76.
+        when(userRepository.findByUsername("joao@x.com"))
+                .thenReturn(Optional.of(User.of("joao@x.com", "hashed", null)));
+
+        assertThatThrownBy(() -> userService.createCustomerAccount("joao@x.com", "Password@123", 1L))
+                .isInstanceOf(UsernameAlreadyExistsException.class);
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    void createCustomerAccount_rejectsWhenEmailAlreadyUsedByAnyone() {
+        when(userRepository.findByUsername(anyString())).thenReturn(Optional.empty());
+        when(userRepository.findByEmail("maria@x.com"))
+                .thenReturn(Optional.of(User.of("other", "hashed", null)));
+
+        assertThatThrownBy(() -> userService.createCustomerAccount("maria@x.com", "Password@123", 1L))
+                .isInstanceOf(EmailAlreadyExistsException.class);
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    void createCustomerAccount_savesEnabledCustomerTypeUserWithRoleCustomer() {
+        Role customerRole = new Role("ROLE_CUSTOMER");
+        when(userRepository.findByUsername(anyString())).thenReturn(Optional.empty());
+        when(userRepository.findByEmail(anyString())).thenReturn(Optional.empty());
+        when(roleRepository.findByName("ROLE_CUSTOMER")).thenReturn(Optional.of(customerRole));
+        when(passwordHash.hash(anyString())).thenReturn("hashed");
+        when(userRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        User created = userService.createCustomerAccount("maria@x.com", "Password@123", 42L);
+
+        assertThat(created.isCustomer()).isTrue();
+        assertThat(created.getCustomerId()).isEqualTo(42L);
+        assertThat(created.getUsername()).isEqualTo("maria@x.com");
+        assertThat(created.getEmail()).isEqualTo("maria@x.com");
+        assertThat(created.isEnabled()).isTrue();
+        assertThat(created.getRoles()).extracting(Role::getName).containsExactly("ROLE_CUSTOMER");
+        verify(userCachePort).evict("maria@x.com");
+    }
+
+    @Test
     void changeOwnPassword_rejectsWrongCurrentPassword() {
         User user = User.of("alice", "hashed", null);
         when(userRepository.findByUsername("alice")).thenReturn(Optional.of(user));

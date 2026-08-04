@@ -93,6 +93,12 @@ public class CashbackControllerSecurityTest {
     }
 
     @Test
+    void resolve_rate_without_auth_returns_401() throws Exception {
+        mockMvc.perform(get("/cashback/rates/resolve").param("sku", "CARV-001"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     void resolve_rate_without_cashback_read_returns_403() throws Exception {
         mockMvc.perform(get("/cashback/rates/resolve").param("sku", "CARV-001")
                 .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
@@ -105,6 +111,12 @@ public class CashbackControllerSecurityTest {
                 .with(user("caixa").authorities(new SimpleGrantedAuthority("CASHBACK_READ"))))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.errorCode").value("PRODUCT_NOT_FOUND"));
+    }
+
+    @Test
+    void margin_impact_without_auth_returns_401() throws Exception {
+        mockMvc.perform(get("/cashback/margin-impact").param("maxShare", "20"))
+                .andExpect(status().isUnauthorized());
     }
 
     @Test
@@ -129,6 +141,12 @@ public class CashbackControllerSecurityTest {
     }
 
     @Test
+    void customer_balance_without_auth_returns_401() throws Exception {
+        mockMvc.perform(get("/cashback/customers/999999"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     void customer_balance_without_cashback_read_returns_403() throws Exception {
         mockMvc.perform(get("/cashback/customers/999999")
                 .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
@@ -144,10 +162,32 @@ public class CashbackControllerSecurityTest {
     }
 
     @Test
+    void customer_entries_without_auth_returns_401() throws Exception {
+        mockMvc.perform(get("/cashback/customers/999999/entries"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     void customer_entries_without_cashback_read_returns_403() throws Exception {
         mockMvc.perform(get("/cashback/customers/999999/entries")
                 .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void customer_entries_with_cashback_read_returns_200() throws Exception {
+        Long customerId = givenCustomer();
+        mockMvc.perform(get("/cashback/customers/" + customerId + "/entries")
+                .with(user("caixa").authorities(new SimpleGrantedAuthority("CASHBACK_READ"))))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void patch_rate_without_auth_returns_401() throws Exception {
+        mockMvc.perform(patch("/cashback/rates/999999")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"percent\":4.0}"))
+                .andExpect(status().isUnauthorized());
     }
 
     @Test
@@ -167,5 +207,48 @@ public class CashbackControllerSecurityTest {
                 .with(user("gerente").authorities(new SimpleGrantedAuthority("CASHBACK_RATE_MANAGE"))))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.errorCode").value("CASHBACK_RATE_NOT_FOUND"));
+    }
+
+    @Test
+    void patch_rate_with_cashback_rate_manage_returns_200() throws Exception {
+        Long rateId = givenRate();
+        mockMvc.perform(patch("/cashback/rates/" + rateId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"percent\":4.0}")
+                .with(user("gerente").authorities(new SimpleGrantedAuthority("CASHBACK_RATE_MANAGE"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.percent").value(4.0));
+    }
+
+    /**
+     * Cadastra uma taxa de cashback única (escopo CATEGORY) e devolve o id — fixture reaproveitada
+     * pelos testes de sucesso que dependem de uma taxa existente.
+     */
+    private Long givenRate() throws Exception {
+        String category = "SEC_TEST_" + System.nanoTime();
+        String location = mockMvc.perform(post("/cashback/rates")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"scope\":\"CATEGORY\",\"scopeRef\":\"" + category + "\",\"percent\":6.5}")
+                .with(user("gerente").authorities(new SimpleGrantedAuthority("CASHBACK_RATE_MANAGE"))))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getHeader("Location");
+        return Long.valueOf(location.substring(location.lastIndexOf('/') + 1));
+    }
+
+    /**
+     * Cadastra um cliente único e devolve o id — fixture reaproveitada pelos testes de sucesso
+     * que dependem de um cliente existente.
+     */
+    private Long givenCustomer() throws Exception {
+        String email = "sec_test_" + System.nanoTime() + "@example.com";
+        String location = mockMvc.perform(post("/crm/customers")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"nome\":\"Maria\",\"contato\":\"11999998888\",\"email\":\"" + email + "\"}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("CRM_CUSTOMER_MANAGE"))))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getHeader("Location");
+        return Long.valueOf(location.substring(location.lastIndexOf('/') + 1));
     }
 }

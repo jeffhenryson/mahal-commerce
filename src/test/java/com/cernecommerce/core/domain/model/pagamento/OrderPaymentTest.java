@@ -104,4 +104,55 @@ class OrderPaymentTest {
         assertThat(payment.method()).isEqualTo(PaymentMethod.PIX);
         assertThat(payment.createdAt()).isEqualTo(createdAt);
     }
+
+    @Test
+    void pending_startsAsPendingWithNoGatewayRefOrTimestamps() {
+        OrderPayment payment = OrderPayment.pending(7L, PaymentMethod.GATEWAY_PIX, new BigDecimal("44.00"));
+
+        assertThat(payment.id()).isNull();
+        assertThat(payment.orderId()).isEqualTo(7L);
+        assertThat(payment.method()).isEqualTo(PaymentMethod.GATEWAY_PIX);
+        assertThat(payment.status()).isEqualTo(PaymentStatus.PENDING);
+        assertThat(payment.gatewayRef()).isNull();
+        assertThat(payment.authorizedAt()).isNull();
+        assertThat(payment.capturedAt()).isNull();
+        assertThat(payment.createdAt()).isNotNull();
+    }
+
+    @Test
+    void confirmCaptured_transitionsPendingToCapturedPreservingIdentity() {
+        OrderPayment pending = OrderPayment.of(5L, 7L, PaymentMethod.GATEWAY_PIX, new BigDecimal("44.00"),
+                PaymentStatus.PENDING, null, null, null, null, Instant.parse("2026-08-03T10:00:00Z"));
+        Instant capturedAt = Instant.parse("2026-08-03T10:05:00Z");
+
+        OrderPayment captured = pending.confirmCaptured("txn-123", capturedAt);
+
+        assertThat(captured.id()).isEqualTo(5L);
+        assertThat(captured.orderId()).isEqualTo(7L);
+        assertThat(captured.method()).isEqualTo(PaymentMethod.GATEWAY_PIX);
+        assertThat(captured.amount()).isEqualByComparingTo("44.00");
+        assertThat(captured.status()).isEqualTo(PaymentStatus.CAPTURED);
+        assertThat(captured.gatewayRef()).isEqualTo("txn-123");
+        assertThat(captured.authorizedAt()).isEqualTo(capturedAt);
+        assertThat(captured.capturedAt()).isEqualTo(capturedAt);
+        assertThat(captured.createdAt()).isEqualTo(Instant.parse("2026-08-03T10:00:00Z"));
+    }
+
+    @Test
+    void confirmCaptured_rejectsNonPendingOrigin() {
+        OrderPayment captured = OrderPayment.captured(7L, PaymentMethod.GATEWAY_PIX, BigDecimal.TEN, null);
+
+        assertThatThrownBy(() -> captured.confirmCaptured("txn-123", Instant.now()))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("PENDING");
+    }
+
+    @Test
+    void confirmCaptured_rejectsBlankGatewayRefOrNullCapturedAt() {
+        OrderPayment pending = OrderPayment.pending(7L, PaymentMethod.GATEWAY_PIX, BigDecimal.TEN);
+
+        assertThatThrownBy(() -> pending.confirmCaptured(" ", Instant.now()))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("gatewayRef");
+        assertThatThrownBy(() -> pending.confirmCaptured("txn-123", null))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("capturedAt");
+    }
 }

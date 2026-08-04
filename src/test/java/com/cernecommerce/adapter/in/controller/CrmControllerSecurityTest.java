@@ -1,9 +1,14 @@
 package com.cernecommerce.adapter.in.controller;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+
+import com.cernecommerce.adapter.out.persistence.repository.AuditLogJpaRepository;
+import com.cernecommerce.adapter.out.security.ratelimit.InMemoryResourceRateLimiterAdapter;
+import com.cernecommerce.core.ports.out.ratelimit.ResourceRateLimiterPort;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -23,11 +28,81 @@ public class CrmControllerSecurityTest {
     @Autowired
     private WebApplicationContext context;
 
+    @Autowired
+    private AuditLogJpaRepository auditRepo;
+
+    @Autowired
+    private ResourceRateLimiterPort resourceRateLimiter;
+
     private MockMvc mockMvc;
 
     @BeforeEach
     void setup() {
         mockMvc = MockMvcBuilders.webAppContextSetup(context).apply(springSecurity()).build();
+        if (resourceRateLimiter instanceof InMemoryResourceRateLimiterAdapter r) r.reset();
+    }
+
+    /** Aguarda até 2 segundos que uma entrada com a action apareça no banco (async). */
+    private void awaitAction(String action) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + 2000;
+        while (System.currentTimeMillis() < deadline) {
+            if (auditRepo.findAll().stream().anyMatch(e -> action.equals(e.getAction()))) return;
+            Thread.sleep(50);
+        }
+        assertThat(auditRepo.findAll().stream().anyMatch(e -> action.equals(e.getAction())))
+                .as("Expected audit entry with action=" + action).isTrue();
+    }
+
+    /**
+     * Cadastra um cliente único e devolve o id — fixture reaproveitada pelos testes de sucesso
+     * que dependem de um cliente existente (notas, pedidos, cashback, tags).
+     */
+    private Long givenCustomer() throws Exception {
+        String email = "sec_test_" + System.nanoTime() + "@example.com";
+        String location = mockMvc.perform(post("/crm/customers")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"nome\":\"Maria\",\"contato\":\"11999998888\",\"email\":\"" + email + "\"}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("CRM_CUSTOMER_MANAGE"))))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getHeader("Location");
+        return Long.valueOf(location.substring(location.lastIndexOf('/') + 1));
+    }
+
+    /**
+     * Cadastra uma tag única e devolve o id — fixture reaproveitada pelos testes de sucesso de
+     * associação/remoção de tags.
+     */
+    private Long givenTag() throws Exception {
+        String nome = "TAG_SEC_TEST_" + System.nanoTime();
+        String location = mockMvc.perform(post("/crm/tags")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"nome\":\"" + nome + "\"}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("CRM_CUSTOMER_MANAGE"))))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getHeader("Location");
+        return Long.valueOf(location.substring(location.lastIndexOf('/') + 1));
+    }
+
+    /**
+     * Cadastra uma automação de gatilho MANUAL e devolve o id — fixture reaproveitada pelos
+     * testes de sucesso de ativação, remoção, disparo e log.
+     */
+    private Long givenAutomation() throws Exception {
+        String nome = "AUTOMACAO_SEC_TEST_" + System.nanoTime();
+        String location = mockMvc.perform(post("/crm/automacoes")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"nome\":\"" + nome + "\",\"gatilho\":\"MANUAL\",\"segmentoAlvo\":\"NOVO_LEAD\","
+                        + "\"canal\":\"EMAIL\",\"template\":\"Ola {nome}\"}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("CRM_CUSTOMER_MANAGE"))))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getHeader("Location");
+        return Long.valueOf(location.substring(location.lastIndexOf('/') + 1));
     }
 
     @Test
@@ -221,6 +296,24 @@ public class CrmControllerSecurityTest {
     }
 
     @Test
+    void list_notes_with_crm_customer_read_returns_200() throws Exception {
+        Long customerId = givenCustomer();
+        mockMvc.perform(post("/crm/customers/" + customerId + "/notes")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"texto\":\"Nota de teste\"}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("CRM_CUSTOMER_MANAGE"))))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(get("/crm/customers/" + customerId + "/notes")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("CRM_CUSTOMER_READ"))))
+                .andExpect(status().isOk());
+    }
+
+    @Test
     void list_orders_without_crm_customer_read_returns_403() throws Exception {
         mockMvc.perform(get("/crm/customers/999999/orders")
                 .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
@@ -228,10 +321,30 @@ public class CrmControllerSecurityTest {
     }
 
     @Test
+    void list_orders_with_crm_customer_read_returns_200() throws Exception {
+        Long customerId = givenCustomer();
+        mockMvc.perform(get("/crm/customers/" + customerId + "/orders")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("CRM_CUSTOMER_READ"))))
+                .andExpect(status().isOk());
+    }
+
+    @Test
     void list_cashback_without_crm_customer_read_returns_403() throws Exception {
         mockMvc.perform(get("/crm/customers/999999/cashback")
                 .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void list_cashback_with_crm_customer_read_returns_200() throws Exception {
+        Long customerId = givenCustomer();
+        mockMvc.perform(get("/crm/customers/" + customerId + "/cashback")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("CRM_CUSTOMER_READ"))))
+                .andExpect(status().isOk());
     }
 
     @Test
@@ -371,6 +484,16 @@ public class CrmControllerSecurityTest {
     }
 
     @Test
+    void delete_tag_with_crm_customer_manage_returns_204() throws Exception {
+        Long tagId = givenTag();
+        mockMvc.perform(delete("/crm/tags/" + tagId)
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("CRM_CUSTOMER_MANAGE"))))
+                .andExpect(status().isNoContent());
+    }
+
+    @Test
     void add_tag_to_customer_without_crm_customer_manage_returns_403() throws Exception {
         mockMvc.perform(post("/crm/customers/999999/tags")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -382,6 +505,19 @@ public class CrmControllerSecurityTest {
     }
 
     @Test
+    void add_tag_to_customer_with_crm_customer_manage_returns_2xx() throws Exception {
+        Long customerId = givenCustomer();
+        Long tagId = givenTag();
+        mockMvc.perform(post("/crm/customers/" + customerId + "/tags")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"tagId\":" + tagId + "}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("CRM_CUSTOMER_MANAGE"))))
+                .andExpect(status().isNoContent());
+    }
+
+    @Test
     void remove_tag_from_customer_without_crm_customer_manage_returns_403() throws Exception {
         mockMvc.perform(delete("/crm/customers/999999/tags/999999")
                 .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
@@ -389,10 +525,39 @@ public class CrmControllerSecurityTest {
     }
 
     @Test
+    void remove_tag_from_customer_with_crm_customer_manage_returns_2xx() throws Exception {
+        Long customerId = givenCustomer();
+        Long tagId = givenTag();
+        mockMvc.perform(post("/crm/customers/" + customerId + "/tags")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"tagId\":" + tagId + "}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("CRM_CUSTOMER_MANAGE"))))
+                .andExpect(status().isNoContent());
+
+        mockMvc.perform(delete("/crm/customers/" + customerId + "/tags/" + tagId)
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("CRM_CUSTOMER_MANAGE"))))
+                .andExpect(status().isNoContent());
+    }
+
+    @Test
     void list_customer_tags_without_crm_customer_read_returns_403() throws Exception {
         mockMvc.perform(get("/crm/customers/999999/tags")
                 .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void list_customer_tags_with_crm_customer_read_returns_200() throws Exception {
+        Long customerId = givenCustomer();
+        mockMvc.perform(get("/crm/customers/" + customerId + "/tags")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("CRM_CUSTOMER_READ"))))
+                .andExpect(status().isOk());
     }
 
     @Test
@@ -415,6 +580,38 @@ public class CrmControllerSecurityTest {
                         new SimpleGrantedAuthority("ROLE_ADMIN"),
                         new SimpleGrantedAuthority("CRM_CUSTOMER_READ"))))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void export_customers_csv_publishes_audit_event() throws Exception {
+        mockMvc.perform(get("/crm/customers/export")
+                .with(user("audit_export_user").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("CRM_CUSTOMER_READ"))))
+                .andExpect(status().isOk());
+
+        awaitAction("CUSTOMER_LIST_EXPORTED");
+    }
+
+    @Test
+    void export_customers_csv_exceeding_rate_limit_returns_429() throws Exception {
+        // Bucket crm-export: 5 requisições/hora por usuário (InMemoryResourceRateLimiterAdapter,
+        // perfil dev). A chave é authentication.getName(), então usamos sempre o mesmo usuário.
+        String username = "rate_limit_export_user";
+        for (int i = 0; i < 5; i++) {
+            mockMvc.perform(get("/crm/customers/export")
+                    .with(user(username).authorities(
+                            new SimpleGrantedAuthority("ROLE_ADMIN"),
+                            new SimpleGrantedAuthority("CRM_CUSTOMER_READ"))))
+                    .andExpect(status().isOk());
+        }
+
+        mockMvc.perform(get("/crm/customers/export")
+                .with(user(username).authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("CRM_CUSTOMER_READ"))))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.errorCode").value("RATE_LIMIT_EXCEEDED"));
     }
 
     @Test
@@ -476,10 +673,46 @@ public class CrmControllerSecurityTest {
     }
 
     @Test
+    void set_automation_active_with_crm_customer_manage_returns_200() throws Exception {
+        Long automationId = givenAutomation();
+        mockMvc.perform(patch("/crm/automacoes/" + automationId + "/ativa")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"ativa\":false}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("CRM_CUSTOMER_MANAGE"))))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void set_automation_active_publishes_audit_event() throws Exception {
+        Long automationId = givenAutomation();
+        mockMvc.perform(patch("/crm/automacoes/" + automationId + "/ativa")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"ativa\":false}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("CRM_CUSTOMER_MANAGE"))))
+                .andExpect(status().isOk());
+
+        awaitAction("CAMPAIGN_AUTOMATION_TOGGLED");
+    }
+
+    @Test
     void delete_automation_without_crm_customer_manage_returns_403() throws Exception {
         mockMvc.perform(delete("/crm/automacoes/999999")
                 .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void delete_automation_with_crm_customer_manage_returns_204() throws Exception {
+        Long automationId = givenAutomation();
+        mockMvc.perform(delete("/crm/automacoes/" + automationId)
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("CRM_CUSTOMER_MANAGE"))))
+                .andExpect(status().isNoContent());
     }
 
     @Test
@@ -499,9 +732,36 @@ public class CrmControllerSecurityTest {
     }
 
     @Test
+    void dispatch_automation_with_crm_customer_manage_returns_200_or_204() throws Exception {
+        // CrmController#dispatchAutomation sempre devolve ResponseEntity.ok(...) — 200.
+        Long automationId = givenAutomation();
+        mockMvc.perform(post("/crm/automacoes/" + automationId + "/disparar")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("CRM_CUSTOMER_MANAGE"))))
+                .andExpect(status().isOk());
+    }
+
+    @Test
     void list_automation_log_without_crm_customer_read_returns_403() throws Exception {
         mockMvc.perform(get("/crm/automacoes/999999/log")
                 .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void list_automation_log_with_crm_customer_read_returns_200() throws Exception {
+        Long automationId = givenAutomation();
+        mockMvc.perform(post("/crm/automacoes/" + automationId + "/disparar")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("CRM_CUSTOMER_MANAGE"))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/crm/automacoes/" + automationId + "/log")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("CRM_CUSTOMER_READ"))))
+                .andExpect(status().isOk());
     }
 }

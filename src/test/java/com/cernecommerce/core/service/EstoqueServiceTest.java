@@ -99,6 +99,7 @@ class EstoqueServiceTest {
     @Mock UserRepository userRepository;
     @Mock KitComponentRepository kitComponentRepository;
     @Mock StockLotRepository stockLotRepository;
+    @Mock com.cernecommerce.core.ports.out.SystemConfigPort systemConfigPort;
 
     /** Mesmo default de {@code estoque.reservation.default-ttl} em {@code CoreBeanConfig}. */
     private static final Duration RESERVATION_TTL = Duration.ofMinutes(30);
@@ -122,7 +123,7 @@ class EstoqueServiceTest {
         estoqueService = new EstoqueService(productRepository, warehouseRepository, stockBalanceRepository,
                 stockMovementRepository, reorderPointRepository, stockIntegrityRepository, stockCountRepository,
                 stockReservationRepository, notificationUseCase, userRepository, immediateExecutor,
-                RESERVATION_TTL, kitComponentRepository, stockLotRepository);
+                RESERVATION_TTL, kitComponentRepository, stockLotRepository, systemConfigPort);
         lenient().when(reorderPointRepository.findBySkuAndWarehouseId(any(), any())).thenReturn(Optional.empty());
         // Padrão dos testes: o SKU existe no catálogo, que é a pré-condição das movimentações.
         // Os testes de createProduct e os de SKU desconhecido sobrescrevem este stub.
@@ -215,6 +216,60 @@ class EstoqueServiceTest {
 
         assertThat(result.content()).hasSize(1);
         assertThat(result.totalElements()).isEqualTo(1L);
+    }
+
+    @Test
+    void listActivePricedProducts_delegatesToRepository() {
+        PageResult<Product> page = new PageResult<>(
+                List.of(Product.of(1L, "NARG-001", "Narguile Aladin", "narguile", true, List.of())), 0, 20, 1L, 1);
+        when(productRepository.findAllActiveAndPriced(0, 20)).thenReturn(page);
+
+        PageResult<Product> result = estoqueService.listActivePricedProducts(0, 20);
+
+        assertThat(result.content()).hasSize(1);
+        assertThat(result.totalElements()).isEqualTo(1L);
+    }
+
+    @Test
+    void getDefaultWarehouse_resolvesConfiguredCode() {
+        when(systemConfigPort.findByKey("estoque.warehouse.default-code"))
+                .thenReturn(Optional.of(new com.cernecommerce.core.domain.model.config.SystemConfig(
+                        "estoque.warehouse.default-code", "LOJA-01", Instant.now(), "admin")));
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+
+        Warehouse result = estoqueService.getDefaultWarehouse();
+
+        assertThat(result.code()).isEqualTo("LOJA-01");
+    }
+
+    @Test
+    void getDefaultWarehouse_throwsWhenConfigKeyMissing() {
+        when(systemConfigPort.findByKey("estoque.warehouse.default-code")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.getDefaultWarehouse())
+                .isInstanceOf(com.cernecommerce.core.domain.exception.estoque.DefaultWarehouseNotConfiguredException.class);
+    }
+
+    @Test
+    void getDefaultWarehouse_throwsWhenConfigValueBlank() {
+        when(systemConfigPort.findByKey("estoque.warehouse.default-code"))
+                .thenReturn(Optional.of(new com.cernecommerce.core.domain.model.config.SystemConfig(
+                        "estoque.warehouse.default-code", "  ", Instant.now(), "admin")));
+
+        assertThatThrownBy(() -> estoqueService.getDefaultWarehouse())
+                .isInstanceOf(com.cernecommerce.core.domain.exception.estoque.DefaultWarehouseNotConfiguredException.class);
+    }
+
+    @Test
+    void getDefaultWarehouse_throwsWhenConfiguredWarehouseDoesNotExist() {
+        when(systemConfigPort.findByKey("estoque.warehouse.default-code"))
+                .thenReturn(Optional.of(new com.cernecommerce.core.domain.model.config.SystemConfig(
+                        "estoque.warehouse.default-code", "GHOST", Instant.now(), "admin")));
+        when(warehouseRepository.findByCode("GHOST")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.getDefaultWarehouse())
+                .isInstanceOf(WarehouseNotFoundException.class);
     }
 
     @Test

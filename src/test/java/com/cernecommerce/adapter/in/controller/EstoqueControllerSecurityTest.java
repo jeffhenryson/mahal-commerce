@@ -470,6 +470,134 @@ public class EstoqueControllerSecurityTest {
                 .andExpect(status().isCreated());
     }
 
+    /**
+     * Fixture completa: produto + depósito + balanço aberto, reaproveitada pelos testes de
+     * sucesso de /stock-counts/{id}/items, /cancel, GET {id} e GET (listagem) — nenhum deles
+     * tinha caminho 2xx coberto (auditoria de cobertura de testes de segurança, 2026-08).
+     */
+    private record StockCountFixture(Long id, String warehouseCode, String sku) {
+    }
+
+    private StockCountFixture givenOpenStockCount() throws Exception {
+        String sku = givenProduct();
+        String code = "LOJA_COUNT_SEC_" + System.nanoTime();
+        mockMvc.perform(post("/estoque/warehouses")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"code\":\"" + code + "\",\"name\":\"Loja Teste\",\"type\":\"LOJA_FISICA\"}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_WAREHOUSE_MANAGE"))))
+                .andExpect(status().isCreated());
+
+        String location = mockMvc.perform(post("/estoque/stock-counts")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"warehouseCode\":\"" + code + "\"}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_STOCK_MANAGE"))))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getHeader("Location");
+        Long id = Long.valueOf(location.substring(location.lastIndexOf('/') + 1));
+        return new StockCountFixture(id, code, sku);
+    }
+
+    @Test
+    void record_counted_item_without_auth_returns_401() throws Exception {
+        mockMvc.perform(post("/estoque/stock-counts/1/items")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"sku\":\"QUALQUER\",\"countedQuantity\":1}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void record_counted_item_with_warehouse_read_only_returns_403() throws Exception {
+        mockMvc.perform(post("/estoque/stock-counts/1/items")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"sku\":\"QUALQUER\",\"countedQuantity\":1}")
+                .with(user("bob").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_WAREHOUSE_READ"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void record_counted_item_with_estoque_stock_manage_returns_200() throws Exception {
+        StockCountFixture fixture = givenOpenStockCount();
+        mockMvc.perform(post("/estoque/stock-counts/" + fixture.id() + "/items")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"sku\":\"" + fixture.sku() + "\",\"countedQuantity\":10}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_STOCK_MANAGE"))))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void cancel_stock_count_without_auth_returns_401() throws Exception {
+        mockMvc.perform(post("/estoque/stock-counts/1/cancel"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void cancel_stock_count_with_warehouse_read_only_returns_403() throws Exception {
+        mockMvc.perform(post("/estoque/stock-counts/1/cancel")
+                .with(user("bob").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_WAREHOUSE_READ"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void cancel_stock_count_with_estoque_stock_manage_returns_200() throws Exception {
+        StockCountFixture fixture = givenOpenStockCount();
+        mockMvc.perform(post("/estoque/stock-counts/" + fixture.id() + "/cancel")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_STOCK_MANAGE"))))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void get_stock_count_without_auth_returns_401() throws Exception {
+        mockMvc.perform(get("/estoque/stock-counts/1"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void get_stock_count_with_estoque_stock_manage_returns_200() throws Exception {
+        StockCountFixture fixture = givenOpenStockCount();
+        mockMvc.perform(get("/estoque/stock-counts/" + fixture.id())
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_STOCK_MANAGE"))))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void list_stock_counts_without_auth_returns_401() throws Exception {
+        mockMvc.perform(get("/estoque/stock-counts").param("warehouseCode", "QUALQUER"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void list_stock_counts_with_warehouse_read_only_returns_403() throws Exception {
+        mockMvc.perform(get("/estoque/stock-counts").param("warehouseCode", "QUALQUER")
+                .with(user("bob").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_WAREHOUSE_READ"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void list_stock_counts_with_estoque_stock_manage_returns_200() throws Exception {
+        StockCountFixture fixture = givenOpenStockCount();
+        mockMvc.perform(get("/estoque/stock-counts").param("warehouseCode", fixture.warehouseCode())
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_STOCK_MANAGE"))))
+                .andExpect(status().isOk());
+    }
+
     @Test
     void list_orphan_skus_without_auth_returns_401() throws Exception {
         mockMvc.perform(get("/estoque/integrity/orphan-skus"))

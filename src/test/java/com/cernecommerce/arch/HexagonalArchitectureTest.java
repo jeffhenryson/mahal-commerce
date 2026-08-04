@@ -85,10 +85,21 @@ class HexagonalArchitectureTest {
     void adapter_in_controllers_must_not_depend_on_output_ports() {
         // Impede que controllers acessem repositórios/ports de saída diretamente,
         // bypassing o use case. Adaptadores em adapter.in.sse podem implementar ports de saída.
+        //
+        // Exceção consciente: core.ports.out.ratelimit (PLAT-C030). Rate limit é preocupação de
+        // borda HTTP — a chave é IP ou usuário autenticado, "quantas requisições isso aguenta
+        // nesta janela" — não regra de negócio. Forçar essa checagem a atravessar CrmUseCase/
+        // EstoqueUseCase/ShopUseCase obrigaria cada assinatura a carregar um parâmetro só de
+        // infraestrutura (identificador de rate limit) sem nenhum significado para o caso de uso
+        // em si. Mesmo raciocínio de core_service_may_only_use_spring_transaction logo abaixo:
+        // uma exceção estreita e documentada, não uma brecha geral.
+        DescribedPredicate<JavaClass> outputPortButNotRateLimit =
+                JavaClass.Predicates.resideInAPackage("..core.ports.out..")
+                        .and(not(JavaClass.Predicates.resideInAPackage("..core.ports.out.ratelimit..")));
+
         ArchRule rule = noClasses()
                 .that().resideInAPackage("..adapter.in.controller..")
-                .should().dependOnClassesThat()
-                .resideInAPackage("..core.ports.out..");
+                .should().dependOnClassesThat(outputPortButNotRateLimit);
 
         rule.check(classes);
     }

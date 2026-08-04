@@ -71,10 +71,13 @@ public class EstoqueControllerTest {
     void setup() {
         estoqueUseCase = mock(EstoqueUseCase.class);
         ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
+        com.cernecommerce.core.ports.out.ratelimit.ResourceRateLimiterPort resourceRateLimiter =
+                mock(com.cernecommerce.core.ports.out.ratelimit.ResourceRateLimiterPort.class);
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new EstoqueController(estoqueUseCase, new ProductDTOConverter(),
                         new WarehouseDTOConverter(), new StockMovementDTOConverter(),
-                        new StockCountDTOConverter(), new StockReservationDTOConverter(), publisher))
+                        new StockCountDTOConverter(), new StockReservationDTOConverter(), publisher,
+                        resourceRateLimiter))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }
