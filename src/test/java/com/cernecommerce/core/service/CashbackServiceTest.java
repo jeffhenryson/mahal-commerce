@@ -3,14 +3,17 @@ package com.cernecommerce.core.service;
 import com.cernecommerce.core.domain.exception.cashback.CashbackRateAlreadyExistsException;
 import com.cernecommerce.core.domain.exception.cashback.CashbackRateNotFoundException;
 import com.cernecommerce.core.domain.exception.crm.CustomerNotFoundException;
+import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.cashback.CashbackEntry;
 import com.cernecommerce.core.domain.model.cashback.CashbackEntryType;
+import com.cernecommerce.core.domain.model.cashback.CashbackMarginImpactItem;
 import com.cernecommerce.core.domain.model.cashback.CashbackRate;
 import com.cernecommerce.core.domain.model.cashback.CashbackScope;
 import com.cernecommerce.core.domain.model.crm.Customer;
 import com.cernecommerce.core.domain.model.crm.CustomerStage;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.estoque.Product;
+import com.cernecommerce.core.domain.model.estoque.ProductType;
 import com.cernecommerce.core.domain.model.pedido.Order;
 import com.cernecommerce.core.domain.model.pedido.OrderItem;
 import com.cernecommerce.core.domain.model.pedido.OrderStatus;
@@ -122,6 +125,76 @@ class CashbackServiceTest {
         assertThat(cashbackService.resolveApplicableRate("CARV-001")).isNull();
     }
 
+    // ── Impacto na margem ───────────────────────────────────────────────────────────────────
+
+    @Test
+    void findMarginImpact_includesProductWhoseShareIsAboveTheMaxSharePercent() {
+        Product product = Product.of(1L, "CARV-001", "Carvão", "carvao", true, List.of(), Pricing.empty());
+        when(estoqueUseCase.listProducts(0, 200))
+                .thenReturn(new PageResult<>(List.of(product), 0, 200, 1, 1));
+        // custo 80 / venda 100 -> margem 20%.
+        when(estoqueUseCase.findPricingBySku("CARV-001"))
+                .thenReturn(Pricing.of(new BigDecimal("80.00"), null, new BigDecimal("100.00")));
+        CashbackRate rate = CashbackRate.forSku("CARV-001", new BigDecimal("10"));
+        when(cashbackRateRepository.findApplicable(eq("CARV-001"), eq("carvao"), any()))
+                .thenReturn(Optional.of(rate));
+
+        // share = 10 / 20 * 100 = 50%, acima do teto de 30%.
+        List<CashbackMarginImpactItem> result = cashbackService.findMarginImpact(new BigDecimal("30"));
+
+        assertThat(result).hasSize(1);
+        CashbackMarginImpactItem item = result.get(0);
+        assertThat(item.sku()).isEqualTo("CARV-001");
+        assertThat(item.marginPercent()).isEqualByComparingTo("20.00");
+        assertThat(item.cashbackPercent()).isEqualByComparingTo("10");
+        assertThat(item.marginShareConsumed()).isEqualByComparingTo("50.00");
+    }
+
+    @Test
+    void findMarginImpact_excludesProductWhoseShareIsBelowTheMaxSharePercent() {
+        Product product = Product.of(2L, "ESSE-001", "Essência", "essencia", true, List.of(), Pricing.empty());
+        when(estoqueUseCase.listProducts(0, 200))
+                .thenReturn(new PageResult<>(List.of(product), 0, 200, 1, 1));
+        // custo 50 / venda 100 -> margem 50%.
+        when(estoqueUseCase.findPricingBySku("ESSE-001"))
+                .thenReturn(Pricing.of(new BigDecimal("50.00"), null, new BigDecimal("100.00")));
+        CashbackRate rate = CashbackRate.forSku("ESSE-001", new BigDecimal("5"));
+        when(cashbackRateRepository.findApplicable(eq("ESSE-001"), eq("essencia"), any()))
+                .thenReturn(Optional.of(rate));
+
+        // share = 5 / 50 * 100 = 10%, abaixo do teto de 30%.
+        List<CashbackMarginImpactItem> result = cashbackService.findMarginImpact(new BigDecimal("30"));
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    void findMarginImpact_forAKit_usesThePricingResolvedByFindPricingBySku_notTheProductsRawPricing() {
+        // Product.pricing() de um kit vem sempre vazio (o costPrice cru é nulo — só é derivado na
+        // leitura, ver comentário de CashbackService.findMarginImpact). Se o serviço usasse
+        // product.pricing() direto em vez de estoqueUseCase.findPricingBySku(sku), marginPercent()
+        // seria null e o item seria pulado (continue) — o resultado ficaria vazio. Ele não fica:
+        // prova que o cálculo usa a Pricing resolvida via findPricingBySku.
+        Product kit = Product.of(3L, "KIT-001", "Kit Carvão + Essência", "kits", true, List.of(),
+                Pricing.empty(), ProductType.KIT);
+        when(estoqueUseCase.listProducts(0, 200))
+                .thenReturn(new PageResult<>(List.of(kit), 0, 200, 1, 1));
+        // custo 60 / venda 100 -> margem 40%, só visível via findPricingBySku.
+        when(estoqueUseCase.findPricingBySku("KIT-001"))
+                .thenReturn(Pricing.of(new BigDecimal("60.00"), null, new BigDecimal("100.00")));
+        CashbackRate rate = CashbackRate.forSku("KIT-001", new BigDecimal("20"));
+        when(cashbackRateRepository.findApplicable(eq("KIT-001"), eq("kits"), any()))
+                .thenReturn(Optional.of(rate));
+
+        List<CashbackMarginImpactItem> result = cashbackService.findMarginImpact(new BigDecimal("10"));
+
+        assertThat(result).hasSize(1);
+        CashbackMarginImpactItem item = result.get(0);
+        assertThat(item.sku()).isEqualTo("KIT-001");
+        assertThat(item.marginPercent()).isEqualByComparingTo("40.00");
+        assertThat(item.marginShareConsumed()).isEqualByComparingTo("50.00");
+    }
+
     // ── Ganho ────────────────────────────────────────────────────────────────────────────────
 
     @Test
@@ -198,6 +271,34 @@ class CashbackServiceTest {
         // Não verifyNoInteractions: a guarda de idempotência (existsEarnedForOrder) roda antes do
         // loop de itens, então o repositório É consultado — só o save() é que não deve acontecer.
         verify(cashbackEntryRepository, never()).save(any());
+    }
+
+    @Test
+    void recordEarnedForOrder_calledTwiceForTheSameOrder_duplicatesTheEarnedEntry() {
+        // Versão sequencial e barata de CashbackLedgerConcurrencyIT (sem threads, determinística).
+        // A proteção real de recordEarnedForOrder tem duas camadas: o lock em memória por
+        // orderId (só vale dentro desta instância) e a checagem existsEarnedForOrder logo dentro
+        // dele — que só barra a segunda chamada se o repositório já enxergar a gravação da
+        // primeira (é o que recordEarnedForOrder_isIdempotentWhenAnEarnedEntryAlreadyExistsForTheOrder
+        // já cobre, estipulando existsEarnedForOrder=true). Aqui, de propósito, NÃO estipulamos
+        // existsEarnedForOrder: o mock não é um banco, não fica "true" sozinho depois do primeiro
+        // save(), então a segunda chamada passa pelo mesmo caminho da primeira. Isso documenta a
+        // lacuna que motivou a defesa em profundidade de
+        // V80__cashback_entry_earned_idempotent.sql (índice único parcial em hml/prod): nada NESTE
+        // método, sozinho, impede a duplicação além dessa consulta refletir a escrita anterior —
+        // se ela não refletir (leitura stale, outra instância, ou aqui, uma consulta que não foi
+        // configurada para "lembrar"), o ganho é lançado de novo.
+        Order order = orderWithCustomer(42L);
+        when(customerRepository.findById(42L)).thenReturn(Optional.of(officialCustomer()));
+        when(systemConfigPort.getInt("cashback.carencia.dias", 7)).thenReturn(7);
+        when(systemConfigPort.getInt("cashback.expiracao.dias", 180)).thenReturn(180);
+
+        cashbackService.recordEarnedForOrder(order);
+        cashbackService.recordEarnedForOrder(order);
+
+        // orderWithCustomer() tem 1 item com taxa estampada -> 1 save por chamada; duas chamadas
+        // para o MESMO pedido resultam em 2 saves, provando a duplicação do ganho.
+        verify(cashbackEntryRepository, times(2)).save(any());
     }
 
     // ── Saldo e extrato ──────────────────────────────────────────────────────────────────────
