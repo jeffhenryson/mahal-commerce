@@ -80,4 +80,19 @@ public class AuthRateLimitingTest {
         mockMvc.perform(delete("/auth/2fa").contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isTooManyRequests());
     }
+
+    /**
+     * Mesmo risco de força bruta de /auth/verify-email (código de 12 chars) — sem este teste, a
+     * ausência de "/auth/confirm-email-change" em LoginRateLimitingFilter.shouldNotFilter passaria
+     * despercebida.
+     */
+    @Test
+    void returns_429_after_exceeding_confirm_email_change_attempts() throws Exception {
+        String body = "{\"code\":\"invalidcode123\"}";
+        for (int i = 0; i < 3; i++) {
+            mockMvc.perform(post("/auth/confirm-email-change").contentType(MediaType.APPLICATION_JSON).content(body));
+        }
+        mockMvc.perform(post("/auth/confirm-email-change").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isTooManyRequests());
+    }
 }

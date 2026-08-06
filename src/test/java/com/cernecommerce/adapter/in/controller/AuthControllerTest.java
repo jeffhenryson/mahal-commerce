@@ -9,8 +9,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.cernecommerce.adapter.in.dtos.request.LoginRequest;
 import com.cernecommerce.adapter.in.dtos.request.LogoutRequest;
 import com.cernecommerce.adapter.in.dtos.request.RefreshRequest;
+import com.cernecommerce.core.domain.event.AuditEvent;
+import com.cernecommerce.core.domain.exception.auth.AccountLockedException;
 import com.cernecommerce.core.domain.exception.auth.PasswordResetTokenExpiredException;
 import com.cernecommerce.core.domain.exception.auth.PasswordResetTokenNotFoundException;
+import com.cernecommerce.core.domain.exception.auth.RefreshTokenAlreadyUsedException;
 import com.cernecommerce.core.domain.model.auth.LoginResponse;
 import com.cernecommerce.core.domain.model.auth.SessionInfo;
 import com.cernecommerce.core.domain.model.auth.TokenPair;
@@ -19,6 +22,7 @@ import com.cernecommerce.core.ports.in.SystemConfigUseCase;
 import com.cernecommerce.core.ports.in.UserUseCase;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -37,6 +41,8 @@ public class AuthControllerTest {
     private MockMvc mockMvc;
     private AuthUseCase authUseCase;
     private UserUseCase userUseCase;
+    private ApplicationEventPublisher publisher;
+    private SystemConfigUseCase systemConfig;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private static final UsernamePasswordAuthenticationToken AUTH =
@@ -46,8 +52,8 @@ public class AuthControllerTest {
     void setup() {
         authUseCase = mock(AuthUseCase.class);
         userUseCase = mock(UserUseCase.class);
-        ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
-        SystemConfigUseCase systemConfig = mock(SystemConfigUseCase.class);
+        publisher = mock(ApplicationEventPublisher.class);
+        systemConfig = mock(SystemConfigUseCase.class);
         when(systemConfig.getBoolean(anyString(), anyBoolean())).thenAnswer(inv -> inv.getArgument(1));
         AuthController controller = new AuthController(authUseCase, userUseCase, publisher, systemConfig, 15, 7L, false);
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
@@ -90,6 +96,25 @@ public class AuthControllerTest {
     }
 
     @Test
+    void login_withAccountLockedException_publishesAuditEvent() throws Exception {
+        var req = new LoginRequest();
+        req.setUsername("admin");
+        req.setPassword("wrong");
+
+        when(authUseCase.login("admin", "wrong"))
+                .thenThrow(new AccountLockedException("admin"));
+
+        mockMvc.perform(post("/auth/login")
+                .contentType("application/json")
+                .content(objectMapper.writeValueAsString(req)))
+                .andExpect(status().isTooManyRequests());
+
+        verify(publisher).publishEvent((Object) argThat(e ->
+                e instanceof AuditEvent ae &&
+                ae.type() == AuditEvent.EventType.ACCOUNT_LOCKED));
+    }
+
+    @Test
     void refresh_with_invalid_token_returns_400() throws Exception {
         var req = new RefreshRequest();
         req.setRefreshToken("invalid");
@@ -117,6 +142,24 @@ public class AuthControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.accessToken").value("newAccess"))
                 .andExpect(jsonPath("$.refreshToken").value("newRefresh"));
+    }
+
+    @Test
+    void refresh_withRefreshTokenAlreadyUsedException_publishesAuditEvent() throws Exception {
+        var req = new RefreshRequest();
+        req.setRefreshToken("stolenRefresh");
+
+        when(authUseCase.refresh("stolenRefresh"))
+                .thenThrow(new RefreshTokenAlreadyUsedException("alice"));
+
+        mockMvc.perform(post("/auth/refresh")
+                .contentType("application/json")
+                .content(objectMapper.writeValueAsString(req)))
+                .andExpect(status().isUnauthorized());
+
+        verify(publisher).publishEvent((Object) argThat(e ->
+                e instanceof AuditEvent ae &&
+                ae.type() == AuditEvent.EventType.TOKEN_THEFT_DETECTED));
     }
 
     @Test
@@ -205,6 +248,18 @@ public class AuthControllerTest {
                 .andExpect(status().isNoContent());
 
         verify(userUseCase).requestPasswordReset("alice@example.com");
+    }
+
+    @Test
+    void forgot_password_returns_503_when_disabled() throws Exception {
+        when(systemConfig.getBoolean("auth.forgot-password.enabled", true)).thenReturn(false);
+
+        mockMvc.perform(post("/auth/forgot-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"alice@example.com\"}"))
+                .andExpect(status().isServiceUnavailable());
+
+        verifyNoInteractions(userUseCase);
     }
 
     @Test

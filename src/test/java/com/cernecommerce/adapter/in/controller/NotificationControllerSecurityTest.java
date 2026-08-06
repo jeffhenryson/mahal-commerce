@@ -56,4 +56,10 @@ class NotificationControllerSecurityTest {
         mockMvc.perform(delete("/notifications/1"))
                 .andExpect(status().isUnauthorized());
     }
+
+    @Test
+    void stream_sem_autenticacao_retorna_401() throws Exception {
+        mockMvc.perform(get("/notifications/stream"))
+                .andExpect(status().isUnauthorized());
+    }
 }

@@ -5,6 +5,9 @@ import com.cernecommerce.adapter.out.security.ratelimit.InMemoryLoginRateLimiter
 import com.cernecommerce.core.ports.out.ratelimit.LoginRateLimiterPort;
 import com.cernecommerce.infra.security.support.EmailVerificationTestHelper;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -13,10 +16,12 @@ import org.springframework.http.MediaType;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -40,6 +45,8 @@ public class PasswordResetFlowIT {
 
     @Autowired
     private LoginRateLimiterPort rateLimiter;
+
+    private final ObjectMapper om = new ObjectMapper();
 
     @BeforeEach
     void resetRateLimiter() {
@@ -113,6 +120,49 @@ public class PasswordResetFlowIT {
                 .content("{\"username\":\"" + username + "\",\"password\":\"" + newPassword + "\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.accessToken").exists());
+    }
+
+    @Test
+    void forgot_password_reset_blocks_previously_issued_access_token() throws Exception {
+        MockMvc mvc = mockMvc();
+        String ts = String.valueOf(System.currentTimeMillis());
+        String username = "resetblock_" + ts;
+        String email = username + "@test.com";
+        String oldPassword = "OldPass@1";
+        String newPassword = "NewPass@2";
+
+        registerAndVerify(mvc, username, email, oldPassword);
+
+        // Login to get an access token issued BEFORE the reset
+        MvcResult loginResult = mvc.perform(post("/auth/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"username\":\"" + username + "\",\"password\":\"" + oldPassword + "\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+        JsonNode loginJson = om.readTree(loginResult.getResponse().getContentAsString());
+        String accessToken = loginJson.get("accessToken").asText();
+
+        // 1. Solicitar reset — deve retornar 204 independente de o email existir
+        mvc.perform(post("/auth/forgot-password")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"email\":\"" + email + "\"}"))
+                .andExpect(status().isNoContent());
+
+        // 2. Recuperar token do "email" enviado pelo LoggingEmailAdapter
+        String resetLink = loggingEmailAdapter.getLastResetLinkForUsername(username);
+        assert resetLink != null : "Reset link deve ser gerado para email existente";
+        String token = extractToken(resetLink);
+
+        // 3. Redefinir senha com token válido — deve retornar 204
+        mvc.perform(post("/auth/reset-password")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"token\":\"" + token + "\",\"newPassword\":\"" + newPassword + "\"}"))
+                .andExpect(status().isNoContent());
+
+        // 4. Access token emitido antes do reset deve ser bloqueado (tokenBlocklistPort.blockAllBefore)
+        mvc.perform(get("/users/me")
+                .header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isUnauthorized());
     }
 
     @Test

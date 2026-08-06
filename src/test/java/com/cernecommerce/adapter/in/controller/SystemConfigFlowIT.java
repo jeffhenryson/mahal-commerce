@@ -77,6 +77,13 @@ class SystemConfigFlowIT {
                 .andExpect(status().isOk());
     }
 
+    @Test
+    void getAll_sem_dev_elevated_retorna_403() throws Exception {
+        mvc.perform(get("/system/config")
+                        .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isForbidden());
+    }
+
     // ── PUT /system/config/{key} ────────────────────────────────────────────
 
     @Test
@@ -85,6 +92,15 @@ class SystemConfigFlowIT {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"value\":\"true\"}"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void set_sem_dev_elevated_retorna_403() throws Exception {
+        mvc.perform(put("/system/config/auth.registration.enabled")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"value\":\"true\"}")
+                        .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isForbidden());
     }
 
     @Test

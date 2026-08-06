@@ -30,12 +30,13 @@ class RegistrationControllerTest {
 
     private MockMvc mockMvc;
     private UserUseCase useCase;
+    private SystemConfigUseCase systemConfig;
 
     @BeforeEach
     void setup() {
         useCase = mock(UserUseCase.class);
         ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
-        SystemConfigUseCase systemConfig = mock(SystemConfigUseCase.class);
+        systemConfig = mock(SystemConfigUseCase.class);
         when(systemConfig.getBoolean(anyString(), anyBoolean())).thenAnswer(inv -> inv.getArgument(1));
         GlobalExceptionHandler exceptionHandler = new GlobalExceptionHandler();
         ReflectionTestUtils.setField(exceptionHandler, "lockoutDurationMinutes", 15L);
@@ -89,6 +90,18 @@ class RegistrationControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"username\":\"bob\",\"password\":\"Secure@1\"}"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void register_returns_503_when_disabled() throws Exception {
+        when(systemConfig.getBoolean("auth.registration.enabled", true)).thenReturn(false);
+
+        mockMvc.perform(post("/auth/register")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"username\":\"newuser\",\"password\":\"Secure@1\",\"email\":\"user@test.com\"}"))
+                .andExpect(status().isServiceUnavailable());
+
+        verifyNoInteractions(useCase);
     }
 
     @Test
