@@ -48,12 +48,9 @@ class ShopControllerTest {
         GlobalExceptionHandler exceptionHandler = new GlobalExceptionHandler();
         ReflectionTestUtils.setField(exceptionHandler, "lockoutDurationMinutes", 15L);
 
-        com.cernecommerce.core.ports.out.ratelimit.ResourceRateLimiterPort resourceRateLimiter =
-                mock(com.cernecommerce.core.ports.out.ratelimit.ResourceRateLimiterPort.class);
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new ShopController(shopUseCase, publisher,
-                        new com.cernecommerce.adapter.in.converter.ShopCatalogDTOConverter(),
-                        resourceRateLimiter))
+                        new com.cernecommerce.adapter.in.converter.ShopCatalogDTOConverter()))
                 .setControllerAdvice(exceptionHandler)
                 .build();
     }

@@ -1630,19 +1630,20 @@ Query: search (opcional — filtra por nome ou contato, case-insensitive), page,
 
 ---
 
-### GET /crm/customers/export — Permissão: CRM_CUSTOMER_READ
+### GET /crm/customers/export — Permissão: CRM_CUSTOMER_EXPORT
 
 ```
 Query: search (opcional — mesmo filtro de GET /crm/customers, mas sem paginação: exporta todos
 os registros correspondentes, não só uma página)
 // Response 200 → text/csv;charset=UTF-8, Content-Disposition: attachment; filename="clientes.csv"
+// Response 429 RATE_LIMIT_EXCEEDED → acima de 5 requisições/hora pelo mesmo usuário
 ```
 
 ```
 Colunas (nessa ordem): id,nome,contato,email,cpf,origem,cadastradoEm,estagio
 ```
 
-Não inclui `ltv`/`cashback`/`segmento` (placeholder) nem `tags` (exigiria query em lote extra — mesma decisão de evitar N+1 da listagem paginada). Arquivo gerado com quebra de linha `\r\n` (RFC 4180), campos com vírgula/aspas/quebra de linha escapados entre aspas duplas, e prefixo BOM UTF-8 (compatibilidade com Excel para acentos).
+Não inclui `ltv`/`cashback`/`segmento` (placeholder) nem `tags` (exigiria query em lote extra — mesma decisão de evitar N+1 da listagem paginada). Arquivo gerado com quebra de linha `\r\n` (RFC 4180), campos com vírgula/aspas/quebra de linha escapados entre aspas duplas, e prefixo BOM UTF-8 (compatibilidade com Excel para acentos). Permissão dedicada (CRM-C002, separada de `CRM_CUSTOMER_READ` desde 2026-08-04) — ler clientes não dá direito a exportar a base inteira. Rate limit (bucket `crm-export`) e `AuditEvent.CUSTOMER_LIST_EXPORTED` já existiam antes disso.
 
 ---
 
@@ -2540,6 +2541,7 @@ interface TotpConfirmResponse {
 | `CRM_CUSTOMER_READ` | Leituras de `/crm/**` |
 | `CRM_CUSTOMER_MANAGE` | Escritas de `/crm/**` |
 | `CRM_CUSTOMER_LOOKUP` | `GET /crm/customers/lookup` — busca pontual por cpf/email/contato, separada de `CRM_CUSTOMER_READ` |
+| `CRM_CUSTOMER_EXPORT` | `GET /crm/customers/export` — export CSV da base inteira, separada de `CRM_CUSTOMER_READ` |
 | `CASHBACK_RATE_MANAGE` | `POST`/`PATCH /cashback/rates` — criar e alterar taxa de cashback |
 | `CASHBACK_READ` | Leituras de `/cashback/**` — taxas, saldo, extrato e diagnóstico de margem |
 | `COMPRAS_READ` | `GET /compras/suppliers` |

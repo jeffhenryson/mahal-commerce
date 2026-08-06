@@ -7,6 +7,12 @@ nenhuma documentação de domínio; o que entra agora é o que o PDV e o marketp
 O backlog em si continua em [`README.md`](README.md#backlog-do-módulo) — este arquivo é o
 **roteiro**, não a lista.
 
+**Status em 2026-08-04:** este roteiro já cumpriu seu propósito — CRM-F003 (cashback, fechado
+2026-07-29) e CRM-C002 (auditoria/permissão do export, fechado 2026-08-04) eram os dois itens que
+o motivaram. O prompt abaixo está congelado no estado de 2026-07-28/29 e não reflete mais o
+backlog atual (ex.: cita "a próxima migration é V70" — hoje é V82). Para o estado real, use
+sempre o [backlog do README](README.md#backlog-do-módulo), não este arquivo.
+
 ---
 
 ## Prompt para colar numa sessão nova
@@ -44,8 +50,8 @@ ORDEM (revisada em 2026-07-29: CRM-C005 + CRM-F002 fechados)
     esta fatia começar de verdade — decisão de negócio adiada com o usuário.
  4. CRM-F001 — orders/cashback deixam de ser placeholder. Depende de PDV-F003 (a tabela
     sales_order, já existe) e de CRM-F003 (o ledger, ainda não).
- 5. CRM-C002 — auditoria no export da base. Independente de tudo acima; é o maior risco de
-    segurança aberto do módulo e pode ser feito a qualquer momento.
+ 5. ~~CRM-C002 — auditoria no export da base~~ ✅ Fechado 2026-08-04 — rate limit, auditoria e
+    permissão dedicada (`CRM_CUSTOMER_EXPORT`) entregues.
  6. CRM-C001 — auditar o código e completar o README. Por último.
  7. CRM-C003 e CRM-C004 — decisão sobre o disparo de campanha que não envia nada, e
     AuditEvent no ativar/desativar automação.
@@ -104,7 +110,7 @@ Comece lendo o README do módulo e o §2.4 do plano, e me apresente o plano para
 | ~~C005 e F002 antes de tudo~~ ✅ | Fechado 2026-07-29. `CampaignAutomation`/`EmailPort` não precisaram de ajuste: `dispatchAutomation` não envia e-mail de verdade ainda (CRM-C003), então o risco cogitado aqui não se materializou. |
 | F003 (cashback) depois da Fatia 3 (pagamento, no PDV) | O ganho é calculado sobre o **líquido efetivamente pago**. `order_payment` já existe (Fatia 3 fechada 2026-07-29) — a pergunta "quanto o cliente pagou" já é respondível. |
 | F001 por último entre as features | Depende de duas coisas: a tabela `sales_order` (PDV-F003, ✅ existe) e o ledger (`CRM-F003`, ainda não). Fazer antes significa consultar tabela vazia. |
-| C002 fora da fila | Não depende de nada e é o maior risco de segurança aberto do módulo — `GET /crm/customers/export` devolve nome, telefone, e-mail e CPF de toda a base, em texto claro, sem auditoria. Pode ser feito em qualquer janela livre. |
+| ~~C002 fora da fila~~ ✅ | Fechado 2026-08-04. Era o maior risco de segurança aberto do módulo — `GET /crm/customers/export` devolvia nome, telefone, e-mail e CPF de toda a base sem rate limit, auditoria nem permissão dedicada. Os três foram entregues. |
 
 ## Riscos a considerar antes de encarar a lista
 
@@ -120,7 +126,7 @@ plano semeia `GLOBAL 8%`, e esse default merece uma conversa.
 
 ## O que "módulo fechado" significa aqui
 
-~~C005, F002~~ ✅ fechados 2026-07-29. Faltam F003 (cashback) e C002 (auditoria do export) para o
-perfil 360 deixar de mentir e o maior risco de segurança do módulo fechar. C001 (documentar), C003
-(campanha que não envia) e C004 (auditoria na automação) são dívida antiga e não bloqueiam o PDV
-nem o marketplace.
+~~C005, F002, F003, C002, C004~~ ✅ todos fechados (F003 em 2026-07-29; C002 e a correção de doc
+do C004 em 2026-08-04). O perfil 360 só falta `GET /crm/customers/{id}/orders` (CRM-F001, ainda
+placeholder) para não mentir mais. C001 (documentar) e C003 (campanha que não envia mensagem) são
+dívida antiga e não bloqueiam o PDV nem o marketplace.

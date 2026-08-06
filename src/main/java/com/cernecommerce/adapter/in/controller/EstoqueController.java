@@ -85,13 +85,11 @@ public class EstoqueController {
     private final StockCountDTOConverter stockCountConverter;
     private final StockReservationDTOConverter reservationConverter;
     private final ApplicationEventPublisher publisher;
-    private final com.cernecommerce.core.ports.out.ratelimit.ResourceRateLimiterPort resourceRateLimiter;
 
     public EstoqueController(EstoqueUseCase estoqueUseCase, ProductDTOConverter converter,
             WarehouseDTOConverter warehouseConverter, StockMovementDTOConverter movementConverter,
             StockCountDTOConverter stockCountConverter, StockReservationDTOConverter reservationConverter,
-            ApplicationEventPublisher publisher,
-            com.cernecommerce.core.ports.out.ratelimit.ResourceRateLimiterPort resourceRateLimiter) {
+            ApplicationEventPublisher publisher) {
         this.estoqueUseCase = estoqueUseCase;
         this.converter = converter;
         this.warehouseConverter = warehouseConverter;
@@ -99,7 +97,6 @@ public class EstoqueController {
         this.stockCountConverter = stockCountConverter;
         this.reservationConverter = reservationConverter;
         this.publisher = publisher;
-        this.resourceRateLimiter = resourceRateLimiter;
     }
 
     @Operation(summary = "Lista produtos paginados")
@@ -379,9 +376,7 @@ public class EstoqueController {
             @RequestParam @NotBlank @Size(min = 3, max = 50) String sku,
             @RequestParam @NotBlank @Size(min = 2, max = 50) String warehouseCode,
             @RequestParam(defaultValue = "0") @Min(0) int page,
-            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size,
-            Authentication authentication) {
-        resourceRateLimiter.checkOrThrow("estoque-movements", authentication.getName());
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
         PageResult<StockMovement> result = estoqueUseCase.listMovements(sku, warehouseCode, page, size);
         PageResult<StockMovementResponseDTO> response = new PageResult<>(
                 result.content().stream().map(m -> movementConverter.toResponse(m, warehouseCode)).toList(),

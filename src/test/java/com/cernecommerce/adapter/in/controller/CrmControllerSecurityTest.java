@@ -567,18 +567,29 @@ public class CrmControllerSecurityTest {
     }
 
     @Test
-    void export_customers_csv_without_crm_customer_read_returns_403() throws Exception {
+    void export_customers_csv_without_crm_customer_export_returns_403() throws Exception {
         mockMvc.perform(get("/crm/customers/export")
                 .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
                 .andExpect(status().isForbidden());
     }
 
     @Test
-    void export_customers_csv_with_crm_customer_read_returns_200() throws Exception {
+    void export_customers_csv_with_crm_customer_read_only_returns_403() throws Exception {
+        // CRM-C002: ler clientes não implica poder exportar a base inteira — CRM_CUSTOMER_EXPORT
+        // é uma permissão dedicada, separada de CRM_CUSTOMER_READ.
+        mockMvc.perform(get("/crm/customers/export")
+                .with(user("leitor").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("CRM_CUSTOMER_READ"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void export_customers_csv_with_crm_customer_export_returns_200() throws Exception {
         mockMvc.perform(get("/crm/customers/export")
                 .with(user("gerente").authorities(
                         new SimpleGrantedAuthority("ROLE_ADMIN"),
-                        new SimpleGrantedAuthority("CRM_CUSTOMER_READ"))))
+                        new SimpleGrantedAuthority("CRM_CUSTOMER_EXPORT"))))
                 .andExpect(status().isOk());
     }
 
@@ -587,7 +598,7 @@ public class CrmControllerSecurityTest {
         mockMvc.perform(get("/crm/customers/export")
                 .with(user("audit_export_user").authorities(
                         new SimpleGrantedAuthority("ROLE_ADMIN"),
-                        new SimpleGrantedAuthority("CRM_CUSTOMER_READ"))))
+                        new SimpleGrantedAuthority("CRM_CUSTOMER_EXPORT"))))
                 .andExpect(status().isOk());
 
         awaitAction("CUSTOMER_LIST_EXPORTED");
@@ -595,21 +606,22 @@ public class CrmControllerSecurityTest {
 
     @Test
     void export_customers_csv_exceeding_rate_limit_returns_429() throws Exception {
-        // Bucket crm-export: 5 requisições/hora por usuário (InMemoryResourceRateLimiterAdapter,
-        // perfil dev). A chave é authentication.getName(), então usamos sempre o mesmo usuário.
+        // Bucket crm-export: 5 requisições/hora por usuário (ResourceRateLimitingFilter +
+        // InMemoryResourceRateLimiterAdapter, perfil dev). A chave é o usuário autenticado, então
+        // usamos sempre o mesmo usuário.
         String username = "rate_limit_export_user";
         for (int i = 0; i < 5; i++) {
             mockMvc.perform(get("/crm/customers/export")
                     .with(user(username).authorities(
                             new SimpleGrantedAuthority("ROLE_ADMIN"),
-                            new SimpleGrantedAuthority("CRM_CUSTOMER_READ"))))
+                            new SimpleGrantedAuthority("CRM_CUSTOMER_EXPORT"))))
                     .andExpect(status().isOk());
         }
 
         mockMvc.perform(get("/crm/customers/export")
                 .with(user(username).authorities(
                         new SimpleGrantedAuthority("ROLE_ADMIN"),
-                        new SimpleGrantedAuthority("CRM_CUSTOMER_READ"))))
+                        new SimpleGrantedAuthority("CRM_CUSTOMER_EXPORT"))))
                 .andExpect(status().isTooManyRequests())
                 .andExpect(jsonPath("$.errorCode").value("RATE_LIMIT_EXCEEDED"));
     }

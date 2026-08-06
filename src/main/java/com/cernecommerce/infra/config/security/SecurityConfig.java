@@ -21,6 +21,7 @@ import com.cernecommerce.infra.security.RestAuthenticationEntryPoint;
 import com.cernecommerce.infra.security.TraceIdFilter;
 import com.cernecommerce.infra.security.jwt.JwtAuthenticationFilter;
 import com.cernecommerce.infra.security.LoginRateLimitingFilter;
+import com.cernecommerce.infra.security.ResourceRateLimitingFilter;
 
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -46,6 +47,7 @@ public class SecurityConfig {
     public SecurityFilterChain filterChain(HttpSecurity http, JwtAuthenticationFilter jwtAuthenticationFilter,
                                            RestAuthenticationEntryPoint entryPoint, RestAccessDeniedHandler deniedHandler,
                                            LoginRateLimitingFilter loginRateLimitingFilter,
+                                           ResourceRateLimitingFilter resourceRateLimitingFilter,
                                            MaintenanceModeFilter maintenanceModeFilter,
                                            TraceIdFilter traceIdFilter,
                                            @org.springframework.beans.factory.annotation.Value("${security.content-security-policy:}") String cspDirective,
@@ -133,6 +135,9 @@ public class SecurityConfig {
             .addFilterAfter(maintenanceModeFilter, TraceIdFilter.class)
             .addFilterBefore(loginRateLimitingFilter, UsernamePasswordAuthenticationFilter.class)
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+            // Depois do JWT, não antes: crm-export/estoque-movements usam o usuário autenticado
+            // como chave (request.getUserPrincipal()), que só existe depois que o JWT já rodou.
+            .addFilterAfter(resourceRateLimitingFilter, JwtAuthenticationFilter.class)
             .cors(Customizer.withDefaults());
         return http.build();
     }

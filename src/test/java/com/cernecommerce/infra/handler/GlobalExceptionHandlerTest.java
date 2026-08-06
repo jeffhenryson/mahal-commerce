@@ -27,6 +27,7 @@ import com.cernecommerce.core.domain.exception.email.EmailAlreadyVerifiedExcepti
 import com.cernecommerce.core.domain.exception.email.EmailDeliveryException;
 import com.cernecommerce.core.domain.exception.email.EmailVerificationCodeExpiredException;
 import com.cernecommerce.core.domain.exception.email.EmailVerificationCodeNotFoundException;
+import com.cernecommerce.core.domain.exception.ratelimit.RateLimitExceededException;
 import com.cernecommerce.core.domain.exception.rbac.RoleNotFoundException;
 import com.cernecommerce.core.domain.exception.user.EmailAlreadyExistsException;
 import com.cernecommerce.core.domain.exception.user.UserNotFoundException;
@@ -140,6 +141,15 @@ class GlobalExceptionHandlerTest {
         assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
         assertThat(resp.getBody().errorCode()).isEqualTo("ACCOUNT_LOCKED");
         assertThat(resp.getHeaders().getFirst("Retry-After")).isEqualTo("900"); // 15min * 60
+    }
+
+    @Test
+    void rateLimitExceeded_returns429_withRetryAfterHeader() {
+        ResponseEntity<ApiError> resp = handler.handleRateLimitExceeded(
+                new RateLimitExceededException("crm-export", 3600), req);
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+        assertThat(resp.getBody().errorCode()).isEqualTo("RATE_LIMIT_EXCEEDED");
+        assertThat(resp.getHeaders().getFirst("Retry-After")).isEqualTo("3600");
     }
 
     // ── 400 Bad Request ───────────────────────────────────────────────────────

@@ -34,7 +34,6 @@ import com.cernecommerce.core.domain.model.crm.Tag;
 import com.cernecommerce.core.domain.model.crm.TagSummary;
 import com.cernecommerce.core.ports.in.CashbackUseCase;
 import com.cernecommerce.core.ports.in.CrmUseCase;
-import com.cernecommerce.core.ports.out.ratelimit.ResourceRateLimiterPort;
 import com.cernecommerce.infra.handler.GlobalExceptionHandler;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -64,13 +63,11 @@ public class CrmControllerTest {
         crmUseCase = mock(CrmUseCase.class);
         cashbackUseCase = mock(CashbackUseCase.class);
         ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
-        ResourceRateLimiterPort resourceRateLimiter = mock(ResourceRateLimiterPort.class);
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new CrmController(crmUseCase, cashbackUseCase, new CustomerDTOConverter(),
                         new CustomerNoteDTOConverter(), new StageTransitionDTOConverter(),
                         new TagDTOConverter(), new CustomerCsvConverter(), new CampaignDTOConverter(),
-                        new ChannelStatusDTOConverter(), new CashbackDTOConverter(), publisher,
-                        resourceRateLimiter))
+                        new ChannelStatusDTOConverter(), new CashbackDTOConverter(), publisher))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }

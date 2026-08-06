@@ -35,7 +35,6 @@ import com.cernecommerce.core.domain.model.crm.Customer;
 import com.cernecommerce.core.domain.model.crm.CustomerNote;
 import com.cernecommerce.core.ports.in.CashbackUseCase;
 import com.cernecommerce.core.ports.in.CrmUseCase;
-import com.cernecommerce.core.ports.out.ratelimit.ResourceRateLimiterPort;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -80,14 +79,12 @@ public class CrmController {
     private final ChannelStatusDTOConverter channelStatusConverter;
     private final CashbackDTOConverter cashbackConverter;
     private final ApplicationEventPublisher publisher;
-    private final ResourceRateLimiterPort resourceRateLimiter;
 
     public CrmController(CrmUseCase crmUseCase, CashbackUseCase cashbackUseCase, CustomerDTOConverter converter,
             CustomerNoteDTOConverter noteConverter, StageTransitionDTOConverter stageConverter,
             TagDTOConverter tagConverter, CustomerCsvConverter csvConverter,
             CampaignDTOConverter campaignConverter, ChannelStatusDTOConverter channelStatusConverter,
-            CashbackDTOConverter cashbackConverter, ApplicationEventPublisher publisher,
-            ResourceRateLimiterPort resourceRateLimiter) {
+            CashbackDTOConverter cashbackConverter, ApplicationEventPublisher publisher) {
         this.crmUseCase = crmUseCase;
         this.cashbackUseCase = cashbackUseCase;
         this.converter = converter;
@@ -99,7 +96,6 @@ public class CrmController {
         this.channelStatusConverter = channelStatusConverter;
         this.cashbackConverter = cashbackConverter;
         this.publisher = publisher;
-        this.resourceRateLimiter = resourceRateLimiter;
     }
 
     @Operation(summary = "Cria um cliente")
@@ -184,10 +180,9 @@ public class CrmController {
             @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
     })
     @GetMapping("/customers/export")
-    @PreAuthorize("hasAuthority('CRM_CUSTOMER_READ')")
+    @PreAuthorize("hasAuthority('CRM_CUSTOMER_EXPORT')")
     public ResponseEntity<byte[]> exportCustomersCsv(@RequestParam(required = false) String search,
             Authentication authentication) {
-        resourceRateLimiter.checkOrThrow("crm-export", authentication.getName());
         List<Customer> customers = crmUseCase.listCustomersForExport(search);
         String csv = csvConverter.toCsv(customers);
         byte[] body = withUtf8Bom(csv);

@@ -9,14 +9,12 @@ import com.cernecommerce.core.domain.event.AuditEvent;
 import com.cernecommerce.core.domain.event.AuditEvent.EventType;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.ports.in.ShopUseCase;
-import com.cernecommerce.core.ports.out.ratelimit.ResourceRateLimiterPort;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import jakarta.validation.Valid;
-import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 
@@ -46,14 +44,12 @@ public class ShopController {
     private final ShopUseCase shopUseCase;
     private final ApplicationEventPublisher publisher;
     private final ShopCatalogDTOConverter catalogConverter;
-    private final ResourceRateLimiterPort resourceRateLimiter;
 
     public ShopController(ShopUseCase shopUseCase, ApplicationEventPublisher publisher,
-            ShopCatalogDTOConverter catalogConverter, ResourceRateLimiterPort resourceRateLimiter) {
+            ShopCatalogDTOConverter catalogConverter) {
         this.shopUseCase = shopUseCase;
         this.publisher = publisher;
         this.catalogConverter = catalogConverter;
-        this.resourceRateLimiter = resourceRateLimiter;
     }
 
     @Operation(summary = "Autocadastro do cliente do marketplace",
@@ -89,9 +85,7 @@ public class ShopController {
     @GetMapping("/catalog")
     public ResponseEntity<PageResult<ShopCatalogItemResponseDTO>> listCatalog(
             @RequestParam(defaultValue = "0") @Min(0) int page,
-            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size,
-            HttpServletRequest request) {
-        resourceRateLimiter.checkOrThrow("shop-catalog", clientIp(request));
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
         PageResult<ShopUseCase.CatalogItem> result = shopUseCase.listCatalog(page, size);
         PageResult<ShopCatalogItemResponseDTO> response = new PageResult<>(
                 result.content().stream().map(catalogConverter::toResponse).toList(),
@@ -107,15 +101,7 @@ public class ShopController {
             @ApiResponse(responseCode = "503", description = "Depósito padrão do marketplace não configurado", content = @Content)
     })
     @GetMapping("/catalog/{sku}")
-    public ResponseEntity<ShopCatalogItemDetailResponseDTO> getCatalogItem(@PathVariable String sku,
-            HttpServletRequest request) {
-        resourceRateLimiter.checkOrThrow("shop-catalog", clientIp(request));
+    public ResponseEntity<ShopCatalogItemDetailResponseDTO> getCatalogItem(@PathVariable String sku) {
         return ResponseEntity.ok(catalogConverter.toResponse(shopUseCase.getCatalogItem(sku)));
-    }
-
-    // Rely on server.forward-headers-strategy (native em hml/prod, none em dev) — mesmo padrão
-    // usado em LoginRateLimitingFilter.clientIp.
-    private String clientIp(HttpServletRequest request) {
-        return request.getRemoteAddr();
     }
 }

@@ -50,27 +50,29 @@ reais. As decisões abaixo pesam mais aqui do que em qualquer outro módulo.
 
 ### Permissões RBAC
 
-Só duas permissões cobrem os **28 endpoints** do `CrmController`, criadas na V48 (com
-`ON CONFLICT DO NOTHING`) e concedidas a `ROLE_ADMIN`; semeadas em `dev` por `SeedConfig` e
-`DevRoleBootstrapConfig`.
+Quatro permissões cobrem os **28 endpoints** do `CrmController`: `CRM_CUSTOMER_READ` e
+`CRM_CUSTOMER_MANAGE` (V48, com `ON CONFLICT DO NOTHING`), `CRM_CUSTOMER_LOOKUP` (V69,
+CRM-F002) e `CRM_CUSTOMER_EXPORT` (V81, CRM-C002) — todas concedidas a `ROLE_ADMIN`, semeadas em
+`dev` por `SeedConfig` e `DevRoleBootstrapConfig`.
 
 | Permissão | Libera | Endpoints |
 |---|---|---|
-| `CRM_CUSTOMER_READ` | toda leitura: clientes, notas, pedidos, cashback, histórico de estágio, dashboard, tags, automações, log de disparos, status de canal e **o export CSV** | 13 |
+| `CRM_CUSTOMER_READ` | toda leitura: clientes, notas, pedidos, cashback, histórico de estágio, dashboard, tags, automações, log de disparos e status de canal | 12 |
 | `CRM_CUSTOMER_MANAGE` | toda escrita: criar cliente e nota, mover estágio, CRUD de tags e associações, CRUD de automações e disparo manual | 11 |
 | `CRM_CUSTOMER_LOOKUP` | `GET /crm/customers/lookup` — busca pontual por CPF/email/contato (CRM-F002) | 1 |
+| `CRM_CUSTOMER_EXPORT` | `GET /crm/customers/export` — export CSV da base inteira (CRM-C002) | 1 |
 
 O programa de cashback (CRM-F003) tem controller e permissões próprios, fora do `CrmController` e
-das duas permissões acima: `CashbackController` em `/cashback`, sob `CASHBACK_RATE_MANAGE`
+das permissões acima: `CashbackController` em `/cashback`, sob `CASHBACK_RATE_MANAGE`
 (mutação de taxa) e `CASHBACK_READ` (saldo, extrato, diagnóstico de margem). `GET
 /crm/customers/{id}/cashback` continua sob `CRM_CUSTOMER_READ` — delega ao mesmo caso de uso, não
 duplica a checagem.
 
-**Granularidade ainda insuficiente para o resto:** não há como separar "consultar um cliente" de
-"exportar a base inteira", nem "criar nota" de "disparar campanha". `CRM_CUSTOMER_LOOKUP` resolveu
-só o caso do balcão — quem atende ali agora pode achar **um** cliente por CPF/email/contato sem
-precisar de `CRM_CUSTOMER_READ` (que levaria o export completo com CPF de brinde) —, mas o resto
-do módulo continua com a granularidade grossa de sempre.
+**Granularidade:** `CRM_CUSTOMER_LOOKUP` resolveu o caso do balcão — quem atende ali agora pode
+achar **um** cliente por CPF/email/contato sem precisar de `CRM_CUSTOMER_READ`.
+`CRM_CUSTOMER_EXPORT` resolveu o caso do export (CRM-C002) — ler um cliente não implica mais
+poder baixar a base inteira. O resto do módulo (ex.: "criar nota" vs. "disparar campanha")
+continua com a granularidade grossa de sempre — fora do escopo de CRM-C002.
 
 > Os nomes `CUSTOMER_CREATE`/`CUSTOMER_READ` que aparecem na descrição legada de F001 no
 > [Histórico](#histórico-de-implementações) nunca existiram no código — as permissões reais
@@ -78,14 +80,15 @@ do módulo continua com a granularidade grossa de sempre.
 
 ### Rate limiting
 
-❌ Nenhum endpoint deste módulo é limitado — o `LoginRateLimitingFilter`
-(`infra/security/LoginRateLimitingFilter.java:42-77`) cobre apenas `/auth/**` e duas rotas de
-notificação.
-
-O caso mais sensível é `GET /crm/customers/export`: devolve a **base inteira sem paginação**
-(`listCustomersForExport`), monta o CSV em memória e não deixa registro de auditoria. Um token
-com `CRM_CUSTOMER_READ` pode baixar toda a base de clientes, repetidamente, sem nenhum freio nem
-rastro. Ver **CRM-C002** e PLAT-C030.
+✅ `GET /crm/customers/export` é limitado desde 2026-08-04: bucket `crm-export`, 5
+requisições/hora por usuário autenticado, aplicado por um filtro de servlet dedicado
+(`infra/security/ResourceRateLimitingFilter.java`, roda depois do `JwtAuthenticationFilter` na
+cadeia — PLAT-C030), não por chamada dentro do controller. Excedente responde `429
+RATE_LIMIT_EXCEEDED` com header `Retry-After`. Nenhum outro endpoint deste módulo é limitado — o
+`LoginRateLimitingFilter` (`infra/security/LoginRateLimitingFilter.java:42-77`) cobre só
+`/auth/**` e duas rotas de notificação. PLAT-C030 segue parcial no restante do backend (demais
+endpoints de negócio fora de `crm-export`/`estoque-movements`/`shop-catalog`) — ver
+[`plataforma`](../plataforma/README.md).
 
 ### Isolamento de dados e dado pessoal
 
@@ -99,7 +102,7 @@ delete). Sobre LGPD no backend como um todo, ver
 
 ### Auditoria
 
-O `CrmController` publica `AuditEvent` em 10 operações de escrita:
+O `CrmController` publica `AuditEvent` em 12 operações:
 
 | Operação | `EventType` |
 |---|---|
@@ -109,12 +112,12 @@ O `CrmController` publica `AuditEvent` em 10 operações de escrita:
 | `POST` / `DELETE /crm/tags` | `TAG_CREATED` / `TAG_DELETED` |
 | `POST` / `DELETE /crm/customers/{id}/tags` | `CUSTOMER_TAG_ADDED` / `CUSTOMER_TAG_REMOVED` |
 | `POST` / `DELETE /crm/automacoes` | `CAMPAIGN_AUTOMATION_CREATED` / `CAMPAIGN_AUTOMATION_DELETED` |
+| `PATCH /crm/automacoes/{id}/ativa` | `CAMPAIGN_AUTOMATION_TOGGLED` |
 | `POST /crm/automacoes/{id}/disparar` | `CAMPAIGN_AUTOMATION_DISPATCHED` |
+| `GET /crm/customers/export` | `CUSTOMER_LIST_EXPORTED` |
 
-É a melhor cobertura de auditoria entre os domínios de negócio. **Lacunas:**
-`PATCH /crm/automacoes/{id}/ativa` (ativar/desativar campanha) não gera evento, e nenhuma
-leitura gera — inclusive o export CSV, que é justamente a leitura que deveria deixar rastro
-(**CRM-C002**).
+É a melhor cobertura de auditoria entre os domínios de negócio. Nenhuma outra leitura gera
+evento — só o export, por expor a base inteira de PII em um único download (CRM-C002).
 
 A trilha de movimentação no kanban tem registro próprio de domínio em
 `customer_stage_transitions` (V50), independente dos `audit_logs`.
@@ -146,9 +149,7 @@ do canal.
 
 ### Riscos conhecidos
 
-- **CRM-C002** — export da base sem auditoria, sem paginação e sem rate limit.
 - **CRM-C001** — README ainda sem Modelo de Domínio, Regras, API, Schema e Testes.
-- **PLAT-C030** — sem rate limit em endpoint de negócio.
 
 ## Testes no Postman
 
@@ -187,15 +188,25 @@ Convenções, variáveis e o environment compartilhado estão em
 | CRM-F001 | 🟡 Importante | Feature | perfil-360-deixa-de-ser-placeholder (orders) | ~~`GET /crm/customers/{id}/cashback` e `CustomerResponseDTO.cashback`~~ ✅ fechados por CRM-F003 (2026-07-29) — delegam ao ledger real. Falta só `GET /crm/customers/{id}/orders`, que ainda devolve `List.of()` (`CrmController.java:236`): passar a consultar `sales_order` por `customer_id`. Depende de PDV-F003 (✅ existe). | Pendente |
 | ~~CRM-F003~~ | 🔴 Alta | Feature | ~~programa-de-cashback~~ ✅ Fechado 2026-07-29 (ganhar + consultas) | Taxas por escopo `GLOBAL`/`CATEGORY`/`SKU` (a mais específica ativa e vigente vence) e ledger `cashback_entry` **append-only**, sem coluna `status` (divergência deliberada do rascunho do plano — disponibilidade é sempre derivada de `available_at`; ver Histórico). Ganho lançado na conclusão da venda de balcão e na liquidação de pedido de marketplace, com carência (7d) e expiração (180d, via `CashbackExpiryCleanupService`) configuráveis em `system_config`. `GET /cashback/margin-impact` já entrega o diagnóstico de margem. Migration V70. **Resgate no balcão (`CASHBACK_REDEEM`) e ajuste manual (`CASHBACK_ADJUST`) ficam para uma fatia seguinte, isolada** — os parâmetros (teto 50%, mínimo de saldo R$50 para resgatar) já estão semeados em `system_config`, sem código que os leia ainda. Fatia 4, §2.4. | ✅ Fechado |
 | CRM-C001 | 🟡 Importante | Correção | auditar-e-documentar-o-modulo | Este README não tem Modelo de Domínio, Regras de Negócio, API, Schema nem Cobertura de Testes — as 9 features foram entregues sem que a documentação de domínio fosse criada. Auditar o código e preencher no padrão de `estoque`. | Pendente |
-| CRM-C002 | 🔴 Alta | Correção | export-da-base-sem-auditoria-nem-limite | `GET /crm/customers/export` (`CrmController.java:150`) devolve **toda** a base de clientes — nome, telefone, e-mail e CPF em texto claro — sem paginação, sem rate limit e **sem publicar `AuditEvent`**. Qualquer token com `CRM_CUSTOMER_READ` (a permissão de leitura mais básica do módulo) pode drenar a base em loop sem deixar rastro. No mínimo: publicar evento de auditoria no export, e avaliar permissão dedicada + limite. O rate limit em si é transversal (PLAT-C030). | Pendente |
+| ~~CRM-C002~~ | 🔴 Alta | Correção | ~~export-da-base-sem-auditoria-nem-limite~~ ✅ Fechado 2026-08-04 | `GET /crm/customers/export` tinha 3 gaps: sem rate limit, sem auditoria e sem permissão dedicada (usava a mesma `CRM_CUSTOMER_READ` de qualquer leitura). Rate limit (bucket `crm-export`, 5 req/hora por usuário, `ResourceRateLimitingFilter`) e o evento `CUSTOMER_LIST_EXPORTED` já tinham sido adicionados mais cedo no mesmo dia. Última peça: nova permissão `CRM_CUSTOMER_EXPORT` (V81), separada de `CRM_CUSTOMER_READ` — quem só lê clientes não consegue mais exportar a base inteira. Paginação do CSV foi avaliada e descartada (é download de arquivo único); streaming/limite de memória ficou fora de escopo por decisão do dono do produto. | ✅ Fechado |
 | CRM-C003 | 🟢 Melhoria | Correção | disparo-de-campanha-nao-envia-nada | `CrmService.dispatchAutomation` (linha 215) grava uma linha em `campaign_log` por cliente do segmento e **não envia mensagem alguma** — o `EmailPort` injetado só serve ao `getChannelStatus`. A tela de Automações reporta disparo bem-sucedido para um envio que nunca aconteceu. Ou o envio é implementado, ou a resposta/documentação precisa deixar claro que é simulação. | Pendente |
-| CRM-C004 | 🟢 Melhoria | Correção | audit-event-ausente-em-ativar-desativar-automacao | `PATCH /crm/automacoes/{id}/ativa` é a única escrita do módulo sem `AuditEvent` — ligar ou desligar uma campanha não deixa rastro, enquanto criar e apagar deixam. | Pendente |
+| ~~CRM-C004~~ | 🟢 Melhoria | Correção | ~~audit-event-ausente-em-ativar-desativar-automacao~~ ✅ Já resolvido | Descrição estava desatualizada: `PATCH /crm/automacoes/{id}/ativa` já publica `CAMPAIGN_AUTOMATION_TOGGLED` (`CrmController.java:459-461`). Corrigido só na documentação nesta sessão — nenhuma mudança de código foi necessária. | ✅ Fechado |
 
 Novas features e correções do CRM seguem as séries `CRM-F001+` e `CRM-C002+`. A série legada
 `F001–F009` está congelada (todos concluídos, ver histórico).
 
 ## Histórico de Implementações
 
+- **2026-08-04** — `export-da-base-sem-auditoria-nem-limite` (**CRM-C002**, fechado): última peça
+  do maior risco de segurança aberto do módulo. Rate limit e evento de auditoria já existiam desde
+  mais cedo no mesmo dia; esta rodada adicionou a permissão dedicada `CRM_CUSTOMER_EXPORT`
+  (migration V81, seguindo o padrão de V48), trocou o `@PreAuthorize` do endpoint de
+  `CRM_CUSTOMER_READ` para ela e semeou a nova permissão em `SeedConfig`/`DevRoleBootstrapConfig`
+  ao lado de `CRM_CUSTOMER_READ`/`MANAGE`/`LOOKUP` (só `ROLE_ADMIN`/`ROLE_DEV` a possuem hoje).
+  Paginação do CSV foi avaliada e descartada — é um download de arquivo único, não uma listagem.
+  Também corrigido nesta sessão, só na documentação (**CRM-C004**): `PATCH
+  /crm/automacoes/{id}/ativa` já publicava `CAMPAIGN_AUTOMATION_TOGGLED`, o README é que estava
+  desatualizado.
 - **2026-07-29** — `programa-de-cashback` (**CRM-F003**, ganhar + consultas): decisões de negócio
   fechadas com o dono nesta sessão — taxa **GLOBAL semeada em 3%** (não os 8% do rascunho do
   plano, que consumiam 44% da margem do carvão no exemplo do plano); **nenhuma taxa por categoria
