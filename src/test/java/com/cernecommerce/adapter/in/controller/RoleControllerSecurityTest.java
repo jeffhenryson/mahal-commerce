@@ -53,6 +53,60 @@ public class RoleControllerSecurityTest {
     }
 
     @Test
+    void get_role_without_auth_returns_401() throws Exception {
+        mockMvc.perform(get("/roles/ROLE_ADMIN"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void get_role_without_role_read_returns_403() throws Exception {
+        mockMvc.perform(get("/roles/ROLE_ADMIN")
+                .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void get_role_with_role_read_returns_200() throws Exception {
+        String name = "ROLE_SEC_TEST_GET_" + System.currentTimeMillis();
+        mockMvc.perform(post("/roles")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"" + name + "\"}")
+                .with(user("dev").authorities(
+                        new SimpleGrantedAuthority("ROLE_DEV"),
+                        new SimpleGrantedAuthority("DEV_ELEVATED"),
+                        new SimpleGrantedAuthority("DEV_ROLE_MANAGE"))))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(get("/roles/" + name)
+                .with(user("admin").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ROLE_READ"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value(name));
+    }
+
+    @Test
+    void list_roles_without_dev_elevated_hides_role_dev() throws Exception {
+        mockMvc.perform(get("/roles").param("search", "ROLE_DEV")
+                .with(user("admin").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ROLE_READ"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[?(@.name == 'ROLE_DEV')]").doesNotExist());
+    }
+
+    @Test
+    void list_roles_with_dev_elevated_shows_role_dev() throws Exception {
+        mockMvc.perform(get("/roles").param("search", "ROLE_DEV")
+                .with(user("dev").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ROLE_READ"),
+                        new SimpleGrantedAuthority("DEV_ELEVATED"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[?(@.name == 'ROLE_DEV')]").exists());
+    }
+
+    @Test
     void create_role_without_auth_returns_401() throws Exception {
         mockMvc.perform(post("/roles")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -97,6 +151,26 @@ public class RoleControllerSecurityTest {
                         new SimpleGrantedAuthority("ROLE_ADMIN"),
                         new SimpleGrantedAuthority("ROLE_READ"))))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void delete_role_with_dev_role_manage_returns_204() throws Exception {
+        String name = "ROLE_SEC_TEST_DELETE_" + System.currentTimeMillis();
+        mockMvc.perform(post("/roles")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"" + name + "\"}")
+                .with(user("dev").authorities(
+                        new SimpleGrantedAuthority("ROLE_DEV"),
+                        new SimpleGrantedAuthority("DEV_ELEVATED"),
+                        new SimpleGrantedAuthority("DEV_ROLE_MANAGE"))))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(delete("/roles/" + name)
+                .with(user("dev").authorities(
+                        new SimpleGrantedAuthority("ROLE_DEV"),
+                        new SimpleGrantedAuthority("DEV_ELEVATED"),
+                        new SimpleGrantedAuthority("DEV_ROLE_MANAGE"))))
+                .andExpect(status().isNoContent());
     }
 
     @Test
@@ -145,5 +219,71 @@ public class RoleControllerSecurityTest {
                         new SimpleGrantedAuthority("ROLE_USER"),
                         new SimpleGrantedAuthority("ROLE_READ"))))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void assign_permission_with_role_manage_permissions_returns_204() throws Exception {
+        String roleName = "ROLE_SEC_TEST_ASSIGN_" + System.currentTimeMillis();
+        String permName = "PERM_SEC_TEST_ASSIGN_" + System.currentTimeMillis();
+
+        mockMvc.perform(post("/roles")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"" + roleName + "\"}")
+                .with(user("dev").authorities(
+                        new SimpleGrantedAuthority("ROLE_DEV"),
+                        new SimpleGrantedAuthority("DEV_ELEVATED"),
+                        new SimpleGrantedAuthority("DEV_ROLE_MANAGE"))))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(post("/permissions")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"" + permName + "\"}")
+                .with(user("dev").authorities(
+                        new SimpleGrantedAuthority("ROLE_DEV"),
+                        new SimpleGrantedAuthority("DEV_ELEVATED"),
+                        new SimpleGrantedAuthority("DEV_PERMISSION_MANAGE"))))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(post("/roles/" + roleName + "/permissions/" + permName)
+                .with(user("admin").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ROLE_MANAGE_PERMISSIONS"))))
+                .andExpect(status().isNoContent());
+    }
+
+    @Test
+    void remove_permission_with_role_manage_permissions_returns_204() throws Exception {
+        String roleName = "ROLE_SEC_TEST_REMOVE_" + System.currentTimeMillis();
+        String permName = "PERM_SEC_TEST_REMOVE_" + System.currentTimeMillis();
+
+        mockMvc.perform(post("/roles")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"" + roleName + "\"}")
+                .with(user("dev").authorities(
+                        new SimpleGrantedAuthority("ROLE_DEV"),
+                        new SimpleGrantedAuthority("DEV_ELEVATED"),
+                        new SimpleGrantedAuthority("DEV_ROLE_MANAGE"))))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(post("/permissions")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"" + permName + "\"}")
+                .with(user("dev").authorities(
+                        new SimpleGrantedAuthority("ROLE_DEV"),
+                        new SimpleGrantedAuthority("DEV_ELEVATED"),
+                        new SimpleGrantedAuthority("DEV_PERMISSION_MANAGE"))))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(post("/roles/" + roleName + "/permissions/" + permName)
+                .with(user("admin").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ROLE_MANAGE_PERMISSIONS"))))
+                .andExpect(status().isNoContent());
+
+        mockMvc.perform(delete("/roles/" + roleName + "/permissions/" + permName)
+                .with(user("admin").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ROLE_MANAGE_PERMISSIONS"))))
+                .andExpect(status().isNoContent());
     }
 }

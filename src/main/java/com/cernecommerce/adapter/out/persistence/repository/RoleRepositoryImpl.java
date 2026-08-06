@@ -27,10 +27,12 @@ public class RoleRepositoryImpl implements RoleRepository {
 
     private final RoleJpaRepository roleRepo;
     private final PermissionJpaRepository permRepo;
+    private final UserJpaRepository userRepo;
 
-    public RoleRepositoryImpl(RoleJpaRepository roleRepo, PermissionJpaRepository permRepo) {
+    public RoleRepositoryImpl(RoleJpaRepository roleRepo, PermissionJpaRepository permRepo, UserJpaRepository userRepo) {
         this.roleRepo = roleRepo;
         this.permRepo = permRepo;
+        this.userRepo = userRepo;
     }
 
     private Role toDomain(RoleEntity e) {
@@ -86,7 +88,11 @@ public class RoleRepositoryImpl implements RoleRepository {
 
     @Override
     public void deleteByName(String name) {
-        roleRepo.findByName(name).ifPresent(roleRepo::delete);
+        roleRepo.findByName(name).ifPresent(role -> {
+            userRepo.findAllContainingRole(role.getId())
+                    .forEach(user -> user.getRoles().remove(role));
+            roleRepo.delete(role);
+        });
     }
 
     @Override

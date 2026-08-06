@@ -59,7 +59,12 @@ public class UserController {
     })
     @PostMapping
     @PreAuthorize("hasAuthority('USER_CREATE')")
-    public ResponseEntity<UserResponseDTO> create(@Valid @RequestBody CreateUserRequest request) {
+    public ResponseEntity<UserResponseDTO> create(@Valid @RequestBody CreateUserRequest request,
+            Authentication auth) {
+        // Sem esta checagem, USER_CREATE sozinho bastaria pra criar um usuário já nascendo
+        // ROLE_DEV, contornando a mesma barreira elevada que assignRole já impõe logo abaixo —
+        // duas portas para o mesmo cofre não podem ter fechaduras diferentes.
+        requireDevElevationIfAssigningDevRole(request.getRoles(), auth);
         User created = useCase.createUser(
                 request.getUsername(), request.getPassword(), request.getEmail(), request.getRoles());
         publisher.publishEvent(AuditEvent.of(EventType.USER_CREATED, created.getUsername()));
@@ -78,19 +83,27 @@ public class UserController {
     @PreAuthorize("hasAuthority('USER_ROLE_ASSIGN')")
     public ResponseEntity<Void> assignRole(@PathVariable String username, @PathVariable String roleName,
             Authentication auth) {
-        if ("ROLE_DEV".equals(roleName)) {
-            boolean hasDevRoleManage = auth.getAuthorities().stream()
-                .anyMatch(a -> "DEV_ROLE_MANAGE".equals(a.getAuthority()));
-            boolean hasDevElevated = auth.getAuthorities().stream()
-                .anyMatch(a -> "DEV_ELEVATED".equals(a.getAuthority()));
-            if (!hasDevRoleManage || !hasDevElevated) {
-                throw new org.springframework.security.access.AccessDeniedException(
-                    "Atribuição de ROLE_DEV requer DEV_ROLE_MANAGE com token elevado");
-            }
-        }
+        requireDevElevationIfAssigningDevRole(java.util.List.of(roleName), auth);
         useCase.assignRole(username, roleName);
         publisher.publishEvent(AuditEvent.of(EventType.USER_ROLE_ASSIGNED, username, Map.of("role", roleName)));
         return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * ROLE_DEV só pode ser concedido — na criação ou por atribuição avulsa — por quem já tem
+     * DEV_ROLE_MANAGE com token elevado (DEV_ELEVATED). Sem essa barreira nos dois pontos de
+     * entrada, um operador com só USER_CREATE/USER_ROLE_ASSIGN conseguiria se autopromover.
+     */
+    private void requireDevElevationIfAssigningDevRole(java.util.List<String> roles, Authentication auth) {
+        if (roles == null || !roles.contains("ROLE_DEV")) return;
+        boolean hasDevRoleManage = auth.getAuthorities().stream()
+                .anyMatch(a -> "DEV_ROLE_MANAGE".equals(a.getAuthority()));
+        boolean hasDevElevated = auth.getAuthorities().stream()
+                .anyMatch(a -> "DEV_ELEVATED".equals(a.getAuthority()));
+        if (!hasDevRoleManage || !hasDevElevated) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "Atribuição de ROLE_DEV requer DEV_ROLE_MANAGE com token elevado");
+        }
     }
 
     @Operation(summary = "Remove uma role do usuário")

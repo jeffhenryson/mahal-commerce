@@ -124,4 +124,80 @@ class RbacEndToEndIT {
         mvc.perform(get("/pdv/sessions").header("Authorization", "Bearer " + accessToken))
                 .andExpect(status().isForbidden());
     }
+
+    @Test
+    void user_with_multiple_roles_reaches_endpoint_when_only_one_role_has_permission() throws Exception {
+        MockMvc mvc = mockMvc();
+        String suffix = String.valueOf(System.currentTimeMillis());
+        String roleWithPermission = "ROLE_RBAC_IT_MULTI_A_" + suffix;
+        String roleWithoutPermission = "ROLE_RBAC_IT_MULTI_B_" + suffix;
+        String username = "rbac_it_multi_" + suffix;
+        String password = "Secure@123";
+
+        roleUseCase.createRole(roleWithPermission);
+        roleUseCase.createRole(roleWithoutPermission);
+
+        // Só a role A recebe PDV_READ — a role B fica sem nenhuma permissão de negócio.
+        mvc.perform(post("/roles/{roleName}/permissions/{permissionName}", roleWithPermission, "PDV_READ")
+                .with(user("admin_setup").authorities(new SimpleGrantedAuthority("ROLE_MANAGE_PERMISSIONS"))))
+                .andExpect(status().isNoContent());
+
+        createUserViaApi(mvc, username, password);
+
+        // Atribui as DUAS roles ao usuário — uma com a permissão, outra sem, via API real.
+        mvc.perform(post("/users/{username}/roles/{roleName}", username, roleWithPermission)
+                .with(user("admin_setup").authorities(new SimpleGrantedAuthority("USER_ROLE_ASSIGN"))))
+                .andExpect(status().isNoContent());
+        mvc.perform(post("/users/{username}/roles/{roleName}", username, roleWithoutPermission)
+                .with(user("admin_setup").authorities(new SimpleGrantedAuthority("USER_ROLE_ASSIGN"))))
+                .andExpect(status().isNoContent());
+
+        // Login real — o JWT deve carregar a união das authorities das duas roles.
+        String accessToken = loginAndGetAccessToken(mvc, username, password);
+
+        // PDV_READ vem só de uma das duas roles, e ainda assim basta para acessar o endpoint.
+        mvc.perform(get("/pdv/sessions").header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void old_jwt_loses_access_after_role_revoked_because_authorities_are_reloaded_per_request() throws Exception {
+        MockMvc mvc = mockMvc();
+        String suffix = String.valueOf(System.currentTimeMillis());
+        String roleName = "ROLE_RBAC_IT_REVOKE_" + suffix;
+        String username = "rbac_it_revoke_" + suffix;
+        String password = "Secure@123";
+
+        roleUseCase.createRole(roleName);
+        mvc.perform(post("/roles/{roleName}/permissions/{permissionName}", roleName, "PDV_READ")
+                .with(user("admin_setup").authorities(new SimpleGrantedAuthority("ROLE_MANAGE_PERMISSIONS"))))
+                .andExpect(status().isNoContent());
+
+        createUserViaApi(mvc, username, password);
+        mvc.perform(post("/users/{username}/roles/{roleName}", username, roleName)
+                .with(user("admin_setup").authorities(new SimpleGrantedAuthority("USER_ROLE_ASSIGN"))))
+                .andExpect(status().isNoContent());
+
+        // Login real — o JWT emitido aqui corresponde a um usuário que, neste instante, tem PDV_READ.
+        String accessToken = loginAndGetAccessToken(mvc, username, password);
+        mvc.perform(get("/pdv/sessions").header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isOk());
+
+        // Revoga a role via API — chamada por um segundo usuário (admin), não pelo próprio dono do JWT.
+        mvc.perform(delete("/users/{username}/roles/{roleName}", username, roleName)
+                .with(user("admin_setup").authorities(new SimpleGrantedAuthority("USER_ROLE_ASSIGN"))))
+                .andExpect(status().isNoContent());
+
+        // MESMO JWT antigo, sem novo login. Pergunta em aberto que este teste responde: o JWT
+        // carrega um claim "roles" no payload (JwtService.generateAccessToken), mas
+        // JwtAuthenticationFilter nunca o lê — a cada request ele chama
+        // userDetailsService.loadUserByUsername(username) de novo (JwtAuthenticationFilter.
+        // doFilterInternal) e usa as authorities retornadas ali, não as do token. UserService.
+        // removeRole evicta o cache desse username no momento da remoção (UserService.removeRole),
+        // então a próxima chamada a loadUserByUsername vai ao banco e traz as authorities já sem
+        // PDV_READ. Descoberta: o JWT antigo continua criptograficamente válido e fora da
+        // blocklist, mas perde acesso na primeira request após a revogação — resultado real é 403.
+        mvc.perform(get("/pdv/sessions").header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isForbidden());
+    }
 }

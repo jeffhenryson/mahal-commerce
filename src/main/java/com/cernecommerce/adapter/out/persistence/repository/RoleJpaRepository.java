@@ -25,4 +25,7 @@ public interface RoleJpaRepository extends JpaRepository<RoleEntity, Long> {
 
     @Query("select r.id from RoleEntity r where lower(r.name) like lower(concat('%', :search, '%')) order by r.name")
     Page<Long> findIdsByNameContaining(@Param("search") String search, Pageable pageable);
+
+    @Query("select distinct r from RoleEntity r join r.permissions p where p.id = :permissionId")
+    List<RoleEntity> findAllContainingPermission(@Param("permissionId") Long permissionId);
 }

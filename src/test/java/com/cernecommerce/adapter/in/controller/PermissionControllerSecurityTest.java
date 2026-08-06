@@ -53,6 +53,27 @@ public class PermissionControllerSecurityTest {
     }
 
     @Test
+    void get_permission_without_auth_returns_401() throws Exception {
+        mockMvc.perform(get("/permissions/USER_READ"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void get_permission_without_permission_read_returns_403() throws Exception {
+        mockMvc.perform(get("/permissions/USER_READ")
+                .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void create_permission_without_auth_returns_401() throws Exception {
+        mockMvc.perform(post("/permissions")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"PERM_TEST_" + System.currentTimeMillis() + "\"}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     void create_permission_without_permission_create_returns_403() throws Exception {
         String body = "{\"name\":\"PERM_TEST_" + System.currentTimeMillis() + "\"}";
         mockMvc.perform(post("/permissions")
@@ -84,5 +105,32 @@ public class PermissionControllerSecurityTest {
                         new SimpleGrantedAuthority("ROLE_USER"),
                         new SimpleGrantedAuthority("PERMISSION_READ"))))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void delete_permission_without_auth_returns_401() throws Exception {
+        mockMvc.perform(delete("/permissions/SOME_PERM"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void delete_permission_with_dev_permission_manage_returns_204() throws Exception {
+        String name = "PERM_SEC_TEST_DELETE_" + System.currentTimeMillis();
+
+        mockMvc.perform(post("/permissions")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"" + name + "\"}")
+                .with(user("dev").authorities(
+                        new SimpleGrantedAuthority("ROLE_DEV"),
+                        new SimpleGrantedAuthority("DEV_ELEVATED"),
+                        new SimpleGrantedAuthority("DEV_PERMISSION_MANAGE"))))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(delete("/permissions/" + name)
+                .with(user("dev").authorities(
+                        new SimpleGrantedAuthority("ROLE_DEV"),
+                        new SimpleGrantedAuthority("DEV_ELEVATED"),
+                        new SimpleGrantedAuthority("DEV_PERMISSION_MANAGE"))))
+                .andExpect(status().isNoContent());
     }
 }

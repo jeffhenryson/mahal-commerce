@@ -17,9 +17,11 @@ import java.util.Optional;
 public class PermissionRepositoryImpl implements PermissionRepository {
 
     private final PermissionJpaRepository permRepo;
+    private final RoleJpaRepository roleRepo;
 
-    public PermissionRepositoryImpl(PermissionJpaRepository permRepo) {
+    public PermissionRepositoryImpl(PermissionJpaRepository permRepo, RoleJpaRepository roleRepo) {
         this.permRepo = permRepo;
+        this.roleRepo = roleRepo;
     }
 
     @Override
@@ -47,7 +49,11 @@ public class PermissionRepositoryImpl implements PermissionRepository {
 
     @Override
     public void deleteByName(String name) {
-        permRepo.findByName(name).ifPresent(permRepo::delete);
+        permRepo.findByName(name).ifPresent(permission -> {
+            roleRepo.findAllContainingPermission(permission.getId())
+                    .forEach(role -> role.getPermissions().remove(permission));
+            permRepo.delete(permission);
+        });
     }
 
     @Override
