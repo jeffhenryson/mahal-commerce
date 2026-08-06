@@ -1,5 +1,6 @@
 package com.cernecommerce.core.service;
 
+import com.cernecommerce.core.domain.exception.estoque.InsufficientStockException;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.estoque.StockMovement;
@@ -20,6 +21,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.transaction.TestTransaction;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -139,5 +141,74 @@ class KitSaleFlowIT {
         assertThatThrownBy(() -> estoqueUseCase.adjustStock(kitSku, warehouseCode, MovementType.AJUSTE,
                         BigDecimal.TEN, "contagem", operator))
                 .isInstanceOf(com.cernecommerce.core.domain.exception.estoque.KitDirectAdjustmentException.class);
+    }
+
+    @Test
+    void kitSale_withInsufficientStockInOneComponent_rollsBackAllComponentMovements() {
+        String suffix = uniqueSuffix();
+        String operator = "caixa-" + suffix;
+        String warehouseCode = "LOJA-" + suffix;
+        String componentASku = "COMPA-" + suffix;
+        String componentBSku = "COMPB-" + suffix;
+        String kitSku = "KIT-" + suffix;
+
+        estoqueUseCase.createWarehouse(warehouseCode, "Loja " + suffix, WarehouseType.LOJA_FISICA);
+        estoqueUseCase.createProduct(componentASku, "Componente A " + suffix, "componente", List.of(),
+                Pricing.of(new BigDecimal("10.00"), null, new BigDecimal("20.00")));
+        estoqueUseCase.createProduct(componentBSku, "Componente B " + suffix, "componente", List.of(),
+                Pricing.of(new BigDecimal("15.00"), null, new BigDecimal("30.00")));
+        // Componente A tem saldo confortável (10 un.); componente B tem saldo insuficiente para
+        // o que a receita do kit vai exigir por unidade vendida (5 un., só 1 disponível).
+        estoqueUseCase.adjustStock(componentASku, warehouseCode, MovementType.ENTRADA, new BigDecimal("10.000"),
+                "carga inicial", operator);
+        estoqueUseCase.adjustStock(componentBSku, warehouseCode, MovementType.ENTRADA, new BigDecimal("1.000"),
+                "carga inicial", operator);
+
+        estoqueUseCase.createProduct(kitSku, "Kit Incompleto " + suffix, "combo", List.of(),
+                Pricing.of(null, null, new BigDecimal("50.00")));
+        estoqueUseCase.defineKitRecipe(kitSku, List.of(
+                new KitComponentCommand(componentASku, BigDecimal.ONE),
+                new KitComponentCommand(componentBSku, new BigDecimal("5"))));
+        flushAndClear();
+
+        CashRegisterSession session = pdvUseCase.openSession(operator, new BigDecimal("100.00"), warehouseCode);
+        flushAndClear();
+
+        // A classe é @Transactional no molde de teste do Spring: todo o método roda dentro de UMA
+        // transação, revertida automaticamente no fim. Se a venda que vai falhar rodasse nessa
+        // MESMA transação, marcá-la como rollback-only não desfaz de verdade o que já foi
+        // persistido — o rollback físico só acontece no fim do teste, e uma leitura ANTES disso,
+        // ainda dentro da mesma transação, enxerga a baixa parcial do componente A (flush sem
+        // commit continua visível na própria transação). Por isso o setup acima é commitado de
+        // verdade aqui, e a venda que vai falhar roda na PRÓPRIA transação, fechada logo depois —
+        // só assim dá pra observar o rollback físico que o @Transactional de registerSale garante
+        // em produção (onde não há transação de teste por cima).
+        TestTransaction.flagForCommit();
+        TestTransaction.end();
+
+        TestTransaction.start();
+        // A ordem em que explodeKitMovement processa os componentes da receita NÃO é garantida
+        // (ProductKitComponentEntity não tem @OrderBy, e KitComponentRepositoryImpl#findByKitSku
+        // delega num findByKitSku derivado do Spring Data sem ORDER BY) — mas a asserção abaixo
+        // não depende disso: seja qual for a ordem, a venda inteira do kit tem que falhar e
+        // NENHUM componente pode ficar com baixa parcial persistida.
+        assertThatThrownBy(() -> pdvUseCase.registerSale(session.id(), null,
+                        List.of(new SaleItemCommand(kitSku, BigDecimal.ONE, null)),
+                        List.of(new PaymentCommand(PaymentMethod.DINHEIRO, new BigDecimal("50.00"), null)), operator))
+                .isInstanceOf(InsufficientStockException.class);
+        // Não chama flagForCommit(): a transação já está marcada rollback-only pela exceção, e o
+        // end() abaixo a fecha de verdade agora — não só no fim do teste — desfazendo qualquer
+        // baixa parcial que tenha sido persistida antes do componente que estourou o saldo.
+        TestTransaction.end();
+
+        TestTransaction.start();
+        // Nenhuma baixa parcial: componente A continua EXATAMENTE com o saldo original, mesmo que
+        // tenha sido processado (e uma SAIDA persistida na mesma transação) antes do componente B
+        // estourar o saldo — prova que o @Transactional da operação reverteu TODOS os componentes,
+        // não só o que efetivamente lançou a exceção.
+        BigDecimal componentABalance = estoqueUseCase.getStockBalance(componentASku, warehouseCode).quantity();
+        BigDecimal componentBBalance = estoqueUseCase.getStockBalance(componentBSku, warehouseCode).quantity();
+        assertThat(componentABalance).isEqualByComparingTo("10.000");
+        assertThat(componentBBalance).isEqualByComparingTo("1.000");
     }
 }

@@ -543,13 +543,24 @@ public class EstoqueService implements EstoqueUseCase {
         if (!lotTracked && lotInfoProvided) {
             throw new UnexpectedLotInfoException(sku, "produto não é lote-rastreado");
         }
+        // EST-C0xx: o saldo esperado é carimbado AGORA, no registro — não recalculado no
+        // fechamento. É o retrato do saldo do sistema no instante em que o contador viu a
+        // prateleira; comparar contra ele (não contra o saldo do fechamento) é o que permite ao
+        // fechamento aplicar só a divergência de verdade, sem apagar movimentação legítima que
+        // aconteça depois da contagem e antes do balanço fechar.
+        BigDecimal systemQuantity;
         if (lotInfoProvided) {
-            // Contagem só reconcilia lote que já existe — lote novo entra por recebimento
-            // (adjustStock ENTRADA), não pelo balanço.
-            stockLotRepository.findBySkuAndWarehouseIdAndLotCode(sku, count.warehouseId(), lotCode)
+            StockLot lot = stockLotRepository.findBySkuAndWarehouseIdAndLotCode(sku, count.warehouseId(), lotCode)
                     .orElseThrow(() -> new StockLotNotFoundException(sku, lotCode));
+            systemQuantity = lot.quantity();
+        } else {
+            systemQuantity = stockBalanceRepository.findBySkuAndWarehouseId(sku, count.warehouseId())
+                    .map(StockBalance::quantity)
+                    .orElse(BigDecimal.ZERO);
         }
-        return stockCountRepository.save(count.withCountedItem(sku, countedQuantity, lotCode));
+        StockCount counted = count.withCountedItem(sku, countedQuantity, lotCode)
+                .withReconciledItem(sku, lotCode, systemQuantity);
+        return stockCountRepository.save(counted);
     }
 
     @Override
@@ -579,19 +590,26 @@ public class EstoqueService implements EstoqueUseCase {
      * Fechamento de um SKU não lote-rastreado: confronta contra o agregado de
      * {@code stock_balance}, como sempre foi. Contagem que bateu não vira movimentação — um AJUSTE
      * de saldo para ele mesmo só faria ruído no ledger.
+     *
+     * <p>{@code item} já chega reconciliado desde {@code recordCountedItem} — {@code
+     * expectedQuantity}/{@code difference} são o retrato do saldo no instante da CONTAGEM, não
+     * deste fechamento. Por isso o AJUSTE aplicado aqui soma {@code item.difference()} ao saldo
+     * ATUAL (lido agora), em vez de substituir o saldo pelo valor contado direto: se uma venda
+     * aconteceu entre a contagem e o fechamento, ela continua refletida — só a divergência que a
+     * contagem de fato encontrou é corrigida.</p>
      */
     private StockCountItem closeAggregateSku(Long stockCountId, Warehouse warehouse, StockCountItem item,
             String username) {
-        BigDecimal systemQuantity = stockBalanceRepository
-                .findBySkuAndWarehouseId(item.sku(), warehouse.id())
-                .map(StockBalance::quantity)
-                .orElse(BigDecimal.ZERO);
-        StockCountItem confronted = item.reconciledWith(systemQuantity);
-        if (confronted.diverges()) {
-            adjustStock(item.sku(), warehouse.code(), MovementType.AJUSTE, item.countedQuantity(),
+        if (item.diverges()) {
+            BigDecimal currentSystemQuantity = stockBalanceRepository
+                    .findBySkuAndWarehouseId(item.sku(), warehouse.id())
+                    .map(StockBalance::quantity)
+                    .orElse(BigDecimal.ZERO);
+            BigDecimal target = currentSystemQuantity.add(item.difference());
+            adjustStock(item.sku(), warehouse.code(), MovementType.AJUSTE, target,
                     "Balanço de inventário #" + stockCountId, username);
         }
-        return confronted;
+        return item;
     }
 
     /**
@@ -608,16 +626,25 @@ public class EstoqueService implements EstoqueUseCase {
         List<StockCountItem> reconciled = new ArrayList<>();
         BigDecimal newTotal = BigDecimal.ZERO;
         for (StockCountItem item : items) {
-            StockLot lot = stockLotRepository.findBySkuAndWarehouseIdAndLotCode(sku, warehouse.id(), item.lotCode())
-                    .orElseThrow(() -> new StockLotNotFoundException(sku, item.lotCode()));
-            StockCountItem confronted = item.reconciledWith(lot.quantity());
-            reconciled.add(confronted);
-            if (confronted.diverges()) {
-                stockLotRepository.save(lot.reconciledTo(item.countedQuantity()));
+            // Mesmo raciocínio de closeAggregateSku: item já reconciliado no registro, o ajuste
+            // soma a divergência encontrada à quantidade ATUAL do lote, não substitui pelo valor
+            // contado — uma consumição FEFO entre a contagem e o fechamento não é apagada.
+            if (item.diverges()) {
+                StockLot lot = stockLotRepository
+                        .findBySkuAndWarehouseIdAndLotCode(sku, warehouse.id(), item.lotCode())
+                        .orElseThrow(() -> new StockLotNotFoundException(sku, item.lotCode()));
+                BigDecimal target = lot.quantity().add(item.difference());
+                stockLotRepository.save(lot.reconciledTo(target));
             }
+            reconciled.add(item);
             newTotal = newTotal.add(item.countedQuantity());
         }
 
+        // Este confronto do agregado contra a SOMA dos lotes contados continua lido no fechamento
+        // (não tem um "instante da contagem" único: cada lote pode ter sido contado em momento
+        // diferente). Ainda sujeito à mesma classe de corrida que motivou o fix acima, só que numa
+        // janela menor (entre o último lote contado e o fechamento) — gap residual conhecido, não
+        // corrigido nesta rodada.
         BigDecimal systemQuantity = stockBalanceRepository.findBySkuAndWarehouseId(sku, warehouse.id())
                 .map(StockBalance::quantity)
                 .orElse(BigDecimal.ZERO);

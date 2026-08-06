@@ -1,6 +1,7 @@
 package com.cernecommerce.adapter.out.persistence.repository;
 
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.estoque.KitComponent;
 import com.cernecommerce.core.domain.model.estoque.LotIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.OrphanSku;
@@ -70,6 +71,7 @@ class EstoqueRepositoryIT {
     @Autowired StockCountRepositoryImpl stockCountRepository;
     @Autowired StockReservationRepositoryImpl stockReservationRepository;
     @Autowired StockLotRepositoryImpl stockLotRepository;
+    @Autowired KitComponentRepositoryImpl kitComponentRepository;
 
     @PersistenceContext EntityManager em;
 
@@ -485,6 +487,26 @@ class EstoqueRepositoryIT {
         assertThat(expiring).extracting(StockLot::lotCode)
                 .as("vencido entra, sem saldo e já alertado ficam de fora, e o que vence longe não entra")
                 .containsExactly("LOTE-VENCIDO");
+    }
+
+    /**
+     * Caso de borda do cutoff: no teste acima, todo lote está bem antes ou bem depois da data de
+     * corte — nenhum bate em cheio. Aqui o {@code expiryDate} é EXATAMENTE igual ao cutoff, o que
+     * prova se a query usa {@code <=} (inclusivo) ou {@code <} (exclusivo).
+     */
+    @Test
+    void stockLot_findExpiringSoon_incluiLoteComExpiryDateIgualAoCutoff() {
+        Warehouse warehouse = givenWarehouse("WH-EXP-EDGE");
+        LocalDate cutoff = LocalDate.of(2026, 12, 31);
+        stockLotRepository.save(StockLot.create("EXP-EDGE-001", warehouse.id(), "LOTE-NO-CUTOFF", cutoff)
+                .receive(BigDecimal.TEN));
+        flushAndClear();
+
+        List<StockLot> expiring = stockLotRepository.findExpiringSoon(cutoff, 10);
+
+        assertThat(expiring).extracting(StockLot::lotCode)
+                .as("expiryDate igual ao cutoff entra no resultado: a comparação é <=, não <")
+                .containsExactly("LOTE-NO-CUTOFF");
     }
 
     @Test
@@ -947,5 +969,71 @@ class EstoqueRepositoryIT {
         flushAndClear();
 
         assertThat(lotMismatchesWithPrefix("LOT-NT-")).isEmpty();
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // EST-F015 — receita de kit virtual. Nenhum teste aqui exercitava KitComponentRepositoryImpl
+    // diretamente: o mapeamento domínio↔entidade e o delete-then-insert de replaceRecipe só
+    // apareciam de lado, por ITs de controller.
+    // ------------------------------------------------------------------------------------------
+
+    @Test
+    void kitComponent_findByKitSku_devolveComponentesMapeados() {
+        kitComponentRepository.replaceRecipe("KIT-001", List.of(
+                KitComponent.create("KIT-001", "KIT-001-COMP-A", new BigDecimal("2.000")),
+                KitComponent.create("KIT-001", "KIT-001-COMP-B", new BigDecimal("3.500"))));
+        flushAndClear();
+
+        List<KitComponent> componentes = kitComponentRepository.findByKitSku("KIT-001");
+
+        assertThat(componentes).hasSize(2).allSatisfy(c -> {
+            assertThat(c.id()).isNotNull();
+            assertThat(c.kitSku()).isEqualTo("KIT-001");
+        });
+        assertThat(componentes).extracting(KitComponent::componentSku)
+                .containsExactlyInAnyOrder("KIT-001-COMP-A", "KIT-001-COMP-B");
+        assertThat(componentes.stream()
+                .filter(c -> c.componentSku().equals("KIT-001-COMP-A")).findFirst().orElseThrow().quantity())
+                .isEqualByComparingTo("2.000");
+        assertThat(componentes.stream()
+                .filter(c -> c.componentSku().equals("KIT-001-COMP-B")).findFirst().orElseThrow().quantity())
+                .isEqualByComparingTo("3.500");
+    }
+
+    /**
+     * Prova que {@code replaceRecipe} é de fato delete-then-insert contra o banco (
+     * {@code deleteByKitSku} + {@code flush()} + {@code saveAll}), e não deixa lixo dos
+     * componentes antigos: a receita nova com só o componente C não pode trazer A nem B de volta.
+     */
+    @Test
+    void kitComponent_replaceRecipe_substituiComponentesAntigosPorNovos() {
+        kitComponentRepository.replaceRecipe("KIT-002", List.of(
+                KitComponent.create("KIT-002", "KIT-002-COMP-A", BigDecimal.ONE),
+                KitComponent.create("KIT-002", "KIT-002-COMP-B", BigDecimal.ONE)));
+        flushAndClear();
+
+        assertThat(kitComponentRepository.findByKitSku("KIT-002")).extracting(KitComponent::componentSku)
+                .as("receita inicial gravada com A e B")
+                .containsExactlyInAnyOrder("KIT-002-COMP-A", "KIT-002-COMP-B");
+
+        kitComponentRepository.replaceRecipe("KIT-002",
+                List.of(KitComponent.create("KIT-002", "KIT-002-COMP-C", BigDecimal.ONE)));
+        flushAndClear();
+
+        assertThat(kitComponentRepository.findByKitSku("KIT-002")).extracting(KitComponent::componentSku)
+                .as("A e B somem, só C fica: sem isso a receita antiga vazaria pro consumo de estoque")
+                .containsExactly("KIT-002-COMP-C");
+    }
+
+    @Test
+    void kitComponent_isUsedAsComponent_trueSoParaSkuQueEComponenteDeAlgumKit() {
+        kitComponentRepository.replaceRecipe("KIT-003",
+                List.of(KitComponent.create("KIT-003", "KIT-003-COMP-USADO", BigDecimal.ONE)));
+        flushAndClear();
+
+        assertThat(kitComponentRepository.isUsedAsComponent("KIT-003-COMP-USADO"))
+                .as("SKU é componente de KIT-003: não pode ser promovido a kit também").isTrue();
+        assertThat(kitComponentRepository.isUsedAsComponent("KIT-003-COMP-NAO-USADO"))
+                .as("SKU não aparece em nenhuma receita").isFalse();
     }
 }

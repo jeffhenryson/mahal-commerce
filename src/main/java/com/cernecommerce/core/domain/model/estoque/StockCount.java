@@ -87,6 +87,26 @@ public record StockCount(Long id, Long warehouseId, StockCountStatus status, Str
         return sku + "|" + (lotCode == null ? "" : lotCode);
     }
 
+    /**
+     * Confronta o item {@code (sku, lotCode)} contra {@code systemQuantity} — chamado logo depois
+     * de {@link #withCountedItem}, no <b>registro</b> da contagem, não no fechamento (EST-C0xx).
+     *
+     * <p>Isso é o que permite ao fechamento aplicar a divergência encontrada sobre o saldo do
+     * sistema NAQUELE INSTANTE (via {@code EstoqueService.closeAggregateSku}), em vez de
+     * substituir o saldo pelo valor contado direto: entre o registro e o fechamento pode ter
+     * havido movimentação legítima (uma venda, por exemplo), e essa movimentação não pode ser
+     * apagada só porque o balanço fechou depois dela.</p>
+     */
+    public StockCount withReconciledItem(String sku, String lotCode, BigDecimal systemQuantity) {
+        String key = itemKey(sku, lotCode);
+        List<StockCountItem> updated = items.stream()
+                .map(item -> itemKey(item.sku(), item.lotCode()).equals(key)
+                        ? item.reconciledWith(systemQuantity)
+                        : item)
+                .toList();
+        return new StockCount(id, warehouseId, status, username, createdAt, closedAt, updated);
+    }
+
     /** Substitui os itens pelos já confrontados com o saldo do sistema. */
     public StockCount withReconciledItems(List<StockCountItem> reconciled) {
         return new StockCount(id, warehouseId, status, username, createdAt, closedAt, reconciled);

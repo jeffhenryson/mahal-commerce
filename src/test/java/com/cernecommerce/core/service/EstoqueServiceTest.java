@@ -231,6 +231,25 @@ class EstoqueServiceTest {
     }
 
     @Test
+    void findProductBySku_returnsProductWhenExists() {
+        Product product = Product.of(1L, "NARG-001", "Narguile Aladin", "narguile", true, oneVariant());
+        when(productRepository.findByAnySku("NARG-001")).thenReturn(Optional.of(product));
+
+        Product result = estoqueService.findProductBySku("NARG-001");
+
+        assertThat(result.sku()).isEqualTo("NARG-001");
+        assertThat(result.name()).isEqualTo("Narguile Aladin");
+    }
+
+    @Test
+    void findProductBySku_throwsWhenSkuNotInCatalog() {
+        when(productRepository.findByAnySku("SKU-FANTASMA")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.findProductBySku("SKU-FANTASMA"))
+                .isInstanceOf(ProductNotFoundException.class);
+    }
+
+    @Test
     void getDefaultWarehouse_resolvesConfiguredCode() {
         when(systemConfigPort.findByKey("estoque.warehouse.default-code"))
                 .thenReturn(Optional.of(new com.cernecommerce.core.domain.model.config.SystemConfig(
@@ -269,6 +288,42 @@ class EstoqueServiceTest {
         when(warehouseRepository.findByCode("GHOST")).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> estoqueService.getDefaultWarehouse())
+                .isInstanceOf(WarehouseNotFoundException.class);
+    }
+
+    @Test
+    void getWarehouse_returnsWarehouseWhenIdExists() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        when(warehouseRepository.findById(1L)).thenReturn(Optional.of(warehouse));
+
+        Warehouse result = estoqueService.getWarehouse(1L);
+
+        assertThat(result.code()).isEqualTo("LOJA-01");
+    }
+
+    @Test
+    void getWarehouse_throwsWhenIdNotFound() {
+        when(warehouseRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.getWarehouse(99L))
+                .isInstanceOf(WarehouseNotFoundException.class);
+    }
+
+    @Test
+    void getWarehouseByCode_returnsWarehouseWhenCodeExists() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+
+        Warehouse result = estoqueService.getWarehouseByCode("LOJA-01");
+
+        assertThat(result.id()).isEqualTo(1L);
+    }
+
+    @Test
+    void getWarehouseByCode_throwsWhenCodeNotFound() {
+        when(warehouseRepository.findByCode("INEXISTENTE")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.getWarehouseByCode("INEXISTENTE"))
                 .isInstanceOf(WarehouseNotFoundException.class);
     }
 
@@ -703,6 +758,48 @@ class EstoqueServiceTest {
         assertThatThrownBy(() -> estoqueService.adjustStock("KIT-001", "LOJA-01", MovementType.SAIDA,
                 BigDecimal.ONE, "motivo", "gerente"))
                 .isInstanceOf(EmptyKitRecipeException.class);
+    }
+
+    /**
+     * explodeKitMovement itera a receita com um for comum, sem try/catch — o segundo componente
+     * (ESS-001) estoura InsufficientStockException dentro do adjustStock recursivo e a exceção sobe
+     * direto, sem ser envolvida ou agregada. Como o primeiro componente (CARV-001) já tinha sido
+     * processado com sucesso antes da falha, o teste confirma tanto que ele foi persistido quanto
+     * que o terceiro (CERA-001), que viria depois do que falhou, nunca chega a ser tocado —
+     * ver EstoqueService.explodeKitMovement, o loop "for (KitComponent component : recipe)" que
+     * chama adjustStock(...) sem qualquer proteção contra exceção de um componente.
+     */
+    @Test
+    void adjustStock_kit_withInsufficientStockInOneComponent_propagatesExceptionWithoutProcessingRemainingComponents() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(productRepository.findByAnySku("KIT-001")).thenReturn(Optional.of(kitProduct("KIT-001", "80.00")));
+        when(kitComponentRepository.findByKitSku("KIT-001")).thenReturn(List.of(
+                KitComponent.create("KIT-001", "CARV-001", new BigDecimal("2")),
+                KitComponent.create("KIT-001", "ESS-001", new BigDecimal("3")),
+                KitComponent.create("KIT-001", "CERA-001", BigDecimal.ONE)));
+        // CARV-001 tem saldo de sobra: primeiro componente processado com sucesso.
+        when(stockBalanceRepository.findBySkuAndWarehouseId("CARV-001", 1L))
+                .thenReturn(Optional.of(StockBalance.of(10L, "CARV-001", 1L, new BigDecimal("10"), 0L)));
+        // ESS-001 só tem 2 disponíveis, mas a receita pede 3 (para 1 kit): estoura aqui.
+        when(stockBalanceRepository.findBySkuAndWarehouseId("ESS-001", 1L))
+                .thenReturn(Optional.of(StockBalance.of(11L, "ESS-001", 1L, new BigDecimal("2"), 0L)));
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        assertThatThrownBy(() -> estoqueService.adjustStock("KIT-001", "LOJA-01", MovementType.SAIDA,
+                BigDecimal.ONE, "Venda balcão", "gerente"))
+                .isInstanceOf(InsufficientStockException.class);
+
+        // Primeiro componente já tinha sido processado e persistido antes da falha do segundo.
+        verify(stockMovementRepository).save(argThat(m -> m.sku().equals("CARV-001")
+                && m.quantity().compareTo(new BigDecimal("2")) == 0));
+        verify(stockBalanceRepository).save(argThat(b -> b.sku().equals("CARV-001")));
+        // Segundo componente falhou: nunca chega a gravar movimento nem saldo dele.
+        verify(stockMovementRepository, never()).save(argThat(m -> m.sku().equals("ESS-001")));
+        verify(stockBalanceRepository, never()).save(argThat(b -> b.sku().equals("ESS-001")));
+        // Terceiro componente é posterior ao que falhou: o loop nunca chega até ele.
+        verify(stockBalanceRepository, never()).findBySkuAndWarehouseId(eq("CERA-001"), any());
+        verify(stockMovementRepository, never()).save(argThat(m -> m.sku().equals("CERA-001")));
     }
 
     @Test
@@ -1508,14 +1605,20 @@ class EstoqueServiceTest {
     @Test
     void recordCountedItem_registraOContado() {
         when(stockCountRepository.findById(50L)).thenReturn(Optional.of(openCount(List.of())));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("NARG-001", 1L)).thenReturn(Optional.empty());
         when(stockCountRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         StockCount updated = estoqueService.recordCountedItem(50L, "NARG-001", new BigDecimal("37.000"));
 
+        // EST-C0xx: o registro já confronta contra o saldo do sistema NESTE instante — não espera
+        // o fechamento — para que o fechamento só precise aplicar a divergência sobre o saldo
+        // atual, sem apagar movimentação legítima que aconteça entre o registro e o fechamento.
         assertThat(updated.items()).singleElement().satisfies(item -> {
             assertThat(item.sku()).isEqualTo("NARG-001");
             assertThat(item.countedQuantity()).isEqualByComparingTo("37.000");
-            assertThat(item.expectedQuantity()).as("só o fechamento confronta").isNull();
+            assertThat(item.expectedQuantity()).as("registro confronta contra saldo zero implícito")
+                    .isEqualByComparingTo("0");
+            assertThat(item.difference()).isEqualByComparingTo("37.000");
         });
     }
 
@@ -1565,20 +1668,27 @@ class EstoqueServiceTest {
         verify(stockCountRepository, never()).save(any());
     }
 
-    /** O coração do F006: divergência vira AJUSTE levando o saldo ao valor contado. */
+    /**
+     * O coração do F006: divergência vira AJUSTE. Os itens já chegam reconciliados (é o que
+     * {@code recordCountedItem} faz desde EST-C0xx) — o saldo mockado aqui é o mesmo no registro
+     * e no fechamento (sem movimentação concorrente), então o AJUSTE final bate com o valor
+     * contado direto, como sempre bateu. O teste de saldo divergindo entre registro e fechamento
+     * é {@code closeStockCount_movimentacaoEntreRegistroEFechamento_aplicaDeltaNaoSubstitui}.
+     */
     @Test
     void closeStockCount_aplicaAjusteApenasNosItensDivergentes() {
         StockCount count = openCount(List.of(
-                StockCountItem.of(1L, "SKU-FALTA", new BigDecimal("8.000"), null, null),
-                StockCountItem.of(2L, "SKU-BATEU", new BigDecimal("5.000"), null, null),
-                StockCountItem.of(3L, "SKU-SOBRA", new BigDecimal("12.000"), null, null)));
+                StockCountItem.of(1L, "SKU-FALTA", new BigDecimal("8.000"), new BigDecimal("10.000"), new BigDecimal("-2.000")),
+                StockCountItem.of(2L, "SKU-BATEU", new BigDecimal("5.000"), new BigDecimal("5.000"), new BigDecimal("0.000")),
+                StockCountItem.of(3L, "SKU-SOBRA", new BigDecimal("12.000"), new BigDecimal("9.000"), new BigDecimal("3.000"))));
         when(stockCountRepository.findById(50L)).thenReturn(Optional.of(count));
         when(warehouseRepository.findById(1L)).thenReturn(Optional.of(LOJA));
         when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(LOJA));
         when(stockBalanceRepository.findBySkuAndWarehouseId("SKU-FALTA", 1L))
                 .thenReturn(Optional.of(StockBalance.of(1L, "SKU-FALTA", 1L, new BigDecimal("10.000"), 0L)));
-        when(stockBalanceRepository.findBySkuAndWarehouseId("SKU-BATEU", 1L))
-                .thenReturn(Optional.of(StockBalance.of(2L, "SKU-BATEU", 1L, new BigDecimal("5.000"), 0L)));
+        // SKU-BATEU não diverge (difference=0.000, já carimbado no item) — closeAggregateSku nem
+        // chega a consultar o saldo dele, então nenhum stub aqui (stub não usado quebraria a
+        // checagem estrita do Mockito).
         when(stockBalanceRepository.findBySkuAndWarehouseId("SKU-SOBRA", 1L))
                 .thenReturn(Optional.of(StockBalance.of(3L, "SKU-SOBRA", 1L, new BigDecimal("9.000"), 0L)));
         when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -1608,11 +1718,47 @@ class EstoqueServiceTest {
                 assertThat(m.reason()).contains("Balanço de inventário #50"));
     }
 
+    /**
+     * EST-C0xx: prova o fix do bug de snapshot. No registro, o contador viu 10 no sistema e
+     * contou 8 (faltam 2) — {@code difference = -2} carimbado ali. Antes do fechamento, uma
+     * ENTRADA de +5 chega (recebimento de mercadoria, concorrente com o balanço ainda aberto):
+     * saldo atual do sistema vira 15. O AJUSTE do fechamento tem que somar a divergência de -2
+     * ao saldo ATUAL (15 - 2 = 13), não substituir pelo valor contado direto (8) — 8 apagaria a
+     * entrada de +5 que aconteceu depois da contagem, como se ela nunca tivesse existido.
+     */
+    @Test
+    void closeStockCount_movimentacaoEntreRegistroEFechamento_aplicaDeltaNaoSubstitui() {
+        StockCount count = openCount(List.of(
+                StockCountItem.of(1L, "SKU-DRIFT", new BigDecimal("8.000"), new BigDecimal("10.000"), new BigDecimal("-2.000"))));
+        when(stockCountRepository.findById(50L)).thenReturn(Optional.of(count));
+        when(warehouseRepository.findById(1L)).thenReturn(Optional.of(LOJA));
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(LOJA));
+        // Saldo ATUAL no fechamento já reflete a ENTRADA concorrente de +5 (10 + 5 = 15) —
+        // diferente do saldo de 10 que estava carimbado no item quando ele foi contado.
+        when(stockBalanceRepository.findBySkuAndWarehouseId("SKU-DRIFT", 1L))
+                .thenReturn(Optional.of(StockBalance.of(1L, "SKU-DRIFT", 1L, new BigDecimal("15.000"), 0L)));
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(stockCountRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        estoqueService.closeStockCount(50L, "gerente");
+
+        ArgumentCaptor<StockMovement> movementCaptor = ArgumentCaptor.forClass(StockMovement.class);
+        verify(stockMovementRepository).save(movementCaptor.capture());
+        assertThat(movementCaptor.getValue().quantity())
+                .as("13 (saldo atual 15 + divergência -2), não 8 (o valor contado, que apagaria a entrada concorrente)")
+                .isEqualByComparingTo("13.000");
+
+        ArgumentCaptor<StockBalance> balanceCaptor = ArgumentCaptor.forClass(StockBalance.class);
+        verify(stockBalanceRepository).save(balanceCaptor.capture());
+        assertThat(balanceCaptor.getValue().quantity()).isEqualByComparingTo("13.000");
+    }
+
     /** SKU nunca movimentado tem saldo zero implícito — contar 4 ali é sobra de 4. */
     @Test
     void closeStockCount_skuSemSaldoRegistrado_confrontaContraZero() {
         when(stockCountRepository.findById(50L)).thenReturn(Optional.of(openCount(
-                List.of(StockCountItem.of(1L, "SKU-NOVO", new BigDecimal("4.000"), null, null)))));
+                List.of(StockCountItem.of(1L, "SKU-NOVO", new BigDecimal("4.000"),
+                        BigDecimal.ZERO, new BigDecimal("4.000"))))));
         when(warehouseRepository.findById(1L)).thenReturn(Optional.of(LOJA));
         when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(LOJA));
         when(stockBalanceRepository.findBySkuAndWarehouseId("SKU-NOVO", 1L)).thenReturn(Optional.empty());
@@ -1631,7 +1777,8 @@ class EstoqueServiceTest {
     @Test
     void closeStockCount_contagemZero_zeraOSaldo() {
         when(stockCountRepository.findById(50L)).thenReturn(Optional.of(openCount(
-                List.of(StockCountItem.of(1L, "SKU-SUMIU", BigDecimal.ZERO, null, null)))));
+                List.of(StockCountItem.of(1L, "SKU-SUMIU", BigDecimal.ZERO,
+                        new BigDecimal("6.000"), new BigDecimal("-6.000"))))));
         when(warehouseRepository.findById(1L)).thenReturn(Optional.of(LOJA));
         when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(LOJA));
         when(stockBalanceRepository.findBySkuAndWarehouseId("SKU-SUMIU", 1L))
@@ -1751,21 +1898,22 @@ class EstoqueServiceTest {
     @Test
     void closeStockCount_loteRastreado_reconciliaCadaLoteEAgregado() {
         StockCount count = openCount(List.of(
-                StockCountItem.of(1L, "ESS-001", new BigDecimal("3.000"), null, null, "LOTE-A"),
-                StockCountItem.of(2L, "ESS-001", new BigDecimal("5.000"), null, null, "LOTE-B")));
+                StockCountItem.of(1L, "ESS-001", new BigDecimal("3.000"),
+                        new BigDecimal("4.000"), new BigDecimal("-1.000"), "LOTE-A"),
+                StockCountItem.of(2L, "ESS-001", new BigDecimal("5.000"),
+                        new BigDecimal("5.000"), new BigDecimal("0.000"), "LOTE-B")));
         when(stockCountRepository.findById(50L)).thenReturn(Optional.of(count));
         when(warehouseRepository.findById(1L)).thenReturn(Optional.of(LOJA));
         when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(LOJA));
         when(productRepository.findByAnySku("ESS-001")).thenReturn(Optional.of(lotTrackedProduct("ESS-001")));
 
+        // LOTE-B não diverge (difference=0.000, carimbado no registro) — o fechamento nem chega a
+        // buscar esse StockLot, então não há stub de findBySkuAndWarehouseIdAndLotCode para ele
+        // (stub não usado quebraria a checagem estrita do Mockito).
         StockLot loteA = StockLot.of(10L, "ESS-001", 1L, "LOTE-A", LocalDate.of(2027, 1, 1),
                 new BigDecimal("4.000"), null, 0L);
-        StockLot loteB = StockLot.of(11L, "ESS-001", 1L, "LOTE-B", LocalDate.of(2027, 6, 1),
-                new BigDecimal("5.000"), null, 0L);
         when(stockLotRepository.findBySkuAndWarehouseIdAndLotCode("ESS-001", 1L, "LOTE-A"))
                 .thenReturn(Optional.of(loteA));
-        when(stockLotRepository.findBySkuAndWarehouseIdAndLotCode("ESS-001", 1L, "LOTE-B"))
-                .thenReturn(Optional.of(loteB));
         when(stockLotRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         when(stockBalanceRepository.findBySkuAndWarehouseId("ESS-001", 1L))
@@ -1791,22 +1939,21 @@ class EstoqueServiceTest {
                         tuple("LOTE-B", new BigDecimal("5.000"), new BigDecimal("0.000")));
     }
 
+    /**
+     * Itens já chegam reconciliados sem divergência (é o que {@code recordCountedItem} carimba
+     * quando o contado bate com o saldo do sistema) — o fechamento nem chega a buscar o
+     * {@code StockLot} de cada um, porque {@code item.diverges()} já responde a pergunta sem
+     * precisar reconsultar nada (EST-C0xx).
+     */
     @Test
     void closeStockCount_loteRastreado_semDivergencia_naoGeraAjuste() {
         StockCount count = openCount(List.of(
-                StockCountItem.of(1L, "ESS-001", new BigDecimal("4.000"), null, null, "LOTE-A"),
-                StockCountItem.of(2L, "ESS-001", new BigDecimal("5.000"), null, null, "LOTE-B")));
+                StockCountItem.of(1L, "ESS-001", new BigDecimal("4.000"),
+                        new BigDecimal("4.000"), new BigDecimal("0.000"), "LOTE-A"),
+                StockCountItem.of(2L, "ESS-001", new BigDecimal("5.000"),
+                        new BigDecimal("5.000"), new BigDecimal("0.000"), "LOTE-B")));
         when(stockCountRepository.findById(50L)).thenReturn(Optional.of(count));
         when(warehouseRepository.findById(1L)).thenReturn(Optional.of(LOJA));
-
-        StockLot loteA = StockLot.of(10L, "ESS-001", 1L, "LOTE-A", LocalDate.of(2027, 1, 1),
-                new BigDecimal("4.000"), null, 0L);
-        StockLot loteB = StockLot.of(11L, "ESS-001", 1L, "LOTE-B", LocalDate.of(2027, 6, 1),
-                new BigDecimal("5.000"), null, 0L);
-        when(stockLotRepository.findBySkuAndWarehouseIdAndLotCode("ESS-001", 1L, "LOTE-A"))
-                .thenReturn(Optional.of(loteA));
-        when(stockLotRepository.findBySkuAndWarehouseIdAndLotCode("ESS-001", 1L, "LOTE-B"))
-                .thenReturn(Optional.of(loteB));
 
         when(stockBalanceRepository.findBySkuAndWarehouseId("ESS-001", 1L))
                 .thenReturn(Optional.of(StockBalance.of(20L, "ESS-001", 1L, new BigDecimal("9.000"), 0L)));
@@ -1814,6 +1961,7 @@ class EstoqueServiceTest {
 
         estoqueService.closeStockCount(50L, "gerente");
 
+        verify(stockLotRepository, never()).findBySkuAndWarehouseIdAndLotCode(any(), any(), any());
         verify(stockLotRepository, never()).save(any());
         verify(stockMovementRepository, never()).save(any());
         verify(stockBalanceRepository, never()).save(any());

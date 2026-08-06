@@ -5,18 +5,24 @@ import java.math.BigDecimal;
 /**
  * Um SKU contado dentro de um balanço (EST-F006).
  *
- * <p>{@code expectedQuantity} e {@code difference} só são preenchidos no <b>fechamento</b>: são o
- * retrato do saldo do sistema no instante em que o ajuste foi aplicado. Guardá-los é o que
- * permite auditar a divergência depois — uma vez ajustado, o saldo já não conta essa história.</p>
+ * <p>{@code expectedQuantity} e {@code difference} são preenchidos no <b>registro</b> da contagem
+ * ({@code EstoqueService.recordCountedItem} → {@link StockCount#withReconciledItem}), não no
+ * fechamento: são o retrato do saldo do sistema no instante em que o contador viu a prateleira,
+ * não no instante em que o balanço fechou (EST-C0xx). É essa distinção que permite ao fechamento
+ * aplicar só a divergência de fato encontrada — somando {@code difference} ao saldo atual — em
+ * vez de substituir o saldo pelo valor contado direto e apagar qualquer movimentação legítima
+ * que tenha acontecido entre a contagem e o fechamento.</p>
  *
  * <p>{@code lotCode} (EST-F008) é nulo para SKU não lote-rastreado — nesse caso a contagem é
  * agregada, como sempre foi. Para SKU lote-rastreado, cada lote é contado e reconciliado
- * separadamente: {@code expectedQuantity}/{@code difference} do fechamento comparam contra o saldo
- * daquele lote em {@code StockLot}, não contra o agregado de {@code stock_balance}.</p>
+ * separadamente: {@code expectedQuantity}/{@code difference} comparam contra o saldo daquele lote
+ * em {@code StockLot}, não contra o agregado de {@code stock_balance}.</p>
  *
  * @param countedQuantity  o que foi contado na prateleira; nunca negativo, e zero é válido
- * @param expectedQuantity saldo do sistema no fechamento (do lote, se {@code lotCode} != null; do
- *                         agregado, senão); {@code null} enquanto a contagem está aberta
+ * @param expectedQuantity saldo do sistema no REGISTRO da contagem (do lote, se {@code lotCode}
+ *                         != null; do agregado, senão); {@code null} enquanto o item ainda não foi
+ *                         reconciliado (só existe entre {@code withCountedItem} e
+ *                         {@code withReconciledItem}, nunca persistido nesse estado intermediário)
  * @param difference       {@code countedQuantity - expectedQuantity}; negativo significa falta
  * @param lotCode          lote contado; {@code null} para SKU não lote-rastreado
  */
