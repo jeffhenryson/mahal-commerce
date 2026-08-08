@@ -41,6 +41,20 @@ public class ProductEntity {
     @Column(name = "on_sale", nullable = false)
     private boolean onSale;
 
+    // Selo de destaque distinto de onSale — segundo nível de promoção, sem filtro de query
+    // próprio (diferente de onSale, que é parâmetro de GET /shop/catalog).
+    @Column(name = "super_promo", nullable = false)
+    private boolean superPromo;
+
+    // Descrição longa do produto, sem limite curto como name. Sem @Lob: TEXT é a convenção já
+    // usada no projeto (ver AuditLogEntity, CustomerNoteEntity, NotificationEntity).
+    @Column(name = "description", columnDefinition = "TEXT")
+    private String description;
+
+    // Estágio 01 do admin — link de vídeo cadastrado manualmente, mesma convenção de imageUrl.
+    @Column(name = "video_url", length = 2048)
+    private String videoUrl;
+
     @Column(nullable = false)
     private boolean active;
 
@@ -55,6 +69,11 @@ public class ProductEntity {
     @Column(name = "sale_price", precision = 14, scale = 2)
     private BigDecimal salePrice;
 
+    // Preço "de/por" — puramente valor de exibição, sem checagem relacional contra salePrice
+    // (ver Pricing.hasDiscount, que decide na leitura se o desconto exibido faz sentido).
+    @Column(name = "original_price", precision = 14, scale = 2)
+    private BigDecimal originalPrice;
+
     // EST-F015 (Fatia 6) — SIMPLES ou KIT. Sem @Enumerated: mesma convenção enum-como-string do
     // resto do projeto (ver OrderEntity.status), conversão manual em ProductRepositoryImpl.
     @Column(nullable = false, length = 20)
@@ -68,4 +87,14 @@ public class ProductEntity {
     @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     @ToString.Exclude
     private List<ProductVariantEntity> variants = new ArrayList<>();
+
+    // Galeria de até 5 imagens ordenadas. @ElementCollection (mesmo padrão leve de
+    // ProductAttribute/product_attribute) em vez de entidade completa: não há requisito de CRUD
+    // independente por imagem, só substituição da lista inteira via PATCH.
+    @ElementCollection
+    @CollectionTable(name = "product_image", joinColumns = @JoinColumn(name = "product_id",
+            foreignKey = @ForeignKey(name = "fk_product_image_product")))
+    @OrderColumn(name = "image_order")
+    @Column(name = "url", length = 2048)
+    private List<String> images = new ArrayList<>();
 }

@@ -38,12 +38,17 @@ public class ProductRepositoryImpl implements ProductRepository {
         entity.setBrand(product.brand());
         entity.setImageUrl(product.imageUrl());
         entity.setOnSale(product.onSale());
+        entity.setSuperPromo(product.superPromo());
+        entity.setDescription(product.description());
+        entity.setVideoUrl(product.videoUrl());
         entity.setActive(product.active());
         entity.setCostPrice(product.pricing().costPrice());
         entity.setMarkupPercent(product.pricing().markupPercent());
         entity.setSalePrice(product.pricing().salePrice());
+        entity.setOriginalPrice(product.pricing().originalPrice());
         entity.setType(product.type().name());
         entity.setLotTracked(product.lotTracked());
+        entity.getImages().addAll(product.images());
         for (ProductVariant variant : product.variants()) {
             ProductVariantEntity variantEntity = new ProductVariantEntity();
             variantEntity.setId(variant.id());
@@ -105,10 +110,11 @@ public class ProductRepositoryImpl implements ProductRepository {
         List<ProductVariant> variants = e.getVariants().stream()
                 .map(this::toDomain)
                 .toList();
-        Pricing pricing = Pricing.of(e.getCostPrice(), e.getMarkupPercent(), e.getSalePrice());
+        Pricing pricing = Pricing.of(e.getCostPrice(), e.getMarkupPercent(), e.getSalePrice(), e.getOriginalPrice());
         ProductType type = ProductType.valueOf(e.getType());
         return Product.of(e.getId(), e.getSku(), e.getName(), e.getCategory(), e.isActive(), variants, pricing, type,
-                e.isLotTracked(), e.getBrand(), e.getImageUrl(), e.isOnSale());
+                e.isLotTracked(), e.getBrand(), e.getImageUrl(), e.isOnSale(), e.isSuperPromo(), e.getDescription(),
+                e.getVideoUrl(), List.copyOf(e.getImages()));
     }
 
     private ProductVariant toDomain(ProductVariantEntity e) {
