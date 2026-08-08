@@ -33,8 +33,15 @@ import java.math.RoundingMode;
  * <p>Quando o preço praticado diverge do sugerido, {@link #effectiveMarkupPercent()} devolve o
  * markup que o preço praticado <i>realmente</i> representa — o número honesto, em oposição ao
  * markup pretendido que ficou guardado em {@link #markupPercent}.</p>
+ *
+ * <h2>Preço "de/por"</h2>
+ * <p>{@link #originalPrice} é puramente um valor de exibição — o preço "riscado" para dar
+ * sensação de desconto na vitrine. Não tem nenhuma relação obrigatória com {@link #salePrice}
+ * ou {@link #effectivePrice()}: o domínio não valida que ele seja maior que o preço praticado.
+ * {@link #hasDiscount()} é quem decide, na leitura, se o desconto exibido faz sentido.</p>
  */
-public record Pricing(BigDecimal costPrice, BigDecimal markupPercent, BigDecimal salePrice) {
+public record Pricing(BigDecimal costPrice, BigDecimal markupPercent, BigDecimal salePrice,
+        BigDecimal originalPrice) {
 
     /** Casas decimais de valores monetários — alinhado com {@code NUMERIC(14,2)} no schema. */
     private static final int MONEY_SCALE = 2;
@@ -44,7 +51,7 @@ public record Pricing(BigDecimal costPrice, BigDecimal markupPercent, BigDecimal
 
     private static final BigDecimal HUNDRED = BigDecimal.valueOf(100);
 
-    private static final Pricing EMPTY = new Pricing(null, null, null);
+    private static final Pricing EMPTY = new Pricing(null, null, null, null);
 
     public Pricing {
         if (costPrice != null && costPrice.signum() < 0) {
@@ -56,26 +63,35 @@ public record Pricing(BigDecimal costPrice, BigDecimal markupPercent, BigDecimal
         if (salePrice != null && salePrice.signum() < 0) {
             throw new IllegalArgumentException("salePrice não pode ser negativo");
         }
+        if (originalPrice != null && originalPrice.signum() < 0) {
+            throw new IllegalArgumentException("originalPrice não pode ser negativo");
+        }
     }
 
-    /** Produto sem precificação — nenhum dos três campos definido. */
+    /** Produto sem precificação — nenhum dos campos definido. */
     public static Pricing empty() {
         return EMPTY;
     }
 
-    /** Precificação a partir dos três campos; qualquer um pode ser nulo. */
+    /** Precificação a partir dos quatro campos; qualquer um pode ser nulo. */
+    public static Pricing of(BigDecimal costPrice, BigDecimal markupPercent, BigDecimal salePrice,
+            BigDecimal originalPrice) {
+        return new Pricing(costPrice, markupPercent, salePrice, originalPrice);
+    }
+
+    /** Precificação a partir dos três campos originais; {@code originalPrice} fica nulo. */
     public static Pricing of(BigDecimal costPrice, BigDecimal markupPercent, BigDecimal salePrice) {
-        return new Pricing(costPrice, markupPercent, salePrice);
+        return new Pricing(costPrice, markupPercent, salePrice, null);
     }
 
     /** Precificação por markup: o preço de venda fica a cargo de {@link #suggestedPrice()}. */
     public static Pricing byMarkup(BigDecimal costPrice, BigDecimal markupPercent) {
-        return new Pricing(costPrice, markupPercent, null);
+        return new Pricing(costPrice, markupPercent, null, null);
     }
 
-    /** Indica se nenhum dos três campos foi definido. */
+    /** Indica se nenhum dos campos foi definido. */
     public boolean isEmpty() {
-        return costPrice == null && markupPercent == null && salePrice == null;
+        return costPrice == null && markupPercent == null && salePrice == null && originalPrice == null;
     }
 
     /**
@@ -172,6 +188,35 @@ public record Pricing(BigDecimal costPrice, BigDecimal markupPercent, BigDecimal
     }
 
     /**
+     * Indica se há desconto "de/por" a exibir: {@link #originalPrice} definido e
+     * <b>estritamente maior</b> que {@link #effectivePrice()}. A checagem evita que o selo de
+     * desconto minta quando o admin digitar um {@code originalPrice} igual ou menor que o preço
+     * praticado — nesse caso não há desconto real, então não deve ser exibido.
+     */
+    public boolean hasDiscount() {
+        BigDecimal price = effectivePrice();
+        return originalPrice != null && price != null && originalPrice.compareTo(price) > 0;
+    }
+
+    /**
+     * Percentual de desconto do preço "de/por": {@code (originalPrice - effectivePrice) /
+     * originalPrice * 100}.
+     *
+     * @return {@code null} quando {@link #hasDiscount()} é falso — sem desconto real, não há
+     *         percentual a exibir.
+     */
+    public BigDecimal discountPercent() {
+        if (!hasDiscount()) {
+            return null;
+        }
+        BigDecimal price = effectivePrice();
+        return originalPrice.subtract(price)
+                .divide(originalPrice, 6, RoundingMode.HALF_UP)
+                .multiply(HUNDRED)
+                .setScale(PERCENT_SCALE, RoundingMode.HALF_UP);
+    }
+
+    /**
      * Alteração parcial (mesma semântica de {@code Product.withDetails}): argumento nulo
      * significa <b>não mexer neste campo</b>.
      *
@@ -179,11 +224,18 @@ public record Pricing(BigDecimal costPrice, BigDecimal markupPercent, BigDecimal
      * quer dizer "manter", não há como <b>limpar</b> um campo já preenchido por este caminho —
      * o máximo é trocá-lo. Despreficicar exige recriar via {@link #of}.</p>
      */
-    public Pricing withPatch(BigDecimal newCostPrice, BigDecimal newMarkupPercent, BigDecimal newSalePrice) {
+    public Pricing withPatch(BigDecimal newCostPrice, BigDecimal newMarkupPercent, BigDecimal newSalePrice,
+            BigDecimal newOriginalPrice) {
         return new Pricing(
                 newCostPrice == null ? costPrice : newCostPrice,
                 newMarkupPercent == null ? markupPercent : newMarkupPercent,
-                newSalePrice == null ? salePrice : newSalePrice);
+                newSalePrice == null ? salePrice : newSalePrice,
+                newOriginalPrice == null ? originalPrice : newOriginalPrice);
+    }
+
+    /** Mesmo que {@link #withPatch(BigDecimal, BigDecimal, BigDecimal, BigDecimal)}, mas sem tocar em {@code originalPrice}. */
+    public Pricing withPatch(BigDecimal newCostPrice, BigDecimal newMarkupPercent, BigDecimal newSalePrice) {
+        return withPatch(newCostPrice, newMarkupPercent, newSalePrice, null);
     }
 
     /**
@@ -195,6 +247,6 @@ public record Pricing(BigDecimal costPrice, BigDecimal markupPercent, BigDecimal
      */
     public Pricing materializeSuggestion() {
         BigDecimal suggested = suggestedPrice();
-        return suggested == null ? this : new Pricing(costPrice, markupPercent, suggested);
+        return suggested == null ? this : new Pricing(costPrice, markupPercent, suggested, originalPrice);
     }
 }

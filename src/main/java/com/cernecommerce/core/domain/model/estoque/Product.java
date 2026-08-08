@@ -24,7 +24,11 @@ public record Product(
     boolean lotTracked,
     String brand,
     String imageUrl,
-    boolean onSale
+    boolean onSale,
+    boolean superPromo,
+    String description,
+    String videoUrl,
+    List<String> images
 ) {
 
     public Product {
@@ -37,6 +41,7 @@ public record Product(
         variants = variants == null ? List.of() : List.copyOf(variants);
         pricing = pricing == null ? Pricing.empty() : pricing;
         type = type == null ? ProductType.SIMPLES : type;
+        images = images == null ? List.of() : List.copyOf(images);
         if (type == ProductType.KIT && lotTracked) {
             throw new IllegalArgumentException(
                     "kit não pode ser lote-rastreado: kit não tem saldo físico próprio (EST-F015)");
@@ -73,13 +78,25 @@ public record Product(
     }
 
     /**
-     * Cria um novo produto (sem id, ativo por padrão) — forma canônica, com marca, imagem
-     * cadastrada manualmente e sinalização de promoção (Estágio 01 do admin).
+     * Cria um novo produto (sem id, ativo por padrão) — com marca, imagem cadastrada
+     * manualmente e sinalização de promoção (Estágio 01 do admin), sem os campos de
+     * marketing adicionados depois (super promo, descrição, vídeo, galeria).
      */
     public static Product create(String sku, String name, String category, List<ProductVariant> variants,
             Pricing pricing, ProductType type, boolean lotTracked, String brand, String imageUrl, boolean onSale) {
+        return create(sku, name, category, variants, pricing, type, lotTracked, brand, imageUrl, onSale, false, null,
+                null, List.of());
+    }
+
+    /**
+     * Cria um novo produto (sem id, ativo por padrão) — forma canônica, com marca, imagem,
+     * promoção, selo de super promoção, descrição, vídeo e galeria de imagens.
+     */
+    public static Product create(String sku, String name, String category, List<ProductVariant> variants,
+            Pricing pricing, ProductType type, boolean lotTracked, String brand, String imageUrl, boolean onSale,
+            boolean superPromo, String description, String videoUrl, List<String> images) {
         return new Product(null, sku, name, category, true, variants, pricing, type, lotTracked, brand, imageUrl,
-                onSale);
+                onSale, superPromo, description, videoUrl, images);
     }
 
     /** Reconstitui um produto sem precificação a partir de persistência. */
@@ -113,14 +130,27 @@ public record Product(
     }
 
     /**
-     * Reconstitui um produto a partir de persistência — forma canônica, com marca, imagem e
-     * sinalização de promoção (Estágio 01 do admin).
+     * Reconstitui um produto a partir de persistência — com marca, imagem e sinalização de
+     * promoção (Estágio 01 do admin), sem os campos de marketing adicionados depois (super
+     * promo, descrição, vídeo, galeria).
      */
     public static Product of(Long id, String sku, String name, String category, boolean active,
             List<ProductVariant> variants, Pricing pricing, ProductType type, boolean lotTracked, String brand,
             String imageUrl, boolean onSale) {
+        return of(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl, onSale,
+                false, null, null, List.of());
+    }
+
+    /**
+     * Reconstitui um produto a partir de persistência — forma canônica, com marca, imagem,
+     * promoção, selo de super promoção, descrição, vídeo e galeria de imagens.
+     */
+    public static Product of(Long id, String sku, String name, String category, boolean active,
+            List<ProductVariant> variants, Pricing pricing, ProductType type, boolean lotTracked, String brand,
+            String imageUrl, boolean onSale, boolean superPromo, String description, String videoUrl,
+            List<String> images) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
-                onSale);
+                onSale, superPromo, description, videoUrl, images);
     }
 
     /**
@@ -147,25 +177,38 @@ public record Product(
 
     /** Variante de {@link #withDetails(String, String, String)} que também alcança {@code imageUrl}. */
     public Product withDetails(String newName, String newCategory, String newBrand, String newImageUrl) {
+        return withDetails(newName, newCategory, newBrand, newImageUrl, null, null);
+    }
+
+    /**
+     * Variante de {@link #withDetails(String, String, String, String)} que também alcança
+     * {@code description} e {@code videoUrl}. {@code images} fica de fora: é substituição de
+     * coleção, não escalar "nulo mantém" — ver {@link #withImages(List)}.
+     */
+    public Product withDetails(String newName, String newCategory, String newBrand, String newImageUrl,
+            String newDescription, String newVideoUrl) {
         return new Product(id, sku,
                 newName == null ? name : newName,
                 newCategory == null ? category : newCategory,
                 active, variants, pricing, type, lotTracked,
                 newBrand == null ? brand : newBrand,
                 newImageUrl == null ? imageUrl : newImageUrl,
-                onSale);
+                onSale, superPromo,
+                newDescription == null ? description : newDescription,
+                newVideoUrl == null ? videoUrl : newVideoUrl,
+                images);
     }
 
     /** Ativa ou desativa o produto, preservando o resto. */
     public Product withActive(boolean newActive) {
         return new Product(id, sku, name, category, newActive, variants, pricing, type, lotTracked, brand, imageUrl,
-                onSale);
+                onSale, superPromo, description, videoUrl, images);
     }
 
     /** Substitui a precificação do produto, preservando o resto. */
     public Product withPricing(Pricing newPricing) {
         return new Product(id, sku, name, category, active, variants, newPricing, type, lotTracked, brand, imageUrl,
-                onSale);
+                onSale, superPromo, description, videoUrl, images);
     }
 
     /**
@@ -175,7 +218,7 @@ public record Product(
      */
     public Product withType(ProductType newType) {
         return new Product(id, sku, name, category, active, variants, pricing, newType, lotTracked, brand, imageUrl,
-                onSale);
+                onSale, superPromo, description, videoUrl, images);
     }
 
     /**
@@ -185,13 +228,28 @@ public record Product(
      */
     public Product withLotTracked(boolean newLotTracked) {
         return new Product(id, sku, name, category, active, variants, pricing, type, newLotTracked, brand, imageUrl,
-                onSale);
+                onSale, superPromo, description, videoUrl, images);
     }
 
     /** Marca ou desmarca o produto como em promoção (Estágio 01 do admin), preservando o resto. */
     public Product withOnSale(boolean newOnSale) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
-                newOnSale);
+                newOnSale, superPromo, description, videoUrl, images);
+    }
+
+    /** Marca ou desmarca o produto com o selo de super promoção, preservando o resto. */
+    public Product withSuperPromo(boolean newSuperPromo) {
+        return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
+                onSale, newSuperPromo, description, videoUrl, images);
+    }
+
+    /**
+     * Substitui a galeria de imagens inteira, preservando o resto. Sem edição parcial
+     * (adicionar/remover uma imagem isolada) — o chamador sempre envia a lista completa.
+     */
+    public Product withImages(List<String> newImages) {
+        return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
+                onSale, superPromo, description, videoUrl, newImages);
     }
 
     /** Indica se este produto é um kit virtual (EST-F015) — sem saldo próprio, saldo derivado. */
