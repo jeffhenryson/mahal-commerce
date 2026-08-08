@@ -4,6 +4,8 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
+import java.util.List;
+
 /**
  * Alteração parcial de produto (EST-F018). Campo ausente ou nulo significa <b>não mexer</b>;
  * por isso nenhum é {@code @NotBlank} — mas se vier, precisa ser válido.
@@ -35,6 +37,24 @@ public class ProductPatchRequest {
 
     /** Estágio 01 do admin — produto em promoção. Nulo mantém; {@code true}/{@code false} troca. */
     private Boolean onSale;
+
+    /** Selo de destaque distinto de {@code onSale}. Nulo mantém; {@code true}/{@code false} troca. */
+    private Boolean superPromo;
+
+    /** Descrição longa do produto. Nulo mantém a atual. */
+    @Size(max = 5000)
+    private String description;
+
+    /** Link de vídeo cadastrado manualmente. Nulo mantém o atual. */
+    @Size(max = 2048)
+    private String videoUrl;
+
+    /**
+     * Galeria de até 5 imagens ordenadas. Nulo mantém a galeria atual; uma lista (mesmo vazia)
+     * substitui a galeria inteira — sem edição parcial de item individual.
+     */
+    @Size(max = 5)
+    private List<@Size(max = 2048) String> images;
 
     /**
      * Precificação (EST-F019). Ausente, mantém a atual; presente, cada um dos seus campos segue

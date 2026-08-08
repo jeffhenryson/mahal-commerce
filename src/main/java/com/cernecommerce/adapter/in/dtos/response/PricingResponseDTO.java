@@ -26,6 +26,9 @@ public class PricingResponseDTO {
     @Schema(description = "Preço praticado, quando cadastrado explicitamente", example = "79.90")
     private BigDecimal salePrice;
 
+    @Schema(description = "Preço \"de\" riscado na vitrine (\"de/por\"), quando cadastrado", example = "99.90")
+    private BigDecimal originalPrice;
+
     @Schema(description = "Preço que o markup manda cobrar: custo × (1 + markup/100)", example = "81.00")
     private BigDecimal suggestedPrice;
 
@@ -49,4 +52,13 @@ public class PricingResponseDTO {
     @Schema(description = "Indica se o preço efetivo está abaixo do custo — prejuízo por unidade. "
             + "Permitido pelo domínio; sinalizado para a UI avisar.", example = "false")
     private boolean belowCost;
+
+    @Schema(description = "Indica se há desconto \"de/por\" real a exibir — só true quando "
+            + "originalPrice é maior que o preço efetivo", example = "true")
+    private boolean hasDiscount;
+
+    @Schema(description = "Percentual de desconto do preço \"de/por\": (originalPrice - "
+            + "effectivePrice) / originalPrice × 100. Nulo quando hasDiscount é falso.",
+            example = "20.02")
+    private BigDecimal discountPercent;
 }

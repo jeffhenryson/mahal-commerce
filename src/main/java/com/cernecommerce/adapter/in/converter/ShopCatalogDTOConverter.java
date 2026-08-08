@@ -20,6 +20,8 @@ public class ShopCatalogDTOConverter {
         dto.setAvailable(item.available());
         dto.setImageUrl(item.imageUrl());
         dto.setOnSale(item.onSale());
+        dto.setOriginalPrice(item.originalPrice());
+        dto.setSuperPromo(item.superPromo());
         return dto;
     }
 
@@ -33,6 +35,11 @@ public class ShopCatalogDTOConverter {
         dto.setVariants(detail.variants().stream().map(this::toResponse).toList());
         dto.setImageUrl(detail.imageUrl());
         dto.setOnSale(detail.onSale());
+        dto.setOriginalPrice(detail.originalPrice());
+        dto.setSuperPromo(detail.superPromo());
+        dto.setDescription(detail.description());
+        dto.setVideoUrl(detail.videoUrl());
+        dto.setImages(detail.images());
         return dto;
     }
 

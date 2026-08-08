@@ -21,4 +21,10 @@ public class ShopCatalogItemResponseDTO {
 
     /** Estágio 01 do admin — produto em promoção, usado pela vitrine "Promoções". */
     private boolean onSale;
+
+    /** Preço "de" riscado na vitrine ("de/por"), quando cadastrado. */
+    private BigDecimal originalPrice;
+
+    /** Selo de destaque distinto de {@code onSale}. */
+    private boolean superPromo;
 }

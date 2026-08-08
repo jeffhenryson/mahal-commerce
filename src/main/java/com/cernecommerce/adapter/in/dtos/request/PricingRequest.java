@@ -35,4 +35,11 @@ public class PricingRequest {
             + "é onde entra o preço psicológico. Omitido, o preço efetivo passa a ser o sugerido.",
             example = "79.90")
     private BigDecimal salePrice;
+
+    @PositiveOrZero
+    @Digits(integer = 12, fraction = 2)
+    @Schema(description = "Preço \"de\" riscado na vitrine, para efeito de desconto (\"de/por\"). "
+            + "Puramente valor de exibição — sem relação obrigatória com o preço praticado.",
+            example = "99.90")
+    private BigDecimal originalPrice;
 }

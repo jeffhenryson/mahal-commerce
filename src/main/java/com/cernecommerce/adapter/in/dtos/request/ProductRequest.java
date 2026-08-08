@@ -30,6 +30,21 @@ public class ProductRequest {
     /** Estágio 01 do admin — produto em promoção. Omitido, nasce {@code false}. */
     private boolean onSale;
 
+    /** Selo de destaque distinto de {@code onSale}. Omitido, nasce {@code false}. */
+    private boolean superPromo;
+
+    /** Descrição longa do produto, opcional. Sem limite curto como {@code name}. */
+    @Size(max = 5000)
+    private String description;
+
+    /** Estágio 01 do admin — link de vídeo cadastrado manualmente, mesma convenção de {@code imageUrl}. */
+    @Size(max = 2048)
+    private String videoUrl;
+
+    /** Galeria de até 5 imagens ordenadas, opcional. */
+    @Size(max = 5)
+    private List<@Size(max = 2048) String> images;
+
     @Valid
     private List<ProductVariantRequest> variants;
 

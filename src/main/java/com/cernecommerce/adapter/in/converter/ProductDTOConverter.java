@@ -52,7 +52,8 @@ public class ProductDTOConverter {
         if (request == null) {
             return null;
         }
-        return Pricing.of(request.getCostPrice(), request.getMarkupPercent(), request.getSalePrice());
+        return Pricing.of(request.getCostPrice(), request.getMarkupPercent(), request.getSalePrice(),
+                request.getOriginalPrice());
     }
 
     public ProductResponseDTO toResponse(Product product) {
@@ -64,6 +65,10 @@ public class ProductDTOConverter {
         dto.setBrand(product.brand());
         dto.setImageUrl(product.imageUrl());
         dto.setOnSale(product.onSale());
+        dto.setSuperPromo(product.superPromo());
+        dto.setDescription(product.description());
+        dto.setVideoUrl(product.videoUrl());
+        dto.setImages(product.images());
         dto.setActive(product.active());
         dto.setVariants(product.variants().stream().map(this::toResponse).toList());
         dto.setPricing(toResponse(product.pricing()));
@@ -99,6 +104,9 @@ public class ProductDTOConverter {
         dto.setEffectiveMarkupPercent(pricing.effectiveMarkupPercent());
         dto.setPriced(pricing.isPriced());
         dto.setBelowCost(pricing.isBelowCost());
+        dto.setOriginalPrice(pricing.originalPrice());
+        dto.setHasDiscount(pricing.hasDiscount());
+        dto.setDiscountPercent(pricing.discountPercent());
         return dto;
     }
 
