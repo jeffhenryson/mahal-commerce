@@ -62,8 +62,6 @@ import com.cernecommerce.core.ports.out.estoque.StockMovementRepository;
 import com.cernecommerce.core.ports.out.estoque.StockReservationRepository;
 import com.cernecommerce.core.ports.out.estoque.WarehouseRepository;
 import com.cernecommerce.core.ports.out.user.UserRepository;
-import org.springframework.cache.annotation.CacheEvict;
-import org.springframework.cache.annotation.Cacheable;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -128,7 +126,6 @@ public class EstoqueService implements EstoqueUseCase {
 
     @Override
     @Transactional
-    @CacheEvict(cacheNames = "shopCatalog", allEntries = true)
     public Product createProduct(String sku, String name, String category, List<ProductVariant> variants,
             Pricing pricing, String brand, String imageUrl, boolean onSale) {
         List<ProductVariant> safeVariants = variants == null ? List.of() : variants;
@@ -160,14 +157,12 @@ public class EstoqueService implements EstoqueUseCase {
 
     @Override
     @Transactional(readOnly = true)
-    @Cacheable(cacheNames = "shopCatalog", key = "{#page, #size, #onSale}")
     public PageResult<Product> listActivePricedProducts(int page, int size, Boolean onSale) {
         return productRepository.findAllActiveAndPriced(page, size, onSale);
     }
 
     @Override
     @Transactional
-    @CacheEvict(cacheNames = "shopCatalog", allEntries = true)
     public Product updateProduct(String sku, String name, String category, Pricing pricing, String brand,
             String imageUrl, Boolean onSale) {
         Product current = productRepository.findBySku(sku)
@@ -240,7 +235,6 @@ public class EstoqueService implements EstoqueUseCase {
 
     @Override
     @Transactional
-    @CacheEvict(cacheNames = "shopCatalog", allEntries = true)
     public Product setProductActive(String sku, boolean active) {
         Product current = productRepository.findBySku(sku)
                 .orElseThrow(() -> new ProductNotFoundException(sku));
