@@ -15,8 +15,11 @@ public interface ProductRepository {
     /**
      * Só produto ativo e precificado, paginado — a base do catálogo público (ECM-F002). Filtrado
      * na consulta, não em memória sobre {@link #findAll}, para a página e o total baterem certo.
+     *
+     * @param onSale filtro opcional de promoção (Estágio 01 do admin) — {@code null} não filtra;
+     *        {@code true}/{@code false} restringe à sinalização exata.
      */
-    PageResult<Product> findAllActiveAndPriced(int page, int size);
+    PageResult<Product> findAllActiveAndPriced(int page, int size, Boolean onSale);
 
     Optional<Product> findBySku(String sku);
 

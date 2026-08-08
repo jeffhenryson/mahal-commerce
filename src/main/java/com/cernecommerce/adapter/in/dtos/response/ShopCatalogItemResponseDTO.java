@@ -15,4 +15,10 @@ public class ShopCatalogItemResponseDTO {
     private String category;
     private BigDecimal price;
     private boolean available;
+
+    /** Estágio 01 do admin — link de imagem cadastrado manualmente pelo lojista. */
+    private String imageUrl;
+
+    /** Estágio 01 do admin — produto em promoção, usado pela vitrine "Promoções". */
+    private boolean onSale;
 }

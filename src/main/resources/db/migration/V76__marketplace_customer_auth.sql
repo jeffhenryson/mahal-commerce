@@ -21,7 +21,7 @@ ALTER TABLE users ADD CONSTRAINT ck_users_customer_link
 CREATE UNIQUE INDEX uk_users_customer_id ON users (customer_id) WHERE customer_id IS NOT NULL;
 
 -- Substitui a unicidade simples de username pela composta com o discriminador.
-ALTER TABLE users DROP CONSTRAINT uk_user_username;
+ALTER TABLE users DROP CONSTRAINT uk_user_username CASCADE;
 ALTER TABLE users ADD CONSTRAINT uk_user_username UNIQUE (user_type, username);
 
 INSERT INTO roles (name) VALUES ('ROLE_CUSTOMER') ON CONFLICT (name) DO NOTHING;

@@ -1,8 +1,11 @@
 package com.cernecommerce.adapter.out.persistence.repository;
 
 import com.cernecommerce.adapter.out.persistence.entity.ReorderPointEntity;
+import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.ReorderPoint;
 import com.cernecommerce.core.ports.out.estoque.ReorderPointRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,6 +25,15 @@ public class ReorderPointRepositoryImpl implements ReorderPointRepository {
     @Transactional(readOnly = true)
     public Optional<ReorderPoint> findBySkuAndWarehouseId(String sku, Long warehouseId) {
         return reorderPointJpaRepository.findBySkuAndWarehouseId(sku, warehouseId).map(this::toDomain);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResult<ReorderPoint> findByWarehouseId(Long warehouseId, int page, int size) {
+        Page<ReorderPointEntity> result = reorderPointJpaRepository
+                .findByWarehouseIdOrderBySkuAsc(warehouseId, PageRequest.of(page, size));
+        return new PageResult<>(result.getContent().stream().map(this::toDomain).toList(),
+                page, size, result.getTotalElements(), result.getTotalPages());
     }
 
     @Override

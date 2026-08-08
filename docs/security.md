@@ -208,6 +208,19 @@ Implementações:
 
 ---
 
+## Autenticação Multifator (2FA)
+
+**Método suportado:** TOTP (Time-based One-Time Password, RFC 6238) via `TotpService`.
+
+- Secret encriptado no banco (`totp_config.secret_encrypted`)
+- Gerador: LibOTP (compatível com Google Authenticator, Authy, Microsoft Authenticator)
+- Validação: janela de ±1 período (30s × 2 = 60s de tolerância para dessincronização de relógio)
+- Backup codes: 10 códigos únicos, consumo one-time, armazenados como SHA-256 hashes
+
+**Fora de escopo:** WebAuthn/FIDO2, Passkeys, fingerprint, face recognition. Estas não estão implementadas e não estão no roadmap.
+
+---
+
 ## Email Verification
 
 | Property | Padrão |

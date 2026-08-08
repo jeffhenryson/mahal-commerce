@@ -1,5 +1,6 @@
 package com.cernecommerce.core.ports.out.estoque;
 
+import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.ReorderPoint;
 
 import java.util.Optional;
@@ -10,6 +11,9 @@ import java.util.Optional;
 public interface ReorderPointRepository {
 
     Optional<ReorderPoint> findBySkuAndWarehouseId(String sku, Long warehouseId);
+
+    /** Pontos de reposição configurados num depósito, paginados, ordenados por SKU. */
+    PageResult<ReorderPoint> findByWarehouseId(Long warehouseId, int page, int size);
 
     ReorderPoint save(ReorderPoint reorderPoint);
 }

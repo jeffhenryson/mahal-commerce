@@ -119,8 +119,8 @@ class ShopControllerTest {
     @Test
     void listCatalog_returnsPagedItems() throws Exception {
         ShopUseCase.CatalogItem item = new ShopUseCase.CatalogItem(
-                "ESS-001", "Essência Maçã", "essencia", new BigDecimal("30.00"), true);
-        when(shopUseCase.listCatalog(0, 20)).thenReturn(new PageResult<>(List.of(item), 0, 20, 1L, 1));
+                "ESS-001", "Essência Maçã", "essencia", new BigDecimal("30.00"), true, null, false);
+        when(shopUseCase.listCatalog(0, 20, null)).thenReturn(new PageResult<>(List.of(item), 0, 20, 1L, 1));
 
         mockMvc.perform(get("/shop/catalog"))
                 .andExpect(status().isOk())
@@ -131,7 +131,7 @@ class ShopControllerTest {
 
     @Test
     void listCatalog_defaultWarehouseNotConfigured_returns_503() throws Exception {
-        when(shopUseCase.listCatalog(0, 20)).thenThrow(new DefaultWarehouseNotConfiguredException());
+        when(shopUseCase.listCatalog(0, 20, null)).thenThrow(new DefaultWarehouseNotConfiguredException());
 
         mockMvc.perform(get("/shop/catalog"))
                 .andExpect(status().isServiceUnavailable())
@@ -143,7 +143,7 @@ class ShopControllerTest {
         ShopUseCase.CatalogVariant variant = new ShopUseCase.CatalogVariant(
                 "ESS-001-MACA", List.of(new ProductAttribute("sabor", "Maçã")), true);
         ShopUseCase.CatalogItemDetail detail = new ShopUseCase.CatalogItemDetail(
-                "ESS-001", "Essência Maçã", "essencia", new BigDecimal("30.00"), true, List.of(variant));
+                "ESS-001", "Essência Maçã", "essencia", new BigDecimal("30.00"), true, List.of(variant), null, false);
         when(shopUseCase.getCatalogItem("ESS-001")).thenReturn(detail);
 
         mockMvc.perform(get("/shop/catalog/ESS-001"))

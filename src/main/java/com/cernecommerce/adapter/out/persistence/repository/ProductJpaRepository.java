@@ -43,10 +43,12 @@ public interface ProductJpaRepository extends JpaRepository<ProductEntity, Long>
     // ECM-F002: mesma condição de Pricing#isPriced() traduzida para SQL — salePrice preenchido,
     // ou custo+markup preenchidos o bastante para sugerir um preço. Kit nunca tem costPrice
     // próprio (KitCostNotEditableException), então só o ramo do salePrice se aplica a ele.
+    // onSale segue o mesmo idioma de filtro opcional de OrderJpaRepository.findFiltered: nulo não filtra.
     @Query("SELECT p.id FROM ProductEntity p WHERE p.active = TRUE "
             + "AND (p.salePrice IS NOT NULL OR (p.costPrice IS NOT NULL AND p.markupPercent IS NOT NULL)) "
+            + "AND (:onSale IS NULL OR p.onSale = :onSale) "
             + "ORDER BY p.id")
-    Page<Long> findActivePricedIds(Pageable pageable);
+    Page<Long> findActivePricedIds(Pageable pageable, Boolean onSale);
 
     @Query("SELECT DISTINCT p FROM ProductEntity p LEFT JOIN FETCH p.variants v LEFT JOIN FETCH v.attributes "
             + "WHERE p.id IN :ids ORDER BY p.id")

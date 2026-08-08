@@ -180,4 +180,30 @@ class OAuthLoginServiceTest {
         assertThatThrownBy(() -> service.loginWithGoogle("id-token"))
                 .isInstanceOf(AccountDisabledException.class);
     }
+
+    // ── edge case: google_id rotation ─────────────────────────────────────────
+
+    @Test
+    void loginWithGoogle_updatesGoogleId_whenUserSwitchesGoogleAccount() {
+        // Usuário anteriormente fez login com uma conta Google (google-old)
+        // Agora tenta login com uma conta Google diferente (google-123) mas mesmo email
+        User userWithOldGoogleId = User.fromPersisted(1L, "alice", null, true, "alice@example.com",
+                true, null, null, null, Set.of(), "google-old", AuthProvider.GOOGLE);
+        when(tokenVerifier.verify(anyString())).thenReturn(GOOGLE_INFO); // googleId = "google-123"
+        when(userRepository.findByGoogleId("google-123")).thenReturn(Optional.empty());
+        when(userRepository.findByEmail("alice@example.com")).thenReturn(Optional.of(userWithOldGoogleId));
+        when(userRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(userAuthoritiesPort.loadAuthoritiesByUsername("alice")).thenReturn(Set.of("ROLE_USER"));
+        when(accessTokenPort.generateFor(eq("alice"), any())).thenReturn("access-token");
+        when(refreshTokenPort.issue("alice")).thenReturn("refresh-token");
+
+        OAuthLoginResult result = service.loginWithGoogle("id-token");
+
+        // Confirma que o google_id foi atualizado
+        ArgumentCaptor<User> saved = ArgumentCaptor.forClass(User.class);
+        verify(userRepository).save(saved.capture());
+        assertThat(saved.getValue().getGoogleId()).isEqualTo("google-123");
+        assertThat(saved.getValue().getUsername()).isEqualTo("alice"); // username não muda
+        assertThat(result.username()).isEqualTo("alice");
+    }
 }

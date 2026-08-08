@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.cernecommerce.adapter.in.dtos.request.GoogleLoginRequest;
+import com.cernecommerce.core.domain.event.AuditEvent;
 import com.cernecommerce.core.domain.exception.auth.OAuthTokenInvalidException;
 import com.cernecommerce.core.domain.model.auth.OAuthLoginResult;
 import com.cernecommerce.core.domain.model.auth.TokenPair;
@@ -14,6 +15,7 @@ import com.cernecommerce.core.ports.in.SystemConfigUseCase;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -25,13 +27,14 @@ public class OAuthControllerTest {
     private MockMvc mockMvc;
     private OAuthLoginUseCase oAuthLoginUseCase;
     private SystemConfigUseCase systemConfig;
+    private ApplicationEventPublisher publisher;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @BeforeEach
     void setup() {
         oAuthLoginUseCase = mock(OAuthLoginUseCase.class);
         systemConfig = mock(SystemConfigUseCase.class);
-        ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
+        publisher = mock(ApplicationEventPublisher.class);
 
         when(systemConfig.getBoolean(anyString(), anyBoolean())).thenAnswer(inv -> inv.getArgument(1));
 
@@ -110,5 +113,22 @@ public class OAuthControllerTest {
                 .andExpect(status().isServiceUnavailable());
 
         verifyNoInteractions(oAuthLoginUseCase);
+    }
+
+    @Test
+    void google_login_publishes_audit_event_when_disabled() throws Exception {
+        when(systemConfig.getBoolean("auth.google.enabled", true)).thenReturn(false);
+
+        mockMvc.perform(post("/auth/oauth2/google")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new GoogleLoginRequest("any-token"))))
+                .andExpect(status().isServiceUnavailable());
+
+        ArgumentCaptor<Object> eventCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(publisher).publishEvent(eventCaptor.capture());
+        Object capturedEvent = eventCaptor.getValue();
+        org.assertj.core.api.Assertions.assertThat(capturedEvent).isInstanceOf(AuditEvent.class);
+        org.assertj.core.api.Assertions.assertThat(((AuditEvent) capturedEvent).type())
+            .isEqualTo(AuditEvent.EventType.OAUTH_GOOGLE_DISABLED_ATTEMPT);
     }
 }

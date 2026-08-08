@@ -35,6 +35,9 @@ public class ProductRepositoryImpl implements ProductRepository {
         entity.setSku(product.sku());
         entity.setName(product.name());
         entity.setCategory(product.category());
+        entity.setBrand(product.brand());
+        entity.setImageUrl(product.imageUrl());
+        entity.setOnSale(product.onSale());
         entity.setActive(product.active());
         entity.setCostPrice(product.pricing().costPrice());
         entity.setMarkupPercent(product.pricing().markupPercent());
@@ -91,8 +94,8 @@ public class ProductRepositoryImpl implements ProductRepository {
 
     @Override
     @Transactional(readOnly = true)
-    public PageResult<Product> findAllActiveAndPriced(int page, int size) {
-        Page<Long> idPage = productJpaRepository.findActivePricedIds(PageRequest.of(page, size));
+    public PageResult<Product> findAllActiveAndPriced(int page, int size, Boolean onSale) {
+        Page<Long> idPage = productJpaRepository.findActivePricedIds(PageRequest.of(page, size), onSale);
         List<ProductEntity> entities = productJpaRepository.findAllByIdsWithVariants(idPage.getContent());
         List<Product> content = entities.stream().map(this::toDomain).toList();
         return new PageResult<>(content, page, size, idPage.getTotalElements(), idPage.getTotalPages());
@@ -105,7 +108,7 @@ public class ProductRepositoryImpl implements ProductRepository {
         Pricing pricing = Pricing.of(e.getCostPrice(), e.getMarkupPercent(), e.getSalePrice());
         ProductType type = ProductType.valueOf(e.getType());
         return Product.of(e.getId(), e.getSku(), e.getName(), e.getCategory(), e.isActive(), variants, pricing, type,
-                e.isLotTracked());
+                e.isLotTracked(), e.getBrand(), e.getImageUrl(), e.isOnSale());
     }
 
     private ProductVariant toDomain(ProductVariantEntity e) {

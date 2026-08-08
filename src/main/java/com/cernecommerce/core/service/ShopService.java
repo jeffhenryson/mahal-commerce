@@ -85,9 +85,9 @@ public class ShopService implements ShopUseCase {
 
     @Override
     @Transactional(readOnly = true)
-    public PageResult<CatalogItem> listCatalog(int page, int size) {
+    public PageResult<CatalogItem> listCatalog(int page, int size, Boolean onSale) {
         Warehouse warehouse = estoqueUseCase.getDefaultWarehouse();
-        PageResult<Product> products = estoqueUseCase.listActivePricedProducts(page, size);
+        PageResult<Product> products = estoqueUseCase.listActivePricedProducts(page, size, onSale);
         return new PageResult<>(
                 products.content().stream().map(p -> toCatalogItem(p, warehouse.code())).toList(),
                 products.page(), products.size(), products.totalElements(), products.totalPages());
@@ -108,12 +108,14 @@ public class ShopService implements ShopUseCase {
                 .map(v -> new CatalogVariant(v.sku(), v.attributes(), isAvailable(v.sku(), warehouse.code())))
                 .toList();
         return new CatalogItemDetail(product.sku(), product.name(), product.category(),
-                product.pricing().effectivePrice(), isAvailable(product.sku(), warehouse.code()), variants);
+                product.pricing().effectivePrice(), isAvailable(product.sku(), warehouse.code()), variants,
+                product.imageUrl(), product.onSale());
     }
 
     private CatalogItem toCatalogItem(Product product, String warehouseCode) {
         return new CatalogItem(product.sku(), product.name(), product.category(),
-                product.pricing().effectivePrice(), isAvailable(product.sku(), warehouseCode));
+                product.pricing().effectivePrice(), isAvailable(product.sku(), warehouseCode),
+                product.imageUrl(), product.onSale());
     }
 
     private boolean isAvailable(String sku, String warehouseCode) {

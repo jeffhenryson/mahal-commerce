@@ -61,6 +61,9 @@ public class ProductDTOConverter {
         dto.setSku(product.sku());
         dto.setName(product.name());
         dto.setCategory(product.category());
+        dto.setBrand(product.brand());
+        dto.setImageUrl(product.imageUrl());
+        dto.setOnSale(product.onSale());
         dto.setActive(product.active());
         dto.setVariants(product.variants().stream().map(this::toResponse).toList());
         dto.setPricing(toResponse(product.pricing()));

@@ -154,6 +154,11 @@ Todos exigem `bearerAuth`. Controller: `adapter/in/controller/EstoqueController.
 | `PATCH` | `/estoque/products/{sku}` | `ESTOQUE_PRODUCT_MANAGE` (+ `ESTOQUE_PRODUCT_PRICE_MANAGE` se enviar `pricing`) | Altera `name`, `category` e/ou `pricing`. Campo ausente é mantido, inclusive dentro de `pricing`; não altera SKU nem variações. `200`; `404 PRODUCT_NOT_FOUND` |
 | `GET` | `/estoque/products/{sku}/price` | `ESTOQUE_PRODUCT_READ` | Precificação vigente do SKU, com os derivados calculados. Aceita SKU **pai ou de variação**. `200`; `404 PRODUCT_NOT_FOUND` |
 | `PATCH` | `/estoque/products/{sku}/active` | `ESTOQUE_PRODUCT_MANAGE` | Ativa/desativa o produto (`{"active": false}`). `200`; `404 PRODUCT_NOT_FOUND`; `400` se `active` ausente |
+| `PUT` | `/estoque/products/{sku}/reorder-point` | `ESTOQUE_STOCK_MANAGE` | Define a quantidade mínima do SKU no depósito (upsert). `204 No Content`; `404 WAREHOUSE_NOT_FOUND` |
+| `GET` | `/estoque/products/{sku}/reorder-point` | `ESTOQUE_WAREHOUSE_READ` | Consulta o ponto de reposição configurado (`minQuantity` nulo se não há configuração). `200`; `404 WAREHOUSE_NOT_FOUND` |
+| `GET` | `/estoque/products/reorder-points` | `ESTOQUE_WAREHOUSE_READ` | Lista paginada dos pontos de reposição de um depósito (`warehouseCode` obrigatório). `200`; `404 WAREHOUSE_NOT_FOUND` |
+| `PUT` | `/estoque/products/{sku}/kit` | `ESTOQUE_KIT_MANAGE` | Define a receita (componentes) de um kit. `200`; `404 PRODUCT_NOT_FOUND`; `400` se SKU não é kit ou violação de regra |
+| `GET` | `/estoque/products/{sku}/kit` | `ESTOQUE_PRODUCT_READ` | Consulta a receita vigente de um kit (lista de componentes). `200` com lista vazia se nunca foi promovido a kit; `404 PRODUCT_NOT_FOUND` |
 | `POST` | `/estoque/warehouses` | `ESTOQUE_WAREHOUSE_MANAGE` | Cria depósito (`LOJA_FISICA` ou `ECOMMERCE`). `201` + `Location`; `409 WAREHOUSE_CODE_ALREADY_EXISTS` |
 | `PATCH` | `/estoque/warehouses/{code}` | `ESTOQUE_WAREHOUSE_MANAGE` | Altera `name` e/ou `type`. Campo ausente é mantido; não altera o código. `200`; `404 WAREHOUSE_NOT_FOUND` |
 | `PATCH` | `/estoque/warehouses/{code}/active` | `ESTOQUE_WAREHOUSE_MANAGE` | Ativa/desativa o depósito. `200`; `404 WAREHOUSE_NOT_FOUND` |
@@ -162,7 +167,6 @@ Todos exigem `bearerAuth`. Controller: `adapter/in/controller/EstoqueController.
 | `POST` | `/estoque/movements` | `ESTOQUE_STOCK_MANAGE` | Registra movimentação manual (`ENTRADA`/`SAIDA`/`AJUSTE`) e devolve o saldo atualizado. Aceita `lotCode`/`expiryDate` opcionais (EST-F008) — obrigatórios juntos numa `ENTRADA` de SKU lote-rastreado, recusados em qualquer outro caso. `201` + `Location` para o saldo; `400 INSUFFICIENT_STOCK`/`LOT_INFO_REQUIRED`/`LOT_INFO_NOT_APPLICABLE`; `404 WAREHOUSE_NOT_FOUND`; `409 STOCK_UPDATE_CONFLICT`/`LOT_EXPIRY_MISMATCH` |
 | `PATCH` | `/estoque/products/{sku}/lot-tracked` | `ESTOQUE_PRODUCT_MANAGE` | Ativa/desativa o rastreamento de lote e validade do SKU (EST-F008), opt-in — kit não pode. `200`; `400` se SKU é `KIT`; `404 PRODUCT_NOT_FOUND` |
 | `GET` | `/estoque/movements` | `ESTOQUE_STOCK_MANAGE` | Histórico paginado do ledger por `sku` + `warehouseCode` (`page` = 0, `size` = 20, teto de 100), mais recentes primeiro. Par nunca movimentado devolve página vazia com `200`; `404 WAREHOUSE_NOT_FOUND`; `400 MISSING_PARAMETER` |
-| `PUT` | `/estoque/products/{sku}/reorder-point` | `ESTOQUE_STOCK_MANAGE` | Define a quantidade mínima do SKU no depósito (upsert). `204 No Content`; `404 WAREHOUSE_NOT_FOUND` |
 | `POST` | `/estoque/stock-counts` | `ESTOQUE_STOCK_MANAGE` | Abre um balanço para o depósito. `201` + `Location`; `404 WAREHOUSE_NOT_FOUND`; `409 STOCK_COUNT_ALREADY_OPEN` |
 | `POST` | `/estoque/stock-counts/{id}/items` | `ESTOQUE_STOCK_MANAGE` | Registra a contagem física de um SKU (upsert; zero é válido). SKU lote-rastreado (EST-F008) exige `lotCode` — upsert então é por `(sku, lotCode)`, cada lote contado à parte. `200`; `404 PRODUCT_NOT_FOUND`/`STOCK_COUNT_NOT_FOUND`/`STOCK_LOT_NOT_FOUND`; `400 LOT_INFO_REQUIRED`/`LOT_INFO_NOT_APPLICABLE`; `409 STOCK_COUNT_NOT_OPEN` |
 | `POST` | `/estoque/stock-counts/{id}/close` | `ESTOQUE_STOCK_MANAGE` | Fecha e aplica os `AJUSTE` dos itens divergentes. `200`; `409 STOCK_COUNT_NOT_OPEN` |
@@ -171,7 +175,7 @@ Todos exigem `bearerAuth`. Controller: `adapter/in/controller/EstoqueController.
 | `GET` | `/estoque/stock-counts` | `ESTOQUE_STOCK_MANAGE` | Balanços do depósito por `warehouseCode`, mais recentes primeiro (`page`/`size` 1–100) |
 | `GET` | `/estoque/integrity/orphan-skus` | `ESTOQUE_STOCK_MANAGE` | Diagnóstico de EST-C011: pares SKU/depósito com saldo, movimentações ou ponto de reposição gravados cujo SKU não existe no catálogo (`page` = 0, `size` = 20, teto de 100). Base íntegra devolve página vazia com `200` |
 | `GET` | `/estoque/reservations` | `ESTOQUE_RESERVATION_READ` | Lista reservas de estoque paginadas, mais recentes primeiro. Filtros opcionais `sku`, `warehouseCode` e `status` (`ACTIVE`/`CONSUMED`/`RELEASED`/`EXPIRED`), combináveis. `404 WAREHOUSE_NOT_FOUND` se `warehouseCode` for informado e não existir |
-| `GET` | `/estoque/reservations/{id}` | `ESTOQUE_RESERVATION_READ` | Consulta uma reserva. `404 RESERVATION_NOT_FOUND` |
+| `GET` | `/estoque/reservations/{id}` | `ESTOQUE_RESERVATION_READ` | Consulta uma reserva específica. `200`; `404 RESERVATION_NOT_FOUND` |
 | `GET` | `/estoque/integrity/reservation-mismatch` | `ESTOQUE_STOCK_MANAGE` | Diagnóstico de EST-C013: pares SKU/depósito cujo `stock_balance.reserved_quantity` diverge da soma das reservas `ACTIVE` em `stock_reservation` — estoque travado invisível, não overselling (`page` = 0, `size` = 20, teto de 100). Base íntegra devolve página vazia com `200` |
 | `GET` | `/estoque/products/{sku}/lots` | `ESTOQUE_PRODUCT_READ` | Lista os lotes de um SKU num depósito (EST-F008, `warehouseCode` obrigatório), do que vence primeiro em diante. Lista vazia se não é lote-rastreado ou nunca recebeu lote — não é erro; `404 WAREHOUSE_NOT_FOUND` |
 | `GET` | `/estoque/integrity/lot-mismatch` | `ESTOQUE_STOCK_MANAGE` | Diagnóstico de EST-F008: pares SKU/depósito de SKU lote-rastreado cujo `stock_balance.quantity` diverge da soma de `stock_lot.quantity` (`page` = 0, `size` = 20, teto de 100). Base íntegra devolve página vazia com `200` |
@@ -191,9 +195,11 @@ Todos exigem `bearerAuth`. Controller: `adapter/in/controller/EstoqueController.
 | `ESTOQUE_PRODUCT_READ` | `GET /estoque/products` | V45 | ✅ `SeedConfig` + `DevRoleBootstrapConfig` |
 | `ESTOQUE_PRODUCT_MANAGE` | `POST /estoque/products` | V45 | ✅ |
 | `ESTOQUE_PRODUCT_PRICE_MANAGE` | O bloco `pricing` no `POST`/`PATCH` de produto | V63 | ✅ `SeedConfig` + `DevRoleBootstrapConfig` |
-| `ESTOQUE_WAREHOUSE_READ` | `GET /estoque/warehouses`, `GET /estoque/stock-balance` | V47 | ✅ |
+| `ESTOQUE_WAREHOUSE_READ` | `GET /estoque/warehouses`, `GET /estoque/stock-balance`, `GET .../reorder-point`, `GET /reorder-points` | V47 | ✅ |
 | `ESTOQUE_WAREHOUSE_MANAGE` | `POST /estoque/warehouses` | V47 | ✅ |
-| `ESTOQUE_STOCK_MANAGE` | `POST`/`GET /estoque/movements`, `PUT .../reorder-point` | V56 | ✅ |
+| `ESTOQUE_STOCK_MANAGE` | `POST`/`GET /estoque/movements`, `PUT .../reorder-point`, stock counts e diagnósticos | V56 | ✅ |
+| `ESTOQUE_RESERVATION_READ` | `GET /estoque/reservations`, `GET .../reservations/{id}` | V64 | ✅ `SeedConfig` + `DevRoleBootstrapConfig` |
+| `ESTOQUE_KIT_MANAGE` | `PUT /estoque/products/{sku}/kit` | V71 | ✅ `SeedConfig` + `DevRoleBootstrapConfig` |
 
 Concedidas a `ROLE_ADMIN` pelas migrations (`hml`/`prod`) e a `ROLE_ADMIN`/`ROLE_DEV` em runtime
 por `SeedConfig`/`DevRoleBootstrapConfig` — necessário porque `dev` não roda Flyway. V45 e V47

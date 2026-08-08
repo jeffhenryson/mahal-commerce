@@ -11,6 +11,11 @@ import lombok.Data;
  * <p>{@code sku} e {@code variants} não estão aqui de propósito: o SKU é a identidade
  * referenciada como texto livre pelas tabelas de estoque, e mexer na grade de variações precisa
  * da validação de duplicidade de {@code POST /estoque/products}.</p>
+ *
+ * <p>{@code onSale} é {@code Boolean} (wrapper), não {@code boolean} — é um toggle puro (mesma
+ * natureza de {@code active}/{@code lotTracked}, que têm PATCH dedicado), sem valor "vazio"
+ * natural para representar "não mexer" como o {@code null} de String faz para os demais campos
+ * deste DTO. Aqui nulo mantém, e {@code true}/{@code false} explícitos trocam.</p>
  */
 @Data
 public class ProductPatchRequest {
@@ -20,6 +25,16 @@ public class ProductPatchRequest {
 
     @Size(max = 100)
     private String category;
+
+    @Size(max = 100)
+    private String brand;
+
+    /** Estágio 01 do admin — link de imagem cadastrado manualmente. Nulo mantém a atual. */
+    @Size(max = 2048)
+    private String imageUrl;
+
+    /** Estágio 01 do admin — produto em promoção. Nulo mantém; {@code true}/{@code false} troca. */
+    private Boolean onSale;
 
     /**
      * Precificação (EST-F019). Ausente, mantém a atual; presente, cada um dos seus campos segue

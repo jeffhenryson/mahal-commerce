@@ -222,9 +222,9 @@ class EstoqueServiceTest {
     void listActivePricedProducts_delegatesToRepository() {
         PageResult<Product> page = new PageResult<>(
                 List.of(Product.of(1L, "NARG-001", "Narguile Aladin", "narguile", true, List.of())), 0, 20, 1L, 1);
-        when(productRepository.findAllActiveAndPriced(0, 20)).thenReturn(page);
+        when(productRepository.findAllActiveAndPriced(0, 20, null)).thenReturn(page);
 
-        PageResult<Product> result = estoqueService.listActivePricedProducts(0, 20);
+        PageResult<Product> result = estoqueService.listActivePricedProducts(0, 20, null);
 
         assertThat(result.content()).hasSize(1);
         assertThat(result.totalElements()).isEqualTo(1L);

@@ -10,6 +10,14 @@ public class ProductResponseDTO {
     private String sku;
     private String name;
     private String category;
+    private String brand;
+
+    /** Estágio 01 do admin — link de imagem cadastrado manualmente pelo lojista. */
+    private String imageUrl;
+
+    /** Estágio 01 do admin — produto em promoção. */
+    private boolean onSale;
+
     private boolean active;
     private List<ProductVariantResponseDTO> variants;
 

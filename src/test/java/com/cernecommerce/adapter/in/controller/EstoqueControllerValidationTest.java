@@ -140,14 +140,39 @@ class EstoqueControllerValidationTest {
     }
 
     /**
-     * Parâmetro ausente continua sendo 400 MISSING_PARAMETER, não VALIDATION_ERROR: são caminhos
-     * distintos, e a distinção já era garantida antes do EST-C005.
+     * {@code sku} e {@code warehouseCode} são opcionais em {@code /estoque/movements} — alimentam
+     * o feed geral de movimentações. Omitidos, a requisição passa direto da validação para a
+     * regra de negócio: como "LOJA-01" não existe neste teste, o resultado é 404
+     * WAREHOUSE_NOT_FOUND, não mais 400 MISSING_PARAMETER.
      */
     @Test
-    void listMovements_semSku_continua_400_MISSING_PARAMETER() throws Exception {
+    void listMovements_semSku_naoCaiEmValidacao() throws Exception {
         mockMvc.perform(asStockManager(get("/estoque/movements").param("warehouseCode", "LOJA-01")))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.errorCode").value("MISSING_PARAMETER"));
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.errorCode").value("WAREHOUSE_NOT_FOUND"));
+    }
+
+    /** Sem nenhum filtro, alimenta o feed geral de movimentações — não é mais 400. */
+    @Test
+    void listMovements_semNenhumFiltro_returns_200() throws Exception {
+        mockMvc.perform(asStockManager(get("/estoque/movements")))
+                .andExpect(status().isOk());
+    }
+
+    /** Só {@code sku}, sem {@code warehouseCode}: também válido, não depende de depósito existir. */
+    @Test
+    void listMovements_semWarehouseCode_returns_200() throws Exception {
+        mockMvc.perform(asStockManager(get("/estoque/movements").param("sku", "NARG-001")))
+                .andExpect(status().isOk());
+    }
+
+    /** {@code sku} opcional em {@code /estoque/stock-balance}: omitido, também passa da validação. */
+    @Test
+    void getStockBalance_semSku_naoCaiEmValidacao() throws Exception {
+        mockMvc.perform(asStockManager(get("/estoque/stock-balance")
+                        .param("warehouseCode", "DEPOSITO-INEXISTENTE")))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.errorCode").value("WAREHOUSE_NOT_FOUND"));
     }
 
     /** Validação roda antes de o depósito ser resolvido: não é 404. */

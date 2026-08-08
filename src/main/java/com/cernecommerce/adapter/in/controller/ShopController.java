@@ -76,7 +76,7 @@ public class ShopController {
 
     @Operation(summary = "Catálogo público paginado (ECM-F002)",
             description = "Só produto ativo e precificado, com preço efetivo e disponibilidade no "
-                    + "depósito padrão do marketplace.")
+                    + "depósito padrão do marketplace. `onSale=true` restringe à lista de promoções.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "OK"),
             @ApiResponse(responseCode = "429", description = "Muitas requisições", content = @Content),
@@ -85,8 +85,9 @@ public class ShopController {
     @GetMapping("/catalog")
     public ResponseEntity<PageResult<ShopCatalogItemResponseDTO>> listCatalog(
             @RequestParam(defaultValue = "0") @Min(0) int page,
-            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
-        PageResult<ShopUseCase.CatalogItem> result = shopUseCase.listCatalog(page, size);
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size,
+            @RequestParam(required = false) Boolean onSale) {
+        PageResult<ShopUseCase.CatalogItem> result = shopUseCase.listCatalog(page, size, onSale);
         PageResult<ShopCatalogItemResponseDTO> response = new PageResult<>(
                 result.content().stream().map(catalogConverter::toResponse).toList(),
                 result.page(), result.size(), result.totalElements(), result.totalPages());

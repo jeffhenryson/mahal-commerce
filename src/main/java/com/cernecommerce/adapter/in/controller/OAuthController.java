@@ -63,6 +63,7 @@ public class OAuthController {
             @Valid @RequestBody GoogleLoginRequest request,
             HttpServletResponse response) {
         if (!systemConfig.getBoolean("auth.google.enabled", true)) {
+            publisher.publishEvent(AuditEvent.of(EventType.OAUTH_GOOGLE_DISABLED_ATTEMPT, "anonymous"));
             return ResponseEntity.status(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE).build();
         }
         OAuthLoginResult result = oAuthLoginUseCase.loginWithGoogle(request.idToken());

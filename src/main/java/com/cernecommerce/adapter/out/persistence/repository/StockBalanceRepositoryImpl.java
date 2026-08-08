@@ -1,8 +1,11 @@
 package com.cernecommerce.adapter.out.persistence.repository;
 
 import com.cernecommerce.adapter.out.persistence.entity.StockBalanceEntity;
+import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
 import com.cernecommerce.core.ports.out.estoque.StockBalanceRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,6 +25,15 @@ public class StockBalanceRepositoryImpl implements StockBalanceRepository {
     @Transactional(readOnly = true)
     public Optional<StockBalance> findBySkuAndWarehouseId(String sku, Long warehouseId) {
         return stockBalanceJpaRepository.findBySkuAndWarehouseId(sku, warehouseId).map(this::toDomain);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResult<StockBalance> findByWarehouseId(Long warehouseId, int page, int size) {
+        Page<StockBalanceEntity> result = stockBalanceJpaRepository
+                .findByWarehouseIdOrderBySkuAsc(warehouseId, PageRequest.of(page, size));
+        return new PageResult<>(result.getContent().stream().map(this::toDomain).toList(),
+                page, size, result.getTotalElements(), result.getTotalPages());
     }
 
     @Override

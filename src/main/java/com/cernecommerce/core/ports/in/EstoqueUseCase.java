@@ -8,6 +8,7 @@ import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
+import com.cernecommerce.core.domain.model.estoque.ReorderPoint;
 import com.cernecommerce.core.domain.model.estoque.ReservationIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.ReservationStatus;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
@@ -22,6 +23,7 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Port de entrada do domínio <b>estoque</b>.
@@ -41,7 +43,24 @@ public interface EstoqueUseCase {
      * Cria um produto precificado (EST-F019). {@code pricing} nulo equivale a
      * {@link Pricing#empty()} — produto sem preço é estado válido do catálogo.
      */
-    Product createProduct(String sku, String name, String category, List<ProductVariant> variants, Pricing pricing);
+    default Product createProduct(String sku, String name, String category, List<ProductVariant> variants,
+            Pricing pricing) {
+        return createProduct(sku, name, category, variants, pricing, null);
+    }
+
+    /** Cria um produto com marca, sem imagem cadastrada nem promoção (EST-F0xx). */
+    default Product createProduct(String sku, String name, String category, List<ProductVariant> variants,
+            Pricing pricing, String brand) {
+        return createProduct(sku, name, category, variants, pricing, brand, null, false);
+    }
+
+    /**
+     * Cria um produto (forma canônica) com marca, link de imagem cadastrado manualmente e
+     * sinalização de promoção (Estágio 01 do admin) — nenhum dos três tem regra de negócio, só
+     * persiste/retorna.
+     */
+    Product createProduct(String sku, String name, String category, List<ProductVariant> variants, Pricing pricing,
+            String brand, String imageUrl, boolean onSale);
 
     /** Lista produtos paginados. */
     PageResult<Product> listProducts(int page, int size);
@@ -50,8 +69,10 @@ public interface EstoqueUseCase {
      * Produtos ativos e precificados, paginados — a consulta que o catálogo público consome
      * (ECM-F002). Filtra no banco, não em memória: paginar depois de filtrar em memória devolveria
      * contagem de página errada.
+     *
+     * @param onSale filtro opcional de promoção (Estágio 01 do admin) — {@code null} não filtra.
      */
-    PageResult<Product> listActivePricedProducts(int page, int size);
+    PageResult<Product> listActivePricedProducts(int page, int size, Boolean onSale);
 
     /**
      * Alteração parcial de produto (EST-F018): {@code name} e/ou {@code category} nulos são
@@ -69,7 +90,26 @@ public interface EstoqueUseCase {
      * precificação atual; se vier preenchido, cada um dos seus três campos segue a mesma
      * semântica de PATCH — nulo mantém, valor troca (ver {@link Pricing#withPatch}).
      */
-    Product updateProduct(String sku, String name, String category, Pricing pricing);
+    default Product updateProduct(String sku, String name, String category, Pricing pricing) {
+        return updateProduct(sku, name, category, pricing, null);
+    }
+
+    /**
+     * Alteração parcial incluindo marca, sem mexer em imagem ou promoção. {@code brand} nulo
+     * mantém a marca atual — mesma semântica de PATCH de {@code name}/{@code category}.
+     */
+    default Product updateProduct(String sku, String name, String category, Pricing pricing, String brand) {
+        return updateProduct(sku, name, category, pricing, brand, null, null);
+    }
+
+    /**
+     * Alteração parcial (forma canônica), incluindo imagem cadastrada manualmente e sinalização
+     * de promoção (Estágio 01 do admin). {@code imageUrl} nulo mantém a atual — mesma semântica
+     * de {@code brand}. {@code onSale} nulo mantém a sinalização atual; {@code true}/{@code false}
+     * explícitos trocam — é um toggle, não um "nulo mantém" de String.
+     */
+    Product updateProduct(String sku, String name, String category, Pricing pricing, String brand, String imageUrl,
+            Boolean onSale);
 
     /**
      * Resolve a precificação vigente de <b>qualquer</b> SKU do catálogo — pai ou variação
@@ -173,6 +213,16 @@ public interface EstoqueUseCase {
     StockBalance getStockBalance(String sku, String warehouseCode);
 
     /**
+     * Saldo paginado de todos os produtos de um depósito, ordenado por SKU — alimenta telas
+     * de alertas de reposição que precisam comparar o saldo de cada produto contra o seu ponto
+     * de reposição. Não inclui KITs: eles não têm linha própria em {@code stock_balance} (o
+     * saldo é derivado ao vivo só na consulta por 1 SKU, ver {@link #getStockBalance}). Lança
+     * {@link com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException}
+     * se o código do depósito não existir.
+     */
+    PageResult<StockBalance> listStockBalances(String warehouseCode, int page, int size);
+
+    /**
      * Registra uma movimentação manual de estoque (entrada, saída ou ajuste) e atualiza o
      * {@link StockBalance} correspondente na mesma transação. Retorna o saldo atualizado.
      * Lança {@link com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException} se o
@@ -219,10 +269,12 @@ public interface EstoqueUseCase {
     List<StockLot> listStockLots(String sku, String warehouseCode);
 
     /**
-     * Histórico paginado de movimentações de um SKU em um depósito, mais recentes primeiro.
-     * Retorna página vazia se o par SKU/depósito nunca foi movimentado. Lança
+     * Histórico paginado de movimentações, mais recentes primeiro. {@code sku} e
+     * {@code warehouseCode} são opcionais — omitidos, o feed traz todas as movimentações; quando
+     * informados, filtram por esse SKU e/ou depósito. Retorna página vazia se o filtro nunca foi
+     * movimentado. Lança
      * {@link com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException}
-     * se o código do depósito não existir.
+     * se o código do depósito informado não existir.
      */
     PageResult<StockMovement> listMovements(String sku, String warehouseCode, int page, int size);
 
@@ -236,6 +288,23 @@ public interface EstoqueUseCase {
      * código do depósito não existir.
      */
     void setReorderPoint(String sku, String warehouseCode, BigDecimal minQuantity);
+
+    /**
+     * Consulta o ponto de reposição de um SKU num depósito. Vazio se não houver nenhum
+     * configurado — leitura não exige que o SKU já exista no catálogo (mesma leniência de
+     * {@link #getStockBalance}). Lança
+     * {@link com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException} se o
+     * código do depósito não existir.
+     */
+    Optional<ReorderPoint> getReorderPoint(String sku, String warehouseCode);
+
+    /**
+     * Pontos de reposição configurados num depósito, paginados, ordenados por SKU — alimenta
+     * telas de alertas de reposição junto com {@link #listStockBalances}. Lança
+     * {@link com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException} se o
+     * código do depósito não existir.
+     */
+    PageResult<ReorderPoint> listReorderPoints(String warehouseCode, int page, int size);
 
     /**
      * Diagnóstico de integridade (EST-C011): pares SKU/depósito com saldo, movimentação ou ponto

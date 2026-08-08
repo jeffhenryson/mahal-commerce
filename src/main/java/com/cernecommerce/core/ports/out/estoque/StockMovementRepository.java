@@ -11,6 +11,9 @@ public interface StockMovementRepository {
 
     StockMovement save(StockMovement movement);
 
-    /** Histórico paginado de movimentações de um SKU em um depósito, mais recentes primeiro. */
+    /**
+     * Histórico paginado de movimentações, mais recentes primeiro. {@code sku} e/ou
+     * {@code warehouseId} nulos não filtram por esse critério.
+     */
     PageResult<StockMovement> findBySkuAndWarehouseId(String sku, Long warehouseId, int page, int size);
 }

@@ -30,7 +30,8 @@ public interface ShopUseCase {
      * comercial de concorrente), e a checagem que vale de verdade acontece na reserva do checkout
      * (ECM-F003), não aqui.
      */
-    record CatalogItem(String sku, String name, String category, BigDecimal price, boolean available) {
+    record CatalogItem(String sku, String name, String category, BigDecimal price, boolean available,
+            String imageUrl, boolean onSale) {
     }
 
     /** Variação de um item do catálogo, com disponibilidade própria — o preço é herdado do pai. */
@@ -39,7 +40,7 @@ public interface ShopUseCase {
 
     /** Detalhe público de um item do catálogo (ECM-F002), com a grade de variações ativas. */
     record CatalogItemDetail(String sku, String name, String category, BigDecimal price, boolean available,
-            List<CatalogVariant> variants) {
+            List<CatalogVariant> variants, String imageUrl, boolean onSale) {
     }
 
     /**
@@ -47,10 +48,13 @@ public interface ShopUseCase {
      * efetivo e disponibilidade no depósito padrão do marketplace ({@code
      * EstoqueUseCase#getDefaultWarehouse}).
      *
+     * @param onSale filtro opcional de promoção (Estágio 01 do admin) — {@code null} não filtra;
+     *        {@code true} devolve só os produtos em promoção, para a vitrine "Promoções" do
+     *        marketplace (mahal-market).
      * @throws com.cernecommerce.core.domain.exception.estoque.DefaultWarehouseNotConfiguredException
      *         se o depósito padrão do marketplace não estiver configurado
      */
-    PageResult<CatalogItem> listCatalog(int page, int size);
+    PageResult<CatalogItem> listCatalog(int page, int size, Boolean onSale);
 
     /**
      * Detalhe público de um item do catálogo (ECM-F002), com a grade de variações ativas e a

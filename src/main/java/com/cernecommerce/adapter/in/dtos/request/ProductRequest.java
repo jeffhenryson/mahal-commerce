@@ -20,6 +20,16 @@ public class ProductRequest {
     @Size(max = 100)
     private String category;
 
+    @Size(max = 100)
+    private String brand;
+
+    /** Estágio 01 do admin — link de imagem cadastrado manualmente, não upload de arquivo. */
+    @Size(max = 2048)
+    private String imageUrl;
+
+    /** Estágio 01 do admin — produto em promoção. Omitido, nasce {@code false}. */
+    private boolean onSale;
+
     @Valid
     private List<ProductVariantRequest> variants;
 

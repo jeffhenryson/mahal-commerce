@@ -1,7 +1,9 @@
 package com.cernecommerce.adapter.in.converter;
 
+import com.cernecommerce.adapter.in.dtos.response.ReorderPointResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.StockBalanceResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.WarehouseResponseDTO;
+import com.cernecommerce.core.domain.model.estoque.ReorderPoint;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
 import com.cernecommerce.core.domain.model.estoque.Warehouse;
 import com.cernecommerce.core.domain.model.estoque.WarehouseType;
@@ -37,6 +39,15 @@ public class WarehouseDTOConverter {
         dto.setQuantity(balance.quantity());
         dto.setReservedQuantity(balance.reservedQuantity());
         dto.setAvailableQuantity(balance.availableQuantity());
+        return dto;
+    }
+
+    /** {@code reorderPoint} nulo (nenhum ponto configurado) vira {@code minQuantity} nulo no DTO. */
+    public ReorderPointResponseDTO toResponse(ReorderPoint reorderPoint, String sku, String warehouseCode) {
+        ReorderPointResponseDTO dto = new ReorderPointResponseDTO();
+        dto.setSku(sku);
+        dto.setWarehouseCode(warehouseCode);
+        dto.setMinQuantity(reorderPoint == null ? null : reorderPoint.minQuantity());
         return dto;
     }
 }

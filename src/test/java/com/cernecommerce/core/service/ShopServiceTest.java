@@ -155,12 +155,12 @@ class ShopServiceTest {
         Product product = Product.of(1L, "ESS-001", "Essência Maçã", "essencia", true, List.of(),
                 Pricing.of(new BigDecimal("15.00"), null, new BigDecimal("30.00")));
         when(estoqueUseCase.getDefaultWarehouse()).thenReturn(WAREHOUSE);
-        when(estoqueUseCase.listActivePricedProducts(0, 20))
+        when(estoqueUseCase.listActivePricedProducts(0, 20, null))
                 .thenReturn(new PageResult<>(List.of(product), 0, 20, 1L, 1));
         when(estoqueUseCase.getStockBalance("ESS-001", "LOJA-01"))
                 .thenReturn(StockBalance.of(1L, "ESS-001", 1L, BigDecimal.TEN, BigDecimal.ZERO, 0L));
 
-        PageResult<ShopUseCase.CatalogItem> result = shopService.listCatalog(0, 20);
+        PageResult<ShopUseCase.CatalogItem> result = shopService.listCatalog(0, 20, null);
 
         assertThat(result.content()).hasSize(1);
         ShopUseCase.CatalogItem item = result.content().get(0);
@@ -174,12 +174,12 @@ class ShopServiceTest {
         Product product = Product.of(1L, "ESS-001", "Essência Maçã", "essencia", true, List.of(),
                 Pricing.of(new BigDecimal("15.00"), null, new BigDecimal("30.00")));
         when(estoqueUseCase.getDefaultWarehouse()).thenReturn(WAREHOUSE);
-        when(estoqueUseCase.listActivePricedProducts(0, 20))
+        when(estoqueUseCase.listActivePricedProducts(0, 20, null))
                 .thenReturn(new PageResult<>(List.of(product), 0, 20, 1L, 1));
         when(estoqueUseCase.getStockBalance("ESS-001", "LOJA-01"))
                 .thenReturn(StockBalance.of(1L, "ESS-001", 1L, BigDecimal.ZERO, BigDecimal.ZERO, 0L));
 
-        PageResult<ShopUseCase.CatalogItem> result = shopService.listCatalog(0, 20);
+        PageResult<ShopUseCase.CatalogItem> result = shopService.listCatalog(0, 20, null);
 
         assertThat(result.content().get(0).available()).isFalse();
     }
@@ -188,9 +188,9 @@ class ShopServiceTest {
     void listCatalog_propagatesDefaultWarehouseNotConfiguredWithoutQueryingProducts() {
         when(estoqueUseCase.getDefaultWarehouse()).thenThrow(new DefaultWarehouseNotConfiguredException());
 
-        assertThatThrownBy(() -> shopService.listCatalog(0, 20))
+        assertThatThrownBy(() -> shopService.listCatalog(0, 20, null))
                 .isInstanceOf(DefaultWarehouseNotConfiguredException.class);
-        verify(estoqueUseCase, never()).listActivePricedProducts(anyInt(), anyInt());
+        verify(estoqueUseCase, never()).listActivePricedProducts(anyInt(), anyInt(), any());
     }
 
     @Test

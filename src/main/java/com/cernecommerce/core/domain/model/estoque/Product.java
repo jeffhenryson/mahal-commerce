@@ -21,7 +21,10 @@ public record Product(
     List<ProductVariant> variants,
     Pricing pricing,
     ProductType type,
-    boolean lotTracked
+    boolean lotTracked,
+    String brand,
+    String imageUrl,
+    boolean onSale
 ) {
 
     public Product {
@@ -57,10 +60,26 @@ public record Product(
         return create(sku, name, category, variants, pricing, type, false);
     }
 
-    /** Cria um novo produto (sem id, ativo por padrão) — forma canônica, com tipo e lote explícitos. */
+    /** Cria um novo produto (sem id, ativo por padrão) — tipo e lote explícitos, sem marca. */
     public static Product create(String sku, String name, String category, List<ProductVariant> variants,
             Pricing pricing, ProductType type, boolean lotTracked) {
-        return new Product(null, sku, name, category, true, variants, pricing, type, lotTracked);
+        return create(sku, name, category, variants, pricing, type, lotTracked, null);
+    }
+
+    /** Cria um novo produto (sem id, ativo por padrão) — tipo e lote explícitos, com marca, sem imagem/promoção. */
+    public static Product create(String sku, String name, String category, List<ProductVariant> variants,
+            Pricing pricing, ProductType type, boolean lotTracked, String brand) {
+        return create(sku, name, category, variants, pricing, type, lotTracked, brand, null, false);
+    }
+
+    /**
+     * Cria um novo produto (sem id, ativo por padrão) — forma canônica, com marca, imagem
+     * cadastrada manualmente e sinalização de promoção (Estágio 01 do admin).
+     */
+    public static Product create(String sku, String name, String category, List<ProductVariant> variants,
+            Pricing pricing, ProductType type, boolean lotTracked, String brand, String imageUrl, boolean onSale) {
+        return new Product(null, sku, name, category, true, variants, pricing, type, lotTracked, brand, imageUrl,
+                onSale);
     }
 
     /** Reconstitui um produto sem precificação a partir de persistência. */
@@ -81,18 +100,35 @@ public record Product(
         return of(id, sku, name, category, active, variants, pricing, type, false);
     }
 
-    /** Reconstitui um produto a partir de persistência — forma canônica, com tipo e lote explícitos. */
+    /** Reconstitui um produto a partir de persistência — tipo e lote explícitos, sem marca. */
     public static Product of(Long id, String sku, String name, String category, boolean active,
             List<ProductVariant> variants, Pricing pricing, ProductType type, boolean lotTracked) {
-        return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked);
+        return of(id, sku, name, category, active, variants, pricing, type, lotTracked, null);
+    }
+
+    /** Reconstitui um produto a partir de persistência — com marca, sem imagem/promoção. */
+    public static Product of(Long id, String sku, String name, String category, boolean active,
+            List<ProductVariant> variants, Pricing pricing, ProductType type, boolean lotTracked, String brand) {
+        return of(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, null, false);
+    }
+
+    /**
+     * Reconstitui um produto a partir de persistência — forma canônica, com marca, imagem e
+     * sinalização de promoção (Estágio 01 do admin).
+     */
+    public static Product of(Long id, String sku, String name, String category, boolean active,
+            List<ProductVariant> variants, Pricing pricing, ProductType type, boolean lotTracked, String brand,
+            String imageUrl, boolean onSale) {
+        return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
+                onSale);
     }
 
     /**
      * Alteração parcial (EST-F018): argumento nulo significa <b>não mexer neste campo</b>.
      *
      * <p>Consequência conhecida: como {@code null} quer dizer "manter", não há como <b>limpar</b>
-     * a {@code category} por este caminho — o máximo é trocá-la. É o custo da semântica de PATCH
-     * sem um wrapper de três estados (ausente / nulo / valor).</p>
+     * a {@code category}/{@code brand} por este caminho — o máximo é trocá-la. É o custo da
+     * semântica de PATCH sem um wrapper de três estados (ausente / nulo / valor).</p>
      *
      * <p>{@code sku} não entra: é a identidade do produto e aparece como texto livre em
      * {@code stock_balance}, {@code stock_movement} e {@code stock_reorder_point}, sem FK.
@@ -101,20 +137,35 @@ public record Product(
      * precisa da mesma validação de duplicidade de {@code createProduct}.</p>
      */
     public Product withDetails(String newName, String newCategory) {
+        return withDetails(newName, newCategory, null);
+    }
+
+    /** Variante de {@link #withDetails(String, String)} que também alcança {@code brand}. */
+    public Product withDetails(String newName, String newCategory, String newBrand) {
+        return withDetails(newName, newCategory, newBrand, null);
+    }
+
+    /** Variante de {@link #withDetails(String, String, String)} que também alcança {@code imageUrl}. */
+    public Product withDetails(String newName, String newCategory, String newBrand, String newImageUrl) {
         return new Product(id, sku,
                 newName == null ? name : newName,
                 newCategory == null ? category : newCategory,
-                active, variants, pricing, type, lotTracked);
+                active, variants, pricing, type, lotTracked,
+                newBrand == null ? brand : newBrand,
+                newImageUrl == null ? imageUrl : newImageUrl,
+                onSale);
     }
 
     /** Ativa ou desativa o produto, preservando o resto. */
     public Product withActive(boolean newActive) {
-        return new Product(id, sku, name, category, newActive, variants, pricing, type, lotTracked);
+        return new Product(id, sku, name, category, newActive, variants, pricing, type, lotTracked, brand, imageUrl,
+                onSale);
     }
 
     /** Substitui a precificação do produto, preservando o resto. */
     public Product withPricing(Pricing newPricing) {
-        return new Product(id, sku, name, category, active, variants, newPricing, type, lotTracked);
+        return new Product(id, sku, name, category, active, variants, newPricing, type, lotTracked, brand, imageUrl,
+                onSale);
     }
 
     /**
@@ -123,7 +174,8 @@ public record Product(
      * isoladamente, porque virar {@code KIT} sem uma receita não faz sentido.
      */
     public Product withType(ProductType newType) {
-        return new Product(id, sku, name, category, active, variants, pricing, newType, lotTracked);
+        return new Product(id, sku, name, category, active, variants, pricing, newType, lotTracked, brand, imageUrl,
+                onSale);
     }
 
     /**
@@ -132,7 +184,14 @@ public record Product(
      * lote-rastreado (kit não tem saldo físico próprio; checado no compact constructor).
      */
     public Product withLotTracked(boolean newLotTracked) {
-        return new Product(id, sku, name, category, active, variants, pricing, type, newLotTracked);
+        return new Product(id, sku, name, category, active, variants, pricing, type, newLotTracked, brand, imageUrl,
+                onSale);
+    }
+
+    /** Marca ou desmarca o produto como em promoção (Estágio 01 do admin), preservando o resto. */
+    public Product withOnSale(boolean newOnSale) {
+        return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
+                newOnSale);
     }
 
     /** Indica se este produto é um kit virtual (EST-F015) — sem saldo próprio, saldo derivado. */

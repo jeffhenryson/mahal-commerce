@@ -1,5 +1,6 @@
 package com.cernecommerce.core.ports.out.estoque;
 
+import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
 
 import java.util.Optional;
@@ -10,6 +11,9 @@ import java.util.Optional;
 public interface StockBalanceRepository {
 
     Optional<StockBalance> findBySkuAndWarehouseId(String sku, Long warehouseId);
+
+    /** Saldo paginado de todos os produtos de um depósito, ordenado por SKU. */
+    PageResult<StockBalance> findByWarehouseId(Long warehouseId, int page, int size);
 
     StockBalance save(StockBalance stockBalance);
 }

@@ -21,6 +21,7 @@ import com.cernecommerce.adapter.in.dtos.response.LotIntegrityMismatchResponseDT
 import com.cernecommerce.adapter.in.dtos.response.OrphanSkuResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.PricingResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.ProductResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.ReorderPointResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.ReservationIntegrityMismatchResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.StockBalanceResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.StockCountResponseDTO;
@@ -35,6 +36,7 @@ import com.cernecommerce.core.domain.model.estoque.LotIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
+import com.cernecommerce.core.domain.model.estoque.ReorderPoint;
 import com.cernecommerce.core.domain.model.estoque.ReservationIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
 import com.cernecommerce.core.domain.model.estoque.StockCount;
@@ -66,6 +68,7 @@ import java.net.URI;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Grade de produtos e controle de saldo multi-depósito do domínio <b>estoque</b>: cadastro de
@@ -131,7 +134,8 @@ public class EstoqueController {
             Authentication authentication) {
         List<ProductVariant> variants = converter.toVariants(request.getVariants());
         Product created = estoqueUseCase.createProduct(request.getSku(), request.getName(), request.getCategory(),
-                variants, converter.toPricing(request.getPricing()));
+                variants, converter.toPricing(request.getPricing()), request.getBrand(), request.getImageUrl(),
+                request.isOnSale());
         publisher.publishEvent(AuditEvent.of(EventType.PRODUCT_CREATED,
                 authentication.getName(), Map.of("sku", created.sku())));
         return ResponseEntity.created(URI.create("/estoque/products/" + created.sku()))
@@ -155,7 +159,8 @@ public class EstoqueController {
             @PathVariable @NotBlank @Size(min = 3, max = 50) String sku,
             @Valid @RequestBody ProductPatchRequest request, Authentication authentication) {
         Product updated = estoqueUseCase.updateProduct(sku, request.getName(), request.getCategory(),
-                converter.toPricing(request.getPricing()));
+                converter.toPricing(request.getPricing()), request.getBrand(), request.getImageUrl(),
+                request.getOnSale());
         publisher.publishEvent(AuditEvent.of(EventType.PRODUCT_UPDATED,
                 authentication.getName(), Map.of("sku", updated.sku())));
         // Evento próprio para mudança de preço: quem baixou o preço de quê e quando é a pergunta
@@ -321,7 +326,10 @@ public class EstoqueController {
         return ResponseEntity.ok(response);
     }
 
-    @Operation(summary = "Consulta o saldo de um SKU em um depósito")
+    @Operation(summary = "Consulta o saldo de estoque em um depósito",
+            description = "`sku` é opcional. Informado, devolve o saldo desse produto (objeto único). "
+                    + "Omitido, devolve o saldo paginado de todos os produtos do depósito (`PageResult`), "
+                    + "para telas de alertas de reposição.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "OK"),
             @ApiResponse(responseCode = "404", description = "Depósito não encontrado", content = @Content),
@@ -329,11 +337,20 @@ public class EstoqueController {
     })
     @GetMapping("/stock-balance")
     @PreAuthorize("hasAuthority('ESTOQUE_WAREHOUSE_READ')")
-    public ResponseEntity<StockBalanceResponseDTO> getStockBalance(
-            @RequestParam @NotBlank @Size(min = 3, max = 50) String sku,
-            @RequestParam @NotBlank @Size(min = 2, max = 50) String warehouseCode) {
-        StockBalance balance = estoqueUseCase.getStockBalance(sku, warehouseCode);
-        return ResponseEntity.ok(warehouseConverter.toResponse(balance, warehouseCode));
+    public ResponseEntity<?> getStockBalance(
+            @RequestParam(required = false) @Size(min = 3, max = 50) String sku,
+            @RequestParam @NotBlank @Size(min = 2, max = 50) String warehouseCode,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+        if (sku != null) {
+            StockBalance balance = estoqueUseCase.getStockBalance(sku, warehouseCode);
+            return ResponseEntity.ok(warehouseConverter.toResponse(balance, warehouseCode));
+        }
+        PageResult<StockBalance> result = estoqueUseCase.listStockBalances(warehouseCode, page, size);
+        PageResult<StockBalanceResponseDTO> response = new PageResult<>(
+                result.content().stream().map(b -> warehouseConverter.toResponse(b, warehouseCode)).toList(),
+                result.page(), result.size(), result.totalElements(), result.totalPages());
+        return ResponseEntity.ok(response);
     }
 
     @Operation(summary = "Registra uma movimentação manual de estoque (entrada, saída ou ajuste)")
@@ -364,7 +381,9 @@ public class EstoqueController {
                 .body(warehouseConverter.toResponse(updated, request.getWarehouseCode()));
     }
 
-    @Operation(summary = "Lista o histórico paginado de movimentações de um SKU em um depósito")
+    @Operation(summary = "Lista o histórico paginado de movimentações de estoque",
+            description = "`sku` e `warehouseCode` são opcionais. Omitidos, devolve o feed geral de "
+                    + "movimentações (mais recentes primeiro); informados, filtram por esse SKU e/ou depósito.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "OK"),
             @ApiResponse(responseCode = "404", description = "Depósito não encontrado", content = @Content),
@@ -373,15 +392,32 @@ public class EstoqueController {
     @GetMapping("/movements")
     @PreAuthorize("hasAuthority('ESTOQUE_STOCK_MANAGE')")
     public ResponseEntity<PageResult<StockMovementResponseDTO>> listMovements(
-            @RequestParam @NotBlank @Size(min = 3, max = 50) String sku,
-            @RequestParam @NotBlank @Size(min = 2, max = 50) String warehouseCode,
+            @RequestParam(required = false) @Size(min = 3, max = 50) String sku,
+            @RequestParam(required = false) @Size(min = 2, max = 50) String warehouseCode,
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
         PageResult<StockMovement> result = estoqueUseCase.listMovements(sku, warehouseCode, page, size);
+        Map<Long, String> warehouseCodesById = warehouseCode != null ? Map.of() : resolveWarehouseCodes(result);
         PageResult<StockMovementResponseDTO> response = new PageResult<>(
-                result.content().stream().map(m -> movementConverter.toResponse(m, warehouseCode)).toList(),
+                result.content().stream()
+                        .map(m -> movementConverter.toResponse(m,
+                                warehouseCode != null ? warehouseCode : warehouseCodesById.get(m.warehouseId())))
+                        .toList(),
                 result.page(), result.size(), result.totalElements(), result.totalPages());
         return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Resolve, num lote só, o {@code code} dos depósitos distintos que aparecem numa página de
+     * movimentações sem {@code warehouseCode} informado — a entidade só guarda {@code warehouseId}.
+     */
+    private Map<Long, String> resolveWarehouseCodes(PageResult<StockMovement> result) {
+        Map<Long, String> codesById = new HashMap<>();
+        for (StockMovement movement : result.content()) {
+            codesById.computeIfAbsent(movement.warehouseId(),
+                    id -> estoqueUseCase.getWarehouse(id).code());
+        }
+        return codesById;
     }
 
     @Operation(summary = "Define o ponto de reposição (quantidade mínima) de um SKU em um depósito")
@@ -400,6 +436,46 @@ public class EstoqueController {
                 Map.of("sku", sku, "warehouseCode", request.getWarehouseCode(),
                         "minQuantity", request.getMinQuantity())));
         return ResponseEntity.noContent().build();
+    }
+
+    @Operation(summary = "Consulta o ponto de reposição de um SKU em um depósito",
+            description = "`minQuantity` nulo significa que não há ponto de reposição configurado "
+                    + "para este SKU/depósito.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "404", description = "Depósito não encontrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/products/{sku}/reorder-point")
+    @PreAuthorize("hasAuthority('ESTOQUE_WAREHOUSE_READ')")
+    public ResponseEntity<ReorderPointResponseDTO> getReorderPoint(
+            @PathVariable @NotBlank @Size(min = 3, max = 50) String sku,
+            @RequestParam @NotBlank @Size(min = 2, max = 50) String warehouseCode) {
+        Optional<ReorderPoint> reorderPoint = estoqueUseCase.getReorderPoint(sku, warehouseCode);
+        return ResponseEntity.ok(warehouseConverter.toResponse(reorderPoint.orElse(null), sku, warehouseCode));
+    }
+
+    @Operation(summary = "Lista paginada dos pontos de reposição configurados em um depósito",
+            description = "Alimenta telas de alertas de reposição junto com GET /estoque/stock-balance "
+                    + "(sem `sku`) — o cliente cruza os dois lotes por SKU.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "404", description = "Depósito não encontrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/products/reorder-points")
+    @PreAuthorize("hasAuthority('ESTOQUE_WAREHOUSE_READ')")
+    public ResponseEntity<PageResult<ReorderPointResponseDTO>> listReorderPoints(
+            @RequestParam @NotBlank @Size(min = 2, max = 50) String warehouseCode,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+        PageResult<ReorderPoint> result = estoqueUseCase.listReorderPoints(warehouseCode, page, size);
+        PageResult<ReorderPointResponseDTO> response = new PageResult<>(
+                result.content().stream()
+                        .map(rp -> warehouseConverter.toResponse(rp, rp.sku(), warehouseCode))
+                        .toList(),
+                result.page(), result.size(), result.totalElements(), result.totalPages());
+        return ResponseEntity.ok(response);
     }
 
     // ------------------------------------------------------------------------------------

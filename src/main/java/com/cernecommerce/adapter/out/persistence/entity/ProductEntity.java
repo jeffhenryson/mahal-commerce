@@ -30,6 +30,17 @@ public class ProductEntity {
     @Column(length = 100)
     private String category;
 
+    @Column(length = 100)
+    private String brand;
+
+    // Estágio 01 do admin — link de imagem cadastrado manualmente pelo lojista, não upload.
+    @Column(name = "image_url", length = 2048)
+    private String imageUrl;
+
+    // Estágio 01 do admin — produto em promoção; o marketplace filtra por este campo.
+    @Column(name = "on_sale", nullable = false)
+    private boolean onSale;
+
     @Column(nullable = false)
     private boolean active;
 

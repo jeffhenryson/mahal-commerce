@@ -35,7 +35,7 @@ public record AuditEvent(EventType type, String username, Instant timestamp, Map
         // DEV elevation
         DEV_ELEVATION_COMPLETED,
         // OAuth
-        OAUTH_GOOGLE_LOGIN,
+        OAUTH_GOOGLE_LOGIN, OAUTH_GOOGLE_DISABLED_ATTEMPT,
         // Estoque
         PRODUCT_CREATED, WAREHOUSE_CREATED, STOCK_MOVEMENT_REGISTERED, REORDER_POINT_SET,
         PRODUCT_UPDATED, PRODUCT_ACTIVATED, PRODUCT_DEACTIVATED, PRODUCT_PRICE_CHANGED,

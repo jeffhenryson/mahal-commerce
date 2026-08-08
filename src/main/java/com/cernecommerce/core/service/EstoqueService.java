@@ -62,6 +62,8 @@ import com.cernecommerce.core.ports.out.estoque.StockMovementRepository;
 import com.cernecommerce.core.ports.out.estoque.StockReservationRepository;
 import com.cernecommerce.core.ports.out.estoque.WarehouseRepository;
 import com.cernecommerce.core.ports.out.user.UserRepository;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -126,8 +128,9 @@ public class EstoqueService implements EstoqueUseCase {
 
     @Override
     @Transactional
+    @CacheEvict(cacheNames = "shopCatalog", allEntries = true)
     public Product createProduct(String sku, String name, String category, List<ProductVariant> variants,
-            Pricing pricing) {
+            Pricing pricing, String brand, String imageUrl, boolean onSale) {
         List<ProductVariant> safeVariants = variants == null ? List.of() : variants;
         // O SKU pai e os das variações compartilham o mesmo espaço de nomes: uk_product_sku e
         // uk_product_variant_sku. Checar os dois aqui evita que a violação de constraint escape
@@ -145,7 +148,7 @@ public class EstoqueService implements EstoqueUseCase {
             }
         }
         Product product = Product.create(sku, name, category, safeVariants,
-                pricing == null ? Pricing.empty() : pricing);
+                pricing == null ? Pricing.empty() : pricing, ProductType.SIMPLES, false, brand, imageUrl, onSale);
         return productRepository.save(product);
     }
 
@@ -157,16 +160,22 @@ public class EstoqueService implements EstoqueUseCase {
 
     @Override
     @Transactional(readOnly = true)
-    public PageResult<Product> listActivePricedProducts(int page, int size) {
-        return productRepository.findAllActiveAndPriced(page, size);
+    @Cacheable(cacheNames = "shopCatalog", key = "{#page, #size, #onSale}")
+    public PageResult<Product> listActivePricedProducts(int page, int size, Boolean onSale) {
+        return productRepository.findAllActiveAndPriced(page, size, onSale);
     }
 
     @Override
     @Transactional
-    public Product updateProduct(String sku, String name, String category, Pricing pricing) {
+    @CacheEvict(cacheNames = "shopCatalog", allEntries = true)
+    public Product updateProduct(String sku, String name, String category, Pricing pricing, String brand,
+            String imageUrl, Boolean onSale) {
         Product current = productRepository.findBySku(sku)
                 .orElseThrow(() -> new ProductNotFoundException(sku));
-        Product updated = current.withDetails(name, category);
+        Product updated = current.withDetails(name, category, brand, imageUrl);
+        if (onSale != null) {
+            updated = updated.withOnSale(onSale);
+        }
         if (pricing != null) {
             // Custo de kit é sempre derivado da soma dos componentes (EST-F015) — um costPrice
             // digitado aqui viraria dado morto, sobrescrito na próxima leitura de
@@ -231,6 +240,7 @@ public class EstoqueService implements EstoqueUseCase {
 
     @Override
     @Transactional
+    @CacheEvict(cacheNames = "shopCatalog", allEntries = true)
     public Product setProductActive(String sku, boolean active) {
         Product current = productRepository.findBySku(sku)
                 .orElseThrow(() -> new ProductNotFoundException(sku));
@@ -288,6 +298,13 @@ public class EstoqueService implements EstoqueUseCase {
         }
         return stockBalanceRepository.findBySkuAndWarehouseId(sku, warehouse.id())
                 .orElseGet(() -> StockBalance.zero(sku, warehouse.id()));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResult<StockBalance> listStockBalances(String warehouseCode, int page, int size) {
+        Warehouse warehouse = requireWarehouse(warehouseCode);
+        return stockBalanceRepository.findByWarehouseId(warehouse.id(), page, size);
     }
 
     @Override
@@ -465,9 +482,8 @@ public class EstoqueService implements EstoqueUseCase {
     @Override
     @Transactional(readOnly = true)
     public PageResult<StockMovement> listMovements(String sku, String warehouseCode, int page, int size) {
-        Warehouse warehouse = warehouseRepository.findByCode(warehouseCode)
-                .orElseThrow(() -> new WarehouseNotFoundException(warehouseCode));
-        return stockMovementRepository.findBySkuAndWarehouseId(sku, warehouse.id(), page, size);
+        Long warehouseId = warehouseCode == null ? null : requireWarehouse(warehouseCode).id();
+        return stockMovementRepository.findBySkuAndWarehouseId(sku, warehouseId, page, size);
     }
 
     @Override
@@ -480,6 +496,20 @@ public class EstoqueService implements EstoqueUseCase {
                 .map(ReorderPoint::id)
                 .orElse(null);
         reorderPointRepository.save(new ReorderPoint(existingId, sku, warehouse.id(), minQuantity));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<ReorderPoint> getReorderPoint(String sku, String warehouseCode) {
+        Warehouse warehouse = requireWarehouse(warehouseCode);
+        return reorderPointRepository.findBySkuAndWarehouseId(sku, warehouse.id());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResult<ReorderPoint> listReorderPoints(String warehouseCode, int page, int size) {
+        Warehouse warehouse = requireWarehouse(warehouseCode);
+        return reorderPointRepository.findByWarehouseId(warehouse.id(), page, size);
     }
 
     @Override
