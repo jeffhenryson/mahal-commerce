@@ -135,7 +135,8 @@ public class EstoqueController {
         List<ProductVariant> variants = converter.toVariants(request.getVariants());
         Product created = estoqueUseCase.createProduct(request.getSku(), request.getName(), request.getCategory(),
                 variants, converter.toPricing(request.getPricing()), request.getBrand(), request.getImageUrl(),
-                request.isOnSale());
+                request.isOnSale(), request.isSuperPromo(), request.getDescription(), request.getVideoUrl(),
+                request.getImages());
         publisher.publishEvent(AuditEvent.of(EventType.PRODUCT_CREATED,
                 authentication.getName(), Map.of("sku", created.sku())));
         return ResponseEntity.created(URI.create("/estoque/products/" + created.sku()))
@@ -160,7 +161,8 @@ public class EstoqueController {
             @Valid @RequestBody ProductPatchRequest request, Authentication authentication) {
         Product updated = estoqueUseCase.updateProduct(sku, request.getName(), request.getCategory(),
                 converter.toPricing(request.getPricing()), request.getBrand(), request.getImageUrl(),
-                request.getOnSale());
+                request.getOnSale(), request.getSuperPromo(), request.getDescription(), request.getVideoUrl(),
+                request.getImages());
         publisher.publishEvent(AuditEvent.of(EventType.PRODUCT_UPDATED,
                 authentication.getName(), Map.of("sku", updated.sku())));
         // Evento próprio para mudança de preço: quem baixou o preço de quê e quando é a pergunta
