@@ -127,7 +127,8 @@ public class EstoqueService implements EstoqueUseCase {
     @Override
     @Transactional
     public Product createProduct(String sku, String name, String category, List<ProductVariant> variants,
-            Pricing pricing, String brand, String imageUrl, boolean onSale) {
+            Pricing pricing, String brand, String imageUrl, boolean onSale, boolean superPromo, String description,
+            String videoUrl, List<String> images) {
         List<ProductVariant> safeVariants = variants == null ? List.of() : variants;
         // O SKU pai e os das variações compartilham o mesmo espaço de nomes: uk_product_sku e
         // uk_product_variant_sku. Checar os dois aqui evita que a violação de constraint escape
@@ -145,7 +146,8 @@ public class EstoqueService implements EstoqueUseCase {
             }
         }
         Product product = Product.create(sku, name, category, safeVariants,
-                pricing == null ? Pricing.empty() : pricing, ProductType.SIMPLES, false, brand, imageUrl, onSale);
+                pricing == null ? Pricing.empty() : pricing, ProductType.SIMPLES, false, brand, imageUrl, onSale,
+                superPromo, description, videoUrl, images);
         return productRepository.save(product);
     }
 
@@ -164,12 +166,19 @@ public class EstoqueService implements EstoqueUseCase {
     @Override
     @Transactional
     public Product updateProduct(String sku, String name, String category, Pricing pricing, String brand,
-            String imageUrl, Boolean onSale) {
+            String imageUrl, Boolean onSale, Boolean superPromo, String description, String videoUrl,
+            List<String> images) {
         Product current = productRepository.findBySku(sku)
                 .orElseThrow(() -> new ProductNotFoundException(sku));
-        Product updated = current.withDetails(name, category, brand, imageUrl);
+        Product updated = current.withDetails(name, category, brand, imageUrl, description, videoUrl);
         if (onSale != null) {
             updated = updated.withOnSale(onSale);
+        }
+        if (superPromo != null) {
+            updated = updated.withSuperPromo(superPromo);
+        }
+        if (images != null) {
+            updated = updated.withImages(images);
         }
         if (pricing != null) {
             // Custo de kit é sempre derivado da soma dos componentes (EST-F015) — um costPrice
@@ -182,7 +191,7 @@ public class EstoqueService implements EstoqueUseCase {
             // markup e o preço já cadastrados. Cada campo de Pricing carrega a mesma semântica
             // de "nulo mantém" que name e category têm em withDetails.
             updated = updated.withPricing(current.pricing().withPatch(
-                    pricing.costPrice(), pricing.markupPercent(), pricing.salePrice()));
+                    pricing.costPrice(), pricing.markupPercent(), pricing.salePrice(), pricing.originalPrice()));
         }
         return productRepository.save(updated);
     }

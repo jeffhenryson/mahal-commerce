@@ -55,12 +55,24 @@ public interface EstoqueUseCase {
     }
 
     /**
-     * Cria um produto (forma canônica) com marca, link de imagem cadastrado manualmente e
-     * sinalização de promoção (Estágio 01 do admin) — nenhum dos três tem regra de negócio, só
+     * Cria um produto com marca, imagem cadastrada manualmente e sinalização de promoção
+     * (Estágio 01 do admin), sem os campos de marketing adicionados depois (super promo,
+     * descrição, vídeo, galeria).
+     */
+    default Product createProduct(String sku, String name, String category, List<ProductVariant> variants,
+            Pricing pricing, String brand, String imageUrl, boolean onSale) {
+        return createProduct(sku, name, category, variants, pricing, brand, imageUrl, onSale, false, null, null,
+                List.of());
+    }
+
+    /**
+     * Cria um produto (forma canônica) com marca, imagem, promoção, selo de super promoção,
+     * descrição, vídeo e galeria de imagens — nenhum desses campos tem regra de negócio, só
      * persiste/retorna.
      */
     Product createProduct(String sku, String name, String category, List<ProductVariant> variants, Pricing pricing,
-            String brand, String imageUrl, boolean onSale);
+            String brand, String imageUrl, boolean onSale, boolean superPromo, String description, String videoUrl,
+            List<String> images);
 
     /** Lista produtos paginados. */
     PageResult<Product> listProducts(int page, int size);
@@ -103,13 +115,27 @@ public interface EstoqueUseCase {
     }
 
     /**
-     * Alteração parcial (forma canônica), incluindo imagem cadastrada manualmente e sinalização
-     * de promoção (Estágio 01 do admin). {@code imageUrl} nulo mantém a atual — mesma semântica
-     * de {@code brand}. {@code onSale} nulo mantém a sinalização atual; {@code true}/{@code false}
+     * Alteração parcial incluindo imagem cadastrada manualmente e sinalização de promoção
+     * (Estágio 01 do admin), sem os campos de marketing adicionados depois (super promo,
+     * descrição, vídeo, galeria). {@code imageUrl} nulo mantém a atual — mesma semântica de
+     * {@code brand}. {@code onSale} nulo mantém a sinalização atual; {@code true}/{@code false}
      * explícitos trocam — é um toggle, não um "nulo mantém" de String.
      */
+    default Product updateProduct(String sku, String name, String category, Pricing pricing, String brand,
+            String imageUrl, Boolean onSale) {
+        return updateProduct(sku, name, category, pricing, brand, imageUrl, onSale, null, null, null, null);
+    }
+
+    /**
+     * Alteração parcial (forma canônica), incluindo selo de super promoção, descrição, vídeo e
+     * galeria de imagens. {@code superPromo} segue a mesma semântica de toggle de {@code onSale}
+     * (nulo mantém, valor explícito troca). {@code description}/{@code videoUrl} nulos mantêm o
+     * valor atual — mesma semântica de {@code brand}/{@code imageUrl}. {@code images} nulo
+     * mantém a galeria atual; uma lista (mesmo vazia) substitui a galeria inteira — sem edição
+     * parcial de item individual.
+     */
     Product updateProduct(String sku, String name, String category, Pricing pricing, String brand, String imageUrl,
-            Boolean onSale);
+            Boolean onSale, Boolean superPromo, String description, String videoUrl, List<String> images);
 
     /**
      * Resolve a precificação vigente de <b>qualquer</b> SKU do catálogo — pai ou variação

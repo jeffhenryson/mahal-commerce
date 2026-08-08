@@ -31,7 +31,7 @@ public interface ShopUseCase {
      * (ECM-F003), não aqui.
      */
     record CatalogItem(String sku, String name, String category, BigDecimal price, boolean available,
-            String imageUrl, boolean onSale) {
+            String imageUrl, boolean onSale, BigDecimal originalPrice, boolean superPromo) {
     }
 
     /** Variação de um item do catálogo, com disponibilidade própria — o preço é herdado do pai. */
@@ -40,7 +40,8 @@ public interface ShopUseCase {
 
     /** Detalhe público de um item do catálogo (ECM-F002), com a grade de variações ativas. */
     record CatalogItemDetail(String sku, String name, String category, BigDecimal price, boolean available,
-            List<CatalogVariant> variants, String imageUrl, boolean onSale) {
+            List<CatalogVariant> variants, String imageUrl, boolean onSale, BigDecimal originalPrice,
+            boolean superPromo, String description, String videoUrl, List<String> images) {
     }
 
     /**

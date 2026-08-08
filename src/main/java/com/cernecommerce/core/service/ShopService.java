@@ -109,13 +109,14 @@ public class ShopService implements ShopUseCase {
                 .toList();
         return new CatalogItemDetail(product.sku(), product.name(), product.category(),
                 product.pricing().effectivePrice(), isAvailable(product.sku(), warehouse.code()), variants,
-                product.imageUrl(), product.onSale());
+                product.imageUrl(), product.onSale(), product.pricing().originalPrice(), product.superPromo(),
+                product.description(), product.videoUrl(), product.images());
     }
 
     private CatalogItem toCatalogItem(Product product, String warehouseCode) {
         return new CatalogItem(product.sku(), product.name(), product.category(),
                 product.pricing().effectivePrice(), isAvailable(product.sku(), warehouseCode),
-                product.imageUrl(), product.onSale());
+                product.imageUrl(), product.onSale(), product.pricing().originalPrice(), product.superPromo());
     }
 
     private boolean isAvailable(String sku, String warehouseCode) {
