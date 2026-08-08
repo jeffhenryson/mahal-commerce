@@ -20,6 +20,7 @@ import com.cernecommerce.core.domain.model.ecommerce.CartItem;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
+import com.cernecommerce.core.domain.model.estoque.ProductType;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
 import com.cernecommerce.core.domain.model.estoque.Warehouse;
@@ -237,6 +238,46 @@ class ShopServiceTest {
         assertThatThrownBy(() -> shopService.getCatalogItem("ESS-001"))
                 .isInstanceOf(ProductNotFoundException.class);
         verify(estoqueUseCase, never()).getDefaultWarehouse();
+    }
+
+    // ---------- Campos de marketing: originalPrice, superPromo, description, videoUrl, images ----------
+
+    @Test
+    void listCatalog_expoeOriginalPriceESuperPromoNoItemResumido() {
+        Product product = Product.of(1L, "ESS-001", "Essência Maçã", "essencia", true, List.of(),
+                Pricing.of(new BigDecimal("15.00"), null, new BigDecimal("30.00"), new BigDecimal("40.00")),
+                ProductType.SIMPLES, false, null, null, false, true, "Descrição", "http://video.mp4",
+                List.of("http://img1.png"));
+        when(estoqueUseCase.getDefaultWarehouse()).thenReturn(WAREHOUSE);
+        when(estoqueUseCase.listActivePricedProducts(0, 20, null))
+                .thenReturn(new PageResult<>(List.of(product), 0, 20, 1L, 1));
+        when(estoqueUseCase.getStockBalance("ESS-001", "LOJA-01"))
+                .thenReturn(StockBalance.of(1L, "ESS-001", 1L, BigDecimal.TEN, BigDecimal.ZERO, 0L));
+
+        ShopUseCase.CatalogItem item = shopService.listCatalog(0, 20, null).content().get(0);
+
+        assertThat(item.originalPrice()).isEqualByComparingTo("40.00");
+        assertThat(item.superPromo()).isTrue();
+    }
+
+    @Test
+    void getCatalogItem_expoeOsCincoCamposDeMarketingNoDetalhe() {
+        Product product = Product.of(1L, "ESS-001", "Essência", "essencia", true, List.of(),
+                Pricing.of(new BigDecimal("15.00"), null, new BigDecimal("30.00"), new BigDecimal("40.00")),
+                ProductType.SIMPLES, false, null, null, false, true, "Descrição longa", "http://video.mp4",
+                List.of("http://img1.png", "http://img2.png"));
+        when(estoqueUseCase.findProductBySku("ESS-001")).thenReturn(product);
+        when(estoqueUseCase.getDefaultWarehouse()).thenReturn(WAREHOUSE);
+        when(estoqueUseCase.getStockBalance("ESS-001", "LOJA-01"))
+                .thenReturn(StockBalance.of(1L, "ESS-001", 1L, BigDecimal.TEN, BigDecimal.ZERO, 0L));
+
+        ShopUseCase.CatalogItemDetail detail = shopService.getCatalogItem("ESS-001");
+
+        assertThat(detail.originalPrice()).isEqualByComparingTo("40.00");
+        assertThat(detail.superPromo()).isTrue();
+        assertThat(detail.description()).isEqualTo("Descrição longa");
+        assertThat(detail.videoUrl()).isEqualTo("http://video.mp4");
+        assertThat(detail.images()).containsExactly("http://img1.png", "http://img2.png");
     }
 
     // ---------------------------------------------------------------------------------------

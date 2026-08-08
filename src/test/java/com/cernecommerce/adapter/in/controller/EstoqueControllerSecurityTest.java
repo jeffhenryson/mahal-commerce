@@ -973,6 +973,74 @@ public class EstoqueControllerSecurityTest {
                 .andExpect(status().isOk());
     }
 
+    // ------------------------------------------------------------------------------------
+    // Campos de marketing (originalPrice, superPromo, description, videoUrl, images):
+    // originalPrice mora dentro do bloco pricing e segue a mesma regra de PRICE_MANAGE;
+    // os demais moram no nível raiz do request e seguem a mesma regra de PRODUCT_MANAGE
+    // já usada por brand/imageUrl/onSale — nenhuma permissão nova foi criada para eles.
+    // ------------------------------------------------------------------------------------
+
+    @Test
+    void create_product_com_original_price_sem_price_manage_returns_403() throws Exception {
+        mockMvc.perform(post("/estoque/products")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"sku\":\"SKU_ORIGPRICE_403\",\"name\":\"Narguile\","
+                        + "\"pricing\":{\"originalPrice\":99.90}}")
+                .with(user("operador").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_MANAGE"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void create_product_com_super_promo_sem_product_manage_returns_403() throws Exception {
+        mockMvc.perform(post("/estoque/products")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"sku\":\"SKU_SUPERPROMO_403\",\"name\":\"Narguile\",\"superPromo\":true}")
+                .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void create_product_com_super_promo_description_video_images_com_apenas_product_manage_returns_201()
+            throws Exception {
+        mockMvc.perform(post("/estoque/products")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"sku\":\"SKU_MKT_OK_" + System.nanoTime() + "\",\"name\":\"Narguile\","
+                        + "\"superPromo\":true,\"description\":\"Descrição\","
+                        + "\"videoUrl\":\"http://video.mp4\",\"images\":[\"http://img1.png\"]}")
+                .with(user("operador").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_MANAGE"))))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
+    void patch_product_com_original_price_sem_price_manage_returns_403() throws Exception {
+        String sku = givenProduct();
+
+        mockMvc.perform(patch("/estoque/products/" + sku)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"pricing\":{\"originalPrice\":99.90}}")
+                .with(user("operador").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_MANAGE"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void patch_product_com_super_promo_e_description_com_apenas_product_manage_returns_200() throws Exception {
+        String sku = givenProduct();
+
+        mockMvc.perform(patch("/estoque/products/" + sku)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"superPromo\":true,\"description\":\"Nova descrição\"}")
+                .with(user("operador").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_MANAGE"))))
+                .andExpect(status().isOk());
+    }
+
     @Test
     void get_product_price_without_auth_returns_401() throws Exception {
         mockMvc.perform(get("/estoque/products/QUALQUER-SKU/price"))

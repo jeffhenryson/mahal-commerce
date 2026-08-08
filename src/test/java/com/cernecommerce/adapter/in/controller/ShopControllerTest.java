@@ -119,7 +119,7 @@ class ShopControllerTest {
     @Test
     void listCatalog_returnsPagedItems() throws Exception {
         ShopUseCase.CatalogItem item = new ShopUseCase.CatalogItem(
-                "ESS-001", "Essência Maçã", "essencia", new BigDecimal("30.00"), true, null, false);
+                "ESS-001", "Essência Maçã", "essencia", new BigDecimal("30.00"), true, null, false, null, false);
         when(shopUseCase.listCatalog(0, 20, null)).thenReturn(new PageResult<>(List.of(item), 0, 20, 1L, 1));
 
         mockMvc.perform(get("/shop/catalog"))
@@ -143,7 +143,8 @@ class ShopControllerTest {
         ShopUseCase.CatalogVariant variant = new ShopUseCase.CatalogVariant(
                 "ESS-001-MACA", List.of(new ProductAttribute("sabor", "Maçã")), true);
         ShopUseCase.CatalogItemDetail detail = new ShopUseCase.CatalogItemDetail(
-                "ESS-001", "Essência Maçã", "essencia", new BigDecimal("30.00"), true, List.of(variant), null, false);
+                "ESS-001", "Essência Maçã", "essencia", new BigDecimal("30.00"), true, List.of(variant), null, false,
+                null, false, null, null, List.of());
         when(shopUseCase.getCatalogItem("ESS-001")).thenReturn(detail);
 
         mockMvc.perform(get("/shop/catalog/ESS-001"))
@@ -151,6 +152,37 @@ class ShopControllerTest {
                 .andExpect(jsonPath("$.sku").value("ESS-001"))
                 .andExpect(jsonPath("$.variants[0].sku").value("ESS-001-MACA"))
                 .andExpect(jsonPath("$.variants[0].attributes[0].value").value("Maçã"));
+    }
+
+    @Test
+    void listCatalog_expoeOriginalPriceESuperPromoNoJson() throws Exception {
+        ShopUseCase.CatalogItem item = new ShopUseCase.CatalogItem(
+                "ESS-001", "Essência Maçã", "essencia", new BigDecimal("30.00"), true, null, false,
+                new BigDecimal("40.00"), true);
+        when(shopUseCase.listCatalog(0, 20, null)).thenReturn(new PageResult<>(List.of(item), 0, 20, 1L, 1));
+
+        mockMvc.perform(get("/shop/catalog"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].originalPrice").value(40.00))
+                .andExpect(jsonPath("$.content[0].superPromo").value(true));
+    }
+
+    @Test
+    void getCatalogItem_expoeOsCincoCamposDeMarketingNoJson() throws Exception {
+        ShopUseCase.CatalogItemDetail detail = new ShopUseCase.CatalogItemDetail(
+                "ESS-001", "Essência Maçã", "essencia", new BigDecimal("30.00"), true, List.of(), null, false,
+                new BigDecimal("40.00"), true, "Descrição longa", "http://video.mp4",
+                List.of("http://img1.png", "http://img2.png"));
+        when(shopUseCase.getCatalogItem("ESS-001")).thenReturn(detail);
+
+        mockMvc.perform(get("/shop/catalog/ESS-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.originalPrice").value(40.00))
+                .andExpect(jsonPath("$.superPromo").value(true))
+                .andExpect(jsonPath("$.description").value("Descrição longa"))
+                .andExpect(jsonPath("$.videoUrl").value("http://video.mp4"))
+                .andExpect(jsonPath("$.images[0]").value("http://img1.png"))
+                .andExpect(jsonPath("$.images[1]").value("http://img2.png"));
     }
 
     @Test

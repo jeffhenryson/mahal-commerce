@@ -294,4 +294,92 @@ class PricingTest {
             assertThat(custoNovo.suggestedPrice()).isEqualByComparingTo("108.00");
         }
     }
+
+    @Nested
+    class PrecoDePor {
+
+        @Test
+        void rejeitaOriginalPriceNegativo() {
+            assertThatThrownBy(() -> Pricing.of(null, null, null, bd("-0.01")))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("originalPrice");
+        }
+
+        @Test
+        void semOriginalPriceNaoHaDesconto() {
+            Pricing pricing = Pricing.of(bd("45.00"), null, bd("79.90"));
+
+            assertThat(pricing.hasDiscount()).isFalse();
+            assertThat(pricing.discountPercent()).isNull();
+        }
+
+        @Test
+        void originalPriceMaiorQueOEfetivoTemDesconto() {
+            Pricing pricing = Pricing.of(bd("45.00"), null, bd("79.90"), bd("99.90"));
+
+            assertThat(pricing.hasDiscount()).isTrue();
+            // (99.90 - 79.90) / 99.90 * 100 = 20.0200...
+            assertThat(pricing.discountPercent()).isEqualByComparingTo("20.02");
+        }
+
+        @Test
+        void originalPriceIgualAoEfetivoNaoTemDesconto() {
+            // Selo "de/por" não deve mentir: preço "de" igual ao praticado não é desconto real.
+            Pricing pricing = Pricing.of(bd("45.00"), null, bd("79.90"), bd("79.90"));
+
+            assertThat(pricing.hasDiscount()).isFalse();
+            assertThat(pricing.discountPercent()).isNull();
+        }
+
+        @Test
+        void originalPriceMenorQueOEfetivoNaoTemDesconto() {
+            Pricing pricing = Pricing.of(bd("45.00"), null, bd("79.90"), bd("50.00"));
+
+            assertThat(pricing.hasDiscount()).isFalse();
+            assertThat(pricing.discountPercent()).isNull();
+        }
+
+        @Test
+        void semPrecoEfetivoNaoHaDesconto() {
+            Pricing pricing = Pricing.of(null, null, null, bd("99.90"));
+
+            assertThat(pricing.hasDiscount()).isFalse();
+            assertThat(pricing.discountPercent()).isNull();
+        }
+
+        @Test
+        void patchDe4ArgumentosAlteraOriginalPrice() {
+            Pricing atual = Pricing.of(bd("45.00"), bd("80"), bd("79.90"));
+
+            Pricing patched = atual.withPatch(null, null, null, bd("99.90"));
+
+            assertThat(patched.originalPrice()).isEqualByComparingTo("99.90");
+            assertThat(patched.costPrice()).isEqualByComparingTo("45.00");
+        }
+
+        @Test
+        void patchDe3ArgumentosNaoTocaEmOriginalPrice() {
+            Pricing atual = Pricing.of(bd("45.00"), bd("80"), bd("79.90"), bd("99.90"));
+
+            Pricing patched = atual.withPatch(bd("50.00"), null, null);
+
+            assertThat(patched.originalPrice()).isEqualByComparingTo("99.90");
+            assertThat(patched.costPrice()).isEqualByComparingTo("50.00");
+        }
+
+        @Test
+        void materializeSuggestionPreservaOriginalPrice() {
+            Pricing pricing = Pricing.of(bd("45.00"), bd("80"), null, bd("99.90"));
+
+            Pricing materialized = pricing.materializeSuggestion();
+
+            assertThat(materialized.originalPrice()).isEqualByComparingTo("99.90");
+            assertThat(materialized.salePrice()).isEqualByComparingTo("81.00");
+        }
+
+        @Test
+        void ofDeTresArgumentosDeixaOriginalPriceNulo() {
+            assertThat(Pricing.of(bd("45.00"), bd("80"), bd("79.90")).originalPrice()).isNull();
+        }
+    }
 }

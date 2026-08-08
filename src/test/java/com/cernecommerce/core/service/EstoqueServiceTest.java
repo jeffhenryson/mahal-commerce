@@ -1267,6 +1267,123 @@ class EstoqueServiceTest {
                 .isEqualByComparingTo("79.90");
     }
 
+    // ---------- Campos de marketing: superPromo, description, videoUrl, images ----------
+
+    @Test
+    void createProduct_persisteOsCincoCamposDeMarketing() {
+        when(productRepository.existsBySku(any())).thenReturn(false);
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Product created = estoqueService.createProduct("NARG-001", "Narguile", "narguile", List.of(),
+                Pricing.of(new BigDecimal("45.00"), null, new BigDecimal("79.90"), new BigDecimal("99.90")),
+                "Aladin", "http://img.png", true, true, "Descrição longa", "http://video.mp4",
+                List.of("http://img1.png", "http://img2.png"));
+
+        assertThat(created.pricing().originalPrice()).isEqualByComparingTo("99.90");
+        assertThat(created.superPromo()).isTrue();
+        assertThat(created.description()).isEqualTo("Descrição longa");
+        assertThat(created.videoUrl()).isEqualTo("http://video.mp4");
+        assertThat(created.images()).containsExactly("http://img1.png", "http://img2.png");
+    }
+
+    @Test
+    void updateProduct_alteraSuperPromoIndependentemente() {
+        when(productRepository.findBySku("NARG-001")).thenReturn(Optional.of(existingProduct()));
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Product updated = estoqueService.updateProduct("NARG-001", null, null, null, null, null, null,
+                true, null, null, null);
+
+        assertThat(updated.superPromo()).isTrue();
+        assertThat(updated.name()).as("demais campos preservados").isEqualTo("Narguile Aladin");
+    }
+
+    @Test
+    void updateProduct_superPromoNulo_preservaOValorAtual() {
+        Product marcado = existingProduct().withSuperPromo(true);
+        when(productRepository.findBySku("NARG-001")).thenReturn(Optional.of(marcado));
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Product updated = estoqueService.updateProduct("NARG-001", "Novo nome", null, null, null, null, null,
+                null, null, null, null);
+
+        assertThat(updated.superPromo()).as("nulo mantém o valor atual").isTrue();
+    }
+
+    @Test
+    void updateProduct_alteraDescriptionEVideoUrlIndependentemente() {
+        when(productRepository.findBySku("NARG-001")).thenReturn(Optional.of(existingProduct()));
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Product updated = estoqueService.updateProduct("NARG-001", null, null, null, null, null, null,
+                null, "Nova descrição", "http://video.mp4", null);
+
+        assertThat(updated.description()).isEqualTo("Nova descrição");
+        assertThat(updated.videoUrl()).isEqualTo("http://video.mp4");
+        assertThat(updated.name()).as("demais campos preservados").isEqualTo("Narguile Aladin");
+    }
+
+    @Test
+    void updateProduct_descriptionEVideoUrlNulos_preservamOValorAtual() {
+        Product comDetalhes = existingProduct().withDetails(null, null, null, null, "Descrição", "http://video.mp4");
+        when(productRepository.findBySku("NARG-001")).thenReturn(Optional.of(comDetalhes));
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Product updated = estoqueService.updateProduct("NARG-001", "Novo nome", null, null, null, null, null,
+                null, null, null, null);
+
+        assertThat(updated.description()).isEqualTo("Descrição");
+        assertThat(updated.videoUrl()).isEqualTo("http://video.mp4");
+    }
+
+    @Test
+    void updateProduct_substituiAGaleriaDeImagens() {
+        when(productRepository.findBySku("NARG-001")).thenReturn(Optional.of(existingProduct()));
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Product updated = estoqueService.updateProduct("NARG-001", null, null, null, null, null, null,
+                null, null, null, List.of("http://img1.png", "http://img2.png"));
+
+        assertThat(updated.images()).containsExactly("http://img1.png", "http://img2.png");
+    }
+
+    @Test
+    void updateProduct_imagesNulo_preservaAGaleriaAtual() {
+        Product comGaleria = existingProduct().withImages(List.of("http://img1.png"));
+        when(productRepository.findBySku("NARG-001")).thenReturn(Optional.of(comGaleria));
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Product updated = estoqueService.updateProduct("NARG-001", "Novo nome", null, null, null, null, null,
+                null, null, null, null);
+
+        assertThat(updated.images()).containsExactly("http://img1.png");
+    }
+
+    @Test
+    void updateProduct_imagesListaVazia_limpaAGaleria() {
+        Product comGaleria = existingProduct().withImages(List.of("http://img1.png"));
+        when(productRepository.findBySku("NARG-001")).thenReturn(Optional.of(comGaleria));
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Product updated = estoqueService.updateProduct("NARG-001", null, null, null, null, null, null,
+                null, null, null, List.of());
+
+        assertThat(updated.images()).isEmpty();
+    }
+
+    @Test
+    void updateProduct_pricingCarregaOriginalPrice() {
+        when(productRepository.findBySku("NARG-001")).thenReturn(Optional.of(pricedProduct()));
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Product updated = estoqueService.updateProduct("NARG-001", null, null,
+                Pricing.of(null, null, null, new BigDecimal("99.90")));
+
+        assertThat(updated.pricing().originalPrice()).isEqualByComparingTo("99.90");
+        assertThat(updated.pricing().salePrice()).as("preço praticado preservado")
+                .isEqualByComparingTo("79.90");
+    }
+
     /** A variação herda o preço do pai — é o caminho do leitor de código de barras no balcão. */
     @Test
     void findPricingBySku_resolveVariacaoPeloPrecoDoPai() {

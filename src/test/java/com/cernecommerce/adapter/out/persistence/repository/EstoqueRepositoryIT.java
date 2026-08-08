@@ -8,6 +8,7 @@ import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
+import com.cernecommerce.core.domain.model.estoque.ProductType;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.ReorderPoint;
 import com.cernecommerce.core.domain.model.estoque.ReservationIntegrityMismatch;
@@ -112,6 +113,57 @@ class EstoqueRepositoryIT {
 
         assertThat(productRepository.findBySku("RT-LOT-001")).isPresent()
                 .get().satisfies(p -> assertThat(p.lotTracked()).isTrue());
+    }
+
+    /**
+     * Único teste que de fato exercita o mapeamento {@code @ElementCollection}+
+     * {@code @OrderColumn} da galeria de imagens contra banco real — mocks não capturam erro
+     * de mapeamento JPA.
+     */
+    @Test
+    void product_roundTrip_preservaCamposDeMarketingEOrdemDaGaleria() {
+        productRepository.save(Product.create("RT-MKT-001", "Narguilé", "narguile", List.of(),
+                Pricing.of(new BigDecimal("45.00"), null, new BigDecimal("79.90"), new BigDecimal("99.90")),
+                ProductType.SIMPLES, false, "Aladin", "http://img.png", true, true, "Descrição longa",
+                "http://video.mp4", List.of("http://img1.png", "http://img2.png", "http://img3.png")));
+        flushAndClear();
+
+        Product found = productRepository.findBySku("RT-MKT-001").orElseThrow();
+
+        assertThat(found.pricing().originalPrice()).isEqualByComparingTo("99.90");
+        assertThat(found.superPromo()).isTrue();
+        assertThat(found.description()).isEqualTo("Descrição longa");
+        assertThat(found.videoUrl()).isEqualTo("http://video.mp4");
+        assertThat(found.images()).as("ordem da galeria preservada")
+                .containsExactly("http://img1.png", "http://img2.png", "http://img3.png");
+    }
+
+    @Test
+    void product_semCamposDeMarketing_voltaComGaleriaVaziaECamposNulos() {
+        productRepository.save(Product.create("RT-MKT-002", "Carvão", "carvao", List.of()));
+        flushAndClear();
+
+        Product found = productRepository.findBySku("RT-MKT-002").orElseThrow();
+
+        assertThat(found.pricing().originalPrice()).isNull();
+        assertThat(found.superPromo()).isFalse();
+        assertThat(found.description()).isNull();
+        assertThat(found.videoUrl()).isNull();
+        assertThat(found.images()).isEmpty();
+    }
+
+    @Test
+    void product_atualizarGaleria_substituiAListaInteiraSemDuplicar() {
+        Product saved = productRepository.save(Product.create("RT-MKT-003", "Narguilé", "narguile", List.of())
+                .withImages(List.of("http://old1.png", "http://old2.png")));
+        flushAndClear();
+
+        Product reloaded = productRepository.findBySku("RT-MKT-003").orElseThrow();
+        productRepository.save(reloaded.withImages(List.of("http://new1.png")));
+        flushAndClear();
+
+        Product found = productRepository.findBySku("RT-MKT-003").orElseThrow();
+        assertThat(found.images()).containsExactly("http://new1.png");
     }
 
     // ---------- EST-F019 — precificação ----------
