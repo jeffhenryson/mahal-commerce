@@ -56,11 +56,12 @@ public class SeedConfig {
                               PermissionUseCase permissionUseCase,
                               CashbackUseCase cashbackUseCase,
                               @Value("${seed.admin.password:Admin@dev1}") String adminPassword,
-                              @Value("${seed.user.password:User@dev1}") String userPassword) {
+                              @Value("${seed.user.password:User@dev1}") String userPassword,
+                              @Value("${seed.atendente.password:Atendente@dev1}") String atendentePassword) {
         return args -> {
             seedPermissions(permissionUseCase);
             seedRoles(roleUseCase);
-            seedUsers(userUseCase, adminPassword, userPassword);
+            seedUsers(userUseCase, adminPassword, userPassword, atendentePassword);
             seedCashbackRate(cashbackUseCase);
         };
     }
@@ -87,7 +88,7 @@ public class SeedConfig {
     }
 
     private void seedRoles(RoleUseCase roleUseCase) {
-        for (String name : new String[]{"ROLE_ADMIN", "ROLE_USER", "ROLE_CUSTOMER"}) {
+        for (String name : new String[]{"ROLE_ADMIN", "ROLE_USER", "ROLE_CUSTOMER", "ROLE_ATENDENTE"}) {
             try { roleUseCase.createRole(name); }
             catch (Exception e) { log.debug("seed.role.skip name={} reason={}", name, e.getMessage()); }
         }
@@ -106,10 +107,12 @@ public class SeedConfig {
         }
     }
 
-    private void seedUsers(UserUseCase userUseCase, String adminPassword, String userPassword) {
+    private void seedUsers(UserUseCase userUseCase, String adminPassword, String userPassword, String atendentePassword) {
         if (userUseCase.findByUsername("admin").isEmpty())
             userUseCase.createUser("admin", adminPassword, List.of("ROLE_ADMIN"));
         if (userUseCase.findByUsername("user").isEmpty())
             userUseCase.createUser("user", userPassword, List.of("ROLE_USER"));
+        if (userUseCase.findByUsername("atendente").isEmpty())
+            userUseCase.createUser("atendente", atendentePassword, List.of("ROLE_ATENDENTE"));
     }
 }
