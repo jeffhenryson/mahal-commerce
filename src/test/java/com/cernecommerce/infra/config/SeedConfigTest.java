@@ -32,7 +32,7 @@ class SeedConfigTest {
         when(userUseCase.findByUsername(anyString())).thenReturn(Optional.empty());
 
         CommandLineRunner runner = seedConfig.seedAll(userUseCase, roleUseCase, permissionUseCase,
-                cashbackUseCase, "Admin@dev1", "User@dev1");
+                cashbackUseCase, "Admin@dev1", "User@dev1", "Atendente@dev1");
         runner.run();
 
         verify(permissionUseCase).createPermission("ESTOQUE_PRODUCT_READ");
@@ -63,7 +63,7 @@ class SeedConfigTest {
         when(userUseCase.findByUsername(anyString())).thenReturn(Optional.empty());
 
         CommandLineRunner runner = seedConfig.seedAll(userUseCase, roleUseCase, permissionUseCase,
-                cashbackUseCase, "Admin@dev1", "User@dev1");
+                cashbackUseCase, "Admin@dev1", "User@dev1", "Atendente@dev1");
         runner.run();
 
         verify(permissionUseCase).createPermission("PDV_SALE_MANAGE");
