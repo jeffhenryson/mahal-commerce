@@ -143,6 +143,13 @@ services:
       RESEND_API_KEY: ${RESEND_API_KEY}
       RESEND_FROM: noreply@cernedsgn.xyz
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      # InfinitePay/Resend/Google reais ainda não configurados neste ambiente — usa os
+      # adapters stub/log que PaymentGatewayAdapterConfig/EmailAdapterConfig já provêm
+      # para esse cenário, em vez de infinitepay.handle/webhook-url (obrigatórios sem
+      # default em application-hml.properties, causavam PlaceholderResolutionException).
+      PAYMENT_GATEWAY_PROVIDER: stub
+      EMAIL_PROVIDER: log
+      AVATAR_BASE_URL: http://127.0.0.1:8082
     ports:
       - "8082:8082"
       - "8083:8081"

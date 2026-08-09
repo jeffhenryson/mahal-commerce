@@ -105,6 +105,9 @@ services:
       TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY}
       TOTP_APP_NAME: ${TOTP_APP_NAME}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      # Conta seed ROLE_DEV (DevRoleBootstrapConfig) — só é criada se DEV_EMAIL não for vazio.
+      DEV_EMAIL: ${DEV_EMAIL}
+      DEV_PASSWORD: ${DEV_PASSWORD}
       # Em hml o email vai para o Mailpit, nunca para caixas reais.
       EMAIL_PROVIDER: mailpit
       MAILPIT_FROM: ${MAILPIT_FROM}
@@ -113,7 +116,14 @@ services:
       RESEND_FROM: ${RESEND_FROM}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       EMAIL_VERIFICATION_FRONTEND_URL: ${EMAIL_VERIFICATION_FRONTEND_URL}
-      AVATAR_BASE_URL: http://localhost:8082
+      # HmlStartupValidator rejeita "localhost" em avatar.base-url; 127.0.0.1 é o
+      # mesmo host, só não bate no filtro.
+      AVATAR_BASE_URL: http://127.0.0.1:8082
+      # InfinitePay real ainda não configurado (handle vem do cliente depois) —
+      # payment.gateway.provider != infinitepay ativa StubPaymentGatewayAdapter
+      # (PaymentGatewayAdapterConfig), evitando exigir infinitepay.handle/webhook-url
+      # (obrigatórios sem default em application-hml.properties).
+      PAYMENT_GATEWAY_PROVIDER: stub
     ports:
       - "8082:8082"
       - "8083:8081"
@@ -194,6 +204,9 @@ volumes:
   uploads_hml:
 
 networks:
+  # Nome externo mahal-commerce_default (não mahal-network): é o que
+  # mahal-admin/docker-compose.yml e mahal-market/docker-compose.yml já esperam
+  # via `external: true`, para plugar nas UIs sem editar os repositórios sibling.
   mahal-network:
-    name: mahal-network
+    name: mahal-commerce_default
     driver: bridge
