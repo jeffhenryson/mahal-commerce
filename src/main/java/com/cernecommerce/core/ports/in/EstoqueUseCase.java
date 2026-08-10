@@ -1,6 +1,7 @@
 package com.cernecommerce.core.ports.in;
 
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.estoque.Category;
 import com.cernecommerce.core.domain.model.estoque.KitComponent;
 import com.cernecommerce.core.domain.model.estoque.LotIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
@@ -88,9 +89,27 @@ public interface EstoqueUseCase {
      * cada variação da grade, estes só <i>descrevem</i> o item e existem para o produto sem grade,
      * que não tinha onde carregá-los.</p>
      */
+    default Product createProduct(String sku, String name, String category, List<ProductVariant> variants,
+            Pricing pricing, String brand, String imageUrl, boolean onSale, boolean superPromo, String description,
+            String videoUrl, List<String> images, List<ProductAttribute> attributes) {
+        return createProduct(sku, name, category, variants, pricing, brand, imageUrl, onSale, superPromo, description,
+                videoUrl, images, attributes, null);
+    }
+
+    /**
+     * Cria um produto (forma canônica) aceitando os <b>dois</b> caminhos de categoria.
+     *
+     * <p>{@code categoryId} preenchido vincula à categoria indicada e o nome sai resolvido a
+     * partir dela. Ausente, {@code category} (texto) é usado para reencontrar — ou criar — a
+     * categoria correspondente. É o que mantém o cadastro atual do admin, que só conhece texto
+     * livre, funcionando sem nenhuma mudança.</p>
+     *
+     * @throws com.cernecommerce.core.domain.exception.estoque.CategoryNotFoundException se
+     *         {@code categoryId} for informado e não existir.
+     */
     Product createProduct(String sku, String name, String category, List<ProductVariant> variants, Pricing pricing,
             String brand, String imageUrl, boolean onSale, boolean superPromo, String description, String videoUrl,
-            List<String> images, List<ProductAttribute> attributes);
+            List<String> images, List<ProductAttribute> attributes, Long categoryId);
 
     /** Lista produtos paginados, sem filtro e ordenados por id. */
     default PageResult<Product> listProducts(int page, int size) {
@@ -118,7 +137,15 @@ public interface EstoqueUseCase {
      *
      * @param onSale filtro opcional de promoção (Estágio 01 do admin) — {@code null} não filtra.
      */
-    PageResult<Product> listActivePricedProducts(int page, int size, Boolean onSale);
+    default PageResult<Product> listActivePricedProducts(int page, int size, Boolean onSale) {
+        return listActivePricedProducts(page, size, onSale, null);
+    }
+
+    /**
+     * @param categoryId filtro opcional de categoria — {@code null} não filtra. A ordem é a da
+     *        vitrine: categoria em destaque primeiro, depois ordem de exibição, depois id.
+     */
+    PageResult<Product> listActivePricedProducts(int page, int size, Boolean onSale, Long categoryId);
 
     /**
      * Alteração parcial de produto (EST-F018): {@code name} e/ou {@code category} nulos são
@@ -181,9 +208,58 @@ public interface EstoqueUseCase {
      * inteiro — a mesma semântica já adotada para {@code images}, e pelo mesmo motivo: não há
      * identidade estável por atributo que permitisse edição item a item.
      */
+    default Product updateProduct(String sku, String name, String category, Pricing pricing, String brand,
+            String imageUrl, Boolean onSale, Boolean superPromo, String description, String videoUrl,
+            List<String> images, List<ProductAttribute> attributes) {
+        return updateProduct(sku, name, category, pricing, brand, imageUrl, onSale, superPromo, description, videoUrl,
+                images, attributes, null);
+    }
+
+    /**
+     * Alteração parcial (forma canônica) aceitando os dois caminhos de categoria, com a mesma
+     * regra de {@code createProduct}. Nulos nos dois campos mantêm a categoria atual.
+     */
     Product updateProduct(String sku, String name, String category, Pricing pricing, String brand, String imageUrl,
             Boolean onSale, Boolean superPromo, String description, String videoUrl, List<String> images,
-            List<ProductAttribute> attributes);
+            List<ProductAttribute> attributes, Long categoryId);
+
+    // ── Categorias do catálogo ───────────────────────────────────────────────
+    //
+    // Categoria deixou de ser só texto livre dentro do produto para poder carregar destaque e
+    // ordem — sem registro próprio não há onde pendurar "aparece na primeira linha do app".
+    // A mudança é ADITIVA: o campo texto do produto continua existindo e continua sendo
+    // devolvido, com o nome denormalizado mantido em sincronia por estas operações.
+
+    /**
+     * Cria uma categoria. Lança {@link com.cernecommerce.core.domain.exception.estoque
+     * .DuplicateCategoryNameException} se já existir uma com o mesmo nome — comparação sem
+     * diferenciar maiúsculas, para "Narguilé" e "narguilé" não virarem duas.
+     */
+    Category createCategory(String name, boolean featured, int displayOrder);
+
+    /**
+     * Alteração parcial: campo nulo é mantido. Renomear <b>propaga</b> o novo nome para a coluna
+     * denormalizada de todos os produtos vinculados — deixá-los divergir faria a vitrine exibir um
+     * rótulo e ordenar por outro.
+     *
+     * @throws com.cernecommerce.core.domain.exception.estoque.CategoryNotFoundException se o id
+     *         não existir.
+     */
+    Category updateCategory(Long id, String name, Boolean featured, Integer displayOrder);
+
+    /**
+     * Ativa ou desativa uma categoria. Desativada, ela some da vitrine
+     * ({@link #listActiveCategories()}), mas os produtos vinculados <b>continuam</b> à venda com o
+     * nome que já tinham: categoria é organização de vitrine, não permissão de venda. Sem DELETE,
+     * pelo mesmo motivo de produto e depósito (EST-F018) — apagar destruiria o vínculo histórico.
+     */
+    Category setCategoryActive(Long id, boolean active);
+
+    /** Listagem do admin, com as inativas, ordenada por destaque, ordem e nome. */
+    PageResult<Category> listCategories(int page, int size);
+
+    /** Categorias ativas na ordem da vitrine — destaque primeiro. Consumida por {@code /shop}. */
+    List<Category> listActiveCategories();
 
     /**
      * Resolve a precificação vigente de <b>qualquer</b> SKU do catálogo — pai ou variação

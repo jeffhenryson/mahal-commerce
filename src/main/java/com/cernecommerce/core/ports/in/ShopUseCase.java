@@ -3,6 +3,7 @@ package com.cernecommerce.core.ports.in;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.auth.User;
 import com.cernecommerce.core.domain.model.crm.Customer;
+import com.cernecommerce.core.domain.model.estoque.Category;
 import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
 import com.cernecommerce.core.domain.model.pedido.Order;
 
@@ -60,7 +61,18 @@ public interface ShopUseCase {
      * @throws com.cernecommerce.core.domain.exception.estoque.DefaultWarehouseNotConfiguredException
      *         se o depósito padrão do marketplace não estiver configurado
      */
-    PageResult<CatalogItem> listCatalog(int page, int size, Boolean onSale);
+    default PageResult<CatalogItem> listCatalog(int page, int size, Boolean onSale) {
+        return listCatalog(page, size, onSale, null);
+    }
+
+    /**
+     * @param categoryId filtro opcional de categoria — {@code null} devolve o catálogo inteiro,
+     *        já na ordem da vitrine (categoria em destaque primeiro).
+     */
+    PageResult<CatalogItem> listCatalog(int page, int size, Boolean onSale, Long categoryId);
+
+    /** Categorias ativas na ordem da vitrine — a primeira linha do app sai daqui. */
+    java.util.List<Category> listCategories();
 
     /**
      * Detalhe público de um item do catálogo (ECM-F002), com a grade de variações ativas e a

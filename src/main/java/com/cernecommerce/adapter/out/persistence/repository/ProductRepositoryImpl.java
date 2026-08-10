@@ -43,6 +43,7 @@ public class ProductRepositoryImpl implements ProductRepository {
         entity.setSku(product.sku());
         entity.setName(product.name());
         entity.setCategory(product.category());
+        entity.setCategoryId(product.categoryId());
         entity.setBrand(product.brand());
         entity.setImageUrl(product.imageUrl());
         entity.setOnSale(product.onSale());
@@ -85,6 +86,11 @@ public class ProductRepositoryImpl implements ProductRepository {
     }
 
     @Override
+    public int renameCategory(Long categoryId, String newName) {
+        return productJpaRepository.renameCategory(categoryId, newName);
+    }
+
+    @Override
     @Transactional(readOnly = true)
     public Optional<Product> findBySku(String sku) {
         return productJpaRepository.findBySku(sku).map(this::toDomain);
@@ -120,8 +126,9 @@ public class ProductRepositoryImpl implements ProductRepository {
 
     @Override
     @Transactional(readOnly = true)
-    public PageResult<Product> findAllActiveAndPriced(int page, int size, Boolean onSale) {
-        Page<Long> idPage = productJpaRepository.findActivePricedIds(PageRequest.of(page, size), onSale);
+    public PageResult<Product> findAllActiveAndPriced(int page, int size, Boolean onSale, Long categoryId) {
+        Page<Long> idPage = productJpaRepository.findActivePricedIds(
+                PageRequest.of(page, size), onSale, categoryId);
         return toPageResult(idPage, page, size);
     }
 
@@ -178,7 +185,7 @@ public class ProductRepositoryImpl implements ProductRepository {
                 .toList();
         return Product.of(e.getId(), e.getSku(), e.getName(), e.getCategory(), e.isActive(), variants, pricing, type,
                 e.isLotTracked(), e.getBrand(), e.getImageUrl(), e.isOnSale(), e.isSuperPromo(), e.getDescription(),
-                e.getVideoUrl(), List.copyOf(e.getImages()), attributes);
+                e.getVideoUrl(), List.copyOf(e.getImages()), attributes, e.getCategoryId());
     }
 
     private ProductVariant toDomain(ProductVariantEntity e) {

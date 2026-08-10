@@ -39,6 +39,8 @@ import com.cernecommerce.core.domain.exception.ecommerce.CartEmptyException;
 import com.cernecommerce.core.domain.exception.ecommerce.CartItemNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.DefaultWarehouseNotConfiguredException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateKitComponentException;
+import com.cernecommerce.core.domain.exception.estoque.CategoryNotFoundException;
+import com.cernecommerce.core.domain.exception.estoque.DuplicateCategoryNameException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateSkuException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateWarehouseCodeException;
 import com.cernecommerce.core.domain.exception.estoque.EmptyKitRecipeException;
@@ -154,6 +156,17 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(DuplicateSkuException.class)
     public ResponseEntity<ApiError> handleDuplicateSku(DuplicateSkuException ex, HttpServletRequest req) {
         return error(HttpStatus.CONFLICT, ex.getMessage(), "SKU_ALREADY_EXISTS", req);
+    }
+
+    @ExceptionHandler(CategoryNotFoundException.class)
+    public ResponseEntity<ApiError> handleCategoryNotFound(CategoryNotFoundException ex, HttpServletRequest req) {
+        return error(HttpStatus.NOT_FOUND, ex.getMessage(), "CATEGORY_NOT_FOUND", req);
+    }
+
+    @ExceptionHandler(DuplicateCategoryNameException.class)
+    public ResponseEntity<ApiError> handleDuplicateCategoryName(DuplicateCategoryNameException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "CATEGORY_NAME_ALREADY_EXISTS", req);
     }
 
     @ExceptionHandler(DuplicateWarehouseCodeException.class)

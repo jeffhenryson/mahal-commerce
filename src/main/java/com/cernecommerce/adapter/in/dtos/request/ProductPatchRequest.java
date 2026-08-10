@@ -28,6 +28,12 @@ public class ProductPatchRequest {
     @Size(max = 100)
     private String category;
 
+    /**
+     * Vínculo direto com uma categoria existente. Quando informado, vence sobre {@code category}.
+     * Nulos nos dois campos mantêm a categoria atual.
+     */
+    private Long categoryId;
+
     @Size(max = 100)
     private String brand;
 

@@ -34,6 +34,9 @@ import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.estoque.Product;
+import com.cernecommerce.core.domain.model.estoque.Category;
+import com.cernecommerce.core.domain.exception.estoque.CategoryNotFoundException;
+import com.cernecommerce.core.domain.exception.estoque.DuplicateCategoryNameException;
 import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
 import com.cernecommerce.core.domain.model.estoque.ProductType;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
@@ -52,6 +55,7 @@ import com.cernecommerce.core.domain.model.notification.NotificationType;
 import com.cernecommerce.core.ports.in.NotificationUseCase;
 import com.cernecommerce.core.ports.in.EstoqueUseCase.KitComponentCommand;
 import com.cernecommerce.core.ports.out.AfterCommitExecutor;
+import com.cernecommerce.core.ports.out.estoque.CategoryRepository;
 import com.cernecommerce.core.ports.out.estoque.KitComponentRepository;
 import com.cernecommerce.core.ports.out.estoque.ProductRepository;
 import com.cernecommerce.core.ports.out.estoque.ReorderPointRepository;
@@ -80,6 +84,7 @@ import java.util.Set;
 import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
@@ -103,6 +108,7 @@ class EstoqueServiceTest {
     @Mock KitComponentRepository kitComponentRepository;
     @Mock StockLotRepository stockLotRepository;
     @Mock com.cernecommerce.core.ports.out.SystemConfigPort systemConfigPort;
+    @Mock CategoryRepository categoryRepository;
 
     /** Mesmo default de {@code estoque.reservation.default-ttl} em {@code CoreBeanConfig}. */
     private static final Duration RESERVATION_TTL = Duration.ofMinutes(30);
@@ -126,7 +132,7 @@ class EstoqueServiceTest {
         estoqueService = new EstoqueService(productRepository, warehouseRepository, stockBalanceRepository,
                 stockMovementRepository, reorderPointRepository, stockIntegrityRepository, stockCountRepository,
                 stockReservationRepository, notificationUseCase, userRepository, immediateExecutor,
-                RESERVATION_TTL, kitComponentRepository, stockLotRepository, systemConfigPort);
+                RESERVATION_TTL, kitComponentRepository, stockLotRepository, systemConfigPort, categoryRepository);
         lenient().when(reorderPointRepository.findBySkuAndWarehouseId(any(), any())).thenReturn(Optional.empty());
         // Padrão dos testes: o SKU existe no catálogo, que é a pré-condição das movimentações.
         // Os testes de createProduct e os de SKU desconhecido sobrescrevem este stub.
@@ -248,9 +254,9 @@ class EstoqueServiceTest {
     void listActivePricedProducts_delegatesToRepository() {
         PageResult<Product> page = new PageResult<>(
                 List.of(Product.of(1L, "NARG-001", "Narguile Aladin", "narguile", true, List.of())), 0, 20, 1L, 1);
-        when(productRepository.findAllActiveAndPriced(0, 20, null)).thenReturn(page);
+        when(productRepository.findAllActiveAndPriced(0, 20, null, null)).thenReturn(page);
 
-        PageResult<Product> result = estoqueService.listActivePricedProducts(0, 20, null);
+        PageResult<Product> result = estoqueService.listActivePricedProducts(0, 20, null, null);
 
         assertThat(result.content()).hasSize(1);
         assertThat(result.totalElements()).isEqualTo(1L);
@@ -2740,5 +2746,183 @@ class EstoqueServiceTest {
                 .thenReturn(List.of(KitComponent.of(1L, "KIT-001", "COMP-001-100G", BigDecimal.ONE)));
 
         assertThat(estoqueService.findPricingBySku("KIT-001").costPrice()).isEqualByComparingTo("40.00");
+    }
+
+
+    // ── Categorias do catálogo ───────────────────────────────────────────────
+
+    @Test
+    void createCategory_recusaNomeJaExistente() {
+        when(categoryRepository.findByName("Narguilé"))
+                .thenReturn(Optional.of(Category.of(1L, "Narguilé", false, 0, true)));
+
+        assertThatThrownBy(() -> estoqueService.createCategory("Narguilé", false, 0))
+                .isInstanceOf(DuplicateCategoryNameException.class);
+        verify(categoryRepository, never()).save(any());
+    }
+
+    @Test
+    void updateCategory_renomear_propagaONomeParaOsProdutosVinculados() {
+        // Sem isso a vitrine exibiria o rótulo antigo e ordenaria pelo novo.
+        Category atual = Category.of(1L, "Narguilé", false, 0, true);
+        when(categoryRepository.findById(1L)).thenReturn(Optional.of(atual));
+        when(categoryRepository.findByName("Narguilés")).thenReturn(Optional.empty());
+        when(categoryRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        estoqueService.updateCategory(1L, "Narguilés", null, null);
+
+        verify(productRepository).renameCategory(1L, "Narguilés");
+    }
+
+    @Test
+    void updateCategory_semRenomear_naoTocaNosProdutos() {
+        Category atual = Category.of(1L, "Narguilé", false, 0, true);
+        when(categoryRepository.findById(1L)).thenReturn(Optional.of(atual));
+        when(categoryRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        estoqueService.updateCategory(1L, null, true, 5);
+
+        verify(productRepository, never()).renameCategory(anyLong(), anyString());
+    }
+
+    @Test
+    void updateCategory_renomearParaNomeDeOutraCategoria_e409() {
+        // Deixar passar daria erro de constraint no flush, longe daqui e sem o errorCode do contrato.
+        when(categoryRepository.findById(1L))
+                .thenReturn(Optional.of(Category.of(1L, "Narguilé", false, 0, true)));
+        when(categoryRepository.findByName("Essência"))
+                .thenReturn(Optional.of(Category.of(2L, "Essência", false, 0, true)));
+
+        assertThatThrownBy(() -> estoqueService.updateCategory(1L, "Essência", null, null))
+                .isInstanceOf(DuplicateCategoryNameException.class);
+        verify(categoryRepository, never()).save(any());
+    }
+
+    @Test
+    void updateCategory_renomearMantendoOProprioNome_naoColideConsigoMesma() {
+        Category atual = Category.of(1L, "Narguilé", false, 0, true);
+        when(categoryRepository.findById(1L)).thenReturn(Optional.of(atual));
+        when(categoryRepository.findByName("Narguilé")).thenReturn(Optional.of(atual));
+        when(categoryRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        assertThatCode(() -> estoqueService.updateCategory(1L, "Narguilé", true, null))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void updateCategory_idInexistente_e404() {
+        when(categoryRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.updateCategory(99L, "X", null, null))
+                .isInstanceOf(CategoryNotFoundException.class);
+    }
+
+    @Test
+    void setCategoryActive_naoMexeNosProdutos() {
+        // Categoria é organização de vitrine, não permissão de venda.
+        when(categoryRepository.findById(1L))
+                .thenReturn(Optional.of(Category.of(1L, "Narguilé", false, 0, true)));
+        when(categoryRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Category desativada = estoqueService.setCategoryActive(1L, false);
+
+        assertThat(desativada.active()).isFalse();
+        verifyNoInteractions(productRepository);
+    }
+
+    // ── Resolução de categoria no cadastro de produto (compatibilidade) ───────
+
+    @Test
+    void createProduct_comTextoDeCategoriaConhecido_reencontraAExistente() {
+        when(productRepository.existsBySku(anyString())).thenReturn(false);
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(categoryRepository.findByName("narguile"))
+                .thenReturn(Optional.of(Category.of(7L, "Narguilé", false, 0, true)));
+
+        estoqueService.createProduct("CAT-001", "Produto", "narguile", List.of(), Pricing.empty(),
+                null, null, false, false, null, null, List.of(), List.of(), null);
+
+        ArgumentCaptor<Product> captor = ArgumentCaptor.forClass(Product.class);
+        verify(productRepository).save(captor.capture());
+        assertThat(captor.getValue().categoryId()).isEqualTo(7L);
+        // O texto passa a ser a grafia canônica da categoria, não a digitada.
+        assertThat(captor.getValue().category()).isEqualTo("Narguilé");
+        verify(categoryRepository, never()).save(any());
+    }
+
+    @Test
+    void createProduct_comTextoDeCategoriaNovo_criaACategoria() {
+        // É o fluxo "Nova categoria..." do formulário: recusar quebraria o admin atual.
+        when(productRepository.existsBySku(anyString())).thenReturn(false);
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(categoryRepository.findByName("Vaporizadores")).thenReturn(Optional.empty());
+        when(categoryRepository.save(any()))
+                .thenReturn(Category.of(9L, "Vaporizadores", false, 0, true));
+
+        estoqueService.createProduct("CAT-002", "Produto", "Vaporizadores", List.of(), Pricing.empty(),
+                null, null, false, false, null, null, List.of(), List.of(), null);
+
+        ArgumentCaptor<Product> captor = ArgumentCaptor.forClass(Product.class);
+        verify(productRepository).save(captor.capture());
+        assertThat(captor.getValue().categoryId()).isEqualTo(9L);
+        verify(categoryRepository).save(any());
+    }
+
+    @Test
+    void createProduct_comCategoryId_venceSobreOTextoEResolveONome() {
+        when(productRepository.existsBySku(anyString())).thenReturn(false);
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(categoryRepository.findById(7L))
+                .thenReturn(Optional.of(Category.of(7L, "Narguilé", false, 0, true)));
+
+        estoqueService.createProduct("CAT-003", "Produto", "texto-ignorado", List.of(), Pricing.empty(),
+                null, null, false, false, null, null, List.of(), List.of(), 7L);
+
+        ArgumentCaptor<Product> captor = ArgumentCaptor.forClass(Product.class);
+        verify(productRepository).save(captor.capture());
+        assertThat(captor.getValue().categoryId()).isEqualTo(7L);
+        assertThat(captor.getValue().category()).isEqualTo("Narguilé");
+        verify(categoryRepository, never()).findByName(anyString());
+    }
+
+    @Test
+    void createProduct_comCategoryIdInexistente_e404() {
+        when(productRepository.existsBySku(anyString())).thenReturn(false);
+        when(categoryRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.createProduct("CAT-004", "Produto", null, List.of(),
+                Pricing.empty(), null, null, false, false, null, null, List.of(), List.of(), 99L))
+                .isInstanceOf(CategoryNotFoundException.class);
+        verify(productRepository, never()).save(any());
+    }
+
+    @Test
+    void createProduct_semCategoriaNenhuma_ficaSemVinculo() {
+        when(productRepository.existsBySku(anyString())).thenReturn(false);
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        estoqueService.createProduct("CAT-005", "Produto", null, List.of(), Pricing.empty(),
+                null, null, false, false, null, null, List.of(), List.of(), null);
+
+        ArgumentCaptor<Product> captor = ArgumentCaptor.forClass(Product.class);
+        verify(productRepository).save(captor.capture());
+        assertThat(captor.getValue().categoryId()).isNull();
+        verifyNoInteractions(categoryRepository);
+    }
+
+    @Test
+    void updateProduct_semCategoria_mantemOVinculoAtual() {
+        Product atual = Product.of(1L, "CAT-006", "Produto", "Narguilé", true, List.of(), Pricing.empty(),
+                ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(), List.of(), 7L);
+        when(productRepository.findBySku("CAT-006")).thenReturn(Optional.of(atual));
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        estoqueService.updateProduct("CAT-006", "Novo Nome", null, null, null, null, null, null, null, null,
+                null, null, null);
+
+        ArgumentCaptor<Product> captor = ArgumentCaptor.forClass(Product.class);
+        verify(productRepository).save(captor.capture());
+        assertThat(captor.getValue().categoryId()).isEqualTo(7L);
+        assertThat(captor.getValue().category()).isEqualTo("Narguilé");
     }
 }

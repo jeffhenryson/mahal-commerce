@@ -71,6 +71,7 @@ public class ProductDTOConverter {
         dto.setSku(product.sku());
         dto.setName(product.name());
         dto.setCategory(product.category());
+        dto.setCategoryId(product.categoryId());
         dto.setBrand(product.brand());
         dto.setImageUrl(product.imageUrl());
         dto.setOnSale(product.onSale());

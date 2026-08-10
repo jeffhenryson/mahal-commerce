@@ -4,6 +4,7 @@ import com.cernecommerce.adapter.out.persistence.entity.ProductEntity;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -70,13 +71,34 @@ public interface ProductJpaRepository extends JpaRepository<ProductEntity, Long>
     // ou custo+markup preenchidos o bastante para sugerir um preço. Kit nunca tem costPrice
     // próprio (KitCostNotEditableException), então só o ramo do salePrice se aplica a ele.
     // onSale segue o mesmo idioma de filtro opcional de OrderJpaRepository.findFiltered: nulo não filtra.
-    @Query("SELECT p.id FROM ProductEntity p WHERE p.active = TRUE "
+    /**
+     * Catálogo público, ordenado pela vitrine: categoria em destaque primeiro, depois a ordem de
+     * exibição da categoria, e só então o id — que segue como desempate final, porque destaque e
+     * ordem não são únicos e sem ele a paginação seria instável (EST-C012).
+     *
+     * <p>{@code LEFT JOIN} e não {@code JOIN}: produto sem categoria vinculada continua no
+     * catálogo. Os {@code COALESCE} colocam esse produto no grupo dos não-destacados e no fim da
+     * ordem, em vez de deixá-lo à mercê do tratamento de NULL do banco, que difere entre
+     * PostgreSQL e H2.</p>
+     */
+    @Query("SELECT p.id FROM ProductEntity p "
+            + "LEFT JOIN ProductCategoryEntity c ON c.id = p.categoryId "
+            + "WHERE p.active = TRUE "
             + "AND (p.salePrice IS NOT NULL OR (p.costPrice IS NOT NULL AND p.markupPercent IS NOT NULL)) "
             + "AND (:onSale IS NULL OR p.onSale = :onSale) "
-            + "ORDER BY p.id")
-    Page<Long> findActivePricedIds(Pageable pageable, Boolean onSale);
+            + "AND (:categoryId IS NULL OR p.categoryId = :categoryId) "
+            + "ORDER BY COALESCE(c.featured, FALSE) DESC, COALESCE(c.displayOrder, 2147483647) ASC, p.id ASC")
+    Page<Long> findActivePricedIds(Pageable pageable, @Param("onSale") Boolean onSale,
+            @Param("categoryId") Long categoryId);
 
     @Query("SELECT DISTINCT p FROM ProductEntity p LEFT JOIN FETCH p.variants v LEFT JOIN FETCH v.attributes "
             + "WHERE p.id IN :ids ORDER BY p.id")
     List<ProductEntity> findAllByIdsWithVariants(List<Long> ids);
+
+    // Propaga o rename da categoria para a coluna denormalizada. @Modifying com
+    // clearAutomatically: o update ignora o contexto de persistência, então instâncias já
+    // carregadas ficariam com o nome antigo até o fim da transação.
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("UPDATE ProductEntity p SET p.category = :newName WHERE p.categoryId = :categoryId")
+    int renameCategory(@Param("categoryId") Long categoryId, @Param("newName") String newName);
 }

@@ -14,6 +14,7 @@ import com.cernecommerce.core.domain.model.cashback.CashbackRate;
 import com.cernecommerce.core.domain.model.crm.Customer;
 import com.cernecommerce.core.domain.model.ecommerce.Cart;
 import com.cernecommerce.core.domain.model.ecommerce.CartItem;
+import com.cernecommerce.core.domain.model.estoque.Category;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.Warehouse;
@@ -85,12 +86,18 @@ public class ShopService implements ShopUseCase {
 
     @Override
     @Transactional(readOnly = true)
-    public PageResult<CatalogItem> listCatalog(int page, int size, Boolean onSale) {
+    public PageResult<CatalogItem> listCatalog(int page, int size, Boolean onSale, Long categoryId) {
         Warehouse warehouse = estoqueUseCase.getDefaultWarehouse();
-        PageResult<Product> products = estoqueUseCase.listActivePricedProducts(page, size, onSale);
+        PageResult<Product> products = estoqueUseCase.listActivePricedProducts(page, size, onSale, categoryId);
         return new PageResult<>(
                 products.content().stream().map(p -> toCatalogItem(p, warehouse.code())).toList(),
                 products.page(), products.size(), products.totalElements(), products.totalPages());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<Category> listCategories() {
+        return estoqueUseCase.listActiveCategories();
     }
 
     @Override

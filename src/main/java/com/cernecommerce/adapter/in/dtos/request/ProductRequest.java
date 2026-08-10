@@ -17,8 +17,19 @@ public class ProductRequest {
     @Size(max = 255)
     private String name;
 
+    /**
+     * Nome da categoria, como texto livre. Continua sendo o caminho aceito e é o que o admin usa
+     * hoje: um nome desconhecido <b>cria</b> a categoria correspondente. Quem já souber o id
+     * prefira {@code categoryId}, que dispensa a busca por nome.
+     */
     @Size(max = 100)
     private String category;
+
+    /**
+     * Vínculo direto com uma categoria existente. Quando informado, vence sobre {@code category}
+     * e o nome é resolvido a partir dele. Id inexistente é 404.
+     */
+    private Long categoryId;
 
     @Size(max = 100)
     private String brand;

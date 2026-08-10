@@ -1,11 +1,14 @@
 package com.cernecommerce.adapter.in.controller;
 
+import com.cernecommerce.adapter.in.converter.CategoryDTOConverter;
 import com.cernecommerce.adapter.in.converter.ProductDTOConverter;
 import com.cernecommerce.adapter.in.converter.StockCountDTOConverter;
 import com.cernecommerce.adapter.in.converter.StockMovementDTOConverter;
 import com.cernecommerce.adapter.in.converter.StockReservationDTOConverter;
 import com.cernecommerce.adapter.in.converter.WarehouseDTOConverter;
 import com.cernecommerce.adapter.in.dtos.request.ActiveRequest;
+import com.cernecommerce.adapter.in.dtos.request.CategoryPatchRequest;
+import com.cernecommerce.adapter.in.dtos.request.CategoryRequest;
 import com.cernecommerce.adapter.in.dtos.request.LotTrackedRequest;
 import com.cernecommerce.adapter.in.dtos.request.KitRecipeRequest;
 import com.cernecommerce.adapter.in.dtos.request.ProductPatchRequest;
@@ -16,6 +19,7 @@ import com.cernecommerce.adapter.in.dtos.request.StockCountRequest;
 import com.cernecommerce.adapter.in.dtos.request.StockMovementRequest;
 import com.cernecommerce.adapter.in.dtos.request.WarehousePatchRequest;
 import com.cernecommerce.adapter.in.dtos.request.WarehouseRequest;
+import com.cernecommerce.adapter.in.dtos.response.CategoryResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.KitComponentResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.LotIntegrityMismatchResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.OrphanSkuResponseDTO;
@@ -33,6 +37,7 @@ import com.cernecommerce.core.domain.event.AuditEvent;
 import com.cernecommerce.core.domain.event.AuditEvent.EventType;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.SortDirection;
+import com.cernecommerce.core.domain.model.estoque.Category;
 import com.cernecommerce.core.domain.model.estoque.LotIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Product;
@@ -95,19 +100,22 @@ public class EstoqueController {
     private final StockMovementDTOConverter movementConverter;
     private final StockCountDTOConverter stockCountConverter;
     private final StockReservationDTOConverter reservationConverter;
+    private final CategoryDTOConverter categoryConverter;
     private final ProductImageUseCase productImageUseCase;
     private final ApplicationEventPublisher publisher;
 
     public EstoqueController(EstoqueUseCase estoqueUseCase, ProductDTOConverter converter,
             WarehouseDTOConverter warehouseConverter, StockMovementDTOConverter movementConverter,
             StockCountDTOConverter stockCountConverter, StockReservationDTOConverter reservationConverter,
-            ProductImageUseCase productImageUseCase, ApplicationEventPublisher publisher) {
+            CategoryDTOConverter categoryConverter, ProductImageUseCase productImageUseCase,
+            ApplicationEventPublisher publisher) {
         this.estoqueUseCase = estoqueUseCase;
         this.converter = converter;
         this.warehouseConverter = warehouseConverter;
         this.movementConverter = movementConverter;
         this.stockCountConverter = stockCountConverter;
         this.reservationConverter = reservationConverter;
+        this.categoryConverter = categoryConverter;
         this.productImageUseCase = productImageUseCase;
         this.publisher = publisher;
     }
@@ -155,6 +163,84 @@ public class EstoqueController {
     public ResponseEntity<ProductResponseDTO> getProduct(
             @PathVariable @NotBlank @Size(min = 3, max = 50) String sku) {
         return ResponseEntity.ok(converter.toResponse(estoqueUseCase.findProductBySku(sku)));
+    }
+
+    // ── Categorias do catálogo ───────────────────────────────────────────────
+
+    @Operation(summary = "Lista categorias do catálogo, incluindo as inativas",
+            description = "Ordenadas por destaque, depois ordem de exibição, depois nome — a mesma "
+                    + "ordem que a vitrine usa.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/categories")
+    @PreAuthorize("hasAuthority('ESTOQUE_PRODUCT_READ')")
+    public ResponseEntity<PageResult<CategoryResponseDTO>> listCategories(
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+        PageResult<Category> result = estoqueUseCase.listCategories(page, size);
+        return ResponseEntity.ok(new PageResult<>(
+                result.content().stream().map(categoryConverter::toResponse).toList(),
+                result.page(), result.size(), result.totalElements(), result.totalPages()));
+    }
+
+    @Operation(summary = "Cria uma categoria do catálogo")
+    @ApiResponses({
+            @ApiResponse(responseCode = "201", description = "Criada"),
+            @ApiResponse(responseCode = "409", description = "Já existe categoria com esse nome", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PostMapping("/categories")
+    @PreAuthorize("hasAuthority('ESTOQUE_CATEGORY_MANAGE')")
+    public ResponseEntity<CategoryResponseDTO> createCategory(@Valid @RequestBody CategoryRequest request,
+            Authentication authentication) {
+        Category created = estoqueUseCase.createCategory(request.getName(), request.isFeatured(),
+                request.getDisplayOrder());
+        publisher.publishEvent(AuditEvent.of(EventType.CATEGORY_CREATED,
+                authentication.getName(), Map.of("categoryId", String.valueOf(created.id()),
+                        "name", created.name())));
+        return ResponseEntity.created(URI.create("/estoque/categories/" + created.id()))
+                .body(categoryConverter.toResponse(created));
+    }
+
+    @Operation(summary = "Altera parcialmente uma categoria (nome, destaque e/ou ordem)",
+            description = "Campo ausente ou nulo é mantido. Renomear propaga o novo nome para "
+                    + "todos os produtos vinculados.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "404", description = "Categoria não encontrada", content = @Content),
+            @ApiResponse(responseCode = "409", description = "Já existe categoria com esse nome", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PatchMapping("/categories/{id}")
+    @PreAuthorize("hasAuthority('ESTOQUE_CATEGORY_MANAGE')")
+    public ResponseEntity<CategoryResponseDTO> updateCategory(@PathVariable Long id,
+            @Valid @RequestBody CategoryPatchRequest request, Authentication authentication) {
+        Category updated = estoqueUseCase.updateCategory(id, request.getName(), request.getFeatured(),
+                request.getDisplayOrder());
+        publisher.publishEvent(AuditEvent.of(EventType.CATEGORY_UPDATED,
+                authentication.getName(), Map.of("categoryId", String.valueOf(id))));
+        return ResponseEntity.ok(categoryConverter.toResponse(updated));
+    }
+
+    @Operation(summary = "Ativa ou desativa uma categoria",
+            description = "Categoria inativa some da vitrine, mas os produtos vinculados continuam "
+                    + "à venda — categoria é organização de vitrine, não permissão de venda.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "404", description = "Categoria não encontrada", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PatchMapping("/categories/{id}/active")
+    @PreAuthorize("hasAuthority('ESTOQUE_CATEGORY_MANAGE')")
+    public ResponseEntity<CategoryResponseDTO> setCategoryActive(@PathVariable Long id,
+            @Valid @RequestBody ActiveRequest request, Authentication authentication) {
+        Category updated = estoqueUseCase.setCategoryActive(id, request.getActive());
+        publisher.publishEvent(AuditEvent.of(
+                Boolean.TRUE.equals(request.getActive()) ? EventType.CATEGORY_ACTIVATED : EventType.CATEGORY_DEACTIVATED,
+                authentication.getName(), Map.of("categoryId", String.valueOf(id))));
+        return ResponseEntity.ok(categoryConverter.toResponse(updated));
     }
 
     @Operation(summary = "Faz upload de uma imagem de produto e devolve a URL pública",
@@ -207,7 +293,7 @@ public class EstoqueController {
         Product created = estoqueUseCase.createProduct(request.getSku(), request.getName(), request.getCategory(),
                 variants, converter.toPricing(request.getPricing()), request.getBrand(), request.getImageUrl(),
                 request.isOnSale(), request.isSuperPromo(), request.getDescription(), request.getVideoUrl(),
-                request.getImages(), converter.toAttributes(request.getAttributes()));
+                request.getImages(), converter.toAttributes(request.getAttributes()), request.getCategoryId());
         publisher.publishEvent(AuditEvent.of(EventType.PRODUCT_CREATED,
                 authentication.getName(), Map.of("sku", created.sku())));
         return ResponseEntity.created(URI.create("/estoque/products/" + created.sku()))
@@ -239,7 +325,8 @@ public class EstoqueController {
                 converter.toPricing(request.getPricing()), request.getBrand(), request.getImageUrl(),
                 request.getOnSale(), request.getSuperPromo(), request.getDescription(), request.getVideoUrl(),
                 request.getImages(),
-                request.getAttributes() == null ? null : converter.toAttributes(request.getAttributes()));
+                request.getAttributes() == null ? null : converter.toAttributes(request.getAttributes()),
+                request.getCategoryId());
         publisher.publishEvent(AuditEvent.of(EventType.PRODUCT_UPDATED,
                 authentication.getName(), Map.of("sku", updated.sku())));
         // Evento próprio para mudança de preço: quem baixou o preço de quê e quando é a pergunta

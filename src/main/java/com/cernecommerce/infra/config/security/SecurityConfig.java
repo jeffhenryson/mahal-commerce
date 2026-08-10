@@ -118,6 +118,8 @@ public class SecurityConfig {
                 .requestMatchers(org.springframework.http.HttpMethod.POST, "/shop/register").permitAll()
                 // ECM-F002: catálogo público — GET /shop/catalog e /shop/catalog/{sku}.
                 .requestMatchers(org.springframework.http.HttpMethod.GET, "/shop/catalog", "/shop/catalog/*").permitAll()
+                // Mesma natureza do catálogo: é a navegação da vitrine, lida sem login.
+                .requestMatchers(org.springframework.http.HttpMethod.GET, "/shop/categories").permitAll()
                 // ECM-F004 (Fatia 10): notificação do gateway de pagamento — é o próprio gateway
                 // chamando, sem sessão de usuário nenhuma. A defesa mora dentro de
                 // PaymentWebhookService (payment_check sempre reconsulta a verdade), não aqui.

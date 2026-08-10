@@ -9,7 +9,14 @@ public class ProductResponseDTO {
     private Long id;
     private String sku;
     private String name;
+    /** Nome da categoria. Mantido como texto por compatibilidade — ver {@code categoryId}. */
     private String category;
+
+    /**
+     * Id da categoria vinculada, ou nulo em produto ainda não vinculado. O nome acima é o desta
+     * categoria, denormalizado e mantido em sincronia pelo backend.
+     */
+    private Long categoryId;
     private String brand;
 
     /** Estágio 01 do admin — link de imagem cadastrado manualmente pelo lojista. */

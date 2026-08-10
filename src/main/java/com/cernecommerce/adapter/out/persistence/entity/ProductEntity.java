@@ -113,4 +113,11 @@ public class ProductEntity {
     @CollectionTable(name = "product_root_attribute", joinColumns = @JoinColumn(name = "product_id",
             foreignKey = @ForeignKey(name = "fk_product_root_attribute_product")))
     private List<ProductAttributeEmbeddable> attributes = new ArrayList<>();
+
+    // Vínculo opcional com product_category. Guardado como id solto e não como @ManyToOne: o
+    // agregado Product não precisa navegar até a categoria (o nome já vem denormalizado na coluna
+    // "category"), e um @ManyToOne traria a entidade inteira em toda leitura de produto sem
+    // ninguém pedir. Nulo = produto ainda não vinculado, estado válido para o legado.
+    @Column(name = "category_id")
+    private Long categoryId;
 }

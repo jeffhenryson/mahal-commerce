@@ -1,6 +1,8 @@
 package com.cernecommerce.core.service;
 
+import com.cernecommerce.core.domain.exception.estoque.CategoryNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.DefaultWarehouseNotConfiguredException;
+import com.cernecommerce.core.domain.exception.estoque.DuplicateCategoryNameException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateKitComponentException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateSkuException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateWarehouseCodeException;
@@ -25,6 +27,7 @@ import com.cernecommerce.core.domain.exception.estoque.StockReservationNotFoundE
 import com.cernecommerce.core.domain.exception.estoque.UnexpectedLotInfoException;
 import com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException;
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.estoque.Category;
 import com.cernecommerce.core.domain.model.estoque.KitComponent;
 import com.cernecommerce.core.domain.model.estoque.LotIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
@@ -55,6 +58,7 @@ import com.cernecommerce.core.ports.in.EstoqueUseCase;
 import com.cernecommerce.core.ports.in.NotificationUseCase;
 import com.cernecommerce.core.ports.out.AfterCommitExecutor;
 import com.cernecommerce.core.ports.out.SystemConfigPort;
+import com.cernecommerce.core.ports.out.estoque.CategoryRepository;
 import com.cernecommerce.core.ports.out.estoque.KitComponentRepository;
 import com.cernecommerce.core.ports.out.estoque.ProductRepository;
 import com.cernecommerce.core.ports.out.estoque.ReorderPointRepository;
@@ -102,6 +106,7 @@ public class EstoqueService implements EstoqueUseCase {
     private final KitComponentRepository kitComponentRepository;
     private final StockLotRepository stockLotRepository;
     private final SystemConfigPort systemConfigPort;
+    private final CategoryRepository categoryRepository;
 
     public EstoqueService(ProductRepository productRepository, WarehouseRepository warehouseRepository,
             StockBalanceRepository stockBalanceRepository, StockMovementRepository stockMovementRepository,
@@ -110,7 +115,7 @@ public class EstoqueService implements EstoqueUseCase {
             NotificationUseCase notificationUseCase, UserRepository userRepository,
             AfterCommitExecutor afterCommitExecutor, Duration defaultReservationTtl,
             KitComponentRepository kitComponentRepository, StockLotRepository stockLotRepository,
-            SystemConfigPort systemConfigPort) {
+            SystemConfigPort systemConfigPort, CategoryRepository categoryRepository) {
         this.stockReservationRepository = stockReservationRepository;
         this.defaultReservationTtl = defaultReservationTtl;
         this.productRepository = productRepository;
@@ -126,13 +131,14 @@ public class EstoqueService implements EstoqueUseCase {
         this.kitComponentRepository = kitComponentRepository;
         this.stockLotRepository = stockLotRepository;
         this.systemConfigPort = systemConfigPort;
+        this.categoryRepository = categoryRepository;
     }
 
     @Override
     @Transactional
     public Product createProduct(String sku, String name, String category, List<ProductVariant> variants,
             Pricing pricing, String brand, String imageUrl, boolean onSale, boolean superPromo, String description,
-            String videoUrl, List<String> images, List<ProductAttribute> attributes) {
+            String videoUrl, List<String> images, List<ProductAttribute> attributes, Long categoryId) {
         List<ProductVariant> safeVariants = variants == null ? List.of() : variants;
         // O SKU pai e os das variações compartilham o mesmo espaço de nomes: uk_product_sku e
         // uk_product_variant_sku. Checar os dois aqui evita que a violação de constraint escape
@@ -149,9 +155,12 @@ public class EstoqueService implements EstoqueUseCase {
                 throw new DuplicateSkuException(candidate);
             }
         }
-        Product product = Product.create(sku, name, category, safeVariants,
+        Category resolved = resolveCategory(categoryId, category);
+        Product product = Product.create(sku, name,
+                resolved == null ? category : resolved.name(), safeVariants,
                 pricing == null ? Pricing.empty() : pricing, ProductType.SIMPLES, false, brand, imageUrl, onSale,
-                superPromo, description, videoUrl, images, attributes);
+                superPromo, description, videoUrl, images, attributes,
+                resolved == null ? null : resolved.id());
         return productRepository.save(product);
     }
 
@@ -164,18 +173,24 @@ public class EstoqueService implements EstoqueUseCase {
 
     @Override
     @Transactional(readOnly = true)
-    public PageResult<Product> listActivePricedProducts(int page, int size, Boolean onSale) {
-        return productRepository.findAllActiveAndPriced(page, size, onSale);
+    public PageResult<Product> listActivePricedProducts(int page, int size, Boolean onSale, Long categoryId) {
+        return productRepository.findAllActiveAndPriced(page, size, onSale, categoryId);
     }
 
     @Override
     @Transactional
     public Product updateProduct(String sku, String name, String category, Pricing pricing, String brand,
             String imageUrl, Boolean onSale, Boolean superPromo, String description, String videoUrl,
-            List<String> images, List<ProductAttribute> attributes) {
+            List<String> images, List<ProductAttribute> attributes, Long categoryId) {
         Product current = productRepository.findBySku(sku)
                 .orElseThrow(() -> new ProductNotFoundException(sku));
         Product updated = current.withDetails(name, category, brand, imageUrl, description, videoUrl);
+        // Categoria muda em par (id + nome denormalizado) ou não muda — nulos nos dois campos
+        // mantêm o que já estava, seguindo a semântica de PATCH do resto do método.
+        Category resolvedCategory = resolveCategory(categoryId, category);
+        if (resolvedCategory != null) {
+            updated = updated.withCategory(resolvedCategory.id(), resolvedCategory.name());
+        }
         if (onSale != null) {
             updated = updated.withOnSale(onSale);
         }
@@ -203,6 +218,91 @@ public class EstoqueService implements EstoqueUseCase {
                     pricing.costPrice(), pricing.markupPercent(), pricing.salePrice(), pricing.originalPrice()));
         }
         return productRepository.save(updated);
+    }
+
+    // ── Categorias do catálogo ───────────────────────────────────────────────
+
+    @Override
+    @Transactional
+    public Category createCategory(String name, boolean featured, int displayOrder) {
+        categoryRepository.findByName(name).ifPresent(existing -> {
+            throw new DuplicateCategoryNameException(name);
+        });
+        return categoryRepository.save(Category.create(name, featured, displayOrder));
+    }
+
+    @Override
+    @Transactional
+    public Category updateCategory(Long id, String name, Boolean featured, Integer displayOrder) {
+        Category current = categoryRepository.findById(id)
+                .orElseThrow(() -> new CategoryNotFoundException(id));
+        if (name != null) {
+            // O nome é único; deixar passar um rename que colide daria erro de constraint no
+            // flush, longe daqui e sem o errorCode que o contrato promete.
+            categoryRepository.findByName(name)
+                    .filter(other -> !other.id().equals(id))
+                    .ifPresent(other -> {
+                        throw new DuplicateCategoryNameException(name);
+                    });
+        }
+        Category updated = categoryRepository.save(current.withDetails(name, featured, displayOrder));
+        if (name != null && !name.equals(current.name())) {
+            // Propaga para a coluna denormalizada dos produtos vinculados. Sem isso a vitrine
+            // passaria a exibir o nome antigo e a ordenar pelo novo.
+            productRepository.renameCategory(id, updated.name());
+        }
+        return updated;
+    }
+
+    @Override
+    @Transactional
+    public Category setCategoryActive(Long id, boolean active) {
+        Category current = categoryRepository.findById(id)
+                .orElseThrow(() -> new CategoryNotFoundException(id));
+        // Deliberadamente NÃO mexe nos produtos: categoria é organização de vitrine, não permissão
+        // de venda. Desativá-la a tira das listas públicas; os produtos seguem à venda.
+        return categoryRepository.save(current.withActive(active));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResult<Category> listCategories(int page, int size) {
+        return categoryRepository.findAll(page, size);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<Category> listActiveCategories() {
+        return categoryRepository.findActiveOrdered();
+    }
+
+    /**
+     * Resolve o par (id, nome) de categoria de um produto, aceitando os <b>dois</b> caminhos.
+     *
+     * <p>É a peça que mantém o cadastro atual do admin funcionando sem nenhuma mudança: ele
+     * continua mandando {@code category} como texto livre, e aqui esse texto vira — ou reencontra
+     * — uma categoria de verdade. Quem já souber o id manda {@code categoryId} e o nome sai
+     * resolvido a partir dele.</p>
+     *
+     * <p>Texto desconhecido <b>cria</b> a categoria, em vez de ser recusado. Recusar quebraria o
+     * fluxo "Nova categoria..." do formulário e transformaria uma feature aditiva em mudança de
+     * contrato; e o efeito colateral de um erro de digitação criar uma categoria a mais é
+     * exatamente o que já acontecia quando categoria era texto puro — só que agora é visível e
+     * editável na tela de categorias.</p>
+     *
+     * @return {@code null} quando não há categoria nenhuma a resolver (produto sem categoria
+     *         segue sendo estado válido).
+     */
+    private Category resolveCategory(Long categoryId, String categoryName) {
+        if (categoryId != null) {
+            return categoryRepository.findById(categoryId)
+                    .orElseThrow(() -> new CategoryNotFoundException(categoryId));
+        }
+        if (categoryName == null || categoryName.isBlank()) {
+            return null;
+        }
+        return categoryRepository.findByName(categoryName)
+                .orElseGet(() -> categoryRepository.save(Category.create(categoryName)));
     }
 
     @Override

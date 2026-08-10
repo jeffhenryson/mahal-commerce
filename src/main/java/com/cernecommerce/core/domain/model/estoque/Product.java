@@ -7,6 +7,13 @@ import java.util.List;
  * uma distinguida por seus {@link ProductAttribute} (sabor, tamanho, cor), e a
  * {@link Pricing} do SKU pai.
  *
+ * <p><b>Categoria existe em dois lugares e isso é deliberado.</b> {@link #categoryId()} é o
+ * vínculo com a entidade {@link Category} (que carrega destaque e ordem da vitrine);
+ * {@link #category()} é o <b>nome denormalizado</b>, mantido em sincronia pelo backend. O texto
+ * permanece porque é o que {@code mahal-market} e {@code mahal-admin} já leem — trocá-lo por um id
+ * quebraria os dois de uma vez. O vínculo é opcional: produto legado sem categoria resolvida tem
+ * {@code categoryId} nulo e segue funcionando.</p>
+ *
  * <p><b>Atributos existem em dois níveis.</b> Os de {@link ProductVariant} <i>distinguem</i> uma
  * variação das outras da mesma grade (é o sabor que diferencia dois SKUs). Os do próprio produto
  * ({@link #attributes()}) apenas <i>descrevem</i> o item e não distinguem nada — servem ao produto
@@ -36,7 +43,8 @@ public record Product(
     String description,
     String videoUrl,
     List<String> images,
-    List<ProductAttribute> attributes
+    List<ProductAttribute> attributes,
+    Long categoryId
 ) {
 
     public Product {
@@ -117,8 +125,20 @@ public record Product(
             Pricing pricing, ProductType type, boolean lotTracked, String brand, String imageUrl, boolean onSale,
             boolean superPromo, String description, String videoUrl, List<String> images,
             List<ProductAttribute> attributes) {
+        return create(sku, name, category, variants, pricing, type, lotTracked, brand, imageUrl, onSale, superPromo,
+                description, videoUrl, images, attributes, null);
+    }
+
+    /**
+     * Cria um novo produto (sem id, ativo por padrão) — forma canônica, incluindo o vínculo com a
+     * entidade {@link Category}. Ver {@link #categoryId()}.
+     */
+    public static Product create(String sku, String name, String category, List<ProductVariant> variants,
+            Pricing pricing, ProductType type, boolean lotTracked, String brand, String imageUrl, boolean onSale,
+            boolean superPromo, String description, String videoUrl, List<String> images,
+            List<ProductAttribute> attributes, Long categoryId) {
         return new Product(null, sku, name, category, true, variants, pricing, type, lotTracked, brand, imageUrl,
-                onSale, superPromo, description, videoUrl, images, attributes);
+                onSale, superPromo, description, videoUrl, images, attributes, categoryId);
     }
 
     /** Reconstitui um produto sem precificação a partir de persistência. */
@@ -180,8 +200,17 @@ public record Product(
             List<ProductVariant> variants, Pricing pricing, ProductType type, boolean lotTracked, String brand,
             String imageUrl, boolean onSale, boolean superPromo, String description, String videoUrl,
             List<String> images, List<ProductAttribute> attributes) {
+        return of(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl, onSale,
+                superPromo, description, videoUrl, images, attributes, null);
+    }
+
+    /** Reconstitui um produto a partir de persistência — forma canônica, com o vínculo de categoria. */
+    public static Product of(Long id, String sku, String name, String category, boolean active,
+            List<ProductVariant> variants, Pricing pricing, ProductType type, boolean lotTracked, String brand,
+            String imageUrl, boolean onSale, boolean superPromo, String description, String videoUrl,
+            List<String> images, List<ProductAttribute> attributes, Long categoryId) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
-                onSale, superPromo, description, videoUrl, images, attributes);
+                onSale, superPromo, description, videoUrl, images, attributes, categoryId);
     }
 
     /**
@@ -227,19 +256,19 @@ public record Product(
                 onSale, superPromo,
                 newDescription == null ? description : newDescription,
                 newVideoUrl == null ? videoUrl : newVideoUrl,
-                images, attributes);
+                images, attributes, categoryId);
     }
 
     /** Ativa ou desativa o produto, preservando o resto. */
     public Product withActive(boolean newActive) {
         return new Product(id, sku, name, category, newActive, variants, pricing, type, lotTracked, brand, imageUrl,
-                onSale, superPromo, description, videoUrl, images, attributes);
+                onSale, superPromo, description, videoUrl, images, attributes, categoryId);
     }
 
     /** Substitui a precificação do produto, preservando o resto. */
     public Product withPricing(Pricing newPricing) {
         return new Product(id, sku, name, category, active, variants, newPricing, type, lotTracked, brand, imageUrl,
-                onSale, superPromo, description, videoUrl, images, attributes);
+                onSale, superPromo, description, videoUrl, images, attributes, categoryId);
     }
 
     /**
@@ -249,7 +278,7 @@ public record Product(
      */
     public Product withType(ProductType newType) {
         return new Product(id, sku, name, category, active, variants, pricing, newType, lotTracked, brand, imageUrl,
-                onSale, superPromo, description, videoUrl, images, attributes);
+                onSale, superPromo, description, videoUrl, images, attributes, categoryId);
     }
 
     /**
@@ -259,19 +288,19 @@ public record Product(
      */
     public Product withLotTracked(boolean newLotTracked) {
         return new Product(id, sku, name, category, active, variants, pricing, type, newLotTracked, brand, imageUrl,
-                onSale, superPromo, description, videoUrl, images, attributes);
+                onSale, superPromo, description, videoUrl, images, attributes, categoryId);
     }
 
     /** Marca ou desmarca o produto como em promoção (Estágio 01 do admin), preservando o resto. */
     public Product withOnSale(boolean newOnSale) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
-                newOnSale, superPromo, description, videoUrl, images, attributes);
+                newOnSale, superPromo, description, videoUrl, images, attributes, categoryId);
     }
 
     /** Marca ou desmarca o produto com o selo de super promoção, preservando o resto. */
     public Product withSuperPromo(boolean newSuperPromo) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
-                onSale, newSuperPromo, description, videoUrl, images, attributes);
+                onSale, newSuperPromo, description, videoUrl, images, attributes, categoryId);
     }
 
     /**
@@ -280,7 +309,7 @@ public record Product(
      */
     public Product withImages(List<String> newImages) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
-                onSale, superPromo, description, videoUrl, newImages, attributes);
+                onSale, superPromo, description, videoUrl, newImages, attributes, categoryId);
     }
 
     /**
@@ -289,7 +318,21 @@ public record Product(
      */
     public Product withAttributes(List<ProductAttribute> newAttributes) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
-                onSale, superPromo, description, videoUrl, images, newAttributes);
+                onSale, superPromo, description, videoUrl, images, newAttributes, categoryId);
+    }
+
+    /**
+     * Vincula o produto a uma {@link Category}, mantendo o nome denormalizado em sincronia.
+     *
+     * <p>Os dois andam sempre juntos, de propósito: {@code category} (texto) é o que
+     * {@code mahal-market} e {@code mahal-admin} leem hoje, e deixá-lo divergir do nome da
+     * categoria vinculada faria a vitrine exibir um rótulo e ordenar por outro.</p>
+     */
+    public Product withCategory(Long newCategoryId, String newCategoryName) {
+        return new Product(id, sku, name,
+                newCategoryName == null ? category : newCategoryName,
+                active, variants, pricing, type, lotTracked, brand, imageUrl, onSale, superPromo, description,
+                videoUrl, images, attributes, newCategoryId);
     }
 
     /**

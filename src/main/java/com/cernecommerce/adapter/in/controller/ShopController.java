@@ -2,6 +2,10 @@ package com.cernecommerce.adapter.in.controller;
 
 import com.cernecommerce.adapter.in.converter.ShopCatalogDTOConverter;
 import com.cernecommerce.adapter.in.dtos.request.ShopRegisterRequest;
+import java.util.List;
+
+import com.cernecommerce.adapter.in.converter.CategoryDTOConverter;
+import com.cernecommerce.adapter.in.dtos.response.CategoryResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.ShopCatalogItemDetailResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.ShopCatalogItemResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.ShopRegisterResponseDTO;
@@ -44,12 +48,14 @@ public class ShopController {
     private final ShopUseCase shopUseCase;
     private final ApplicationEventPublisher publisher;
     private final ShopCatalogDTOConverter catalogConverter;
+    private final CategoryDTOConverter categoryConverter;
 
     public ShopController(ShopUseCase shopUseCase, ApplicationEventPublisher publisher,
-            ShopCatalogDTOConverter catalogConverter) {
+            ShopCatalogDTOConverter catalogConverter, CategoryDTOConverter categoryConverter) {
         this.shopUseCase = shopUseCase;
         this.publisher = publisher;
         this.catalogConverter = catalogConverter;
+        this.categoryConverter = categoryConverter;
     }
 
     @Operation(summary = "Autocadastro do cliente do marketplace",
@@ -74,9 +80,22 @@ public class ShopController {
         return ResponseEntity.status(201).body(response);
     }
 
+    @Operation(summary = "Categorias ativas do catálogo, na ordem da vitrine",
+            description = "Destacadas primeiro, depois por ordem de exibição, depois por nome. "
+                    + "É a lista que o app usa para montar a primeira linha de navegação.")
+    @ApiResponses(@ApiResponse(responseCode = "200", description = "OK"))
+    @GetMapping("/categories")
+    public ResponseEntity<List<CategoryResponseDTO>> listCategories() {
+        return ResponseEntity.ok(shopUseCase.listCategories().stream()
+                .map(categoryConverter::toResponse)
+                .toList());
+    }
+
     @Operation(summary = "Catálogo público paginado (ECM-F002)",
             description = "Só produto ativo e precificado, com preço efetivo e disponibilidade no "
-                    + "depósito padrão do marketplace. `onSale=true` restringe à lista de promoções.")
+                    + "depósito padrão do marketplace. `onSale=true` restringe à lista de promoções; "
+                    + "`categoryId` restringe a uma categoria. A ordem é a da vitrine: produtos de "
+                    + "categoria em destaque vêm primeiro.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "OK"),
             @ApiResponse(responseCode = "429", description = "Muitas requisições", content = @Content),
@@ -86,8 +105,9 @@ public class ShopController {
     public ResponseEntity<PageResult<ShopCatalogItemResponseDTO>> listCatalog(
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size,
-            @RequestParam(required = false) Boolean onSale) {
-        PageResult<ShopUseCase.CatalogItem> result = shopUseCase.listCatalog(page, size, onSale);
+            @RequestParam(required = false) Boolean onSale,
+            @RequestParam(required = false) Long categoryId) {
+        PageResult<ShopUseCase.CatalogItem> result = shopUseCase.listCatalog(page, size, onSale, categoryId);
         PageResult<ShopCatalogItemResponseDTO> response = new PageResult<>(
                 result.content().stream().map(catalogConverter::toResponse).toList(),
                 result.page(), result.size(), result.totalElements(), result.totalPages());

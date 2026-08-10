@@ -2,6 +2,7 @@ package com.cernecommerce.adapter.out.persistence.repository;
 
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.SortDirection;
+import com.cernecommerce.core.domain.model.estoque.Category;
 import com.cernecommerce.core.domain.model.estoque.KitComponent;
 import com.cernecommerce.core.domain.model.estoque.LotIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
@@ -324,6 +325,158 @@ class EstoqueRepositoryIT {
         assertThat(page.size()).isEqualTo(1);
         assertThat(page.totalElements()).isGreaterThanOrEqualTo(2);
         assertThat(page.totalPages()).isGreaterThanOrEqualTo(2);
+    }
+
+    // ── Categorias do catálogo ───────────────────────────────────────────────
+
+    @Autowired CategoryRepositoryImpl categoryRepository;
+
+    @Test
+    void category_roundTrip() {
+        Category saved = categoryRepository.save(Category.create("CatRT Narguilé", true, 3));
+        flushAndClear();
+
+        Category reloaded = categoryRepository.findById(saved.id()).orElseThrow();
+
+        assertThat(reloaded.name()).isEqualTo("CatRT Narguilé");
+        assertThat(reloaded.featured()).isTrue();
+        assertThat(reloaded.displayOrder()).isEqualTo(3);
+        assertThat(reloaded.active()).isTrue();
+    }
+
+    @Test
+    void category_findByName_ignoraCaixa() {
+        // É o caminho de compatibilidade: o admin ainda manda texto livre, e "Narguilé" e
+        // "narguilé" não podem virar duas categorias.
+        categoryRepository.save(Category.create("CatCase Essência"));
+        flushAndClear();
+
+        assertThat(categoryRepository.findByName("catcase essência")).isPresent();
+        assertThat(categoryRepository.findByName("CATCASE ESSÊNCIA")).isPresent();
+    }
+
+    @Test
+    void category_findActiveOrdered_destacadasPrimeiroDepoisOrdemDepoisNome() {
+        categoryRepository.save(Category.create("ZZ Ord Comum B", false, 1));
+        categoryRepository.save(Category.create("ZZ Ord Comum A", false, 0));
+        categoryRepository.save(Category.create("ZZ Ord Destaque B", true, 1));
+        categoryRepository.save(Category.create("ZZ Ord Destaque A", true, 0));
+        Category inativa = categoryRepository.save(Category.create("ZZ Ord Inativa", true, 0));
+        categoryRepository.save(inativa.withActive(false));
+        flushAndClear();
+
+        List<String> nomes = categoryRepository.findActiveOrdered().stream()
+                .map(Category::name)
+                .filter(n -> n.startsWith("ZZ Ord"))
+                .toList();
+
+        assertThat(nomes).containsExactly(
+                "ZZ Ord Destaque A", "ZZ Ord Destaque B", "ZZ Ord Comum A", "ZZ Ord Comum B");
+        assertThat(nomes).doesNotContain("ZZ Ord Inativa");
+    }
+
+    @Test
+    void renameCategory_atualizaAColunaDenormalizadaDosProdutosVinculados() {
+        Category categoria = categoryRepository.save(Category.create("Ren Antiga"));
+        productRepository.save(Product.create("REN-001", "Produto 1", "Ren Antiga", List.of(), Pricing.empty(),
+                ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(), List.of(),
+                categoria.id()));
+        productRepository.save(Product.create("REN-002", "Produto 2", "Ren Antiga", List.of(), Pricing.empty(),
+                ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(), List.of(),
+                categoria.id()));
+        // Produto de outra categoria não pode ser arrastado pelo rename.
+        productRepository.save(Product.create("REN-003", "Produto 3", "Outra", List.of()));
+        flushAndClear();
+
+        int atualizados = productRepository.renameCategory(categoria.id(), "Ren Nova");
+        flushAndClear();
+
+        assertThat(atualizados).isEqualTo(2);
+        assertThat(productRepository.findBySku("REN-001").orElseThrow().category()).isEqualTo("Ren Nova");
+        assertThat(productRepository.findBySku("REN-002").orElseThrow().category()).isEqualTo("Ren Nova");
+        assertThat(productRepository.findBySku("REN-003").orElseThrow().category()).isEqualTo("Outra");
+    }
+
+    @Test
+    void product_roundTripDoVinculoDeCategoria() {
+        Category categoria = categoryRepository.save(Category.create("Vinc Narguilé"));
+        productRepository.save(Product.create("VINC-001", "Produto", "Vinc Narguilé", List.of(), Pricing.empty(),
+                ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(), List.of(),
+                categoria.id()));
+        flushAndClear();
+
+        Product reloaded = productRepository.findBySku("VINC-001").orElseThrow();
+
+        assertThat(reloaded.categoryId()).isEqualTo(categoria.id());
+        assertThat(reloaded.category()).isEqualTo("Vinc Narguilé");
+    }
+
+    @Test
+    void product_semVinculoDeCategoria_segueValido() {
+        productRepository.save(Product.create("VINC-002", "Produto", "texto solto", List.of()));
+        flushAndClear();
+
+        Product reloaded = productRepository.findBySku("VINC-002").orElseThrow();
+
+        assertThat(reloaded.categoryId()).isNull();
+        assertThat(reloaded.category()).isEqualTo("texto solto");
+    }
+
+    @Test
+    void catalogoPublico_ordenaPorDestaqueEOrdemDaCategoria() {
+        Category destaque = categoryRepository.save(Category.create("Cat Vitrine Destaque", true, 0));
+        Category comum = categoryRepository.save(Category.create("Cat Vitrine Comum", false, 5));
+        Pricing precificado = new Pricing(null, null, new BigDecimal("10.00"), null);
+        // Gravado na ordem inversa da esperada, para a ordenação ter o que provar.
+        productRepository.save(Product.create("VIT-001", "Comum", "Cat Vitrine Comum", List.of(), precificado,
+                ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(), List.of(), comum.id()));
+        productRepository.save(Product.create("VIT-002", "Destacado", "Cat Vitrine Destaque", List.of(), precificado,
+                ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(), List.of(), destaque.id()));
+        flushAndClear();
+
+        List<String> skus = productRepository.findAllActiveAndPriced(0, 100, null, null).content().stream()
+                .map(Product::sku)
+                .filter(sku -> sku.startsWith("VIT-"))
+                .toList();
+
+        assertThat(skus).containsExactly("VIT-002", "VIT-001");
+    }
+
+    @Test
+    void catalogoPublico_produtoSemCategoriaNaoSomeEVaiParaOFim() {
+        // LEFT JOIN + COALESCE: sem eles o produto sem categoria sumiria (JOIN) ou cairia numa
+        // posição dependente de como o banco trata NULL na ordenação.
+        Category destaque = categoryRepository.save(Category.create("Cat Orfa Destaque", true, 0));
+        Pricing precificado = new Pricing(null, null, new BigDecimal("10.00"), null);
+        productRepository.save(Product.create("ORF-001", "Sem categoria", null, List.of(), precificado));
+        productRepository.save(Product.create("ORF-002", "Destacado", "Cat Orfa Destaque", List.of(), precificado,
+                ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(), List.of(),
+                destaque.id()));
+        flushAndClear();
+
+        List<String> skus = productRepository.findAllActiveAndPriced(0, 100, null, null).content().stream()
+                .map(Product::sku)
+                .filter(sku -> sku.startsWith("ORF-"))
+                .toList();
+
+        assertThat(skus).containsExactly("ORF-002", "ORF-001");
+    }
+
+    @Test
+    void catalogoPublico_filtraPorCategoria() {
+        Category alvo = categoryRepository.save(Category.create("Cat Filtro Alvo"));
+        Category outra = categoryRepository.save(Category.create("Cat Filtro Outra"));
+        Pricing precificado = new Pricing(null, null, new BigDecimal("10.00"), null);
+        productRepository.save(Product.create("FIL-001", "Alvo", "Cat Filtro Alvo", List.of(), precificado,
+                ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(), List.of(), alvo.id()));
+        productRepository.save(Product.create("FIL-002", "Outra", "Cat Filtro Outra", List.of(), precificado,
+                ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(), List.of(), outra.id()));
+        flushAndClear();
+
+        PageResult<Product> page = productRepository.findAllActiveAndPriced(0, 100, null, alvo.id());
+
+        assertThat(page.content()).extracting(Product::sku).containsExactly("FIL-001");
+        assertThat(page.totalElements()).isEqualTo(1L);
     }
 
     // ── Preço próprio da variação (EST-F020) ─────────────────────────────────

@@ -7,6 +7,7 @@ import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.auth.User;
 import com.cernecommerce.core.domain.model.crm.Customer;
 import com.cernecommerce.core.domain.model.crm.CustomerStage;
+import com.cernecommerce.core.domain.model.estoque.Category;
 import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
 import com.cernecommerce.core.domain.model.rbac.Role;
 import com.cernecommerce.core.ports.in.ShopUseCase;
@@ -50,7 +51,8 @@ class ShopControllerTest {
 
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new ShopController(shopUseCase, publisher,
-                        new com.cernecommerce.adapter.in.converter.ShopCatalogDTOConverter()))
+                        new com.cernecommerce.adapter.in.converter.ShopCatalogDTOConverter(),
+                        new com.cernecommerce.adapter.in.converter.CategoryDTOConverter()))
                 .setControllerAdvice(exceptionHandler)
                 .build();
     }
@@ -120,7 +122,7 @@ class ShopControllerTest {
     void listCatalog_returnsPagedItems() throws Exception {
         ShopUseCase.CatalogItem item = new ShopUseCase.CatalogItem(
                 "ESS-001", "Essência Maçã", "essencia", new BigDecimal("30.00"), true, null, false, null, false);
-        when(shopUseCase.listCatalog(0, 20, null)).thenReturn(new PageResult<>(List.of(item), 0, 20, 1L, 1));
+        when(shopUseCase.listCatalog(0, 20, null, null)).thenReturn(new PageResult<>(List.of(item), 0, 20, 1L, 1));
 
         mockMvc.perform(get("/shop/catalog"))
                 .andExpect(status().isOk())
@@ -131,7 +133,7 @@ class ShopControllerTest {
 
     @Test
     void listCatalog_defaultWarehouseNotConfigured_returns_503() throws Exception {
-        when(shopUseCase.listCatalog(0, 20, null)).thenThrow(new DefaultWarehouseNotConfiguredException());
+        when(shopUseCase.listCatalog(0, 20, null, null)).thenThrow(new DefaultWarehouseNotConfiguredException());
 
         mockMvc.perform(get("/shop/catalog"))
                 .andExpect(status().isServiceUnavailable())
@@ -162,7 +164,7 @@ class ShopControllerTest {
         ShopUseCase.CatalogItem item = new ShopUseCase.CatalogItem(
                 "ESS-001", "Essência Maçã", "essencia", new BigDecimal("30.00"), true, null, false,
                 new BigDecimal("40.00"), true);
-        when(shopUseCase.listCatalog(0, 20, null)).thenReturn(new PageResult<>(List.of(item), 0, 20, 1L, 1));
+        when(shopUseCase.listCatalog(0, 20, null, null)).thenReturn(new PageResult<>(List.of(item), 0, 20, 1L, 1));
 
         mockMvc.perform(get("/shop/catalog"))
                 .andExpect(status().isOk())
@@ -195,5 +197,31 @@ class ShopControllerTest {
         mockMvc.perform(get("/shop/catalog/GHOST"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.errorCode").value("PRODUCT_NOT_FOUND"));
+    }
+
+
+    @Test
+    void listCategories_devolveNaOrdemDaVitrine() throws Exception {
+        when(shopUseCase.listCategories()).thenReturn(List.of(
+                Category.of(1L, "Promoções", true, 0, true),
+                Category.of(2L, "Narguilé", false, 1, true)));
+
+        mockMvc.perform(get("/shop/categories"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].name").value("Promoções"))
+                .andExpect(jsonPath("$[0].featured").value(true))
+                .andExpect(jsonPath("$[1].name").value("Narguilé"))
+                .andExpect(jsonPath("$[1].displayOrder").value(1));
+    }
+
+    @Test
+    void listCatalog_repassaCategoryIdAoUseCase() throws Exception {
+        when(shopUseCase.listCatalog(0, 20, null, 7L))
+                .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0));
+
+        mockMvc.perform(get("/shop/catalog").param("categoryId", "7"))
+                .andExpect(status().isOk());
+
+        verify(shopUseCase).listCatalog(0, 20, null, 7L);
     }
 }

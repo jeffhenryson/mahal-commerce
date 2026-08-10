@@ -40,7 +40,16 @@ public interface ProductRepository {
      * @param onSale filtro opcional de promoção (Estágio 01 do admin) — {@code null} não filtra;
      *        {@code true}/{@code false} restringe à sinalização exata.
      */
-    PageResult<Product> findAllActiveAndPriced(int page, int size, Boolean onSale);
+    default PageResult<Product> findAllActiveAndPriced(int page, int size, Boolean onSale) {
+        return findAllActiveAndPriced(page, size, onSale, null);
+    }
+
+    /**
+     * @param categoryId filtro opcional de categoria — {@code null} não filtra. A ordenação é
+     *        sempre a da vitrine: categoria em destaque primeiro, depois ordem de exibição,
+     *        depois id.
+     */
+    PageResult<Product> findAllActiveAndPriced(int page, int size, Boolean onSale, Long categoryId);
 
     Optional<Product> findBySku(String sku);
 
@@ -70,4 +79,16 @@ public interface ProductRepository {
     boolean isSkuActive(String sku);
 
     Product save(Product product);
+
+    /**
+     * Atualiza em lote a coluna denormalizada {@code category} de todos os produtos vinculados a
+     * uma categoria renomeada.
+     *
+     * <p>Update em massa e não carregar-e-salvar produto a produto: a operação toca só uma coluna
+     * escalar, e materializar o agregado inteiro (com variações e atributos) de cada produto de
+     * uma categoria grande para reescrever um texto seria caro sem nenhum ganho.</p>
+     *
+     * @return quantidade de produtos atualizados
+     */
+    int renameCategory(Long categoryId, String newName);
 }

@@ -1298,4 +1298,111 @@ public class EstoqueControllerSecurityTest {
         mockMvc.perform(get("/product-images/a..b.jpg"))
                 .andExpect(status().isNotFound());
     }
+
+
+    // ===== Categorias: ESTOQUE_CATEGORY_MANAGE para escrita, PRODUCT_READ para leitura =====
+
+    private Long givenCategory() throws Exception {
+        String body = mockMvc.perform(post("/estoque/categories")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"Cat Sec " + System.nanoTime() + "\"}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_CATEGORY_MANAGE"))))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        return Long.valueOf(body.replaceAll(".*\"id\":(\\d+).*", "$1"));
+    }
+
+    @Test
+    void list_categories_without_auth_returns_401() throws Exception {
+        mockMvc.perform(get("/estoque/categories")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void list_categories_with_estoque_product_read_returns_200() throws Exception {
+        // Ler categoria é ler catálogo — não exige a permissão de gestão.
+        mockMvc.perform(get("/estoque/categories")
+                .with(user("vendedor").authorities(
+                        new SimpleGrantedAuthority("ROLE_ATENDENTE"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_READ"))))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void create_category_with_product_manage_only_returns_403() throws Exception {
+        // Manter o cadastro de produtos não dá direito de reorganizar a vitrine.
+        mockMvc.perform(post("/estoque/categories")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"Proibida\"}")
+                .with(user("cadastrador").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_MANAGE"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void create_category_with_category_manage_returns_201() throws Exception {
+        mockMvc.perform(post("/estoque/categories")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"Cat Sec Ok " + System.nanoTime() + "\"}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_CATEGORY_MANAGE"))))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
+    void patch_category_without_category_manage_returns_403() throws Exception {
+        mockMvc.perform(patch("/estoque/categories/1")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"featured\":true}")
+                .with(user("cadastrador").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_MANAGE"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void patch_category_with_category_manage_returns_200() throws Exception {
+        Long id = givenCategory();
+        mockMvc.perform(patch("/estoque/categories/" + id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"featured\":true,\"displayOrder\":2}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_CATEGORY_MANAGE"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.featured").value(true));
+    }
+
+    @Test
+    void patch_category_active_without_category_manage_returns_403() throws Exception {
+        mockMvc.perform(patch("/estoque/categories/1/active")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"active\":false}")
+                .with(user("cadastrador").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_MANAGE"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void patch_category_active_with_category_manage_returns_200() throws Exception {
+        Long id = givenCategory();
+        mockMvc.perform(patch("/estoque/categories/" + id + "/active")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"active\":false}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_CATEGORY_MANAGE"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.active").value(false));
+    }
+
+    @Test
+    void shop_categories_is_public() throws Exception {
+        // Sem token: é a navegação da vitrine, lida pelo app antes de qualquer login.
+        mockMvc.perform(get("/shop/categories")).andExpect(status().isOk());
+    }
 }
