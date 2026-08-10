@@ -1,6 +1,6 @@
 package com.cernecommerce.core.ports.in;
 
-import com.cernecommerce.core.domain.model.AvatarServeResult;
+import com.cernecommerce.core.domain.model.storage.FileServeResult;
 
 public interface AvatarUseCase {
     /** Valida, armazena e associa o avatar ao usuário. Retorna a URL pública. */
@@ -10,5 +10,5 @@ public interface AvatarUseCase {
     void delete(String username);
 
     /** Resolve como servir o arquivo: redirect para CDN/S3 ou bytes locais. */
-    AvatarServeResult serve(String filename);
+    FileServeResult serve(String filename);
 }

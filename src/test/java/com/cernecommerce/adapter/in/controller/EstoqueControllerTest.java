@@ -10,6 +10,8 @@ import com.cernecommerce.adapter.in.converter.StockCountDTOConverter;
 import com.cernecommerce.adapter.in.converter.StockMovementDTOConverter;
 import com.cernecommerce.adapter.in.converter.StockReservationDTOConverter;
 import com.cernecommerce.adapter.in.converter.WarehouseDTOConverter;
+import com.cernecommerce.core.domain.exception.storage.ImageTooLargeException;
+import com.cernecommerce.core.domain.exception.storage.InvalidImageFormatException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateSkuException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateWarehouseCodeException;
 import com.cernecommerce.core.domain.exception.estoque.InactiveProductException;
@@ -43,6 +45,7 @@ import com.cernecommerce.core.domain.model.estoque.StockReservation;
 import com.cernecommerce.core.domain.model.estoque.Warehouse;
 import com.cernecommerce.core.domain.model.estoque.WarehouseType;
 import com.cernecommerce.core.ports.in.EstoqueUseCase;
+import com.cernecommerce.core.ports.in.ProductImageUseCase;
 import com.cernecommerce.infra.handler.GlobalExceptionHandler;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -52,6 +55,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.math.BigDecimal;
@@ -63,6 +67,7 @@ public class EstoqueControllerTest {
 
     private MockMvc mockMvc;
     private EstoqueUseCase estoqueUseCase;
+    private ProductImageUseCase productImageUseCase;
 
     private static final UsernamePasswordAuthenticationToken AUTH =
             new UsernamePasswordAuthenticationToken("admin", null, List.of());
@@ -70,11 +75,13 @@ public class EstoqueControllerTest {
     @BeforeEach
     void setup() {
         estoqueUseCase = mock(EstoqueUseCase.class);
+        productImageUseCase = mock(ProductImageUseCase.class);
         ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new EstoqueController(estoqueUseCase, new ProductDTOConverter(),
                         new WarehouseDTOConverter(), new StockMovementDTOConverter(),
-                        new StockCountDTOConverter(), new StockReservationDTOConverter(), publisher))
+                        new StockCountDTOConverter(), new StockReservationDTOConverter(),
+                        productImageUseCase, publisher))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }
@@ -1514,5 +1521,57 @@ public class EstoqueControllerTest {
                 .andExpect(status().isOk());
 
         verify(estoqueUseCase).listOrphanSkus(3, 100);
+    }
+
+    // ===== Upload de imagem de produto =====
+
+    private static final byte[] JPEG_BYTES = {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 0x00, 0x11};
+
+    @Test
+    void uploadProductImage_devolve_a_url_no_body_e_repassa_os_bytes_ao_use_case() throws Exception {
+        when(productImageUseCase.upload(any())).thenReturn("http://localhost:8082/product-images/abc.jpg");
+
+        mockMvc.perform(multipart("/estoque/products/images")
+                        .file(new MockMultipartFile("file", "foto.jpg", "image/jpeg", JPEG_BYTES))
+                        .principal(AUTH))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.imageUrl").value("http://localhost:8082/product-images/abc.jpg"));
+
+        ArgumentCaptor<byte[]> captor = ArgumentCaptor.forClass(byte[].class);
+        verify(productImageUseCase).upload(captor.capture());
+        assertThat(captor.getValue()).isEqualTo(JPEG_BYTES);
+    }
+
+    @Test
+    void uploadProductImage_arquivo_vazio_returns_400_sem_chamar_o_use_case() throws Exception {
+        mockMvc.perform(multipart("/estoque/products/images")
+                        .file(new MockMultipartFile("file", "vazio.jpg", "image/jpeg", new byte[0]))
+                        .principal(AUTH))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("INVALID_IMAGE_FORMAT"));
+
+        verifyNoInteractions(productImageUseCase);
+    }
+
+    @Test
+    void uploadProductImage_formato_recusado_pelo_dominio_returns_400() throws Exception {
+        when(productImageUseCase.upload(any())).thenThrow(new InvalidImageFormatException());
+
+        mockMvc.perform(multipart("/estoque/products/images")
+                        .file(new MockMultipartFile("file", "script.jpg", "image/jpeg", "nao sou imagem".getBytes()))
+                        .principal(AUTH))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("INVALID_IMAGE_FORMAT"));
+    }
+
+    @Test
+    void uploadProductImage_acima_do_limite_returns_400() throws Exception {
+        when(productImageUseCase.upload(any())).thenThrow(new ImageTooLargeException(5_242_880L));
+
+        mockMvc.perform(multipart("/estoque/products/images")
+                        .file(new MockMultipartFile("file", "grande.jpg", "image/jpeg", JPEG_BYTES))
+                        .principal(AUTH))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("IMAGE_TOO_LARGE"));
     }
 }

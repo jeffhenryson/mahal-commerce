@@ -49,7 +49,12 @@ class SecurityArchitectureTest {
             // ECM-F004 (Fatia 10): é o gateway de pagamento chamando, sem sessão de usuário. A
             // defesa mora dentro de PaymentWebhookService (payment_check sempre reconsulta a
             // verdade no gateway), não em @PreAuthorize — o InfinitePay nem assina o webhook.
-            "PaymentWebhookController");
+            "PaymentWebhookController",
+            // Só serve o arquivo de imagem já publicado no catálogo, pelo mesmo motivo de
+            // GET /shop/catalog ser público: a vitrine do marketplace renderiza a foto sem token.
+            // O UPLOAD não está aqui — mora em EstoqueController#uploadProductImage, sob
+            // ESTOQUE_PRODUCT_MANAGE, e continua coberto por esta regra.
+            "ProductImageController");
 
     private static final Set<String> SELF_SERVICE_CONTROLLERS = Set.of(
             "NotificationController", "NotificationPreferenceController", "AvatarController");

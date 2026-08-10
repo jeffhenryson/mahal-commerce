@@ -44,7 +44,9 @@ import com.cernecommerce.core.domain.model.estoque.StockCountItem;
 import com.cernecommerce.core.domain.model.estoque.StockMovement;
 import com.cernecommerce.core.domain.model.estoque.StockReservation;
 import com.cernecommerce.core.domain.model.estoque.Warehouse;
+import com.cernecommerce.core.domain.exception.storage.InvalidImageFormatException;
 import com.cernecommerce.core.ports.in.EstoqueUseCase;
+import com.cernecommerce.core.ports.in.ProductImageUseCase;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -58,12 +60,15 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.net.URI;
 import java.util.HashMap;
 import java.util.List;
@@ -87,18 +92,20 @@ public class EstoqueController {
     private final StockMovementDTOConverter movementConverter;
     private final StockCountDTOConverter stockCountConverter;
     private final StockReservationDTOConverter reservationConverter;
+    private final ProductImageUseCase productImageUseCase;
     private final ApplicationEventPublisher publisher;
 
     public EstoqueController(EstoqueUseCase estoqueUseCase, ProductDTOConverter converter,
             WarehouseDTOConverter warehouseConverter, StockMovementDTOConverter movementConverter,
             StockCountDTOConverter stockCountConverter, StockReservationDTOConverter reservationConverter,
-            ApplicationEventPublisher publisher) {
+            ProductImageUseCase productImageUseCase, ApplicationEventPublisher publisher) {
         this.estoqueUseCase = estoqueUseCase;
         this.converter = converter;
         this.warehouseConverter = warehouseConverter;
         this.movementConverter = movementConverter;
         this.stockCountConverter = stockCountConverter;
         this.reservationConverter = reservationConverter;
+        this.productImageUseCase = productImageUseCase;
         this.publisher = publisher;
     }
 
@@ -117,6 +124,36 @@ public class EstoqueController {
                 result.content().stream().map(converter::toResponse).toList(),
                 result.page(), result.size(), result.totalElements(), result.totalPages());
         return ResponseEntity.ok(response);
+    }
+
+    @Operation(summary = "Faz upload de uma imagem de produto e devolve a URL pública",
+            description = "Recebe `multipart/form-data` com o campo `file` (JPEG, PNG ou WebP). "
+                    + "Não recebe SKU: a imagem é enviada enquanto o produto ainda está sendo "
+                    + "preenchido, e a URL devolvida é usada depois em `imageUrl`/`images` do "
+                    + "cadastro. A URL é pública e servida por `GET /product-images/{filename}`.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "400", description = "Arquivo ausente, formato não aceito ou acima do limite", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PostMapping(value = "/products/images", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasAuthority('ESTOQUE_PRODUCT_MANAGE')")
+    public ResponseEntity<Map<String, String>> uploadProductImage(
+            @RequestParam("file") MultipartFile file,
+            Authentication authentication) {
+        if (file == null || file.isEmpty()) throw new InvalidImageFormatException();
+        byte[] bytes;
+        try {
+            bytes = file.getBytes();
+        } catch (IOException e) {
+            // Falha ao ler o corpo do multipart é requisição malformada, não erro do servidor —
+            // mesmo tratamento que AvatarController dá ao caso.
+            throw new InvalidImageFormatException();
+        }
+        String imageUrl = productImageUseCase.upload(bytes);
+        publisher.publishEvent(AuditEvent.of(EventType.PRODUCT_IMAGE_UPLOADED,
+                authentication.getName(), Map.of("imageUrl", imageUrl)));
+        return ResponseEntity.ok(Map.of("imageUrl", imageUrl));
     }
 
     @Operation(summary = "Cria um produto (SKU pai) com suas variações e, opcionalmente, sua precificação",

@@ -4,6 +4,8 @@ import com.cernecommerce.core.domain.exception.ModuleDisabledException;
 import com.cernecommerce.core.domain.exception.auth.TotpSetupRequiredException;
 import com.cernecommerce.core.domain.exception.avatar.AvatarTooLargeException;
 import com.cernecommerce.core.domain.exception.avatar.InvalidAvatarFormatException;
+import com.cernecommerce.core.domain.exception.storage.ImageTooLargeException;
+import com.cernecommerce.core.domain.exception.storage.InvalidImageFormatException;
 import com.cernecommerce.core.domain.exception.PermissionAlreadyExistsException;
 import com.cernecommerce.core.domain.exception.PermissionNotFoundException;
 import com.cernecommerce.core.domain.exception.RoleAlreadyExistsException;
@@ -525,6 +527,19 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(InvalidAvatarFormatException.class)
     public ResponseEntity<ApiError> handleInvalidAvatarFormat(InvalidAvatarFormatException ex, HttpServletRequest req) {
         return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "INVALID_AVATAR_FORMAT", req);
+    }
+
+    // Contrapartes de imagem de produto. Mesmos status das de avatar (400 nos dois casos): o
+    // arquivo é parte do corpo da requisição, então tamanho e formato errados são erro de
+    // requisição, não de estado do servidor.
+    @ExceptionHandler(ImageTooLargeException.class)
+    public ResponseEntity<ApiError> handleImageTooLarge(ImageTooLargeException ex, HttpServletRequest req) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "IMAGE_TOO_LARGE", req);
+    }
+
+    @ExceptionHandler(InvalidImageFormatException.class)
+    public ResponseEntity<ApiError> handleInvalidImageFormat(InvalidImageFormatException ex, HttpServletRequest req) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "INVALID_IMAGE_FORMAT", req);
     }
 
     @ExceptionHandler(EmailDeliveryException.class)

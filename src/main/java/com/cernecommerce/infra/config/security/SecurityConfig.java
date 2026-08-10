@@ -108,6 +108,10 @@ public class SecurityConfig {
                 .requestMatchers("/auth/dev/complete").permitAll()
                 .requestMatchers("/auth/**").permitAll()
                 .requestMatchers(org.springframework.http.HttpMethod.GET, "/avatars/*").permitAll()
+                // Imagem de produto é pública pelo mesmo motivo do avatar: a vitrine do
+                // marketplace renderiza a foto sem token. O upload continua autenticado, em
+                // POST /estoque/products/images sob ESTOQUE_PRODUCT_MANAGE.
+                .requestMatchers(org.springframework.http.HttpMethod.GET, "/product-images/*").permitAll()
                 // Fatia 8 (plano-pdv-marketplace.md §2.9): ramo /shop/** público começa aqui.
                 // Cadastro e catálogo são públicos por natureza; carrinho/checkout (Fatia 9) exigem
                 // SHOP_CART_OWN/SHOP_ORDER_OWN via @PreAuthorize, não regra de rota.

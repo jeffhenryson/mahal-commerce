@@ -67,7 +67,10 @@ class S3AvatarStorageAdapterTest {
 
         assertThatThrownBy(() -> adapter.save(new byte[]{1}, "webp"))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("Falha ao salvar avatar no S3");
+                // A mensagem passou a nomear a chave completa (com o prefixo avatars/) quando o
+                // adapter foi generalizado para servir também imagem de produto.
+                .hasMessageContaining("Falha ao salvar no S3")
+                .hasMessageContaining("avatars/");
     }
 
     // ── load ────────────────────────────────────────────────────────────────

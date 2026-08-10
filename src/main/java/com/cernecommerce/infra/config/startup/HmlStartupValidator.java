@@ -55,6 +55,11 @@ public class HmlStartupValidator {
     @Value("${avatar.base-url:}")
     private String avatarBaseUrl;
 
+    // A URL é gravada dentro do produto (imageUrl/images) e servida ao marketplace; um valor
+    // placeholder aqui só aparece depois, como foto quebrada na vitrine.
+    @Value("${product.image.base-url:}")
+    private String productImageBaseUrl;
+
     @PostConstruct
     public void validate() {
         List<String> errors = new ArrayList<>();
@@ -99,6 +104,9 @@ public class HmlStartupValidator {
         }
         if (isBlankOrPlaceholder(avatarBaseUrl, "localhost", "example.com")) {
             errors.add("avatar.base-url (AVATAR_BASE_URL) está ausente ou usa um valor de placeholder (localhost/example.com) — URLs de avatar não funcionarão corretamente");
+        }
+        if (isBlankOrPlaceholder(productImageBaseUrl, "localhost", "example.com")) {
+            errors.add("product.image.base-url (PRODUCT_IMAGE_BASE_URL) está ausente ou usa um valor de placeholder (localhost/example.com) — as URLs de imagem gravadas no catálogo apontariam para um host inacessível");
         }
 
         if (!errors.isEmpty()) {

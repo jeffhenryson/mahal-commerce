@@ -32,6 +32,7 @@ class ProdStartupValidatorTest {
         // PLAT-C028 o validator o trata como placeholder, como o HmlStartupValidator já fazia.
         ReflectionTestUtils.setField(v, "totpEncryptionKey", "cpp8ZZIhZSudh6UPD+OgTzqUhGhnFroAq285qGFEb9M=");
         ReflectionTestUtils.setField(v, "avatarBaseUrl", "https://cdn.meudominio.com/avatars");
+        ReflectionTestUtils.setField(v, "productImageBaseUrl", "https://cdn.meudominio.com/product-images");
         ReflectionTestUtils.setField(v, "googleClientId", "123456789-abc.apps.googleusercontent.com");
         return v;
     }
@@ -254,6 +255,26 @@ class ProdStartupValidatorTest {
         assertThatThrownBy(v::validate)
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("avatar.base-url");
+    }
+
+    @Test
+    void deve_rejeitar_product_image_base_url_ausente() {
+        ProdStartupValidator v = validadorValido();
+        ReflectionTestUtils.setField(v, "productImageBaseUrl", "");
+        assertThatThrownBy(v::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("product.image.base-url");
+    }
+
+    @Test
+    void deve_rejeitar_product_image_base_url_placeholder() {
+        // A URL vai gravada dentro do produto e é servida ao marketplace: um placeholder aqui
+        // só apareceria depois, como foto quebrada na vitrine.
+        ProdStartupValidator v = validadorValido();
+        ReflectionTestUtils.setField(v, "productImageBaseUrl", "https://example.com/product-images");
+        assertThatThrownBy(v::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("product.image.base-url");
     }
 
     // ── oauth2.google.client-id ───────────────────────────────────────────────

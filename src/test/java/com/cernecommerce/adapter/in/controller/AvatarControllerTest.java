@@ -8,7 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.cernecommerce.core.domain.exception.avatar.AvatarTooLargeException;
 import com.cernecommerce.core.domain.exception.avatar.InvalidAvatarFormatException;
-import com.cernecommerce.core.domain.model.AvatarServeResult;
+import com.cernecommerce.core.domain.model.storage.FileServeResult;
 import com.cernecommerce.core.ports.in.AvatarUseCase;
 import com.cernecommerce.infra.handler.GlobalExceptionHandler;
 import org.junit.jupiter.api.BeforeEach;
@@ -90,7 +90,7 @@ class AvatarControllerTest {
     @Test
     void serve_local_file_returns_200_with_cache_headers() throws Exception {
         when(avatarUseCase.serve("uuid.jpg"))
-                .thenReturn(new AvatarServeResult.LocalFile(JPEG_BYTES, "jpg"));
+                .thenReturn(new FileServeResult.LocalFile(JPEG_BYTES, "jpg"));
 
         mockMvc.perform(get("/avatars/uuid.jpg"))
                 .andExpect(status().isOk())
@@ -101,7 +101,7 @@ class AvatarControllerTest {
     @Test
     void serve_s3_file_returns_redirect() throws Exception {
         when(avatarUseCase.serve("uuid.jpg"))
-                .thenReturn(new AvatarServeResult.Redirect("https://cdn.example.com/uuid.jpg"));
+                .thenReturn(new FileServeResult.Redirect("https://cdn.example.com/uuid.jpg"));
 
         mockMvc.perform(get("/avatars/uuid.jpg"))
                 .andExpect(status().is(308))
@@ -111,7 +111,7 @@ class AvatarControllerTest {
     @Test
     void serve_missing_file_returns_404() throws Exception {
         when(avatarUseCase.serve("missing.jpg"))
-                .thenReturn(new AvatarServeResult.NotFound());
+                .thenReturn(new FileServeResult.NotFound());
 
         mockMvc.perform(get("/avatars/missing.jpg"))
                 .andExpect(status().isNotFound());

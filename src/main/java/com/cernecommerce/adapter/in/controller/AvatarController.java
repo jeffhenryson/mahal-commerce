@@ -1,7 +1,8 @@
 package com.cernecommerce.adapter.in.controller;
 
 import com.cernecommerce.core.domain.exception.avatar.InvalidAvatarFormatException;
-import com.cernecommerce.core.domain.model.AvatarServeResult;
+import com.cernecommerce.core.domain.model.storage.FileServeResult;
+import com.cernecommerce.core.domain.model.storage.ImageFormat;
 import com.cernecommerce.core.ports.in.AvatarUseCase;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -60,24 +61,19 @@ public class AvatarController {
             return ResponseEntity.notFound().build();
         }
         return switch (avatarUseCase.serve(filename)) {
-            case AvatarServeResult.Redirect r -> ResponseEntity.status(HttpStatus.PERMANENT_REDIRECT)
+            case FileServeResult.Redirect r -> ResponseEntity.status(HttpStatus.PERMANENT_REDIRECT)
                     .header(HttpHeaders.LOCATION, r.url())
                     .cacheControl(CacheControl.maxAge(365, TimeUnit.DAYS).immutable())
                     .build();
-            case AvatarServeResult.LocalFile f -> ResponseEntity.ok()
+            case FileServeResult.LocalFile f -> ResponseEntity.ok()
                     .contentType(resolveMediaType(f.extension()))
                     .cacheControl(CacheControl.maxAge(365, TimeUnit.DAYS).immutable())
                     .body(f.bytes());
-            case AvatarServeResult.NotFound ignored -> ResponseEntity.notFound().build();
+            case FileServeResult.NotFound ignored -> ResponseEntity.notFound().build();
         };
     }
 
     private MediaType resolveMediaType(String extension) {
-        return switch (extension) {
-            case "jpg", "jpeg" -> MediaType.IMAGE_JPEG;
-            case "png"         -> MediaType.IMAGE_PNG;
-            case "webp"        -> MediaType.parseMediaType("image/webp");
-            default            -> MediaType.APPLICATION_OCTET_STREAM;
-        };
+        return MediaType.parseMediaType(ImageFormat.contentTypeOf(extension));
     }
 }

@@ -61,6 +61,11 @@ public class ProdStartupValidator {
     @Value("${avatar.base-url:}")
     private String avatarBaseUrl;
 
+    // A URL é gravada dentro do produto (imageUrl/images) e servida ao marketplace; um valor
+    // placeholder aqui só aparece depois, como foto quebrada na vitrine.
+    @Value("${product.image.base-url:}")
+    private String productImageBaseUrl;
+
     @Value("${oauth2.google.client-id:}")
     private String googleClientId;
 
@@ -121,6 +126,9 @@ public class ProdStartupValidator {
         }
         if (isBlankOrPlaceholder(avatarBaseUrl, "localhost", "example.com")) {
             errors.add("avatar.base-url (AVATAR_BASE_URL) está ausente — URLs de avatar não funcionarão corretamente");
+        }
+        if (isBlankOrPlaceholder(productImageBaseUrl, "localhost", "example.com")) {
+            errors.add("product.image.base-url (PRODUCT_IMAGE_BASE_URL) está ausente — as URLs de imagem gravadas no catálogo apontariam para um host inacessível");
         }
         if (isBlankOrPlaceholder(googleClientId)) {
             errors.add("oauth2.google.client-id (GOOGLE_CLIENT_ID) está ausente — autenticação OAuth2 Google pode ser bypassada com qualquer token");

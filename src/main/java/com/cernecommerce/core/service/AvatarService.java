@@ -3,7 +3,8 @@ package com.cernecommerce.core.service;
 import com.cernecommerce.core.domain.exception.avatar.AvatarTooLargeException;
 import com.cernecommerce.core.domain.exception.avatar.InvalidAvatarFormatException;
 import com.cernecommerce.core.domain.exception.user.UserNotFoundException;
-import com.cernecommerce.core.domain.model.AvatarServeResult;
+import com.cernecommerce.core.domain.model.storage.FileServeResult;
+import com.cernecommerce.core.domain.model.storage.ImageFormat;
 import com.cernecommerce.core.domain.model.auth.User;
 import com.cernecommerce.core.ports.in.AvatarUseCase;
 import com.cernecommerce.core.ports.out.storage.AvatarStoragePort;
@@ -70,49 +71,32 @@ public class AvatarService implements AvatarUseCase {
 
     @Override
     @Transactional(readOnly = true)
-    public AvatarServeResult serve(String filename) {
+    public FileServeResult serve(String filename) {
         java.util.Optional<String> publicUrl = storagePort.getPublicUrl(filename);
         if (publicUrl.isPresent()) {
-            return new AvatarServeResult.Redirect(publicUrl.get());
+            return new FileServeResult.Redirect(publicUrl.get());
         }
         return storagePort.load(filename).map(stream -> {
             try (InputStream is = stream) {
                 String ext = filename.contains(".")
                         ? filename.substring(filename.lastIndexOf('.') + 1).toLowerCase()
                         : "";
-                return (AvatarServeResult) new AvatarServeResult.LocalFile(is.readAllBytes(), ext);
+                return (FileServeResult) new FileServeResult.LocalFile(is.readAllBytes(), ext);
             } catch (IOException e) {
-                return (AvatarServeResult) new AvatarServeResult.NotFound();
+                return (FileServeResult) new FileServeResult.NotFound();
             }
-        }).orElse(new AvatarServeResult.NotFound());
+        }).orElse(new FileServeResult.NotFound());
     }
 
-    // --- Validação por magic bytes ---
-
-    private static final byte[] MAGIC_JPEG  = {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF};
-    private static final byte[] MAGIC_PNG   = {(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
-    // WebP: bytes 0-3 = "RIFF", bytes 8-11 = "WEBP"
-    private static final byte[] MAGIC_RIFF  = {0x52, 0x49, 0x46, 0x46};
-    private static final byte[] MAGIC_WEBP  = {0x57, 0x45, 0x42, 0x50};
-
+    /**
+     * Validação por magic bytes, hoje em {@link ImageFormat} — foi extraída daqui quando o upload
+     * de imagem de produto passou a precisar exatamente da mesma regra. A tradução do "não
+     * reconheci" para a exceção de avatar fica neste ponto, porque o formato aceito é comum aos
+     * dois casos mas o erro devolvido ao cliente não é.
+     */
     private String detectExtension(byte[] bytes) {
-        if (bytes.length >= 3 && startsWith(bytes, MAGIC_JPEG))  return "jpg";
-        if (bytes.length >= 8 && startsWith(bytes, MAGIC_PNG))   return "png";
-        if (bytes.length >= 12
-                && startsWith(bytes, MAGIC_RIFF)
-                && startsWith(bytes, 8, MAGIC_WEBP))              return "webp";
-        throw new InvalidAvatarFormatException();
-    }
-
-    private boolean startsWith(byte[] data, byte[] prefix) {
-        return startsWith(data, 0, prefix);
-    }
-
-    private boolean startsWith(byte[] data, int offset, byte[] prefix) {
-        if (data.length < offset + prefix.length) return false;
-        for (int i = 0; i < prefix.length; i++) {
-            if (data[offset + i] != prefix[i]) return false;
-        }
-        return true;
+        return ImageFormat.detect(bytes)
+                .orElseThrow(InvalidAvatarFormatException::new)
+                .extension();
     }
 }

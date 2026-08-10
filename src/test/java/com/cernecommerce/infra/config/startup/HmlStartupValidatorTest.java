@@ -27,6 +27,7 @@ class HmlStartupValidatorTest {
         ReflectionTestUtils.setField(v, "jwtIssuer", "meu-servico-hml");
         ReflectionTestUtils.setField(v, "jwtAudience", "meu-servico-api");
         ReflectionTestUtils.setField(v, "avatarBaseUrl", "https://cdn.meudominio.com/avatars");
+        ReflectionTestUtils.setField(v, "productImageBaseUrl", "https://cdn.meudominio.com/product-images");
         return v;
     }
 
@@ -255,6 +256,26 @@ class HmlStartupValidatorTest {
         assertThatThrownBy(v::validate)
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("avatar.base-url");
+    }
+
+    @Test
+    void deve_rejeitar_product_image_base_url_ausente() {
+        HmlStartupValidator v = validadorValido();
+        ReflectionTestUtils.setField(v, "productImageBaseUrl", "");
+        assertThatThrownBy(v::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("product.image.base-url");
+    }
+
+    @Test
+    void deve_rejeitar_product_image_base_url_placeholder() {
+        // A URL vai gravada dentro do produto e é servida ao marketplace: um placeholder aqui
+        // só apareceria depois, como foto quebrada na vitrine.
+        HmlStartupValidator v = validadorValido();
+        ReflectionTestUtils.setField(v, "productImageBaseUrl", "https://example.com/product-images");
+        assertThatThrownBy(v::validate)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("product.image.base-url");
     }
 
     // ── múltiplos erros ───────────────────────────────────────────────────────

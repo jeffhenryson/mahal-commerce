@@ -10,6 +10,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 import com.cernecommerce.core.ports.in.AuditLogsUseCase;
 import com.cernecommerce.core.ports.in.AuthUseCase;
 import com.cernecommerce.core.ports.in.AvatarUseCase;
+import com.cernecommerce.core.ports.in.ProductImageUseCase;
 import com.cernecommerce.core.ports.in.NotificationPreferenceUseCase;
 import com.cernecommerce.core.ports.in.NotificationUseCase;
 import com.cernecommerce.core.ports.in.OAuthLoginUseCase;
@@ -48,11 +49,14 @@ import com.cernecommerce.core.ports.out.audit.AuditLogRepository;
 import com.cernecommerce.core.ports.out.notification.NotificationPreferenceRepository;
 import com.cernecommerce.core.ports.out.notification.NotificationRepository;
 import com.cernecommerce.adapter.out.storage.LocalAvatarStorageAdapter;
+import com.cernecommerce.adapter.out.storage.LocalProductImageStorageAdapter;
 import com.cernecommerce.core.ports.out.storage.AvatarStoragePort;
+import com.cernecommerce.core.ports.out.storage.ProductImageStoragePort;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import com.cernecommerce.core.service.AuditLogsService;
 import com.cernecommerce.core.service.AuthService;
 import com.cernecommerce.core.service.AvatarService;
+import com.cernecommerce.core.service.ProductImageService;
 import com.cernecommerce.core.service.NotificationPreferenceService;
 import com.cernecommerce.core.service.NotificationService;
 import com.cernecommerce.core.service.OAuthLoginService;
@@ -351,5 +355,20 @@ class CoreBeanConfig {
             AvatarProperties avatarProps) {
         return new AvatarService(userRepository, storagePort, userCachePort,
                 avatarProps.getMaxSizeBytes(), avatarProps.getBaseUrl());
+    }
+
+    // Imagem de produto tem configuração independente da de avatar — um pode estar em S3 e o
+    // outro em disco. O bean S3 correspondente mora em ProductImageS3StorageConfig.
+    @Bean
+    @ConditionalOnProperty(name = "product.image.storage.type", havingValue = "local", matchIfMissing = true)
+    ProductImageStoragePort productImageStoragePort(ProductImageProperties productImageProps) {
+        return new LocalProductImageStorageAdapter(Path.of(productImageProps.getStorage().getDir()));
+    }
+
+    @Bean
+    ProductImageUseCase productImageUseCase(ProductImageStoragePort productImageStoragePort,
+            ProductImageProperties productImageProps) {
+        return new ProductImageService(productImageStoragePort,
+                productImageProps.getMaxSizeBytes(), productImageProps.getBaseUrl());
     }
 }

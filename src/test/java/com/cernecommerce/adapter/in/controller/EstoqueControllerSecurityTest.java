@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
@@ -1128,5 +1129,70 @@ public class EstoqueControllerSecurityTest {
                         new SimpleGrantedAuthority("ESTOQUE_PRODUCT_READ"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray());
+    }
+
+    // ===== Upload de imagem de produto =====
+    // Escrever no catálogo é operação de estoque, então o upload entra na matriz do módulo.
+    // A leitura (GET /product-images/{filename}) é pública e não aparece aqui.
+
+    private static MockMultipartFile jpegFile() {
+        return new MockMultipartFile("file", "foto.jpg", "image/jpeg",
+                new byte[] {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 0x00, 0x11});
+    }
+
+    @Test
+    void upload_product_image_without_auth_returns_401() throws Exception {
+        mockMvc.perform(multipart("/estoque/products/images").file(jpegFile()))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void upload_product_image_with_user_role_only_returns_403() throws Exception {
+        mockMvc.perform(multipart("/estoque/products/images").file(jpegFile())
+                .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void upload_product_image_with_product_read_only_returns_403() throws Exception {
+        // Ler o catálogo não dá direito de subir arquivo para o servidor.
+        mockMvc.perform(multipart("/estoque/products/images").file(jpegFile())
+                .with(user("vendedor").authorities(
+                        new SimpleGrantedAuthority("ROLE_ATENDENTE"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_READ"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void upload_product_image_with_estoque_product_manage_returns_200() throws Exception {
+        mockMvc.perform(multipart("/estoque/products/images").file(jpegFile())
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_MANAGE"))))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void serve_product_image_is_public_and_returns_404_for_unknown_file() throws Exception {
+        // Sem token: a vitrine do marketplace precisa renderizar a foto. Arquivo inexistente é
+        // 404, não 401 — o que prova que a rota passou pelo filtro de segurança.
+        mockMvc.perform(get("/product-images/inexistente.jpg"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void serve_product_image_rejects_encoded_path_traversal_no_firewall() throws Exception {
+        // O StrictHttpFirewall do Spring Security barra a barra codificada antes de chegar ao
+        // controller — por isso 400 e não o 404 do guard. É a primeira das duas barreiras.
+        mockMvc.perform(get("/product-images/..%2F..%2Fapplication.properties"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void serve_product_image_rejects_dot_dot_no_controller() throws Exception {
+        // Segunda barreira: nome que passa pelo firewall mas contém "..". Quem barra aqui é o
+        // guard do ProductImageController, e o 404 prova que ele rodou sem tocar o storage.
+        mockMvc.perform(get("/product-images/a..b.jpg"))
+                .andExpect(status().isNotFound());
     }
 }
