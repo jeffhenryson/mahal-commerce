@@ -98,7 +98,9 @@ migration livre: V76. Fora de escopo por decisão: reserva por lote específico 
 no consumo. Detalhes completos no Histórico de Implementações do README.
 
 ORDEM SUGERIDA (revisada em 2026-07-28 pelo plano de PDV/marketplace; F013/F021/C013 fechados em
-07-29; F014/F015/F022 fechados em 07-29; F008 fechado em 07-30)
+07-29; F014/F015/F022 fechados em 07-29; F008 fechado em 07-30; §P1-Estoque do mahal-admin
+BACKEND_TODO fechada em 08-10 — upload de imagem, busca/filtro server-side, atributos de raiz,
+F020 e categoria, ver README §Histórico de Implementações)
  1. ~~EST-F014~~ ✅ estorno/devolução de venda (Fatia 5 do plano) — `OrderService.refundOrder`
     devolve a mercadoria via `adjustStock(ENTRADA)` por item, com `REVERSED` no cashback e
     estorno de pagamento na mesma transação. Ver `docs/dominios/vendas-balcao/README.md`.
@@ -112,13 +114,19 @@ ORDEM SUGERIDA (revisada em 2026-07-28 pelo plano de PDV/marketplace; F013/F021/
  6. EST-F005  entrada por XML de NF-e (NfeXmlImportPort). Por último entre as features
               de entrada, porque o XML traz lote e custo — depende de F008 (fechado) e F007.
 
-DESPRIORIZADOS POR DECISÃO (não são esquecimento — §2.2 e §8.5 do plano)
+DESPRIORIZADOS POR DECISÃO (não são esquecimento — §2.2 do plano)
 - EST-F012 (transferência entre depósitos) só faz sentido quando existir um SEGUNDO LOCAL
   FÍSICO de verdade. O marketplace NÃO vai usar WarehouseType.ECOMMERCE para separar canal:
   numa loja só a prateleira é uma só, e partir o pool geraria rebalanceamento manual
   permanente. A reserva é o mecanismo que deixa um pool servir dois canais.
-- EST-F020 (preço por variação) desaconselhado: sabores da mesma essência custam o mesmo;
-  grade com preços distintos se modela como produtos separados até doer de verdade.
+
+FECHADO EM 2026-08-10, CONTRA A RECOMENDAÇÃO ORIGINAL
+- EST-F020 (preço por variação) estava aqui como "desaconselhado" (§8.5 do plano: sabores da
+  mesma essência custam o mesmo). O dono do produto pediu a implementação mesmo assim. Resolvido
+  com herança POR CAMPO do pai como padrão — variação sem preço próprio segue herdando
+  exatamente como antes, então o argumento do §8.5 continua valendo como comportamento default,
+  só deixou de ser a única opção. Ver `Product.effectivePricingFor` e a entrada de
+  `categoria-como-entidade`/`preco-por-variacao` no Histórico de Implementações do README.
 
 NÃO CABEM EM ESTOQUE — me traga a decisão em vez de implementar:
 - EST-F011 (curva ABC e giro) está marcado como domínio `relatorios`, que não existe.
@@ -200,13 +208,16 @@ que se perde é venda fracionada, não a integridade do saldo.
 ## O que "módulo fechado" significa aqui
 
 Fechar os grupos que restam no roteiro, mais uma decisão registrada sobre os dois que não cabem
-em estoque (F011, C006) e sobre os dois despriorizados (F012, F020). Com isso o backlog do módulo
-zera e `financeiro` fica destravado para o DRE, que hoje espera o custo médio de F007.
+em estoque (F011, C006) e sobre o único item ainda despriorizado (F012 — F020 fechou em
+2026-08-10, ver acima). Com isso o backlog do módulo zera e `financeiro` fica destravado para o
+DRE, que hoje espera o custo médio de F007.
 
 **O estoque deixou de ser o módulo da vez.** A reserva fechou, `vendas-balcao` fechou suas cinco
 fatias (0, 1, 3, 5 e a parte de reembolso da Fatia 5) e o próprio estoque fechou **EST-F014**
 (devolução, via `OrderService.refundOrder`), **EST-F015/EST-F022** (kits, Fatia 6) em 2026-07-29 e
 **EST-F008** (lote e validade) em 2026-07-30 — ver
 [`dominios/vendas-balcao/proximos-passos.md`](../vendas-balcao/proximos-passos.md). Sem fatia
-numerada pendente no marco do marketplace; o que resta do backlog deste módulo (F007, F016, F005,
-mais a decisão sobre F011/C006) não bloqueia nada e pode esperar uma janela.
+numerada pendente no marco do marketplace. Em 2026-08-10 fechou também a §P1-Estoque do
+`BACKEND_TODO.md` do `mahal-admin` — upload de imagem, busca/filtro server-side, atributos de
+raiz, F020 (com herança) e categoria como entidade. O que resta do backlog deste módulo (F007,
+F016, F005, mais a decisão sobre F011/C006) não bloqueia nada e pode esperar uma janela.

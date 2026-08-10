@@ -149,7 +149,13 @@ Todos exigem `bearerAuth`. Controller: `adapter/in/controller/EstoqueController.
 
 | Método | Rota | Permissão | Descrição |
 |---|---|---|---|
-| `GET` | `/estoque/products` | `ESTOQUE_PRODUCT_READ` | Lista produtos paginados (`page` = 0, `size` = 20, teto de 100) |
+| `GET` | `/estoque/products` | `ESTOQUE_PRODUCT_READ` | Lista produtos paginados (`page` = 0, `size` = 20, teto de 100). Filtros opcionais e combináveis: `search` (trecho em nome **ou** SKU, sem diferenciar maiúsculas), `category`, `brand` (igualdade exata, idem), `active`; ordenação por `sort` (`ID`/`NAME`/`SALE_PRICE`) e `direction` (`ASC`/`DESC`), **sempre desempatada por id**. Sem parâmetros, comportamento idêntico ao anterior. `400 INVALID_ENUM_VALUE` para `sort`/`direction` fora da lista |
+| `GET` | `/estoque/products/{sku}` | `ESTOQUE_PRODUCT_READ` | Busca um produto por SKU. Aceita SKU **pai ou de variação** — nos dois casos devolve o pai. `200`; `404 PRODUCT_NOT_FOUND` |
+| `POST` | `/estoque/products/images` | `ESTOQUE_PRODUCT_MANAGE` | Upload de imagem de produto (`multipart/form-data`, campo `file`; JPEG/PNG/WebP, 5 MB). Devolve `{"imageUrl": "..."}`. **Não recebe SKU** — a imagem é enviada antes de o produto existir. `400 INVALID_IMAGE_FORMAT`/`IMAGE_TOO_LARGE` |
+| `GET` | `/estoque/categories` | `ESTOQUE_PRODUCT_READ` | Lista categorias paginadas, incluindo inativas, na ordem da vitrine (destaque, ordem, nome) |
+| `POST` | `/estoque/categories` | `ESTOQUE_CATEGORY_MANAGE` | Cria categoria. `201` + `Location`; `409 CATEGORY_NAME_ALREADY_EXISTS` (comparação sem diferenciar maiúsculas) |
+| `PATCH` | `/estoque/categories/{id}` | `ESTOQUE_CATEGORY_MANAGE` | Altera `name`, `featured` e/ou `displayOrder`. Campo ausente é mantido. Renomear **propaga** o nome para os produtos vinculados. `200`; `404 CATEGORY_NOT_FOUND`; `409 CATEGORY_NAME_ALREADY_EXISTS` |
+| `PATCH` | `/estoque/categories/{id}/active` | `ESTOQUE_CATEGORY_MANAGE` | Ativa/desativa a categoria. Inativa some da vitrine, mas os produtos vinculados **continuam à venda**. `200`; `404 CATEGORY_NOT_FOUND` |
 | `POST` | `/estoque/products` | `ESTOQUE_PRODUCT_MANAGE` (+ `ESTOQUE_PRODUCT_PRICE_MANAGE` se enviar `pricing`) | Cria produto (SKU pai) com variações, atributos e `pricing` opcional. `201` + `Location: /estoque/products/{sku}`; `409 SKU_ALREADY_EXISTS` |
 | `PATCH` | `/estoque/products/{sku}` | `ESTOQUE_PRODUCT_MANAGE` (+ `ESTOQUE_PRODUCT_PRICE_MANAGE` se enviar `pricing`) | Altera `name`, `category` e/ou `pricing`. Campo ausente é mantido, inclusive dentro de `pricing`; não altera SKU nem variações. `200`; `404 PRODUCT_NOT_FOUND` |
 | `GET` | `/estoque/products/{sku}/price` | `ESTOQUE_PRODUCT_READ` | Precificação vigente do SKU, com os derivados calculados. Aceita SKU **pai ou de variação**. `200`; `404 PRODUCT_NOT_FOUND` |
@@ -180,6 +186,16 @@ Todos exigem `bearerAuth`. Controller: `adapter/in/controller/EstoqueController.
 | `GET` | `/estoque/products/{sku}/lots` | `ESTOQUE_PRODUCT_READ` | Lista os lotes de um SKU num depósito (EST-F008, `warehouseCode` obrigatório), do que vence primeiro em diante. Lista vazia se não é lote-rastreado ou nunca recebeu lote — não é erro; `404 WAREHOUSE_NOT_FOUND` |
 | `GET` | `/estoque/integrity/lot-mismatch` | `ESTOQUE_STOCK_MANAGE` | Diagnóstico de EST-F008: pares SKU/depósito de SKU lote-rastreado cujo `stock_balance.quantity` diverge da soma de `stock_lot.quantity` (`page` = 0, `size` = 20, teto de 100). Base íntegra devolve página vazia com `200` |
 
+**Rotas públicas fora de `/estoque`** (sem token, liberadas em `SecurityConfig`):
+
+| Método | Rota | Descrição |
+|---|---|---|
+| `GET` | `/product-images/{filename}` | Serve a imagem de produto enviada pelo upload. Redirect 308 com S3/CDN, bytes com armazenamento local; cache imutável de 365 dias. A vitrine do marketplace precisa renderizar a foto sem login |
+| `GET` | `/shop/categories` | Categorias ativas na ordem da vitrine — é a lista que o app usa para montar a primeira linha de navegação |
+
+`GET /shop/catalog` ganhou `?categoryId` e passou a ordenar por **destaque da categoria**, depois
+ordem de exibição, depois id.
+
 ## Segurança e Infraestrutura
 
 > Mecanismos transversais (JWT, filtros, CORS, headers, rate limit de login, lockout) estão em
@@ -200,6 +216,7 @@ Todos exigem `bearerAuth`. Controller: `adapter/in/controller/EstoqueController.
 | `ESTOQUE_STOCK_MANAGE` | `POST`/`GET /estoque/movements`, `PUT .../reorder-point`, stock counts e diagnósticos | V56 | ✅ |
 | `ESTOQUE_RESERVATION_READ` | `GET /estoque/reservations`, `GET .../reservations/{id}` | V64 | ✅ `SeedConfig` + `DevRoleBootstrapConfig` |
 | `ESTOQUE_KIT_MANAGE` | `PUT /estoque/products/{sku}/kit` | V71 | ✅ `SeedConfig` + `DevRoleBootstrapConfig` |
+| `ESTOQUE_CATEGORY_MANAGE` | `POST`/`PATCH` de `/estoque/categories` | V90 | ✅ `SeedConfig` + `DevRoleBootstrapConfig` |
 
 Concedidas a `ROLE_ADMIN` pelas migrations (`hml`/`prod`) e a `ROLE_ADMIN`/`ROLE_DEV` em runtime
 por `SeedConfig`/`DevRoleBootstrapConfig` — necessário porque `dev` não roda Flyway. V45 e V47
@@ -357,6 +374,27 @@ transação de venda não espera o envio, e uma venda revertida não notifica ni
 - Cria `ESTOQUE_PRODUCT_PRICE_MANAGE` para `ROLE_ADMIN`, com `ON CONFLICT DO NOTHING`.
 - **`product_variant` não recebe colunas de preço** — a variação herda o preço do pai. Ver EST-F020.
 
+**V87 — `estoque_product_search_indexes`**
+- Índices funcionais `idx_product_category_lower` e `idx_product_brand_lower` sobre `LOWER(category)`/`LOWER(brand)`, servindo aos filtros de igualdade de `GET /estoque/products`.
+- **Sem índice para a busca textual, de propósito:** ela é `LIKE '%termo%'`, com curinga à esquerda, e btree não serve — o planner faz seq scan de qualquer jeito. Criar um daria a falsa impressão de busca indexada. Quando o catálogo crescer a ponto de doer, a resposta é `CREATE EXTENSION pg_trgm` + GIN sobre `LOWER(name)`/`LOWER(sku)`.
+
+**V88 — `estoque_product_root_attributes`**
+- `product_root_attribute` (product_id FK → `product` ON DELETE CASCADE, attr_type, attr_value) — índice `idx_product_root_attribute_product_id`; **sem PK própria** (`@ElementCollection`, mesmo padrão de `product_attribute`)
+- Tabela nova em vez de tornar `product_attribute.variant_id` anulável: aquela tabela tem FK e índice para `variant_id`, e admitir linha sem variação exigiria coluna nula em metade das linhas mais um CHECK garantindo que exatamente um dos dois donos está preenchido.
+- **Sem UNIQUE em `(product_id, attr_type)`** — o mesmo tipo pode repetir com valores diferentes (dois sabores num blend), como já era em `product_attribute`.
+
+**V89 — `estoque_variant_pricing`**
+- `product_variant` ganha `cost_price NUMERIC(14,2)`, `markup_percent NUMERIC(9,4)`, `sale_price NUMERIC(14,2)` e `original_price NUMERIC(14,2)`, todas **NULLABLE** — as quatro nulas são exatamente como "esta variação herda do pai" fica representada. Sem `DEFAULT` e sem backfill, pelo mesmo motivo da V63.
+- CHECKs de não-negatividade espelhando os do produto pai.
+- **Revoga a nota da V63** de que `product_variant` não recebe colunas de preço — ver EST-F020 no histórico.
+
+**V90 — `estoque_product_category`**
+- `product_category` (id, name UNIQUE `uk_product_category_name`, featured DEFAULT FALSE, display_order INTEGER DEFAULT 0 com CHECK `>= 0`, active DEFAULT TRUE)
+- Índice **único funcional** `uk_product_category_name_lower` sobre `LOWER(name)`: a UNIQUE comum é sensível a caixa, mas a resolução por nome (caminho de compatibilidade, em que o admin ainda manda texto livre) é case-insensitive — sem ele, "Narguilé" e "narguilé" passariam e virariam duas categorias que a aplicação trata como uma.
+- `product` ganha `category_id BIGINT` NULL com FK `fk_product_category` e índice `idx_product_category_id`. **`product.category` (texto) permanece** como nome denormalizado, mantido em sincronia pela aplicação — é o que `mahal-market` e `mahal-admin` leem, e trocá-lo por FK quebraria os dois.
+- **Backfill:** cada valor distinto de `product.category` vira categoria (agrupado por `LOWER(TRIM(...))` para não colidir com o índice acima, gravando a primeira grafia que entrou no catálogo), os produtos são vinculados e seus textos alinhados à grafia canônica. Sem destaque e com ordem 0 — adivinhar hierarquia aqui seria inventar.
+- Cria `ESTOQUE_CATEGORY_MANAGE` para `ROLE_ADMIN`, com `ON CONFLICT DO NOTHING`.
+
 **Nota de modelagem:** `stock_balance`, `stock_movement` e `stock_reorder_point` referenciam
 `warehouse(id)` por FK, mas guardam `sku` como **texto livre** — não há FK para `product.sku`
 nem para `product_variant.sku`. Ver EST-C002.
@@ -431,7 +469,6 @@ Convenções, variáveis e o environment compartilhado estão em
 | EST-F011 | 🟢 Baixa | Feature | curva-abc-giro | Análise ABC e giro de produtos para priorização de compras (domínio `relatorios`). | Backlog (Sprint 6) |
 | EST-F012 | 🟢 Baixa | Feature | transferencia-entre-depositos | `MovementType.TRANSFER`: saída atômica de um `Warehouse` + entrada em outro, distinto do ajuste manual. **Só faz sentido quando existir um segundo local físico de verdade** ([`plano-pdv-marketplace.md`](../../plano-pdv-marketplace.md) §2.2): o marketplace **não** vai usar `WarehouseType.ECOMMERCE` para separar canal — para uma tabacaria de uma loja, a prateleira é uma só, e partir o pool geraria rebalanceamento manual permanente e o absurdo de "o site tem 5 e a loja tem 0" com tudo no mesmo armário. A reserva (EST-F013) é o mecanismo que permite um pool servir dois canais. | Backlog (Sprint 4) |
 | EST-F016 | 🟢 Baixa | Feature | unidade-medida-conversao | Múltiplas unidades por produto (compra em kg, venda em porção/g) com fator de conversão nas movimentações. | Backlog (Sprint 6) |
-| EST-F020 | 🟢 Baixa | Feature | preco-por-variacao | Preço no SKU de variação, hoje herdado do pai (EST-F019). Necessário quando a grade tem preços distintos (tamanhos de narguilé), não quando só muda o sabor. Exige decidir a precedência variação → pai e propagar em `findPricingBySku`. **Desaconselhado por ora** ([`plano-pdv-marketplace.md`](../../plano-pdv-marketplace.md) §8.5): para a tabacaria, sabores da mesma essência custam o mesmo; grade com preços distintos se modela como produtos separados até doer. | Pendente |
 | EST-C006 | 🟢 Melhoria | Correção | migrations-v45-v47-sem-on-conflict | V45 e V47 inserem permissões sem `ON CONFLICT DO NOTHING`, ao contrário de V56/V57/V60. Re-execução em base parcialmente populada quebra. Herdado do antigo C018. | Pendente |
 
 ## Histórico de Implementações
@@ -540,12 +577,111 @@ Convenções, variáveis e o environment compartilhado estão em
   persistência (`EstoqueRepositoryIT`) e controller/segurança (`EstoqueControllerTest`,
   `EstoqueControllerSecurityTest`).
 
+- **2026-08-10** — `upload-de-imagem-de-produto` (BACKEND_TODO §P1-Estoque item 1): o mahal-admin
+  já chamava `POST /estoque/products/images` desde o formulário novo de cadastro, e o botão
+  "Arquivo" falhava contra o backend, que não tinha o endpoint. `AvatarService` já resolvia
+  exatamente este problema (magic bytes, limite de tamanho, storage local ou S3, URL pública), e
+  a entrega foi generalizar em vez de duplicar: novo `FileStoragePort` com o contrato que era de
+  `AvatarStoragePort`; as duas portas concretas viraram marcadoras vazias que só existem para o
+  wiring manual de `CoreBeanConfig` distinguir os beans (o projeto não usa `@Qualifier`).
+  `LocalAvatarStorageAdapter`/`S3AvatarStorageAdapter` viraram subclasses finas de
+  `LocalFileStorageAdapter`/`S3FileStorageAdapter`, com `keyPrefix` separando `avatars/` de
+  `product-images/` no mesmo bucket. A detecção por magic bytes saiu de dentro de `AvatarService`
+  para o enum `ImageFormat` (`core.domain`, sem Spring) — o formato é detectado pelo **conteúdo**,
+  nunca pela extensão nem pelo `Content-Type`, que são texto controlado por quem faz o upload.
+  O upload **não recebe SKU**, de propósito: o admin sobe a imagem enquanto ainda preenche o
+  formulário, antes de o produto existir; a contrapartida é imagem órfã sem expurgo automático,
+  pelo mesmo motivo de EST-C011. `GET /product-images/{filename}` é público, como
+  `/avatars/{filename}`. **Bug pré-existente corrigido no caminho:** `avatar.storage.dir` nunca
+  bindava em `AvatarProperties` — o binder do Spring Boot trata o ponto como separador de nível, e
+  a chave não casava com o campo `storageDir` de nível único, caindo em silêncio no default; na
+  prática `AVATAR_STORAGE_DIR` era ignorado. Passava despercebido porque o valor de hml/prod é
+  igual ao default. Corrigido com classe aninhada `Storage`, com teste de regressão. Sem migration.
+
+- **2026-08-10** — `busca-filtro-e-ordenacao-server-side-no-catalogo`: `GET /estoque/products` só
+  aceitava `page`/`size`, então o admin baixava o catálogo inteiro e filtrava no cliente — com o
+  teto de `size=100` (EST-C005), qualquer catálogo maior fazia busca, KPIs e exportação CSV
+  mentirem em silêncio, sem erro nem aviso. Não estava na lista numerada do BACKEND_TODO; apareceu
+  ao auditar o consumo real do admin. Novo `ProductFilter` (search/category/brand/active, com
+  normalização — branco vira nulo, texto em minúsculas) e `ProductSortField` (lista fechada
+  ID/NAME/SALE_PRICE; ordenação por nome de coluna concatenado seria injeção). A ordenação
+  **sempre desempata por id**, mesmo pedindo outro campo — nome e preço não são únicos, e paginar
+  por chave não-única faz o banco devolver a mesma linha em duas páginas ou em nenhuma (mesma
+  lição de EST-C012). `findAllByIdsWithVariants` tem `ORDER BY p.id` fixo, então a ordem pedida é
+  reimposta a partir da página de ids — sem isso, ordenar por nome devolveria a página certa na
+  ordem errada. Novo `GET /estoque/products/{sku}`, reusando `findProductBySku`, fechando a
+  lacuna que o próprio EST-F018 citou como motivo de o PATCH ser parcial. `findAllIds` foi
+  removido (`findFilteredIds` com todos os filtros nulos é o mesmo). Migration V87 indexa só os
+  filtros de igualdade — busca textual é `LIKE '%termo%'` e btree não serve, ver a migration.
+  Retrocompatível: sem parâmetros novos, comportamento idêntico ao anterior.
+
+- **2026-08-10** — `atributos-no-produto-pai` (BACKEND_TODO §P1-Estoque item 3): atributo só
+  existia dentro de uma variação, onde faz parte do que **identifica** cada SKU filho. Produto
+  sem grade não tinha onde carregar um atributo puramente **descritivo** ("Sabor: Menta" num item
+  que não varia). São coleções separadas de propósito — fundi-las faria um dado descritivo do pai
+  parecer parte da chave da variação. Nova tabela `product_root_attribute` em vez de tornar
+  `product_attribute.variant_id` anulável (aquela tabela tem FK/índice para `variant_id`, e
+  admitir linha sem variação exigiria CHECK garantindo exatamente um dono preenchido);
+  `ProductAttributeEmbeddable` reaproveitado como está. Semântica de PATCH igual a `images`: nulo
+  mantém, lista — inclusive vazia — substitui o conjunto inteiro. Sem `JOIN FETCH` simultâneo com
+  `variants`: os dois são bags, e buscar os dois juntos dá `MultipleBagFetchException` — mesma
+  escolha já vigente para `images`. Migration V88.
+
+- **2026-08-10** — `preco-por-variacao` (EST-F020, BACKEND_TODO §P1-Estoque item 2): estava
+  marcado como "desaconselhado por ora" (`plano-pdv-marketplace.md` §8.5 — sabores da mesma
+  essência custam o mesmo, grade com preços distintos deveria virar produtos separados). Decisão
+  do dono do produto: implementar, mas com **herança do pai como padrão**, preservando o argumento
+  do §8.5 em vez de contrariá-lo — variação sem preço declarado continua herdando exatamente como
+  antes. A herança é **por campo**, não tudo-ou-nada: cada valor preenchido na variação vence o do
+  pai, cada ausente é herdado (mesma semântica de `Pricing.withPatch`). Tudo-ou-nada falharia em
+  silêncio — uma variação que só declara `originalPrice` ficaria sem preço de venda nenhum, porque
+  o do pai teria sido descartado junto. Bug pego por teste na primeira versão: `hasOwnPricing()`
+  usava `Pricing.isPriced()` (exige preço de venda), então uma variação que só declara o próprio
+  custo tinha esse custo silenciosamente ignorado no cálculo do custo de kit — entrou
+  `Pricing.isEmpty()` ("nenhum dos quatro campos preenchido"), a pergunta certa. A precedência mora
+  em `Product.effectivePricingFor(sku)`, no domínio (não no service): PDV e vitrine precisam da
+  mesma regra, e duplicá-la garantiria divergência. **Correção de segurança que veio junto, e sem
+  a qual esta fatia seria um furo:** o `@PreAuthorize` de `POST`/`PATCH /estoque/products` checava
+  só `#request.pricing == null`; com preço podendo vir dentro de `variants[]`, quem tinha apenas
+  `ESTOQUE_PRODUCT_MANAGE` passaria a precificar pela porta lateral, desfazendo a separação que
+  EST-F019 criou de propósito. Trocado por `touchesPricing()`, varrendo raiz e variações. Migration
+  V89, quatro colunas nullable em `product_variant`, sem backfill (mesmo motivo da V63).
+
+- **2026-08-10** — `categoria-como-entidade` (BACKEND_TODO §P1-Estoque item 6, maior escopo do
+  bloco): pedido concreto — mandar uma categoria para a primeira linha do app. Impossível com
+  categoria como texto solto, sem registro onde pendurar destaque/ordem. **Decisão central: a
+  mudança é aditiva, não substitutiva** — `product.category` (texto) permanece e continua sendo
+  devolvido; `mahal-market` e o próprio admin leem aquele campo hoje, e trocá-lo por FK quebraria
+  os dois de uma vez. Nova coluna `category_id` opcional; o texto vira nome denormalizado mantido
+  em sincronia pelo backend. `EstoqueService.resolveCategory` aceita os dois caminhos: quem manda
+  `categoryId` tem o nome resolvido a partir dele; quem manda só texto — o que o admin faz hoje —
+  tem a categoria reencontrada por nome (sem diferenciar maiúsculas) ou **criada** se não existir.
+  Criar em vez de recusar é deliberado: mantém o fluxo "Nova categoria..." do formulário, e o
+  efeito colateral de erro de digitação criar categoria a mais já acontecia com texto puro — só
+  que agora é visível e editável. Renomear **propaga** o nome para a coluna denormalizada de todos
+  os produtos vinculados (update em massa, não carrega-e-salva). Desativar categoria **não** tira
+  produtos de venda — categoria é organização de vitrine, não permissão de venda; sem `DELETE`,
+  mesmo motivo de EST-F018. `featured` e `displayOrder` são campos separados de propósito: um
+  número só faria "destacar" virar "reordenar todo mundo". `GET /shop/categories` público;
+  `GET /shop/catalog` ganhou `?categoryId` e passou a ordenar por destaque → ordem → id (`LEFT
+  JOIN` + `COALESCE`, para produto sem categoria não sumir nem depender de como cada banco trata
+  NULL). Migration V90, com backfill que colapsa grafias divergentes ("Narguilé"/"narguilé") numa
+  categoria só e normaliza o texto dos produtos para a grafia canônica — validado contra
+  postgres:16 real. Permissão `ESTOQUE_CATEGORY_MANAGE`, com `ON CONFLICT DO NOTHING` (a convenção
+  que V45/V47 violaram — EST-C006) e semeada em `SeedConfig`/`DevRoleBootstrapConfig` para não
+  repetir o furo de EST-C001 em `dev`.
+
+## Próximos passos
+
 ## Próximos passos
 
 A sprint de 2026-07-27 fechou C002, C003, C004, C005, C007, C008, C009, C010, C011, C012, F006 e F018.
 Em 2026-07-29 fecharam também F013/F021/C013 (reserva), F014 (estorno/devolução, via
 `OrderService.refundOrder`) e F015/F022 (kits, Fatia 6) — nenhum item do marco do marketplace
-segue pendente neste módulo. Em 2026-07-30 fechou também F008 (lote e validade).
+segue pendente neste módulo. Em 2026-07-30 fechou também F008 (lote e validade). Em 2026-08-10
+fechou o bloco da §P1-Estoque do `BACKEND_TODO.md` do `mahal-admin`: upload de imagem, busca e
+filtro server-side, atributos no produto pai, preço por variação (F020) e categoria como
+entidade.
 
 O roteiro completo para o que resta — ordem de execução, dependências entre os itens e os dois
 que não cabem em estoque — está em [`proximos-passos.md`](proximos-passos.md). Resumo da
@@ -553,7 +689,7 @@ prioridade imediata (nenhuma bloqueia outro módulo):
 
 1. **EST-F007** (custo médio) — o custo entra por lote (F008 já fechou), e F007 destrava o DRE do `financeiro`.
 2. **EST-F016** (unidade de medida) e **EST-F005** (entrada por XML de NF-e).
-3. **EST-F012** (transferência entre depósitos) e **EST-F020** (preço por variação) seguem despriorizados por decisão — ver `proximos-passos.md`.
+3. **EST-F012** (transferência entre depósitos) segue despriorizado por decisão — ver `proximos-passos.md`. **EST-F020** (preço por variação) saiu do backlog: foi implementado em 2026-08-10 a pedido do dono, com herança do pai como padrão, o que preserva o argumento do §8.5 em vez de contrariá-lo.
 
 Fora do roteiro de código, EST-C011 deixou uma **pendência operacional**: rodar
 `GET /estoque/integrity/orphan-skus` (ou o script) contra a base de produção e decidir o destino
