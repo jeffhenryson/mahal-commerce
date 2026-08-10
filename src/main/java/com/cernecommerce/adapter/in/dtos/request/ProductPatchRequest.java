@@ -72,4 +72,14 @@ public class ProductPatchRequest {
      */
     @Valid
     private PricingRequest pricing;
+
+    /**
+     * Contraparte de {@code ProductRequest.touchesPricing()}, usada pelo mesmo
+     * {@code @PreAuthorize}. Aqui só existe o bloco da raiz, porque o PATCH não mexe em
+     * {@code variants} — mas o método existe para as duas rotas compartilharem literalmente a
+     * mesma expressão de permissão, em vez de duas parecidas que podem divergir.
+     */
+    public boolean touchesPricing() {
+        return pricing != null;
+    }
 }

@@ -89,11 +89,6 @@ public record Pricing(BigDecimal costPrice, BigDecimal markupPercent, BigDecimal
         return new Pricing(costPrice, markupPercent, null, null);
     }
 
-    /** Indica se nenhum dos campos foi definido. */
-    public boolean isEmpty() {
-        return costPrice == null && markupPercent == null && salePrice == null && originalPrice == null;
-    }
-
     /**
      * Preço que o markup manda cobrar: {@code costPrice * (1 + markupPercent / 100)}, arredondado
      * a 2 casas com {@code HALF_UP}.
@@ -122,6 +117,18 @@ public record Pricing(BigDecimal costPrice, BigDecimal markupPercent, BigDecimal
     /** Indica se há preço a cobrar — praticado ou sugerido. */
     public boolean isPriced() {
         return effectivePrice() != null;
+    }
+
+    /**
+     * Indica que <b>nenhum</b> dos quatro campos foi preenchido.
+     *
+     * <p>Distinto de {@code !isPriced()}: uma precificação só com {@code costPrice} não tem preço
+     * a cobrar, mas carrega informação. A diferença importa em EST-F020, onde "a variação
+     * declarou algum preço próprio" e "a variação tem preço de venda próprio" são perguntas
+     * diferentes — usar {@code isPriced()} ali faria um custo próprio da variação ser ignorado.</p>
+     */
+    public boolean isEmpty() {
+        return costPrice == null && markupPercent == null && salePrice == null && originalPrice == null;
     }
 
     /**

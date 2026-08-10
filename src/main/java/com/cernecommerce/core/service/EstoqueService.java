@@ -208,12 +208,15 @@ public class EstoqueService implements EstoqueUseCase {
     @Override
     @Transactional(readOnly = true)
     public Pricing findPricingBySku(String sku) {
-        // findByAnySku e não findBySku: a variação herda o preço do pai, então o SKU lido no
-        // balcão resolve para a Pricing do pai sem o chamador precisar saber se é pai ou filho.
+        // findByAnySku e não findBySku: o SKU lido no balcão pode ser o do pai ou o de uma
+        // variação, e o chamador não precisa saber qual — a resolução acontece aqui.
         Product product = productRepository.findByAnySku(sku)
                 .orElseThrow(() -> new ProductNotFoundException(sku));
-        return product.isKit() ? derivedKitPricing(product) : product.pricing();
+        // Kit nunca tem variação (KitHasVariantsException), então a precedência não se aplica.
+        return product.isKit() ? derivedKitPricing(product) : product.effectivePricingFor(sku);
     }
+
+
 
     /**
      * Custo do kit é a soma de {@code costPrice * quantity} dos componentes — nunca digitado
@@ -233,7 +236,10 @@ public class EstoqueService implements EstoqueUseCase {
             // próprio dele direto, sem reentrar em findPricingBySku.
             Product componentProduct = productRepository.findByAnySku(component.componentSku())
                     .orElseThrow(() -> new ProductNotFoundException(component.componentSku()));
-            BigDecimal componentCost = componentProduct.pricing().costPrice();
+            // Pela mesma precedência de findPricingBySku: se o componente é uma variação com
+            // custo próprio, é esse custo que entra na soma do kit — não o do pai dela.
+            BigDecimal componentCost =
+                    componentProduct.effectivePricingFor(component.componentSku()).costPrice();
             if (componentCost == null) {
                 totalCost = null;
                 break;

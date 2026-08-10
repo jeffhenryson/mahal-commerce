@@ -1131,6 +1131,68 @@ public class EstoqueControllerSecurityTest {
                 .andExpect(jsonPath("$").isArray());
     }
 
+    // ===== Preço por variação: a permissão de preço não pode vazar (EST-F020) =====
+    //
+    // Antes de haver preço dentro de variants[], o @PreAuthorize checava só #request.pricing.
+    // Estes testes travam o fechamento desse furo: quem tem apenas ESTOQUE_PRODUCT_MANAGE não
+    // pode precificar por nenhum dos dois caminhos.
+
+    @Test
+    void create_product_com_pricing_na_variante_sem_price_manage_returns_403() throws Exception {
+        mockMvc.perform(post("/estoque/products")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {"sku":"SEC_VAR_1","name":"Essência","variants":[
+                          {"sku":"SEC_VAR_1_A","pricing":{"salePrice":99.90}}]}""")
+                .with(user("cadastrador").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_MANAGE"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void create_product_com_pricing_na_variante_com_price_manage_returns_201() throws Exception {
+        String sku = "SEC_VAR_2_" + System.nanoTime();
+        mockMvc.perform(post("/estoque/products")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"sku\":\"" + sku + "\",\"name\":\"Essência\",\"variants\":["
+                        + "{\"sku\":\"" + sku + "_A\",\"pricing\":{\"salePrice\":99.90}}]}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_MANAGE"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_PRICE_MANAGE"))))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
+    void create_product_com_variante_sem_pricing_dispensa_price_manage() throws Exception {
+        // O caminho comum — grade que herda o preço do pai — não pode ficar mais difícil.
+        String sku = "SEC_VAR_3_" + System.nanoTime();
+        mockMvc.perform(post("/estoque/products")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"sku\":\"" + sku + "\",\"name\":\"Essência\",\"variants\":["
+                        + "{\"sku\":\"" + sku + "_A\",\"attributes\":[{\"type\":\"Sabor\",\"value\":\"Menta\"}]}]}")
+                .with(user("cadastrador").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_MANAGE"))))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
+    void create_product_com_pricing_na_segunda_variante_sem_price_manage_returns_403() throws Exception {
+        // A checagem varre todas as variações, não só a primeira.
+        mockMvc.perform(post("/estoque/products")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {"sku":"SEC_VAR_4","name":"Essência","variants":[
+                          {"sku":"SEC_VAR_4_A"},
+                          {"sku":"SEC_VAR_4_B","pricing":{"costPrice":10.00}}]}""")
+                .with(user("cadastrador").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_MANAGE"))))
+                .andExpect(status().isForbidden());
+    }
+
     // ===== Busca por SKU e filtros da listagem =====
 
     @Test

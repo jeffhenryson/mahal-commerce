@@ -66,6 +66,15 @@ public class ProductRepositoryImpl implements ProductRepository {
             variantEntity.setProduct(entity);
             variantEntity.setSku(variant.sku());
             variantEntity.setActive(variant.active());
+            // Preço próprio da variação (EST-F020). Nulo grava as quatro colunas nulas, que é
+            // exatamente como "herda do pai" fica representado no banco.
+            Pricing variantPricing = variant.pricing();
+            if (variantPricing != null) {
+                variantEntity.setCostPrice(variantPricing.costPrice());
+                variantEntity.setMarkupPercent(variantPricing.markupPercent());
+                variantEntity.setSalePrice(variantPricing.salePrice());
+                variantEntity.setOriginalPrice(variantPricing.originalPrice());
+            }
             variantEntity.getAttributes().addAll(variant.attributes().stream()
                     .map(a -> new ProductAttributeEmbeddable(a.type(), a.value()))
                     .toList());
@@ -176,6 +185,18 @@ public class ProductRepositoryImpl implements ProductRepository {
         List<ProductAttribute> attributes = e.getAttributes().stream()
                 .map(a -> new ProductAttribute(a.getType(), a.getValue()))
                 .toList();
-        return ProductVariant.of(e.getId(), e.getSku(), attributes, e.isActive());
+        return ProductVariant.of(e.getId(), e.getSku(), attributes, e.isActive(), toVariantPricing(e));
+    }
+
+    /**
+     * Reconstitui a precificação própria da variação, ou {@code null} quando as quatro colunas
+     * estão vazias — é esse {@code null} que o domínio lê como "herda do pai" (EST-F020).
+     */
+    private static Pricing toVariantPricing(ProductVariantEntity e) {
+        if (e.getCostPrice() == null && e.getMarkupPercent() == null
+                && e.getSalePrice() == null && e.getOriginalPrice() == null) {
+            return null;
+        }
+        return Pricing.of(e.getCostPrice(), e.getMarkupPercent(), e.getSalePrice(), e.getOriginalPrice());
     }
 }

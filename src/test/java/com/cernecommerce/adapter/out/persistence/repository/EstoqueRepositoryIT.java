@@ -326,6 +326,79 @@ class EstoqueRepositoryIT {
         assertThat(page.totalPages()).isGreaterThanOrEqualTo(2);
     }
 
+    // ── Preço próprio da variação (EST-F020) ─────────────────────────────────
+
+    @Test
+    void variant_roundTripDoPrecoProprio() {
+        productRepository.save(Product.create("RT-VP-001", "Essência", "essencia",
+                List.of(ProductVariant.create("RT-VP-001-100G", List.of(),
+                        new Pricing(new BigDecimal("40.00"), new BigDecimal("50.0000"),
+                                new BigDecimal("99.90"), new BigDecimal("120.00")))),
+                new Pricing(new BigDecimal("10.00"), null, new BigDecimal("30.00"), null)));
+        flushAndClear();
+
+        ProductVariant reloaded = productRepository.findBySku("RT-VP-001").orElseThrow()
+                .variants().get(0);
+
+        assertThat(reloaded.hasOwnPricing()).isTrue();
+        assertThat(reloaded.pricing().costPrice()).isEqualByComparingTo("40.00");
+        assertThat(reloaded.pricing().markupPercent()).isEqualByComparingTo("50.0000");
+        assertThat(reloaded.pricing().salePrice()).isEqualByComparingTo("99.90");
+        assertThat(reloaded.pricing().originalPrice()).isEqualByComparingTo("120.00");
+    }
+
+    @Test
+    void variant_semPrecoProprioVoltaComPricingNuloENaoVazio() {
+        // O null é o que representa "herda do pai"; um Pricing vazio significaria outra coisa.
+        productRepository.save(Product.create("RT-VP-002", "Essência", "essencia",
+                List.of(ProductVariant.create("RT-VP-002-MENTA", List.of())),
+                new Pricing(null, null, new BigDecimal("30.00"), null)));
+        flushAndClear();
+
+        ProductVariant reloaded = productRepository.findBySku("RT-VP-002").orElseThrow()
+                .variants().get(0);
+
+        assertThat(reloaded.pricing()).isNull();
+        assertThat(reloaded.hasOwnPricing()).isFalse();
+    }
+
+    @Test
+    void variant_precoParcialSobreviveAoRoundTripEHerdaOResto() {
+        productRepository.save(Product.create("RT-VP-003", "Essência", "essencia",
+                List.of(ProductVariant.create("RT-VP-003-A", List.of(),
+                        Pricing.of(new BigDecimal("40.00"), null, null))),
+                new Pricing(new BigDecimal("10.00"), null, new BigDecimal("30.00"), null)));
+        flushAndClear();
+
+        Product reloaded = productRepository.findBySku("RT-VP-003").orElseThrow();
+        Pricing efetivo = reloaded.effectivePricingFor("RT-VP-003-A");
+
+        assertThat(efetivo.costPrice()).as("próprio").isEqualByComparingTo("40.00");
+        assertThat(efetivo.salePrice()).as("herdado").isEqualByComparingTo("30.00");
+    }
+
+    @Test
+    void variant_precoProprioPodeSerRemovidoVoltandoAHerdar() {
+        productRepository.save(Product.create("RT-VP-004", "Essência", "essencia",
+                List.of(ProductVariant.create("RT-VP-004-A", List.of(),
+                        Pricing.of(null, null, new BigDecimal("99.90")))),
+                new Pricing(null, null, new BigDecimal("30.00"), null)));
+        flushAndClear();
+
+        Product reloaded = productRepository.findBySku("RT-VP-004").orElseThrow();
+        // Não há atalho no agregado para zerar o preço da grade inteira — reconstrói-se o produto
+        // com cada variação voltando a herdar, que é o caminho que o service percorreria.
+        Product semPrecoNaVariacao = Product.of(reloaded.id(), reloaded.sku(), reloaded.name(),
+                reloaded.category(), reloaded.active(),
+                reloaded.variants().stream().map(v -> v.withPricing(null)).toList(),
+                reloaded.pricing());
+        productRepository.save(semPrecoNaVariacao);
+        flushAndClear();
+
+        assertThat(productRepository.findBySku("RT-VP-004").orElseThrow()
+                .variants().get(0).pricing()).isNull();
+    }
+
     // ── Atributos do próprio SKU pai ─────────────────────────────────────────
 
     @Test

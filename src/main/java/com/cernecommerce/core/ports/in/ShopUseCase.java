@@ -35,7 +35,12 @@ public interface ShopUseCase {
     }
 
     /** Variação de um item do catálogo, com disponibilidade própria — o preço é herdado do pai. */
-    record CatalogVariant(String sku, List<ProductAttribute> attributes, boolean available) {
+    /**
+     * @param price preço efetivo <b>desta</b> variação (EST-F020): o próprio, quando ela tem
+     *        preço, ou o herdado do pai. Vem resolvido pelo backend para a vitrine não precisar
+     *        reimplementar a precedência — e divergir dela.
+     */
+    record CatalogVariant(String sku, List<ProductAttribute> attributes, boolean available, BigDecimal price) {
     }
 
     /** Detalhe público de um item do catálogo (ECM-F002), com a grade de variações ativas. */

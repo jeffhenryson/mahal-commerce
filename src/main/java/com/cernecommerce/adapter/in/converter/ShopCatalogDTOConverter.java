@@ -48,6 +48,7 @@ public class ShopCatalogDTOConverter {
         dto.setSku(variant.sku());
         dto.setAttributes(variant.attributes().stream().map(this::toResponse).toList());
         dto.setAvailable(variant.available());
+        dto.setPrice(variant.price());
         return dto;
     }
 

@@ -2,6 +2,8 @@ package com.cernecommerce.core.domain.model.estoque;
 
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -366,5 +368,92 @@ class ProductTest {
                 List.of(new ProductAttribute("Origem", "Brasil")));
 
         assertThat(product.withAttributes(List.of()).attributes()).isEmpty();
+    }
+
+    // ── Precedência de preço variação → pai (EST-F020) ───────────────────────
+
+    private static Product comGrade(Pricing precoDoPai, Pricing precoDaVariacaoA) {
+        return Product.create("PAI-1", "Essência", "essencia",
+                List.of(ProductVariant.create("PAI-1-A", List.of(), precoDaVariacaoA),
+                        ProductVariant.create("PAI-1-B", List.of())),
+                precoDoPai);
+    }
+
+    @Test
+    void skuDoPai_resolveSempreParaOPrecoDoPai() {
+        Product product = comGrade(Pricing.of(null, null, new BigDecimal("30.00")),
+                Pricing.of(null, null, new BigDecimal("99.00")));
+
+        assertThat(product.effectivePricingFor("PAI-1").salePrice()).isEqualByComparingTo("30.00");
+    }
+
+    @Test
+    void variacaoComPrecoProprio_sobrescreveODoPai() {
+        Product product = comGrade(Pricing.of(null, null, new BigDecimal("30.00")),
+                Pricing.of(null, null, new BigDecimal("99.00")));
+
+        assertThat(product.effectivePricingFor("PAI-1-A").salePrice()).isEqualByComparingTo("99.00");
+    }
+
+    @Test
+    void variacaoSemPrecoProprio_herdaODoPai() {
+        // É o comportamento histórico e segue sendo o padrão.
+        Product product = comGrade(Pricing.of(null, null, new BigDecimal("30.00")),
+                Pricing.of(null, null, new BigDecimal("99.00")));
+
+        assertThat(product.effectivePricingFor("PAI-1-B").salePrice()).isEqualByComparingTo("30.00");
+    }
+
+    @Test
+    void variacaoComPricingVazio_herdaEmVezDeApagarOPrecoDoPai() {
+        Product product = comGrade(Pricing.of(null, null, new BigDecimal("30.00")), Pricing.empty());
+
+        assertThat(product.effectivePricingFor("PAI-1-A").salePrice()).isEqualByComparingTo("30.00");
+    }
+
+    @Test
+    void skuDesconhecido_caiNoPrecoDoPai() {
+        // Não lança: quem valida existência de SKU é o service, não a resolução de preço.
+        Product product = comGrade(Pricing.of(null, null, new BigDecimal("30.00")), null);
+
+        assertThat(product.effectivePricingFor("NAO-EXISTE").salePrice()).isEqualByComparingTo("30.00");
+    }
+
+    @Test
+    void produtoSemGrade_resolveParaOProprioPreco() {
+        Product product = Product.create("SIMPLES-1", "Carvão", "carvao", List.of(),
+                Pricing.of(null, null, new BigDecimal("12.00")));
+
+        assertThat(product.effectivePricingFor("SIMPLES-1").salePrice()).isEqualByComparingTo("12.00");
+    }
+
+    @Test
+    void variacaoQueDeclaraSoOOriginalPrice_naoPerdeOPrecoDeVendaDoPai() {
+        // Herança é POR CAMPO. Fosse tudo-ou-nada, esta variação ficaria sem preço de venda
+        // nenhum — silenciosamente, porque o do pai teria sido descartado junto.
+        Product product = Product.create("PAI-2", "Essência", "essencia",
+                List.of(ProductVariant.create("PAI-2-A", List.of(),
+                        Pricing.of(null, null, null, new BigDecimal("120.00")))),
+                Pricing.of(null, null, new BigDecimal("30.00")));
+
+        Pricing efetivo = product.effectivePricingFor("PAI-2-A");
+
+        assertThat(efetivo.salePrice()).as("herdado do pai").isEqualByComparingTo("30.00");
+        assertThat(efetivo.originalPrice()).as("próprio da variação").isEqualByComparingTo("120.00");
+    }
+
+    @Test
+    void variacaoQueDeclaraSoOCusto_sobrescreveOCustoEHerdaOPrecoDeVenda() {
+        Product product = Product.create("PAI-3", "Essência", "essencia",
+                List.of(ProductVariant.create("PAI-3-A", List.of(),
+                        Pricing.of(new BigDecimal("40.00"), null, null))),
+                Pricing.of(new BigDecimal("10.00"), null, new BigDecimal("30.00")));
+
+        Pricing efetivo = product.effectivePricingFor("PAI-3-A");
+
+        assertThat(efetivo.costPrice()).isEqualByComparingTo("40.00");
+        assertThat(efetivo.salePrice()).isEqualByComparingTo("30.00");
+        // E a margem passa a refletir o custo real da variação, não o do pai.
+        assertThat(efetivo.marginAmount()).isEqualByComparingTo("-10.00");
     }
 }

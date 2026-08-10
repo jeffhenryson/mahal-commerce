@@ -10,4 +10,11 @@ public class ProductVariantResponseDTO {
     private String sku;
     private boolean active;
     private List<ProductAttributeResponseDTO> attributes;
+
+    /**
+     * Precificação própria da variação (EST-F020). <b>Nula quando a variação herda o preço do
+     * pai</b> — a ausência aqui é informação, não omissão: é assim que o cliente distingue
+     * "tem preço próprio" de "usa o do pai".
+     */
+    private PricingResponseDTO pricing;
 }

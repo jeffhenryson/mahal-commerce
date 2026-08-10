@@ -3,6 +3,7 @@ package com.cernecommerce.adapter.out.persistence.entity;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.math.BigDecimal;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
@@ -35,4 +36,20 @@ public class ProductVariantEntity {
     @CollectionTable(name = "product_attribute", joinColumns = @JoinColumn(name = "variant_id",
             foreignKey = @ForeignKey(name = "fk_product_attribute_variant")))
     private Set<ProductAttributeEmbeddable> attributes = new LinkedHashSet<>();
+
+    // EST-F020: precificação própria da variação. Todas nulas = herda do pai, que é o padrão.
+    // Não são embutidas num @Embedded Pricing porque o domínio precisa distinguir "não tem preço
+    // próprio" (o record inteiro nulo) de "tem, mas desconhecido" — e um @Embedded com todos os
+    // campos nulos é materializado pelo Hibernate como objeto não-nulo, apagando a distinção.
+    @Column(name = "cost_price", precision = 14, scale = 2)
+    private BigDecimal costPrice;
+
+    @Column(name = "markup_percent", precision = 9, scale = 4)
+    private BigDecimal markupPercent;
+
+    @Column(name = "sale_price", precision = 14, scale = 2)
+    private BigDecimal salePrice;
+
+    @Column(name = "original_price", precision = 14, scale = 2)
+    private BigDecimal originalPrice;
 }

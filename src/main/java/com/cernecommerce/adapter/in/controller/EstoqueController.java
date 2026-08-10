@@ -196,8 +196,11 @@ public class EstoqueController {
             @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
     })
     @PostMapping("/products")
+    // touchesPricing() e não "#request.pricing == null": desde EST-F020 o preço também pode vir
+    // dentro de variants[], e checar só a raiz deixaria quem tem apenas ESTOQUE_PRODUCT_MANAGE
+    // precificar pela porta lateral.
     @PreAuthorize("hasAuthority('ESTOQUE_PRODUCT_MANAGE') "
-            + "and (#request.pricing == null or hasAuthority('ESTOQUE_PRODUCT_PRICE_MANAGE'))")
+            + "and (!#request.touchesPricing() or hasAuthority('ESTOQUE_PRODUCT_PRICE_MANAGE'))")
     public ResponseEntity<ProductResponseDTO> createProduct(@Valid @RequestBody ProductRequest request,
             Authentication authentication) {
         List<ProductVariant> variants = converter.toVariants(request.getVariants());
@@ -222,8 +225,11 @@ public class EstoqueController {
             @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
     })
     @PatchMapping("/products/{sku}")
+    // touchesPricing() e não "#request.pricing == null": desde EST-F020 o preço também pode vir
+    // dentro de variants[], e checar só a raiz deixaria quem tem apenas ESTOQUE_PRODUCT_MANAGE
+    // precificar pela porta lateral.
     @PreAuthorize("hasAuthority('ESTOQUE_PRODUCT_MANAGE') "
-            + "and (#request.pricing == null or hasAuthority('ESTOQUE_PRODUCT_PRICE_MANAGE'))")
+            + "and (!#request.touchesPricing() or hasAuthority('ESTOQUE_PRODUCT_PRICE_MANAGE'))")
     public ResponseEntity<ProductResponseDTO> updateProduct(
             @PathVariable @NotBlank @Size(min = 3, max = 50) String sku,
             @Valid @RequestBody ProductPatchRequest request, Authentication authentication) {

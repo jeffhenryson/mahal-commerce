@@ -141,7 +141,7 @@ class ShopControllerTest {
     @Test
     void getCatalogItem_returnsDetailWithVariants() throws Exception {
         ShopUseCase.CatalogVariant variant = new ShopUseCase.CatalogVariant(
-                "ESS-001-MACA", List.of(new ProductAttribute("sabor", "Maçã")), true);
+                "ESS-001-MACA", List.of(new ProductAttribute("sabor", "Maçã")), true, new BigDecimal("30.00"));
         ShopUseCase.CatalogItemDetail detail = new ShopUseCase.CatalogItemDetail(
                 "ESS-001", "Essência Maçã", "essencia", new BigDecimal("30.00"), true, List.of(variant), null, false,
                 null, false, null, null, List.of());
@@ -151,7 +151,10 @@ class ShopControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.sku").value("ESS-001"))
                 .andExpect(jsonPath("$.variants[0].sku").value("ESS-001-MACA"))
-                .andExpect(jsonPath("$.variants[0].attributes[0].value").value("Maçã"));
+                .andExpect(jsonPath("$.variants[0].attributes[0].value").value("Maçã"))
+                // EST-F020: a vitrine recebe o preço já resolvido por variação, próprio ou
+                // herdado — não reimplementa a precedência.
+                .andExpect(jsonPath("$.variants[0].price").value(30.00));
     }
 
     @Test

@@ -382,4 +382,31 @@ class PricingTest {
             assertThat(Pricing.of(bd("45.00"), bd("80"), bd("79.90")).originalPrice()).isNull();
         }
     }
+
+    @Nested
+    class Vazio {
+
+        @Test
+        void isEmpty_verdadeiroSoQuandoNenhumCampoFoiPreenchido() {
+            assertThat(Pricing.empty().isEmpty()).isTrue();
+            assertThat(Pricing.of(null, null, null, null).isEmpty()).isTrue();
+        }
+
+        @Test
+        void isEmpty_falsoQuandoQualquerCampoEstaPreenchido() {
+            assertThat(Pricing.of(new BigDecimal("10.00"), null, null).isEmpty()).isFalse();
+            assertThat(Pricing.of(null, new BigDecimal("50"), null).isEmpty()).isFalse();
+            assertThat(Pricing.of(null, null, new BigDecimal("30.00")).isEmpty()).isFalse();
+            assertThat(Pricing.of(null, null, null, new BigDecimal("99.00")).isEmpty()).isFalse();
+        }
+
+        @Test
+        void isEmpty_eDistintoDeNaoEstarPrecificado() {
+            // Só custo: não há preço a cobrar, mas há informação — e é essa diferença que faz o
+            // custo próprio de uma variação não ser ignorado (EST-F020).
+            Pricing soCusto = Pricing.of(new BigDecimal("10.00"), null, null);
+            assertThat(soCusto.isPriced()).isFalse();
+            assertThat(soCusto.isEmpty()).isFalse();
+        }
+    }
 }

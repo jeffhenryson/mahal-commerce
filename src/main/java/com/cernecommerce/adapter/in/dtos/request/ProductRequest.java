@@ -61,4 +61,21 @@ public class ProductRequest {
     /** Opcional (EST-F019) — omitido, o produto nasce sem precificação. */
     @Valid
     private PricingRequest pricing;
+
+    /**
+     * Indica se este request mexe em preço em <b>qualquer</b> nível — na raiz ou dentro de alguma
+     * variação (EST-F020).
+     *
+     * <p>Existe para o {@code @PreAuthorize} do controller. Antes de haver preço por variação, a
+     * expressão checava {@code #request.pricing == null} e isso bastava. Com o preço podendo vir
+     * dentro de {@code variants[]}, aquela checagem virou um furo: quem tem apenas
+     * {@code ESTOQUE_PRODUCT_MANAGE} passaria a precificar pela porta lateral, desfazendo a
+     * separação que EST-F019 criou de propósito entre manter cadastro e mexer em preço.</p>
+     */
+    public boolean touchesPricing() {
+        if (pricing != null) {
+            return true;
+        }
+        return variants != null && variants.stream().anyMatch(v -> v != null && v.getPricing() != null);
+    }
 }

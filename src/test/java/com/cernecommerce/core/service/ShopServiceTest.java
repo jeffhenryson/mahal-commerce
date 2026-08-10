@@ -57,6 +57,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -536,5 +537,29 @@ class ShopServiceTest {
                 order.discountAmount(), order.cashbackRedeemed(), order.netAmount(), order.changeAmount(),
                 order.cancelReason(), order.createdAt(), order.paidAt(), order.concludedAt(),
                 order.cancelledAt(), order.refundedAt(), order.version());
+    }
+
+    @Test
+    void getCatalogItem_precoDaVariacaoSaiResolvidoProprioOuHerdado() {
+        // A vitrine não pode reimplementar a precedência de EST-F020 — se reimplementasse,
+        // divergiria do que o PDV cobra.
+        Product produto = Product.of(1L, "ESS-001", "Essência", "essencia", true,
+                List.of(ProductVariant.of(9L, "ESS-001-50G", List.of(), true),
+                        ProductVariant.of(10L, "ESS-001-100G", List.of(), true,
+                                Pricing.of(null, null, new BigDecimal("99.90")))),
+                Pricing.of(null, null, new BigDecimal("30.00")));
+        when(estoqueUseCase.findProductBySku("ESS-001")).thenReturn(produto);
+        when(estoqueUseCase.getDefaultWarehouse()).thenReturn(
+                Warehouse.of(1L, "PRINCIPAL", "Principal", WarehouseType.LOJA_FISICA, true));
+        when(estoqueUseCase.getStockBalance(anyString(), anyString()))
+                .thenReturn(StockBalance.of(1L, "X", 1L, new BigDecimal("5"), BigDecimal.ZERO, 0L));
+
+        ShopUseCase.CatalogItemDetail detail = shopService.getCatalogItem("ESS-001");
+
+        assertThat(detail.variants())
+                .extracting(ShopUseCase.CatalogVariant::sku, v -> v.price().stripTrailingZeros())
+                .containsExactly(
+                        tuple("ESS-001-50G", new BigDecimal("30.00").stripTrailingZeros()),
+                        tuple("ESS-001-100G", new BigDecimal("99.90").stripTrailingZeros()));
     }
 }

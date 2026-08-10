@@ -1,6 +1,7 @@
 package com.cernecommerce.adapter.in.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -1776,6 +1777,63 @@ public class EstoqueControllerTest {
                         .principal(AUTH)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"sku\":\"ATR-006\",\"name\":\"X\",\"attributes\":[" + attrs + "]}"))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(estoqueUseCase);
+    }
+
+    // ===== Preço por variação (EST-F020) =====
+
+    @Test
+    void createProduct_comPricingNaVariante_repassaAoUseCase() throws Exception {
+        when(estoqueUseCase.createProduct(anyString(), anyString(), any(), anyList(), any(), any(), any(),
+                anyBoolean(), anyBoolean(), any(), any(), any(), anyList())).thenReturn(product("VAR-001"));
+
+        mockMvc.perform(post("/estoque/products")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"sku":"VAR-001","name":"Essência","pricing":{"salePrice":30.00},
+                                 "variants":[
+                                   {"sku":"VAR-001-50G"},
+                                   {"sku":"VAR-001-100G","pricing":{"salePrice":99.90}}]}"""))
+                .andExpect(status().isCreated());
+
+        ArgumentCaptor<List<ProductVariant>> captor = ArgumentCaptor.forClass(List.class);
+        verify(estoqueUseCase).createProduct(anyString(), anyString(), any(), captor.capture(), any(), any(), any(),
+                anyBoolean(), anyBoolean(), any(), any(), any(), anyList());
+
+        assertThat(captor.getValue())
+                .extracting(ProductVariant::sku, ProductVariant::hasOwnPricing)
+                .containsExactly(tuple("VAR-001-50G", false), tuple("VAR-001-100G", true));
+        assertThat(captor.getValue().get(1).pricing().salePrice()).isEqualByComparingTo("99.90");
+    }
+
+    @Test
+    void response_variacaoSemPrecoProprio_traPricingNuloEComPrecoTraOBloco() throws Exception {
+        // A ausência do bloco é o que sinaliza a herança — por isso não pode virar um objeto
+        // vazio na serialização.
+        Product criado = Product.of(1L, "VAR-002", "Essência", "essencia", true,
+                List.of(ProductVariant.of(9L, "VAR-002-50G", List.of(), true),
+                        ProductVariant.of(10L, "VAR-002-100G", List.of(), true,
+                                Pricing.of(null, null, new BigDecimal("99.90")))),
+                Pricing.of(null, null, new BigDecimal("30.00")));
+        when(estoqueUseCase.findProductBySku("VAR-002")).thenReturn(criado);
+
+        mockMvc.perform(get("/estoque/products/VAR-002"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.variants[0].pricing").doesNotExist())
+                .andExpect(jsonPath("$.variants[1].pricing.salePrice").value(99.90));
+    }
+
+    @Test
+    void createProduct_pricingDaVarianteComValorNegativo_returns_400() throws Exception {
+        mockMvc.perform(post("/estoque/products")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"sku":"VAR-003","name":"Essência","variants":[
+                                  {"sku":"VAR-003-A","pricing":{"salePrice":-1.00}}]}"""))
                 .andExpect(status().isBadRequest());
 
         verifyNoInteractions(estoqueUseCase);

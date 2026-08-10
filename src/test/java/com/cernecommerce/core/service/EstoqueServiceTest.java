@@ -2653,4 +2653,92 @@ class EstoqueServiceTest {
         assertThat(captor.getValue().attributes())
                 .extracting(ProductAttribute::type).containsExactly("Origem");
     }
+
+    // ── Preço por variação: precedência no caminho do PDV (EST-F020) ─────────
+
+    @Test
+    void findPricingBySku_skuDeVariacaoComPrecoProprio_devolveODaVariacao() {
+        Product pai = Product.of(1L, "VAR-001", "Essência", "essencia", true,
+                List.of(ProductVariant.of(9L, "VAR-001-100G", List.of(), true,
+                        Pricing.of(null, null, new BigDecimal("99.00")))),
+                Pricing.of(null, null, new BigDecimal("30.00")));
+        when(productRepository.findByAnySku("VAR-001-100G")).thenReturn(Optional.of(pai));
+
+        assertThat(estoqueService.findPricingBySku("VAR-001-100G").salePrice())
+                .isEqualByComparingTo("99.00");
+    }
+
+    @Test
+    void findPricingBySku_skuDeVariacaoSemPrecoProprio_herdaODoPai() {
+        Product pai = Product.of(1L, "VAR-002", "Essência", "essencia", true,
+                List.of(ProductVariant.of(9L, "VAR-002-MENTA", List.of(), true)),
+                Pricing.of(null, null, new BigDecimal("30.00")));
+        when(productRepository.findByAnySku("VAR-002-MENTA")).thenReturn(Optional.of(pai));
+
+        assertThat(estoqueService.findPricingBySku("VAR-002-MENTA").salePrice())
+                .isEqualByComparingTo("30.00");
+    }
+
+    @Test
+    void findPricingBySku_skuDoPai_naoEAfetadoPeloPrecoDaVariacao() {
+        Product pai = Product.of(1L, "VAR-003", "Essência", "essencia", true,
+                List.of(ProductVariant.of(9L, "VAR-003-100G", List.of(), true,
+                        Pricing.of(null, null, new BigDecimal("99.00")))),
+                Pricing.of(null, null, new BigDecimal("30.00")));
+        when(productRepository.findByAnySku("VAR-003")).thenReturn(Optional.of(pai));
+
+        assertThat(estoqueService.findPricingBySku("VAR-003").salePrice()).isEqualByComparingTo("30.00");
+    }
+
+    @Test
+    void findPricingBySku_naoFazConsultaExtraParaResolverAVariacao() {
+        // findByAnySku já traz as variações com JOIN FETCH; uma segunda consulta aqui seria N+1
+        // no caminho mais quente do PDV.
+        Product pai = Product.of(1L, "VAR-004", "Essência", "essencia", true,
+                List.of(ProductVariant.of(9L, "VAR-004-A", List.of(), true,
+                        Pricing.of(null, null, new BigDecimal("99.00")))),
+                Pricing.of(null, null, new BigDecimal("30.00")));
+        when(productRepository.findByAnySku("VAR-004-A")).thenReturn(Optional.of(pai));
+
+        estoqueService.findPricingBySku("VAR-004-A");
+
+        verify(productRepository, times(1)).findByAnySku("VAR-004-A");
+        verify(productRepository, never()).findBySku(anyString());
+    }
+
+    @Test
+    void createProduct_persisteOPrecoProprioDaVariacao() {
+        when(productRepository.existsBySku(anyString())).thenReturn(false);
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        estoqueService.createProduct("VAR-005", "Essência", "essencia",
+                List.of(ProductVariant.create("VAR-005-50G", List.of()),
+                        ProductVariant.create("VAR-005-100G", List.of(),
+                                Pricing.of(null, null, new BigDecimal("99.00")))),
+                Pricing.of(null, null, new BigDecimal("30.00")), null, null, false, false, null, null, List.of());
+
+        ArgumentCaptor<Product> captor = ArgumentCaptor.forClass(Product.class);
+        verify(productRepository).save(captor.capture());
+        assertThat(captor.getValue().variants())
+                .extracting(ProductVariant::sku, ProductVariant::hasOwnPricing)
+                .containsExactly(tuple("VAR-005-50G", false), tuple("VAR-005-100G", true));
+    }
+
+    @Test
+    void custoDoKit_usaOCustoProprioDaVariacaoQuandoOComponenteEUmaVariacao() {
+        // A soma do kit precisa seguir a mesma precedência; ler o custo do pai daria um kit mais
+        // barato do que realmente é.
+        Product kit = Product.of(1L, "KIT-001", "Kit", "kits", true, List.of(),
+                Pricing.of(null, null, new BigDecimal("150.00")), ProductType.KIT, false);
+        Product componentePai = Product.of(2L, "COMP-001", "Essência", "essencia", true,
+                List.of(ProductVariant.of(9L, "COMP-001-100G", List.of(), true,
+                        Pricing.of(new BigDecimal("40.00"), null, null))),
+                Pricing.of(new BigDecimal("10.00"), null, null));
+        when(productRepository.findByAnySku("KIT-001")).thenReturn(Optional.of(kit));
+        when(productRepository.findByAnySku("COMP-001-100G")).thenReturn(Optional.of(componentePai));
+        when(kitComponentRepository.findByKitSku("KIT-001"))
+                .thenReturn(List.of(KitComponent.of(1L, "KIT-001", "COMP-001-100G", BigDecimal.ONE)));
+
+        assertThat(estoqueService.findPricingBySku("KIT-001").costPrice()).isEqualByComparingTo("40.00");
+    }
 }

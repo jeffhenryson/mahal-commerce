@@ -30,7 +30,8 @@ public class ProductDTOConverter {
             return List.of();
         }
         return requests.stream()
-                .map(r -> ProductVariant.create(r.getSku(), toAttributes(r.getAttributes())))
+                .map(r -> ProductVariant.create(r.getSku(), toAttributes(r.getAttributes()),
+                        toPricing(r.getPricing())))
                 .toList();
     }
 
@@ -125,6 +126,8 @@ public class ProductDTOConverter {
         dto.setSku(variant.sku());
         dto.setActive(variant.active());
         dto.setAttributes(variant.attributes().stream().map(this::toResponse).toList());
+        // Nulo quando a variação herda do pai — a ausência do bloco é o que sinaliza a herança.
+        dto.setPricing(variant.pricing() == null ? null : toResponse(variant.pricing()));
         return dto;
     }
 

@@ -292,6 +292,35 @@ public record Product(
                 onSale, superPromo, description, videoUrl, images, newAttributes);
     }
 
+    /**
+     * Precedência de preço variação → pai (EST-F020).
+     *
+     * <p>A herança é <b>por campo</b>, e não tudo-ou-nada: cada valor preenchido na variação
+     * vence o do pai, e cada valor ausente é herdado. É a mesma semântica de "nulo mantém" que
+     * {@link Pricing#withPatch} já implementa para o PATCH, reaproveitada aqui.</p>
+     *
+     * <p>Tudo-ou-nada seria pior de um jeito silencioso: uma variação que declara só o próprio
+     * {@code originalPrice} para efeito de vitrine passaria a não ter preço de venda nenhum,
+     * porque o do pai teria sido descartado junto.</p>
+     *
+     * <p>Para o SKU do próprio pai, ou para uma variação que não declarou preço algum, o
+     * resultado é exatamente a {@link #pricing()} do pai — o comportamento histórico do módulo,
+     * que segue sendo o padrão.</p>
+     *
+     * <p>Mora aqui, e não no service, porque tanto a resolução de preço do PDV quanto a vitrine
+     * pública precisam da mesma regra — duplicá-la seria garantir que as duas divergissem.</p>
+     */
+    public Pricing effectivePricingFor(String sku) {
+        return variants.stream()
+                .filter(variant -> variant.sku().equals(sku))
+                .filter(ProductVariant::hasOwnPricing)
+                .map(ProductVariant::pricing)
+                .findFirst()
+                .map(own -> pricing.withPatch(own.costPrice(), own.markupPercent(), own.salePrice(),
+                        own.originalPrice()))
+                .orElse(pricing);
+    }
+
     /** Indica se este produto é um kit virtual (EST-F015) — sem saldo próprio, saldo derivado. */
     public boolean isKit() {
         return type == ProductType.KIT;

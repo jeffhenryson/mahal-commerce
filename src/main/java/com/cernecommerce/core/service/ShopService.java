@@ -105,7 +105,8 @@ public class ShopService implements ShopUseCase {
         Warehouse warehouse = estoqueUseCase.getDefaultWarehouse();
         List<CatalogVariant> variants = product.variants().stream()
                 .filter(ProductVariant::active)
-                .map(v -> new CatalogVariant(v.sku(), v.attributes(), isAvailable(v.sku(), warehouse.code())))
+                .map(v -> new CatalogVariant(v.sku(), v.attributes(), isAvailable(v.sku(), warehouse.code()),
+                        product.effectivePricingFor(v.sku()).effectivePrice()))
                 .toList();
         return new CatalogItemDetail(product.sku(), product.name(), product.category(),
                 product.pricing().effectivePrice(), isAvailable(product.sku(), warehouse.code()), variants,
