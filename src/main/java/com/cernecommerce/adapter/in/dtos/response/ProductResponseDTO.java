@@ -30,6 +30,12 @@ public class ProductResponseDTO {
     /** Galeria de até 5 imagens ordenadas. Nunca nula; lista vazia se não cadastrada. */
     private List<String> images;
 
+    /**
+     * Atributos descritivos do próprio produto. Nunca nulo; lista vazia se não cadastrados.
+     * Distintos dos que vêm dentro de cada item de {@code variants}.
+     */
+    private List<ProductAttributeResponseDTO> attributes;
+
     private boolean active;
     private List<ProductVariantResponseDTO> variants;
 

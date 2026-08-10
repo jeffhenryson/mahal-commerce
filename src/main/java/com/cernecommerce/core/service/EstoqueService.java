@@ -32,6 +32,7 @@ import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.SortDirection;
 import com.cernecommerce.core.domain.model.estoque.Product;
+import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
 import com.cernecommerce.core.domain.model.estoque.ProductFilter;
 import com.cernecommerce.core.domain.model.estoque.ProductSortField;
 import com.cernecommerce.core.domain.model.estoque.ProductType;
@@ -131,7 +132,7 @@ public class EstoqueService implements EstoqueUseCase {
     @Transactional
     public Product createProduct(String sku, String name, String category, List<ProductVariant> variants,
             Pricing pricing, String brand, String imageUrl, boolean onSale, boolean superPromo, String description,
-            String videoUrl, List<String> images) {
+            String videoUrl, List<String> images, List<ProductAttribute> attributes) {
         List<ProductVariant> safeVariants = variants == null ? List.of() : variants;
         // O SKU pai e os das variações compartilham o mesmo espaço de nomes: uk_product_sku e
         // uk_product_variant_sku. Checar os dois aqui evita que a violação de constraint escape
@@ -150,7 +151,7 @@ public class EstoqueService implements EstoqueUseCase {
         }
         Product product = Product.create(sku, name, category, safeVariants,
                 pricing == null ? Pricing.empty() : pricing, ProductType.SIMPLES, false, brand, imageUrl, onSale,
-                superPromo, description, videoUrl, images);
+                superPromo, description, videoUrl, images, attributes);
         return productRepository.save(product);
     }
 
@@ -171,7 +172,7 @@ public class EstoqueService implements EstoqueUseCase {
     @Transactional
     public Product updateProduct(String sku, String name, String category, Pricing pricing, String brand,
             String imageUrl, Boolean onSale, Boolean superPromo, String description, String videoUrl,
-            List<String> images) {
+            List<String> images, List<ProductAttribute> attributes) {
         Product current = productRepository.findBySku(sku)
                 .orElseThrow(() -> new ProductNotFoundException(sku));
         Product updated = current.withDetails(name, category, brand, imageUrl, description, videoUrl);
@@ -183,6 +184,10 @@ public class EstoqueService implements EstoqueUseCase {
         }
         if (images != null) {
             updated = updated.withImages(images);
+        }
+        // Mesma semântica de images: nulo mantém, lista (inclusive vazia) substitui o conjunto.
+        if (attributes != null) {
+            updated = updated.withAttributes(attributes);
         }
         if (pricing != null) {
             // Custo de kit é sempre derivado da soma dos componentes (EST-F015) — um costPrice

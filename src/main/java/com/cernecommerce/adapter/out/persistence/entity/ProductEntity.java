@@ -97,4 +97,20 @@ public class ProductEntity {
     @OrderColumn(name = "image_order")
     @Column(name = "url", length = 2048)
     private List<String> images = new ArrayList<>();
+
+    // Atributos descritivos do próprio SKU pai, para o produto sem grade poder carregar
+    // "Sabor: Menta" — antes só existia atributo dentro de variação.
+    //
+    // Tabela NOVA em vez de tornar product_attribute.variant_id anulável: aquela tabela é a que
+    // distingue uma variação das outras, tem FK e índice para variant_id, e admitir linha sem
+    // variação ali significaria uma coluna nula em metade das linhas mais um CHECK para garantir
+    // que exatamente um dos dois donos está preenchido. Duas tabelas com um dono cada saem mais
+    // baratas e mantêm a FK existente intacta.
+    //
+    // O ProductAttributeEmbeddable é reaproveitado como está: as colunas attr_type/attr_value são
+    // as mesmas, só muda a tabela e a coluna de junção.
+    @ElementCollection
+    @CollectionTable(name = "product_root_attribute", joinColumns = @JoinColumn(name = "product_id",
+            foreignKey = @ForeignKey(name = "fk_product_root_attribute_product")))
+    private List<ProductAttributeEmbeddable> attributes = new ArrayList<>();
 }

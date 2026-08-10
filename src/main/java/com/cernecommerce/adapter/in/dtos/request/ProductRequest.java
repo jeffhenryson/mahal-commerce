@@ -45,6 +45,16 @@ public class ProductRequest {
     @Size(max = 5)
     private List<@Size(max = 2048) String> images;
 
+    /**
+     * Atributos descritivos do próprio produto, opcional. Distintos dos que vão dentro de
+     * {@code variants}: aqueles fazem parte do que identifica cada variação da grade, estes só
+     * descrevem o item — existem para o produto <b>sem</b> grade, que não tinha onde carregar
+     * um "Sabor: Menta".
+     */
+    @Valid
+    @Size(max = 20)
+    private List<ProductAttributeRequest> attributes;
+
     @Valid
     private List<ProductVariantRequest> variants;
 

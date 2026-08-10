@@ -57,6 +57,15 @@ public class ProductPatchRequest {
     private List<@Size(max = 2048) String> images;
 
     /**
+     * Atributos descritivos do próprio produto. Nulo mantém os atuais; uma lista (mesmo vazia)
+     * substitui o conjunto inteiro — mesma semântica de {@code images}, e pelo mesmo motivo: não
+     * há identidade estável por atributo que permitisse edição item a item.
+     */
+    @Valid
+    @Size(max = 20)
+    private List<ProductAttributeRequest> attributes;
+
+    /**
      * Precificação (EST-F019). Ausente, mantém a atual; presente, cada um dos seus campos segue
      * a mesma regra de "nulo mantém". Exige {@code ESTOQUE_PRODUCT_PRICE_MANAGE} — mandar este
      * bloco sem a permissão é 403, e nada do PATCH é aplicado.

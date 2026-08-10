@@ -2550,4 +2550,107 @@ class EstoqueServiceTest {
         verify(notificationUseCase, never()).notify(any(), any(), any(), any());
         verify(stockLotRepository, never()).save(any());
     }
+
+    // ── Atributos do próprio SKU pai ──────────────────────────────────────────
+
+    @Test
+    void createProduct_persisteOsAtributosDeRaiz() {
+        when(productRepository.existsBySku(anyString())).thenReturn(false);
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        estoqueService.createProduct("ATR-001", "Essência", "essencia", List.of(), Pricing.empty(),
+                null, null, false, false, null, null, List.of(),
+                List.of(new ProductAttribute("Origem", "Brasil"), new ProductAttribute("Peso", "50g")));
+
+        ArgumentCaptor<Product> captor = ArgumentCaptor.forClass(Product.class);
+        verify(productRepository).save(captor.capture());
+        assertThat(captor.getValue().attributes())
+                .extracting(ProductAttribute::type, ProductAttribute::value)
+                .containsExactly(tuple("Origem", "Brasil"), tuple("Peso", "50g"));
+    }
+
+    @Test
+    void createProduct_semAtributos_nasceComListaVazia() {
+        when(productRepository.existsBySku(anyString())).thenReturn(false);
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        estoqueService.createProduct("ATR-002", "Carvão", "carvao", List.of(), Pricing.empty(),
+                null, null, false, false, null, null, List.of());
+
+        ArgumentCaptor<Product> captor = ArgumentCaptor.forClass(Product.class);
+        verify(productRepository).save(captor.capture());
+        assertThat(captor.getValue().attributes()).isEmpty();
+    }
+
+    @Test
+    void updateProduct_substituiOConjuntoDeAtributos() {
+        Product atual = Product.of(1L, "ATR-003", "Essência", "essencia", true, List.of(), Pricing.empty(),
+                ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(),
+                List.of(new ProductAttribute("Origem", "Brasil")));
+        when(productRepository.findBySku("ATR-003")).thenReturn(Optional.of(atual));
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        estoqueService.updateProduct("ATR-003", null, null, null, null, null, null, null, null, null, null,
+                List.of(new ProductAttribute("Peso", "50g")));
+
+        ArgumentCaptor<Product> captor = ArgumentCaptor.forClass(Product.class);
+        verify(productRepository).save(captor.capture());
+        assertThat(captor.getValue().attributes())
+                .extracting(ProductAttribute::type).containsExactly("Peso");
+    }
+
+    @Test
+    void updateProduct_atributosNulos_preservamOsAtuais() {
+        Product atual = Product.of(1L, "ATR-004", "Essência", "essencia", true, List.of(), Pricing.empty(),
+                ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(),
+                List.of(new ProductAttribute("Origem", "Brasil")));
+        when(productRepository.findBySku("ATR-004")).thenReturn(Optional.of(atual));
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        // Um PATCH que só renomeia não pode apagar os atributos.
+        estoqueService.updateProduct("ATR-004", "Novo Nome", null, null, null, null, null, null, null, null, null,
+                null);
+
+        ArgumentCaptor<Product> captor = ArgumentCaptor.forClass(Product.class);
+        verify(productRepository).save(captor.capture());
+        assertThat(captor.getValue().attributes()).extracting(ProductAttribute::type).containsExactly("Origem");
+        assertThat(captor.getValue().name()).isEqualTo("Novo Nome");
+    }
+
+    @Test
+    void updateProduct_listaVaziaDeAtributos_limpaOConjunto() {
+        // Mesma assimetria já adotada para images: nulo mantém, lista vazia apaga.
+        Product atual = Product.of(1L, "ATR-005", "Essência", "essencia", true, List.of(), Pricing.empty(),
+                ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(),
+                List.of(new ProductAttribute("Origem", "Brasil")));
+        when(productRepository.findBySku("ATR-005")).thenReturn(Optional.of(atual));
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        estoqueService.updateProduct("ATR-005", null, null, null, null, null, null, null, null, null, null,
+                List.of());
+
+        ArgumentCaptor<Product> captor = ArgumentCaptor.forClass(Product.class);
+        verify(productRepository).save(captor.capture());
+        assertThat(captor.getValue().attributes()).isEmpty();
+    }
+
+    @Test
+    void updateProduct_atributosDeRaizNaoTocamNasVariacoes() {
+        Product atual = Product.of(1L, "ATR-006", "Essência", "essencia", true,
+                List.of(ProductVariant.of(9L, "ATR-006-A", List.of(new ProductAttribute("Sabor", "Menta")), true)),
+                Pricing.empty(), ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(),
+                List.of());
+        when(productRepository.findBySku("ATR-006")).thenReturn(Optional.of(atual));
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        estoqueService.updateProduct("ATR-006", null, null, null, null, null, null, null, null, null, null,
+                List.of(new ProductAttribute("Origem", "Brasil")));
+
+        ArgumentCaptor<Product> captor = ArgumentCaptor.forClass(Product.class);
+        verify(productRepository).save(captor.capture());
+        assertThat(captor.getValue().variants().get(0).attributes())
+                .extracting(ProductAttribute::type).containsExactly("Sabor");
+        assertThat(captor.getValue().attributes())
+                .extracting(ProductAttribute::type).containsExactly("Origem");
+    }
 }

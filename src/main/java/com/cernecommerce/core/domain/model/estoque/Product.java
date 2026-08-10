@@ -7,6 +7,13 @@ import java.util.List;
  * uma distinguida por seus {@link ProductAttribute} (sabor, tamanho, cor), e a
  * {@link Pricing} do SKU pai.
  *
+ * <p><b>Atributos existem em dois níveis.</b> Os de {@link ProductVariant} <i>distinguem</i> uma
+ * variação das outras da mesma grade (é o sabor que diferencia dois SKUs). Os do próprio produto
+ * ({@link #attributes()}) apenas <i>descrevem</i> o item e não distinguem nada — servem ao produto
+ * sem grade, que antes não tinha onde carregar "Sabor: Menta" por não ter variação nenhuma. São
+ * coleções separadas de propósito: fundi-las faria um atributo descritivo do pai parecer parte da
+ * chave que identifica a variação.</p>
+ *
  * <p><b>Preço mora no SKU pai</b> (EST-F019). As variações herdam — sabores diferentes da mesma
  * essência 50g custam o mesmo. Preço por variação (ex.: tamanhos distintos do mesmo narguilé)
  * é EST-F020 no backlog do módulo; até lá, grade com preços diferentes se modela como produtos
@@ -28,7 +35,8 @@ public record Product(
     boolean superPromo,
     String description,
     String videoUrl,
-    List<String> images
+    List<String> images,
+    List<ProductAttribute> attributes
 ) {
 
     public Product {
@@ -42,6 +50,7 @@ public record Product(
         pricing = pricing == null ? Pricing.empty() : pricing;
         type = type == null ? ProductType.SIMPLES : type;
         images = images == null ? List.of() : List.copyOf(images);
+        attributes = attributes == null ? List.of() : List.copyOf(attributes);
         if (type == ProductType.KIT && lotTracked) {
             throw new IllegalArgumentException(
                     "kit não pode ser lote-rastreado: kit não tem saldo físico próprio (EST-F015)");
@@ -95,8 +104,21 @@ public record Product(
     public static Product create(String sku, String name, String category, List<ProductVariant> variants,
             Pricing pricing, ProductType type, boolean lotTracked, String brand, String imageUrl, boolean onSale,
             boolean superPromo, String description, String videoUrl, List<String> images) {
+        return create(sku, name, category, variants, pricing, type, lotTracked, brand, imageUrl, onSale, superPromo,
+                description, videoUrl, images, List.of());
+    }
+
+    /**
+     * Cria um novo produto (sem id, ativo por padrão) — forma canônica, incluindo os atributos do
+     * próprio SKU pai. Ver {@link #attributes()} para por que eles existem separados dos da
+     * variação.
+     */
+    public static Product create(String sku, String name, String category, List<ProductVariant> variants,
+            Pricing pricing, ProductType type, boolean lotTracked, String brand, String imageUrl, boolean onSale,
+            boolean superPromo, String description, String videoUrl, List<String> images,
+            List<ProductAttribute> attributes) {
         return new Product(null, sku, name, category, true, variants, pricing, type, lotTracked, brand, imageUrl,
-                onSale, superPromo, description, videoUrl, images);
+                onSale, superPromo, description, videoUrl, images, attributes);
     }
 
     /** Reconstitui um produto sem precificação a partir de persistência. */
@@ -149,8 +171,17 @@ public record Product(
             List<ProductVariant> variants, Pricing pricing, ProductType type, boolean lotTracked, String brand,
             String imageUrl, boolean onSale, boolean superPromo, String description, String videoUrl,
             List<String> images) {
+        return of(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl, onSale,
+                superPromo, description, videoUrl, images, List.of());
+    }
+
+    /** Reconstitui um produto a partir de persistência — forma canônica, com atributos do SKU pai. */
+    public static Product of(Long id, String sku, String name, String category, boolean active,
+            List<ProductVariant> variants, Pricing pricing, ProductType type, boolean lotTracked, String brand,
+            String imageUrl, boolean onSale, boolean superPromo, String description, String videoUrl,
+            List<String> images, List<ProductAttribute> attributes) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
-                onSale, superPromo, description, videoUrl, images);
+                onSale, superPromo, description, videoUrl, images, attributes);
     }
 
     /**
@@ -196,19 +227,19 @@ public record Product(
                 onSale, superPromo,
                 newDescription == null ? description : newDescription,
                 newVideoUrl == null ? videoUrl : newVideoUrl,
-                images);
+                images, attributes);
     }
 
     /** Ativa ou desativa o produto, preservando o resto. */
     public Product withActive(boolean newActive) {
         return new Product(id, sku, name, category, newActive, variants, pricing, type, lotTracked, brand, imageUrl,
-                onSale, superPromo, description, videoUrl, images);
+                onSale, superPromo, description, videoUrl, images, attributes);
     }
 
     /** Substitui a precificação do produto, preservando o resto. */
     public Product withPricing(Pricing newPricing) {
         return new Product(id, sku, name, category, active, variants, newPricing, type, lotTracked, brand, imageUrl,
-                onSale, superPromo, description, videoUrl, images);
+                onSale, superPromo, description, videoUrl, images, attributes);
     }
 
     /**
@@ -218,7 +249,7 @@ public record Product(
      */
     public Product withType(ProductType newType) {
         return new Product(id, sku, name, category, active, variants, pricing, newType, lotTracked, brand, imageUrl,
-                onSale, superPromo, description, videoUrl, images);
+                onSale, superPromo, description, videoUrl, images, attributes);
     }
 
     /**
@@ -228,19 +259,19 @@ public record Product(
      */
     public Product withLotTracked(boolean newLotTracked) {
         return new Product(id, sku, name, category, active, variants, pricing, type, newLotTracked, brand, imageUrl,
-                onSale, superPromo, description, videoUrl, images);
+                onSale, superPromo, description, videoUrl, images, attributes);
     }
 
     /** Marca ou desmarca o produto como em promoção (Estágio 01 do admin), preservando o resto. */
     public Product withOnSale(boolean newOnSale) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
-                newOnSale, superPromo, description, videoUrl, images);
+                newOnSale, superPromo, description, videoUrl, images, attributes);
     }
 
     /** Marca ou desmarca o produto com o selo de super promoção, preservando o resto. */
     public Product withSuperPromo(boolean newSuperPromo) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
-                onSale, newSuperPromo, description, videoUrl, images);
+                onSale, newSuperPromo, description, videoUrl, images, attributes);
     }
 
     /**
@@ -249,7 +280,16 @@ public record Product(
      */
     public Product withImages(List<String> newImages) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
-                onSale, superPromo, description, videoUrl, newImages);
+                onSale, superPromo, description, videoUrl, newImages, attributes);
+    }
+
+    /**
+     * Substitui os atributos do próprio SKU pai, preservando o resto. Como {@link #withImages},
+     * é substituição da coleção inteira — não há edição de um atributo isolado.
+     */
+    public Product withAttributes(List<ProductAttribute> newAttributes) {
+        return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
+                onSale, superPromo, description, videoUrl, images, newAttributes);
     }
 
     /** Indica se este produto é um kit virtual (EST-F015) — sem saldo próprio, saldo derivado. */

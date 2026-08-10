@@ -8,6 +8,7 @@ import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.SortDirection;
 import com.cernecommerce.core.domain.model.estoque.Product;
+import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
 import com.cernecommerce.core.domain.model.estoque.ProductFilter;
 import com.cernecommerce.core.domain.model.estoque.ProductSortField;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
@@ -73,9 +74,23 @@ public interface EstoqueUseCase {
      * descrição, vídeo e galeria de imagens — nenhum desses campos tem regra de negócio, só
      * persiste/retorna.
      */
+    default Product createProduct(String sku, String name, String category, List<ProductVariant> variants,
+            Pricing pricing, String brand, String imageUrl, boolean onSale, boolean superPromo, String description,
+            String videoUrl, List<String> images) {
+        return createProduct(sku, name, category, variants, pricing, brand, imageUrl, onSale, superPromo, description,
+                videoUrl, images, List.of());
+    }
+
+    /**
+     * Cria um produto (forma canônica) incluindo os atributos descritivos do próprio SKU pai.
+     *
+     * <p>Distintos dos atributos de {@code variants}: aqueles fazem parte do que <i>identifica</i>
+     * cada variação da grade, estes só <i>descrevem</i> o item e existem para o produto sem grade,
+     * que não tinha onde carregá-los.</p>
+     */
     Product createProduct(String sku, String name, String category, List<ProductVariant> variants, Pricing pricing,
             String brand, String imageUrl, boolean onSale, boolean superPromo, String description, String videoUrl,
-            List<String> images);
+            List<String> images, List<ProductAttribute> attributes);
 
     /** Lista produtos paginados, sem filtro e ordenados por id. */
     default PageResult<Product> listProducts(int page, int size) {
@@ -153,8 +168,22 @@ public interface EstoqueUseCase {
      * mantém a galeria atual; uma lista (mesmo vazia) substitui a galeria inteira — sem edição
      * parcial de item individual.
      */
+    default Product updateProduct(String sku, String name, String category, Pricing pricing, String brand,
+            String imageUrl, Boolean onSale, Boolean superPromo, String description, String videoUrl,
+            List<String> images) {
+        return updateProduct(sku, name, category, pricing, brand, imageUrl, onSale, superPromo, description, videoUrl,
+                images, null);
+    }
+
+    /**
+     * Alteração parcial (forma canônica) incluindo os atributos do próprio SKU pai.
+     * {@code attributes} nulo mantém os atuais; uma lista (mesmo vazia) substitui o conjunto
+     * inteiro — a mesma semântica já adotada para {@code images}, e pelo mesmo motivo: não há
+     * identidade estável por atributo que permitisse edição item a item.
+     */
     Product updateProduct(String sku, String name, String category, Pricing pricing, String brand, String imageUrl,
-            Boolean onSale, Boolean superPromo, String description, String videoUrl, List<String> images);
+            Boolean onSale, Boolean superPromo, String description, String videoUrl, List<String> images,
+            List<ProductAttribute> attributes);
 
     /**
      * Resolve a precificação vigente de <b>qualquer</b> SKU do catálogo — pai ou variação

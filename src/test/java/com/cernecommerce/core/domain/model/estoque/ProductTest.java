@@ -7,6 +7,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
 class ProductTest {
 
@@ -294,5 +295,76 @@ class ProductTest {
         Product atualizado = comGaleria.withDetails("Novo nome", null, null, null, null, null);
 
         assertThat(atualizado.images()).containsExactly("http://img1.png");
+    }
+
+    // ── Atributos do próprio SKU pai ──────────────────────────────────────────
+
+    @Test
+    void sobrecargasAntigas_nascemSemAtributosDeRaiz() {
+        // Retrocompatibilidade: quem já chamava create/of sem atributos continua válido.
+        assertThat(Product.create("P-1", "Nome", "cat", List.of()).attributes()).isEmpty();
+        assertThat(Product.of(1L, "P-1", "Nome", "cat", true, List.of()).attributes()).isEmpty();
+    }
+
+    @Test
+    void atributosNulosViramListaVaziaENuncaNull() {
+        Product product = Product.create("P-1", "Nome", "cat", List.of(), Pricing.empty(),
+                ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(), null);
+        assertThat(product.attributes()).isNotNull().isEmpty();
+    }
+
+    @Test
+    void atributosSaoCopiadosDefensivamente() {
+        List<ProductAttribute> mutavel = new ArrayList<>();
+        mutavel.add(new ProductAttribute("Sabor", "Menta"));
+
+        Product product = Product.create("P-1", "Nome", "cat", List.of(), Pricing.empty(),
+                ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(), mutavel);
+        mutavel.add(new ProductAttribute("Cor", "Azul"));
+
+        assertThat(product.attributes()).hasSize(1);
+        assertThatThrownBy(() -> product.attributes().add(new ProductAttribute("X", "Y")))
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    void withAttributes_substituiOConjuntoInteiroEPreservaOResto() {
+        Product product = Product.create("P-1", "Nome", "cat",
+                List.of(ProductVariant.create("P-1-A", List.of(new ProductAttribute("Sabor", "Menta")))),
+                Pricing.empty(), ProductType.SIMPLES, false, "marca", "img", true, false, "desc", "video",
+                List.of("g1.png"), List.of(new ProductAttribute("Origem", "Brasil")));
+
+        Product updated = product.withAttributes(List.of(new ProductAttribute("Peso", "50g")));
+
+        assertThat(updated.attributes())
+                .extracting(ProductAttribute::type, ProductAttribute::value)
+                .containsExactly(tuple("Peso", "50g"));
+        // Nada mais pode ter mudado.
+        assertThat(updated.name()).isEqualTo("Nome");
+        assertThat(updated.brand()).isEqualTo("marca");
+        assertThat(updated.images()).containsExactly("g1.png");
+        assertThat(updated.variants()).hasSize(1);
+    }
+
+    @Test
+    void atributosDeRaizNaoSeMisturamComOsDaVariacao() {
+        // São coleções separadas de propósito: o da variação identifica, o da raiz só descreve.
+        Product product = Product.create("P-1", "Nome", "cat",
+                List.of(ProductVariant.create("P-1-A", List.of(new ProductAttribute("Sabor", "Menta")))),
+                Pricing.empty(), ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(),
+                List.of(new ProductAttribute("Origem", "Brasil")));
+
+        assertThat(product.attributes()).extracting(ProductAttribute::type).containsExactly("Origem");
+        assertThat(product.variants().get(0).attributes()).extracting(ProductAttribute::type)
+                .containsExactly("Sabor");
+    }
+
+    @Test
+    void withAttributes_aceitaListaVaziaParaLimpar() {
+        Product product = Product.create("P-1", "Nome", "cat", List.of(), Pricing.empty(),
+                ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(),
+                List.of(new ProductAttribute("Origem", "Brasil")));
+
+        assertThat(product.withAttributes(List.of()).attributes()).isEmpty();
     }
 }

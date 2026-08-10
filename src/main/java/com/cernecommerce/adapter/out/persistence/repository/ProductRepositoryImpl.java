@@ -57,6 +57,9 @@ public class ProductRepositoryImpl implements ProductRepository {
         entity.setType(product.type().name());
         entity.setLotTracked(product.lotTracked());
         entity.getImages().addAll(product.images());
+        entity.getAttributes().addAll(product.attributes().stream()
+                .map(a -> new ProductAttributeEmbeddable(a.type(), a.value()))
+                .toList());
         for (ProductVariant variant : product.variants()) {
             ProductVariantEntity variantEntity = new ProductVariantEntity();
             variantEntity.setId(variant.id());
@@ -161,9 +164,12 @@ public class ProductRepositoryImpl implements ProductRepository {
                 .toList();
         Pricing pricing = Pricing.of(e.getCostPrice(), e.getMarkupPercent(), e.getSalePrice(), e.getOriginalPrice());
         ProductType type = ProductType.valueOf(e.getType());
+        List<ProductAttribute> attributes = e.getAttributes().stream()
+                .map(a -> new ProductAttribute(a.getType(), a.getValue()))
+                .toList();
         return Product.of(e.getId(), e.getSku(), e.getName(), e.getCategory(), e.isActive(), variants, pricing, type,
                 e.isLotTracked(), e.getBrand(), e.getImageUrl(), e.isOnSale(), e.isSuperPromo(), e.getDescription(),
-                e.getVideoUrl(), List.copyOf(e.getImages()));
+                e.getVideoUrl(), List.copyOf(e.getImages()), attributes);
     }
 
     private ProductVariant toDomain(ProductVariantEntity e) {

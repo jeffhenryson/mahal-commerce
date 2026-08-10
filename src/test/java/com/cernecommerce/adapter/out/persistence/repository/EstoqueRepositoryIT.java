@@ -326,6 +326,77 @@ class EstoqueRepositoryIT {
         assertThat(page.totalPages()).isGreaterThanOrEqualTo(2);
     }
 
+    // ── Atributos do próprio SKU pai ─────────────────────────────────────────
+
+    @Test
+    void product_roundTripDosAtributosDeRaiz() {
+        productRepository.save(Product.create("RT-ATR-001", "Essência", "essencia", List.of(), Pricing.empty(),
+                ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(),
+                List.of(new ProductAttribute("Origem", "Brasil"), new ProductAttribute("Peso", "50g"))));
+        flushAndClear();
+
+        Product reloaded = productRepository.findBySku("RT-ATR-001").orElseThrow();
+
+        assertThat(reloaded.attributes())
+                .extracting(ProductAttribute::type, ProductAttribute::value)
+                .containsExactlyInAnyOrder(tuple("Origem", "Brasil"), tuple("Peso", "50g"));
+    }
+
+    @Test
+    void product_atributosDeRaizEDeVariacaoNaoSeMisturamNoBanco() {
+        // Tabelas diferentes (product_root_attribute x product_attribute); o teste prova que uma
+        // não vaza para a outra ao recarregar.
+        productRepository.save(Product.create("RT-ATR-002", "Essência", "essencia",
+                List.of(ProductVariant.create("RT-ATR-002-A", List.of(new ProductAttribute("Sabor", "Menta")))),
+                Pricing.empty(), ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(),
+                List.of(new ProductAttribute("Origem", "Brasil"))));
+        flushAndClear();
+
+        Product reloaded = productRepository.findBySku("RT-ATR-002").orElseThrow();
+
+        assertThat(reloaded.attributes()).extracting(ProductAttribute::type).containsExactly("Origem");
+        assertThat(reloaded.variants()).hasSize(1);
+        assertThat(reloaded.variants().get(0).attributes())
+                .extracting(ProductAttribute::type).containsExactly("Sabor");
+    }
+
+    @Test
+    void product_semAtributosDeRaizVoltaListaVaziaENuncaNull() {
+        productRepository.save(Product.create("RT-ATR-003", "Carvão", "carvao", List.of()));
+        flushAndClear();
+
+        assertThat(productRepository.findBySku("RT-ATR-003").orElseThrow().attributes())
+                .isNotNull().isEmpty();
+    }
+
+    @Test
+    void product_atributosDeRaizAceitamTipoRepetidoComValoresDiferentes() {
+        // Não há UNIQUE em (product_id, attr_type): um blend pode ter dois sabores.
+        productRepository.save(Product.create("RT-ATR-004", "Blend", "essencia", List.of(), Pricing.empty(),
+                ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(),
+                List.of(new ProductAttribute("Sabor", "Menta"), new ProductAttribute("Sabor", "Limão"))));
+        flushAndClear();
+
+        assertThat(productRepository.findBySku("RT-ATR-004").orElseThrow().attributes())
+                .extracting(ProductAttribute::value)
+                .containsExactlyInAnyOrder("Menta", "Limão");
+    }
+
+    @Test
+    void product_substituicaoDaColecaoDeAtributosApagaOsAnteriores() {
+        productRepository.save(Product.create("RT-ATR-005", "Essência", "essencia", List.of(), Pricing.empty(),
+                ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(),
+                List.of(new ProductAttribute("Origem", "Brasil"))));
+        flushAndClear();
+
+        Product reloaded = productRepository.findBySku("RT-ATR-005").orElseThrow();
+        productRepository.save(reloaded.withAttributes(List.of(new ProductAttribute("Peso", "50g"))));
+        flushAndClear();
+
+        assertThat(productRepository.findBySku("RT-ATR-005").orElseThrow().attributes())
+                .extracting(ProductAttribute::type).containsExactly("Peso");
+    }
+
     // ── Listagem filtrada do catálogo ────────────────────────────────────────
     //
     // Todos os produtos destes testes usam o prefixo FLT- e categorias/marcas próprias, para as

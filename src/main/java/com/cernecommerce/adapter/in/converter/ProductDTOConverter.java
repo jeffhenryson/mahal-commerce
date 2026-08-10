@@ -34,7 +34,15 @@ public class ProductDTOConverter {
                 .toList();
     }
 
-    private List<ProductAttribute> toAttributes(List<ProductAttributeRequest> requests) {
+    /**
+     * Converte atributos do request. Usado tanto para os da variação quanto para os do próprio
+     * produto — é o mesmo DTO e o mesmo tipo de domínio, só muda onde ficam pendurados.
+     *
+     * <p>Público porque o controller precisa distinguir "não veio" de "veio vazio" no PATCH: aqui
+     * ausência vira lista vazia, e quem precisa do {@code null} de "não mexer" trata antes de
+     * chamar.</p>
+     */
+    public List<ProductAttribute> toAttributes(List<ProductAttributeRequest> requests) {
         if (requests == null) {
             return List.of();
         }
@@ -69,6 +77,7 @@ public class ProductDTOConverter {
         dto.setDescription(product.description());
         dto.setVideoUrl(product.videoUrl());
         dto.setImages(product.images());
+        dto.setAttributes(product.attributes().stream().map(this::toResponse).toList());
         dto.setActive(product.active());
         dto.setVariants(product.variants().stream().map(this::toResponse).toList());
         dto.setPricing(toResponse(product.pricing()));
