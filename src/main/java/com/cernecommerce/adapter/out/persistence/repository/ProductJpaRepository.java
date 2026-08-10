@@ -5,6 +5,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.Optional;
@@ -35,10 +36,35 @@ public interface ProductJpaRepository extends JpaRepository<ProductEntity, Long>
             + "AND (p.sku = :sku OR (v.sku = :sku AND v.active = TRUE))")
     boolean isSkuActive(String sku);
 
-    // Padrão ID-first: pagina apenas os ids, depois faz JOIN FETCH das variações
-    // pelos ids já resolvidos — evita LIMIT/OFFSET junto de fetch de coleção (bug clássico de paginação com JOIN FETCH).
-    @Query("SELECT p.id FROM ProductEntity p ORDER BY p.id")
-    Page<Long> findAllIds(Pageable pageable);
+    /**
+     * Listagem filtrada do catálogo, no mesmo idioma {@code :param IS NULL OR ...} de
+     * {@code OrderJpaRepository.findFiltered} — uma Specification daria o mesmo para quatro
+     * critérios fixos, com muito mais cerimônia.
+     *
+     * <p>Sem {@code ORDER BY} na query, de propósito: a ordenação chega pelo {@code Pageable},
+     * porque o campo é escolhido pelo cliente dentro de uma lista fechada
+     * ({@code ProductSortField}). Concatenar o nome da coluna na string da query seria injeção.</p>
+     *
+     * <p>{@code search} chega já em minúsculas e com os {@code %} aplicados pelo adapter, e cobre
+     * nome e SKU — é o mesmo campo de busca único da tela do admin.</p>
+     *
+     * <p>Padrão ID-first, como toda paginação do módulo: pagina só os ids e o fetch das variações
+     * vem depois, por {@code findAllByIdsWithVariants} — {@code LIMIT}/{@code OFFSET} junto de
+     * {@code JOIN FETCH} de coleção é o bug clássico de paginação com JPA. Substituiu o antigo
+     * {@code findAllIds}, que era este mesmo com todos os filtros nulos.</p>
+     */
+    @Query("""
+            SELECT p.id FROM ProductEntity p
+            WHERE (:search   IS NULL OR LOWER(p.name) LIKE :search OR LOWER(p.sku) LIKE :search)
+              AND (:category IS NULL OR LOWER(p.category) = :category)
+              AND (:brand    IS NULL OR LOWER(p.brand)    = :brand)
+              AND (:active   IS NULL OR p.active = :active)
+            """)
+    Page<Long> findFilteredIds(@Param("search") String search,
+            @Param("category") String category,
+            @Param("brand") String brand,
+            @Param("active") Boolean active,
+            Pageable pageable);
 
     // ECM-F002: mesma condição de Pricing#isPriced() traduzida para SQL — salePrice preenchido,
     // ou custo+markup preenchidos o bastante para sugerir um preço. Kit nunca tem costPrice

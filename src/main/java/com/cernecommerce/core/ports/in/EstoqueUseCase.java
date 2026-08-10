@@ -6,7 +6,10 @@ import com.cernecommerce.core.domain.model.estoque.LotIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
+import com.cernecommerce.core.domain.model.SortDirection;
 import com.cernecommerce.core.domain.model.estoque.Product;
+import com.cernecommerce.core.domain.model.estoque.ProductFilter;
+import com.cernecommerce.core.domain.model.estoque.ProductSortField;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.ReorderPoint;
 import com.cernecommerce.core.domain.model.estoque.ReservationIntegrityMismatch;
@@ -74,8 +77,24 @@ public interface EstoqueUseCase {
             String brand, String imageUrl, boolean onSale, boolean superPromo, String description, String videoUrl,
             List<String> images);
 
-    /** Lista produtos paginados. */
-    PageResult<Product> listProducts(int page, int size);
+    /** Lista produtos paginados, sem filtro e ordenados por id. */
+    default PageResult<Product> listProducts(int page, int size) {
+        return listProducts(page, size, ProductFilter.EMPTY, ProductSortField.ID, SortDirection.ASC);
+    }
+
+    /**
+     * Lista produtos paginados aplicando busca, filtros e ordenação <b>no banco</b>.
+     *
+     * <p>Existe porque a versão só-paginada obrigava o cliente a baixar o catálogo inteiro para
+     * filtrar em memória. Como o teto de {@code size} é 100 (EST-C005), catálogo maior que isso
+     * fazia busca, KPI e exportação do admin passarem a mentir em silêncio: os 100 primeiros
+     * sempre voltam, então não há erro visível — só resultado incompleto.</p>
+     *
+     * @param filter critérios opcionais; {@link ProductFilter#EMPTY} não filtra nada.
+     * @param sortField campo de ordenação, sempre desempatado por id (EST-C012).
+     */
+    PageResult<Product> listProducts(int page, int size, ProductFilter filter,
+            ProductSortField sortField, SortDirection direction);
 
     /**
      * Produtos ativos e precificados, paginados — a consulta que o catálogo público consome

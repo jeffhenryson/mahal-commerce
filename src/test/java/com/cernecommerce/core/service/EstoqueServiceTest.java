@@ -14,6 +14,9 @@ import com.cernecommerce.core.domain.exception.estoque.StockReservationNotActive
 import com.cernecommerce.core.domain.exception.estoque.StockReservationNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException;
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.SortDirection;
+import com.cernecommerce.core.domain.model.estoque.ProductFilter;
+import com.cernecommerce.core.domain.model.estoque.ProductSortField;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateKitComponentException;
 import com.cernecommerce.core.domain.exception.estoque.EmptyKitRecipeException;
 import com.cernecommerce.core.domain.exception.estoque.KitComponentAlreadyInUseException;
@@ -210,12 +213,35 @@ class EstoqueServiceTest {
     void listProducts_delegatesToRepository() {
         PageResult<Product> page = new PageResult<>(
                 List.of(Product.of(1L, "NARG-001", "Narguile Aladin", "narguile", true, List.of())), 0, 20, 1L, 1);
-        when(productRepository.findAll(0, 20)).thenReturn(page);
+        when(productRepository.findAll(eq(0), eq(20), any(), any(), any())).thenReturn(page);
 
         PageResult<Product> result = estoqueService.listProducts(0, 20);
 
         assertThat(result.content()).hasSize(1);
         assertThat(result.totalElements()).isEqualTo(1L);
+    }
+
+    @Test
+    void listProducts_semArgumentos_naoFiltraEOrdenaPorIdAscendente() {
+        // A sobrecarga de dois argumentos é o caminho retrocompatível: precisa continuar
+        // significando "catálogo inteiro, ordem de id".
+        when(productRepository.findAll(anyInt(), anyInt(), any(), any(), any()))
+                .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0));
+
+        estoqueService.listProducts(0, 20);
+
+        verify(productRepository).findAll(0, 20, ProductFilter.EMPTY, ProductSortField.ID, SortDirection.ASC);
+    }
+
+    @Test
+    void listProducts_repassaFiltroEOrdenacaoAoRepositorio() {
+        ProductFilter filter = new ProductFilter("menta", "narguile", "zomo", true);
+        when(productRepository.findAll(anyInt(), anyInt(), any(), any(), any()))
+                .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0));
+
+        estoqueService.listProducts(2, 50, filter, ProductSortField.SALE_PRICE, SortDirection.DESC);
+
+        verify(productRepository).findAll(2, 50, filter, ProductSortField.SALE_PRICE, SortDirection.DESC);
     }
 
     @Test

@@ -1131,6 +1131,47 @@ public class EstoqueControllerSecurityTest {
                 .andExpect(jsonPath("$").isArray());
     }
 
+    // ===== Busca por SKU e filtros da listagem =====
+
+    @Test
+    void get_product_by_sku_without_auth_returns_401() throws Exception {
+        mockMvc.perform(get("/estoque/products/QUALQUER-SKU"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void get_product_by_sku_with_user_role_only_returns_403() throws Exception {
+        mockMvc.perform(get("/estoque/products/QUALQUER-SKU")
+                .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void get_product_by_sku_with_estoque_product_read_returns_200() throws Exception {
+        String sku = givenProduct();
+        mockMvc.perform(get("/estoque/products/" + sku)
+                .with(user("vendedor").authorities(
+                        new SimpleGrantedAuthority("ROLE_ATENDENTE"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_READ"))))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void list_products_com_filtros_exige_a_mesma_permissao_de_leitura() throws Exception {
+        // Os filtros novos não podem virar uma porta lateral: continuam sob ESTOQUE_PRODUCT_READ.
+        mockMvc.perform(get("/estoque/products")
+                .param("search", "menta").param("active", "true").param("sort", "NAME")
+                .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/estoque/products")
+                .param("search", "menta").param("active", "true").param("sort", "NAME")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_READ"))))
+                .andExpect(status().isOk());
+    }
+
     // ===== Upload de imagem de produto =====
     // Escrever no catálogo é operação de estoque, então o upload entra na matriz do módulo.
     // A leitura (GET /product-images/{filename}) é pública e não aparece aqui.

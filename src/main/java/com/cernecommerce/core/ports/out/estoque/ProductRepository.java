@@ -1,7 +1,10 @@
 package com.cernecommerce.core.ports.out.estoque;
 
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.SortDirection;
 import com.cernecommerce.core.domain.model.estoque.Product;
+import com.cernecommerce.core.domain.model.estoque.ProductFilter;
+import com.cernecommerce.core.domain.model.estoque.ProductSortField;
 
 import java.util.Optional;
 
@@ -10,7 +13,25 @@ import java.util.Optional;
  */
 public interface ProductRepository {
 
-    PageResult<Product> findAll(int page, int size);
+    /**
+     * Listagem sem filtro, ordenada por id. Mantida como {@code default} sobre a assinatura
+     * filtrada para os chamadores antigos não mudarem — mesmo idioma de evolução usado em
+     * {@code EstoqueUseCase}.
+     */
+    default PageResult<Product> findAll(int page, int size) {
+        return findAll(page, size, ProductFilter.EMPTY, ProductSortField.ID, SortDirection.ASC);
+    }
+
+    /**
+     * Listagem filtrada e ordenada do catálogo.
+     *
+     * <p>A ordenação sempre desempata por {@code id}, mesmo quando o campo pedido é outro: nome e
+     * preço não são chaves únicas, e paginar por chave não-única faz o banco devolver a mesma
+     * linha em duas páginas ou em nenhuma. É a mesma lição de EST-C012, que apareceu no ledger de
+     * movimentações e vale igual aqui.</p>
+     */
+    PageResult<Product> findAll(int page, int size, ProductFilter filter,
+            ProductSortField sortField, SortDirection direction);
 
     /**
      * Só produto ativo e precificado, paginado — a base do catálogo público (ECM-F002). Filtrado

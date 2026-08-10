@@ -27,6 +27,9 @@ import com.cernecommerce.core.domain.exception.estoque.StockCountNotOpenExceptio
 import com.cernecommerce.core.domain.exception.estoque.StockReservationNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException;
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.SortDirection;
+import com.cernecommerce.core.domain.model.estoque.ProductFilter;
+import com.cernecommerce.core.domain.model.estoque.ProductSortField;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
@@ -93,7 +96,7 @@ public class EstoqueControllerTest {
 
     @Test
     void list_returns_200_with_products() throws Exception {
-        when(estoqueUseCase.listProducts(0, 20))
+        when(estoqueUseCase.listProducts(eq(0), eq(20), any(), any(), any()))
                 .thenReturn(new PageResult<>(List.of(product("NARG-001")), 0, 20, 1L, 1));
 
         mockMvc.perform(get("/estoque/products"))
@@ -102,6 +105,103 @@ public class EstoqueControllerTest {
                 .andExpect(jsonPath("$.content[0].sku").value("NARG-001"))
                 .andExpect(jsonPath("$.content[0].variants[0].attributes[0].type").value("sabor"))
                 .andExpect(jsonPath("$.totalElements").value(1));
+    }
+
+    @Test
+    void list_sem_parametros_nao_filtra_e_ordena_por_id_ascendente() throws Exception {
+        // Contrato de retrocompatibilidade: quem já chamava só com page/size continua vendo o
+        // mesmo comportamento de antes desta entrega.
+        when(estoqueUseCase.listProducts(eq(0), eq(20), any(), any(), any()))
+                .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0));
+
+        mockMvc.perform(get("/estoque/products")).andExpect(status().isOk());
+
+        ArgumentCaptor<ProductFilter> filter = ArgumentCaptor.forClass(ProductFilter.class);
+        verify(estoqueUseCase).listProducts(eq(0), eq(20), filter.capture(),
+                eq(ProductSortField.ID), eq(SortDirection.ASC));
+        assertThat(filter.getValue().isEmpty()).isTrue();
+    }
+
+    @Test
+    void list_repassa_busca_filtros_e_ordenacao_ao_use_case() throws Exception {
+        when(estoqueUseCase.listProducts(eq(1), eq(50), any(), any(), any()))
+                .thenReturn(new PageResult<>(List.of(), 1, 50, 0L, 0));
+
+        mockMvc.perform(get("/estoque/products")
+                        .param("page", "1")
+                        .param("size", "50")
+                        .param("search", "MeNtA")
+                        .param("category", "Narguilé")
+                        .param("brand", "Zomo")
+                        .param("active", "true")
+                        .param("sort", "NAME")
+                        .param("direction", "DESC"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<ProductFilter> filter = ArgumentCaptor.forClass(ProductFilter.class);
+        verify(estoqueUseCase).listProducts(eq(1), eq(50), filter.capture(),
+                eq(ProductSortField.NAME), eq(SortDirection.DESC));
+        // Normalizado pelo próprio ProductFilter.
+        assertThat(filter.getValue().search()).isEqualTo("menta");
+        assertThat(filter.getValue().category()).isEqualTo("narguilé");
+        assertThat(filter.getValue().brand()).isEqualTo("zomo");
+        assertThat(filter.getValue().active()).isTrue();
+    }
+
+    @Test
+    void list_com_active_false_filtra_inativos_em_vez_de_ignorar() throws Exception {
+        when(estoqueUseCase.listProducts(anyInt(), anyInt(), any(), any(), any()))
+                .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0));
+
+        mockMvc.perform(get("/estoque/products").param("active", "false"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<ProductFilter> filter = ArgumentCaptor.forClass(ProductFilter.class);
+        verify(estoqueUseCase).listProducts(anyInt(), anyInt(), filter.capture(), any(), any());
+        assertThat(filter.getValue().active()).isFalse();
+    }
+
+    @Test
+    void list_com_sort_invalido_returns_400_listando_os_valores_aceitos() throws Exception {
+        mockMvc.perform(get("/estoque/products").param("sort", "custo_secreto"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("INVALID_ENUM_VALUE"))
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("SALE_PRICE")));
+
+        verifyNoInteractions(estoqueUseCase);
+    }
+
+    @Test
+    void getProduct_returns_200_para_sku_existente() throws Exception {
+        when(estoqueUseCase.findProductBySku("NARG-001")).thenReturn(product("NARG-001"));
+
+        mockMvc.perform(get("/estoque/products/NARG-001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sku").value("NARG-001"))
+                .andExpect(jsonPath("$.name").value("Narguile Aladin"));
+    }
+
+    @Test
+    void getProduct_de_sku_inexistente_returns_404() throws Exception {
+        when(estoqueUseCase.findProductBySku("SUMIU-001"))
+                .thenThrow(new ProductNotFoundException("SUMIU-001"));
+
+        mockMvc.perform(get("/estoque/products/SUMIU-001"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.errorCode").value("PRODUCT_NOT_FOUND"));
+    }
+
+    @Test
+    void getProduct_nao_colide_com_a_rota_literal_de_reorder_points() throws Exception {
+        // /estoque/products/reorder-points é rota literal e precisa continuar vencendo o
+        // template /estoque/products/{sku} — senão "reorder-points" viraria uma busca por SKU.
+        when(estoqueUseCase.listReorderPoints(anyString(), anyInt(), anyInt()))
+                .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0));
+
+        mockMvc.perform(get("/estoque/products/reorder-points").param("warehouseCode", "PRINCIPAL"))
+                .andExpect(status().isOk());
+
+        verify(estoqueUseCase, never()).findProductBySku(anyString());
     }
 
     @Test
@@ -970,7 +1070,7 @@ public class EstoqueControllerTest {
     /** Produto sem preço serializa o bloco com os campos nulos — nunca um `pricing` ausente. */
     @Test
     void listProducts_produtoSemPreco_serializaPricingComCamposNulos() throws Exception {
-        when(estoqueUseCase.listProducts(0, 20))
+        when(estoqueUseCase.listProducts(eq(0), eq(20), any(), any(), any()))
                 .thenReturn(new PageResult<>(List.of(product("NARG-001")), 0, 20, 1L, 1));
 
         mockMvc.perform(get("/estoque/products"))

@@ -4,7 +4,10 @@ import com.cernecommerce.adapter.out.persistence.entity.ProductAttributeEmbeddab
 import com.cernecommerce.adapter.out.persistence.entity.ProductEntity;
 import com.cernecommerce.adapter.out.persistence.entity.ProductVariantEntity;
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.SortDirection;
 import com.cernecommerce.core.domain.model.estoque.Product;
+import com.cernecommerce.core.domain.model.estoque.ProductFilter;
+import com.cernecommerce.core.domain.model.estoque.ProductSortField;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
 import com.cernecommerce.core.domain.model.estoque.ProductType;
@@ -12,11 +15,16 @@ import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.ports.out.estoque.ProductRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 @Repository
 @Transactional
@@ -90,20 +98,61 @@ public class ProductRepositoryImpl implements ProductRepository {
 
     @Override
     @Transactional(readOnly = true)
-    public PageResult<Product> findAll(int page, int size) {
-        Page<Long> idPage = productJpaRepository.findAllIds(PageRequest.of(page, size));
-        List<ProductEntity> entities = productJpaRepository.findAllByIdsWithVariants(idPage.getContent());
-        List<Product> content = entities.stream().map(this::toDomain).toList();
-        return new PageResult<>(content, page, size, idPage.getTotalElements(), idPage.getTotalPages());
+    public PageResult<Product> findAll(int page, int size, ProductFilter filter,
+            ProductSortField sortField, SortDirection direction) {
+        Pageable pageable = PageRequest.of(page, size, toSort(sortField, direction));
+        Page<Long> idPage = productJpaRepository.findFilteredIds(
+                likePattern(filter.search()), filter.category(), filter.brand(), filter.active(), pageable);
+        return toPageResult(idPage, page, size);
     }
 
     @Override
     @Transactional(readOnly = true)
     public PageResult<Product> findAllActiveAndPriced(int page, int size, Boolean onSale) {
         Page<Long> idPage = productJpaRepository.findActivePricedIds(PageRequest.of(page, size), onSale);
-        List<ProductEntity> entities = productJpaRepository.findAllByIdsWithVariants(idPage.getContent());
-        List<Product> content = entities.stream().map(this::toDomain).toList();
+        return toPageResult(idPage, page, size);
+    }
+
+    /**
+     * Segunda metade do padrão ID-first: resolve as entidades dos ids já paginados.
+     *
+     * <p>A ordem é reimposta a partir da página de ids em vez de vir da consulta de fetch, que tem
+     * {@code ORDER BY p.id} fixo — sem isso, pedir ordenação por nome ou preço devolveria a
+     * página certa de produtos na ordem errada, que é o tipo de bug que passa despercebido
+     * porque o conteúdo está correto.</p>
+     */
+    private PageResult<Product> toPageResult(Page<Long> idPage, int page, int size) {
+        List<Long> ids = idPage.getContent();
+        Map<Long, ProductEntity> byId = productJpaRepository.findAllByIdsWithVariants(ids).stream()
+                .collect(Collectors.toMap(ProductEntity::getId, e -> e));
+        List<Product> content = ids.stream()
+                .map(byId::get)
+                .filter(Objects::nonNull)
+                .map(this::toDomain)
+                .toList();
         return new PageResult<>(content, page, size, idPage.getTotalElements(), idPage.getTotalPages());
+    }
+
+    /**
+     * Traduz o campo do domínio para o atributo JPA. O desempate por {@code id} é sempre
+     * acrescentado: nome e preço não são únicos, e paginar por chave não-única faz o banco
+     * devolver a mesma linha em duas páginas ou em nenhuma (EST-C012).
+     */
+    private static Sort toSort(ProductSortField sortField, SortDirection direction) {
+        Sort.Direction jpaDirection = direction == SortDirection.DESC
+                ? Sort.Direction.DESC : Sort.Direction.ASC;
+        String property = switch (sortField) {
+            case ID -> "id";
+            case NAME -> "name";
+            case SALE_PRICE -> "salePrice";
+        };
+        Sort sort = Sort.by(jpaDirection, property);
+        return sortField == ProductSortField.ID ? sort : sort.and(Sort.by(Sort.Direction.ASC, "id"));
+    }
+
+    /** Busca parcial em nome ou SKU. O termo já chega em minúsculas de {@link ProductFilter}. */
+    private static String likePattern(String search) {
+        return search == null ? null : "%" + search + "%";
     }
 
     private Product toDomain(ProductEntity e) {

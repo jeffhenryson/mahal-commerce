@@ -1,6 +1,7 @@
 package com.cernecommerce.adapter.out.persistence.repository;
 
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.SortDirection;
 import com.cernecommerce.core.domain.model.estoque.KitComponent;
 import com.cernecommerce.core.domain.model.estoque.LotIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
@@ -8,6 +9,8 @@ import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
+import com.cernecommerce.core.domain.model.estoque.ProductFilter;
+import com.cernecommerce.core.domain.model.estoque.ProductSortField;
 import com.cernecommerce.core.domain.model.estoque.ProductType;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.ReorderPoint;
@@ -321,6 +324,181 @@ class EstoqueRepositoryIT {
         assertThat(page.size()).isEqualTo(1);
         assertThat(page.totalElements()).isGreaterThanOrEqualTo(2);
         assertThat(page.totalPages()).isGreaterThanOrEqualTo(2);
+    }
+
+    // ── Listagem filtrada do catálogo ────────────────────────────────────────
+    //
+    // Todos os produtos destes testes usam o prefixo FLT- e categorias/marcas próprias, para as
+    // asserções serem exatas apesar de o banco ser compartilhado com os demais testes da classe.
+
+    private void givenCatalogoParaFiltro() {
+        productRepository.save(Product.create("FLT-001", "Essência Menta", "flt-essencia", List.of(),
+                new Pricing(new BigDecimal("10.00"), null, new BigDecimal("30.00"), null),
+                ProductType.SIMPLES, false, "flt-zomo"));
+        productRepository.save(Product.create("FLT-002", "Essência Melancia", "flt-essencia", List.of(),
+                new Pricing(new BigDecimal("10.00"), null, new BigDecimal("10.00"), null),
+                ProductType.SIMPLES, false, "flt-adalya"));
+        productRepository.save(Product.create("FLT-003", "Narguilé Grande", "flt-narguile", List.of(),
+                new Pricing(new BigDecimal("10.00"), null, new BigDecimal("20.00"), null),
+                ProductType.SIMPLES, false, "flt-zomo"));
+        Product inativo = productRepository.save(Product.create("FLT-004", "Carvão Menta", "flt-carvao", List.of(),
+                Pricing.empty(), ProductType.SIMPLES, false, "flt-zomo"));
+        productRepository.save(inativo.withActive(false));
+        flushAndClear();
+    }
+
+    private List<String> skus(PageResult<Product> page) {
+        return page.content().stream().map(Product::sku).toList();
+    }
+
+    private PageResult<Product> filtrar(ProductFilter filter) {
+        return productRepository.findAll(0, 50, filter, ProductSortField.ID, SortDirection.ASC);
+    }
+
+    @Test
+    void findAll_semFiltro_devolveTudoComoAntes() {
+        givenCatalogoParaFiltro();
+
+        PageResult<Product> page = filtrar(ProductFilter.EMPTY);
+
+        assertThat(skus(page)).contains("FLT-001", "FLT-002", "FLT-003", "FLT-004");
+    }
+
+    @Test
+    void findAll_buscaPorTrechoDoNomeIgnorandoCaixa() {
+        givenCatalogoParaFiltro();
+
+        assertThat(skus(filtrar(new ProductFilter("MENTA", null, null, null))))
+                .containsExactlyInAnyOrder("FLT-001", "FLT-004");
+    }
+
+    @Test
+    void findAll_buscaCasaTambemPorTrechoDoSku() {
+        // É um campo de busca único na tela do admin: o operador digita nome ou código.
+        givenCatalogoParaFiltro();
+
+        assertThat(skus(filtrar(new ProductFilter("flt-00", null, null, null))))
+                .contains("FLT-001", "FLT-002", "FLT-003", "FLT-004");
+    }
+
+    @Test
+    void findAll_filtraPorCategoriaComIgualdadeExata() {
+        givenCatalogoParaFiltro();
+
+        // "flt-essencia" não pode arrastar "flt-narguile" nem casar por prefixo.
+        assertThat(skus(filtrar(new ProductFilter(null, "FLT-ESSENCIA", null, null))))
+                .containsExactlyInAnyOrder("FLT-001", "FLT-002");
+    }
+
+    @Test
+    void findAll_filtraPorMarca() {
+        givenCatalogoParaFiltro();
+
+        assertThat(skus(filtrar(new ProductFilter(null, null, "flt-adalya", null))))
+                .containsExactly("FLT-002");
+    }
+
+    @Test
+    void findAll_filtraPorAtivoEPorInativo() {
+        givenCatalogoParaFiltro();
+
+        assertThat(skus(filtrar(new ProductFilter("flt-00", null, null, true))))
+                .containsExactlyInAnyOrder("FLT-001", "FLT-002", "FLT-003");
+        // active=false é filtro de verdade, não ausência de filtro.
+        assertThat(skus(filtrar(new ProductFilter("flt-00", null, null, false))))
+                .containsExactly("FLT-004");
+    }
+
+    @Test
+    void findAll_combinaOsFiltrosComE() {
+        givenCatalogoParaFiltro();
+
+        assertThat(skus(filtrar(new ProductFilter("essência", "flt-essencia", "flt-zomo", true))))
+                .containsExactly("FLT-001");
+    }
+
+    @Test
+    void findAll_filtroSemResultadoDevolvePaginaVaziaComTotalZero() {
+        givenCatalogoParaFiltro();
+
+        PageResult<Product> page = filtrar(new ProductFilter("nao-existe-nada-assim", null, null, null));
+
+        assertThat(page.content()).isEmpty();
+        assertThat(page.totalElements()).isZero();
+        assertThat(page.totalPages()).isZero();
+    }
+
+    @Test
+    void findAll_totalElementsRefleteOFiltroENaoOCatalogoInteiro() {
+        // É este número que alimenta a paginação do admin — se viesse do catálogo inteiro, a tela
+        // ofereceria páginas que não existem.
+        givenCatalogoParaFiltro();
+
+        assertThat(filtrar(new ProductFilter(null, "flt-essencia", null, null)).totalElements())
+                .isEqualTo(2L);
+    }
+
+    @Test
+    void findAll_ordenaPorNomeNosDoisSentidos() {
+        givenCatalogoParaFiltro();
+        ProductFilter soFlt = new ProductFilter(null, null, "flt-zomo", null);
+
+        assertThat(skus(productRepository.findAll(0, 50, soFlt, ProductSortField.NAME, SortDirection.ASC)))
+                .containsExactly("FLT-004", "FLT-001", "FLT-003"); // Carvão, Essência, Narguilé
+        assertThat(skus(productRepository.findAll(0, 50, soFlt, ProductSortField.NAME, SortDirection.DESC)))
+                .containsExactly("FLT-003", "FLT-001", "FLT-004");
+    }
+
+    @Test
+    void findAll_ordenaPorPrecoDeVenda() {
+        givenCatalogoParaFiltro();
+        ProductFilter comPreco = new ProductFilter(null, null, null, true);
+
+        List<String> ordenados = skus(productRepository.findAll(0, 50, comPreco,
+                ProductSortField.SALE_PRICE, SortDirection.ASC));
+
+        // 10.00 (FLT-002) < 20.00 (FLT-003) < 30.00 (FLT-001)
+        assertThat(ordenados).containsSubsequence("FLT-002", "FLT-003", "FLT-001");
+    }
+
+    @Test
+    void findAll_ordenacaoPorCampoNaoUnicoNaoRepeteNemPulaLinha() {
+        // EST-C012 aplicado ao catálogo: os quatro produtos abaixo têm o MESMO nome, então
+        // ordenar só por nome deixaria a ordem indefinida entre páginas e o banco poderia
+        // devolver a mesma linha duas vezes. O desempate por id é o que torna a paginação estável.
+        for (int i = 1; i <= 4; i++) {
+            productRepository.save(Product.create("DUP-00" + i, "Nome Repetido", "dup-cat", List.of(),
+                    Pricing.empty(), ProductType.SIMPLES, false, "dup-marca"));
+        }
+        flushAndClear();
+
+        ProductFilter filter = new ProductFilter(null, "dup-cat", null, null);
+        List<String> vistos = new ArrayList<>();
+        for (int page = 0; page < 4; page++) {
+            vistos.addAll(skus(productRepository.findAll(page, 1, filter,
+                    ProductSortField.NAME, SortDirection.ASC)));
+        }
+
+        assertThat(vistos).containsExactly("DUP-001", "DUP-002", "DUP-003", "DUP-004");
+    }
+
+    @Test
+    void findAll_ordenacaoNaoEDesfeitaPeloFetchDasVariacoes() {
+        // O fetch das variações tem ORDER BY p.id fixo; a ordem pedida precisa sobreviver a ele,
+        // senão a página vem com o conteúdo certo na ordem errada.
+        productRepository.save(Product.create("ORD-001", "Zebra", "ord-cat",
+                List.of(ProductVariant.create("ORD-001-A", List.of(new ProductAttribute("cor", "azul"))))));
+        productRepository.save(Product.create("ORD-002", "Abacaxi", "ord-cat",
+                List.of(ProductVariant.create("ORD-002-A", List.of(new ProductAttribute("cor", "verde"))))));
+        flushAndClear();
+
+        PageResult<Product> page = productRepository.findAll(0, 50,
+                new ProductFilter(null, "ord-cat", null, null), ProductSortField.NAME, SortDirection.ASC);
+
+        assertThat(skus(page)).containsExactly("ORD-002", "ORD-001");
+        assertThat(page.content().get(0).variants()).hasSize(1);
+        assertThat(page.content().get(0).variants().get(0).attributes())
+                .extracting(ProductAttribute::value).containsExactly("verde");
     }
 
     @Test

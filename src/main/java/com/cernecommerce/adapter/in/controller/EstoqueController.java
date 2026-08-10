@@ -32,9 +32,12 @@ import com.cernecommerce.adapter.in.dtos.response.WarehouseResponseDTO;
 import com.cernecommerce.core.domain.event.AuditEvent;
 import com.cernecommerce.core.domain.event.AuditEvent.EventType;
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.SortDirection;
 import com.cernecommerce.core.domain.model.estoque.LotIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Product;
+import com.cernecommerce.core.domain.model.estoque.ProductFilter;
+import com.cernecommerce.core.domain.model.estoque.ProductSortField;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.ReorderPoint;
 import com.cernecommerce.core.domain.model.estoque.ReservationIntegrityMismatch;
@@ -109,21 +112,49 @@ public class EstoqueController {
         this.publisher = publisher;
     }
 
-    @Operation(summary = "Lista produtos paginados")
+    @Operation(summary = "Lista produtos paginados, com busca, filtros e ordenação",
+            description = "Todos os filtros são opcionais e combináveis; omitir todos devolve o "
+                    + "catálogo inteiro paginado, como antes. `search` casa por trecho em nome "
+                    + "OU SKU, sem diferenciar maiúsculas. `category` e `brand` são igualdade "
+                    + "exata (também sem diferenciar maiúsculas). A ordenação sempre desempata "
+                    + "por id, para a paginação ser estável.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "400", description = "Parâmetro fora da faixa ou valor de enum inválido", content = @Content),
             @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
     })
     @GetMapping("/products")
     @PreAuthorize("hasAuthority('ESTOQUE_PRODUCT_READ')")
     public ResponseEntity<PageResult<ProductResponseDTO>> listProducts(
             @RequestParam(defaultValue = "0") @Min(0) int page,
-            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
-        PageResult<Product> result = estoqueUseCase.listProducts(page, size);
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size,
+            @RequestParam(required = false) @Size(max = 100) String search,
+            @RequestParam(required = false) @Size(max = 100) String category,
+            @RequestParam(required = false) @Size(max = 100) String brand,
+            @RequestParam(required = false) Boolean active,
+            @RequestParam(defaultValue = "ID") ProductSortField sort,
+            @RequestParam(defaultValue = "ASC") SortDirection direction) {
+        ProductFilter filter = new ProductFilter(search, category, brand, active);
+        PageResult<Product> result = estoqueUseCase.listProducts(page, size, filter, sort, direction);
         PageResult<ProductResponseDTO> response = new PageResult<>(
                 result.content().stream().map(converter::toResponse).toList(),
                 result.page(), result.size(), result.totalElements(), result.totalPages());
         return ResponseEntity.ok(response);
+    }
+
+    @Operation(summary = "Busca um produto por SKU",
+            description = "Aceita o SKU do produto pai ou o de qualquer variação — nos dois casos "
+                    + "devolve o produto pai, que é onde moram categoria e precificação.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "404", description = "SKU não encontrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/products/{sku}")
+    @PreAuthorize("hasAuthority('ESTOQUE_PRODUCT_READ')")
+    public ResponseEntity<ProductResponseDTO> getProduct(
+            @PathVariable @NotBlank @Size(min = 3, max = 50) String sku) {
+        return ResponseEntity.ok(converter.toResponse(estoqueUseCase.findProductBySku(sku)));
     }
 
     @Operation(summary = "Faz upload de uma imagem de produto e devolve a URL pública",
