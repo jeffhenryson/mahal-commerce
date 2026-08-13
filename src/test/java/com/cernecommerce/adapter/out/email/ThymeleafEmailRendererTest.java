@@ -6,6 +6,7 @@ import org.thymeleaf.spring6.SpringTemplateEngine;
 import org.thymeleaf.templatemode.TemplateMode;
 import org.thymeleaf.templateresolver.ClassLoaderTemplateResolver;
 
+import java.math.BigDecimal;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -98,5 +99,58 @@ class ThymeleafEmailRendererTest {
         assertThat(html).contains("eve");
         assertThat(html).contains("Papel atribuído");
         assertThat(html).contains("ROLE_ADMIN");
+    }
+
+    @Test
+    void order_confirmation_template_renderiza_com_campos_corretos() {
+        String html = renderer.render("order-confirmation", Map.of(
+                "customerName", "Maria",
+                "orderReference", "Pedido #7",
+                "total", new BigDecimal("99.90"),
+                "itemCount", 3,
+                "checkoutUrl", "http://checkout-url"));
+
+        assertThat(html).contains("Maria");
+        assertThat(html).contains("Pedido #7");
+        assertThat(html).contains("99.90");
+        assertThat(html).contains("http://checkout-url");
+    }
+
+    @Test
+    void order_status_update_template_renderiza_com_campos_corretos() {
+        String html = renderer.render("order-status-update", Map.of(
+                "customerName", "Maria",
+                "orderReference", "Pedido #7",
+                "newStatusLabel", "Pagamento confirmado"));
+
+        assertThat(html).contains("Maria");
+        assertThat(html).contains("Pedido #7");
+        assertThat(html).contains("Pagamento confirmado");
+    }
+
+    @Test
+    void order_cancellation_template_usa_texto_de_reembolso_quando_refunded() {
+        String html = renderer.render("order-cancellation", Map.of(
+                "customerName", "Maria",
+                "orderReference", "Pedido #7",
+                "reason", "Produto com defeito",
+                "refunded", true));
+
+        assertThat(html).contains("Maria");
+        assertThat(html).contains("Pedido #7");
+        assertThat(html).contains("reembolsado");
+        assertThat(html).contains("Produto com defeito");
+    }
+
+    @Test
+    void order_cancellation_template_usa_texto_de_cancelamento_quando_nao_refunded() {
+        String html = renderer.render("order-cancellation", Map.of(
+                "customerName", "Maria",
+                "orderReference", "Pedido #7",
+                "reason", "Cliente desistiu",
+                "refunded", false));
+
+        assertThat(html).contains("cancelado");
+        assertThat(html).doesNotContain("reembolsado");
     }
 }

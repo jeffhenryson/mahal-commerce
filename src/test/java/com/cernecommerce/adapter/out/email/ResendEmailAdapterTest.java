@@ -10,6 +10,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
+import java.math.BigDecimal;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -109,6 +110,52 @@ class ResendEmailAdapterTest {
         adapter.sendTokenTheftAlert("user@example.com", "alice");
 
         server.verify();
+    }
+
+    @Test
+    void sendOrderConfirmation_envia_post_com_campos_corretos() throws Exception {
+        when(renderer.render(eq("order-confirmation"), anyMap())).thenReturn("<html>confirmation</html>");
+        server.expect(requestTo(API_URL))
+                .andExpect(jsonPath("$.to[0]").value("customer@example.com"))
+                .andExpect(jsonPath("$.subject").value("Recebemos seu pedido Pedido #7"))
+                .andRespond(withSuccess());
+
+        adapter.sendOrderConfirmation("customer@example.com", "Maria", "Pedido #7",
+                new BigDecimal("99.90"), 3, "http://checkout-url");
+
+        server.verify();
+        verify(renderer).render(eq("order-confirmation"), argThat((Map<String, Object> m) ->
+                "Maria".equals(m.get("customerName")) && "Pedido #7".equals(m.get("orderReference"))
+                        && Integer.valueOf(3).equals(m.get("itemCount"))));
+    }
+
+    @Test
+    void sendOrderStatusUpdate_envia_post_com_campos_corretos() throws Exception {
+        when(renderer.render(eq("order-status-update"), anyMap())).thenReturn("<html>status</html>");
+        server.expect(requestTo(API_URL))
+                .andExpect(jsonPath("$.to[0]").value("customer@example.com"))
+                .andExpect(jsonPath("$.subject").value("Atualização do pedido Pedido #7"))
+                .andRespond(withSuccess());
+
+        adapter.sendOrderStatusUpdate("customer@example.com", "Maria", "Pedido #7", "Pagamento confirmado");
+
+        server.verify();
+        verify(renderer).render(eq("order-status-update"), argThat((Map<String, Object> m) ->
+                "Pagamento confirmado".equals(m.get("newStatusLabel"))));
+    }
+
+    @Test
+    void sendOrderCancellation_usa_texto_de_reembolso_quando_refunded() throws Exception {
+        when(renderer.render(eq("order-cancellation"), anyMap())).thenReturn("<html>cancel</html>");
+        server.expect(requestTo(API_URL))
+                .andExpect(jsonPath("$.subject").value("Pedido Pedido #7 reembolsado"))
+                .andRespond(withSuccess());
+
+        adapter.sendOrderCancellation("customer@example.com", "Maria", "Pedido #7", "Produto com defeito", true);
+
+        server.verify();
+        verify(renderer).render(eq("order-cancellation"), argThat((Map<String, Object> m) ->
+                Boolean.TRUE.equals(m.get("refunded")) && "Produto com defeito".equals(m.get("reason"))));
     }
 
     @Test

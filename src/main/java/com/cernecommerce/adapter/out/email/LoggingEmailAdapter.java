@@ -5,6 +5,7 @@ import com.cernecommerce.core.ports.out.notification.EmailPort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.math.BigDecimal;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -57,6 +58,26 @@ public class LoggingEmailAdapter implements EmailPort {
     @Override
     public void sendTokenTheftAlert(String to, String username) {
         log.info("DEV EMAIL >> to={} username={} [security-alert:token-theft]", to, username);
+    }
+
+    @Override
+    public void sendOrderConfirmation(String to, String customerName, String orderReference, BigDecimal total,
+            int itemCount, String checkoutUrl) {
+        log.info("DEV EMAIL >> to={} customerName={} orderReference={} total={} itemCount={} checkoutUrl={} [order-confirmation]",
+                to, customerName, orderReference, total, itemCount, checkoutUrl);
+    }
+
+    @Override
+    public void sendOrderStatusUpdate(String to, String customerName, String orderReference, String newStatusLabel) {
+        log.info("DEV EMAIL >> to={} customerName={} orderReference={} newStatusLabel={} [order-status-update]",
+                to, customerName, orderReference, newStatusLabel);
+    }
+
+    @Override
+    public void sendOrderCancellation(String to, String customerName, String orderReference, String reason,
+            boolean refunded) {
+        log.info("DEV EMAIL >> to={} customerName={} orderReference={} reason={} refunded={} [order-cancellation]",
+                to, customerName, orderReference, reason, refunded);
     }
 
     @Override

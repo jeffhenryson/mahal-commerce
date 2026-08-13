@@ -2,13 +2,17 @@ package com.cernecommerce.infra.notification;
 
 import com.cernecommerce.core.domain.event.AuditEvent;
 import com.cernecommerce.core.domain.model.auth.User;
+import com.cernecommerce.core.domain.model.crm.Customer;
 import com.cernecommerce.core.domain.model.notification.Notification;
 import com.cernecommerce.core.domain.model.notification.NotificationPreference;
 import com.cernecommerce.core.domain.model.notification.NotificationType;
+import com.cernecommerce.core.domain.model.pedido.Order;
 import com.cernecommerce.core.ports.in.NotificationPreferenceUseCase;
 import com.cernecommerce.core.ports.in.NotificationUseCase;
+import com.cernecommerce.core.ports.out.crm.CustomerRepository;
 import com.cernecommerce.core.ports.out.notification.EmailPort;
 import com.cernecommerce.core.ports.out.notification.NotificationSsePort;
+import com.cernecommerce.core.ports.out.pedido.OrderRepository;
 import com.cernecommerce.core.ports.out.user.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -32,6 +36,8 @@ class NotificationEventListenerTest {
     @Mock UserRepository userRepository;
     @Mock EmailPort emailPort;
     @Mock NotificationSsePort ssePort;
+    @Mock OrderRepository orderRepository;
+    @Mock CustomerRepository customerRepository;
 
     NotificationEventListener listener;
 
@@ -42,7 +48,7 @@ class NotificationEventListenerTest {
     void setUp() {
         MockitoAnnotations.openMocks(this);
         listener = new NotificationEventListener(notificationUseCase, preferenceUseCase,
-                userRepository, emailPort, ssePort);
+                userRepository, emailPort, ssePort, orderRepository, customerRepository);
     }
 
     @Test
@@ -128,7 +134,68 @@ class NotificationEventListenerTest {
         verify(emailPort).sendAccountLockedAlert(eq("alice@example.com"), eq("alice"));
     }
 
+    @Test
+    void order_status_changed_envia_email_de_atualizacao_para_o_cliente_do_pedido() {
+        Order order = mock(Order.class);
+        when(order.customerId()).thenReturn(42L);
+        given(orderRepository.findById(7L)).willReturn(Optional.of(order));
+        Customer customer = stubCustomer();
+        given(customerRepository.findById(42L)).willReturn(Optional.of(customer));
+
+        listener.onAuditEvent(AuditEvent.of(AuditEvent.EventType.ORDER_STATUS_CHANGED, "webhook",
+                Map.of("orderId", 7L, "to", "PAGO")));
+
+        verify(emailPort).sendOrderStatusUpdate(
+                "customer@example.com", "Cliente Exemplo", "Pedido #7", "Pagamento confirmado");
+    }
+
+    @Test
+    void order_cancelled_envia_email_de_cancelamento_com_motivo() {
+        Order order = mock(Order.class);
+        when(order.customerId()).thenReturn(42L);
+        given(orderRepository.findById(7L)).willReturn(Optional.of(order));
+        given(customerRepository.findById(42L)).willReturn(Optional.of(stubCustomer()));
+
+        listener.onAuditEvent(AuditEvent.of(AuditEvent.EventType.ORDER_CANCELLED, "alice",
+                Map.of("orderId", 7L, "reason", "Cliente desistiu")));
+
+        verify(emailPort).sendOrderCancellation(
+                "customer@example.com", "Cliente Exemplo", "Pedido #7", "Cliente desistiu", false);
+    }
+
+    @Test
+    void order_refunded_envia_email_de_reembolso() {
+        Order order = mock(Order.class);
+        when(order.customerId()).thenReturn(42L);
+        given(orderRepository.findById(7L)).willReturn(Optional.of(order));
+        given(customerRepository.findById(42L)).willReturn(Optional.of(stubCustomer()));
+
+        listener.onAuditEvent(AuditEvent.of(AuditEvent.EventType.ORDER_REFUNDED, "alice",
+                Map.of("orderId", 7L, "reason", "Produto com defeito")));
+
+        verify(emailPort).sendOrderCancellation(
+                "customer@example.com", "Cliente Exemplo", "Pedido #7", "Produto com defeito", true);
+    }
+
+    @Test
+    void order_status_changed_sem_customerId_nao_envia_email_venda_de_balcao() {
+        Order order = mock(Order.class);
+        when(order.customerId()).thenReturn(null);
+        given(orderRepository.findById(7L)).willReturn(Optional.of(order));
+
+        listener.onAuditEvent(AuditEvent.of(AuditEvent.EventType.ORDER_STATUS_CHANGED, "alice",
+                Map.of("orderId", 7L, "to", "ENVIADO")));
+
+        verifyNoInteractions(emailPort);
+        verifyNoInteractions(customerRepository);
+    }
+
     // helpers
+
+    private Customer stubCustomer() {
+        return new Customer(42L, "Cliente Exemplo", "11999999999", "customer@example.com",
+                null, "MARKETPLACE", Instant.now(), com.cernecommerce.core.domain.model.crm.CustomerStage.NOVO_LEAD);
+    }
 
     private List<NotificationPreference> todosHabilitados(String username) {
         return List.of(

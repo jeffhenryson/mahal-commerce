@@ -1,13 +1,17 @@
 package com.cernecommerce.infra.notification;
 
 import com.cernecommerce.core.domain.event.AuditEvent;
+import com.cernecommerce.core.domain.model.crm.Customer;
 import com.cernecommerce.core.domain.model.notification.Notification;
 import com.cernecommerce.core.domain.model.notification.NotificationPreference;
 import com.cernecommerce.core.domain.model.notification.NotificationType;
+import com.cernecommerce.core.domain.model.pedido.Order;
 import com.cernecommerce.core.ports.in.NotificationPreferenceUseCase;
 import com.cernecommerce.core.ports.in.NotificationUseCase;
+import com.cernecommerce.core.ports.out.crm.CustomerRepository;
 import com.cernecommerce.core.ports.out.notification.EmailPort;
 import com.cernecommerce.core.ports.out.notification.NotificationSsePort;
+import com.cernecommerce.core.ports.out.pedido.OrderRepository;
 import com.cernecommerce.core.ports.out.user.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,6 +20,8 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.function.Consumer;
 
 @Component
@@ -23,22 +29,35 @@ public class NotificationEventListener {
 
     private static final Logger log = LoggerFactory.getLogger(NotificationEventListener.class);
 
+    private static final Map<String, String> ORDER_STATUS_LABELS = Map.of(
+            "PAGO", "Pagamento confirmado",
+            "SEPARADO", "Pedido separado",
+            "ENVIADO", "Pedido enviado",
+            "ENTREGUE", "Pedido entregue",
+            "CONCLUIDO", "Pedido concluído");
+
     private final NotificationUseCase notificationUseCase;
     private final NotificationPreferenceUseCase preferenceUseCase;
     private final UserRepository userRepository;
     private final EmailPort emailPort;
     private final NotificationSsePort ssePort;
+    private final OrderRepository orderRepository;
+    private final CustomerRepository customerRepository;
 
     public NotificationEventListener(NotificationUseCase notificationUseCase,
                                      NotificationPreferenceUseCase preferenceUseCase,
                                      UserRepository userRepository,
                                      EmailPort emailPort,
-                                     NotificationSsePort ssePort) {
+                                     NotificationSsePort ssePort,
+                                     OrderRepository orderRepository,
+                                     CustomerRepository customerRepository) {
         this.notificationUseCase = notificationUseCase;
         this.preferenceUseCase = preferenceUseCase;
         this.userRepository = userRepository;
         this.emailPort = emailPort;
         this.ssePort = ssePort;
+        this.orderRepository = orderRepository;
+        this.customerRepository = customerRepository;
     }
 
     @EventListener
@@ -88,8 +107,38 @@ public class NotificationEventListener {
                 dispatch(event.username(), NotificationType.ACCOUNT_DISABLED,
                         "Conta desativada", "Sua conta foi desativada por um administrador.", null);
             }
+            case ORDER_STATUS_CHANGED -> {
+                String to = String.valueOf(event.details().get("to"));
+                String label = ORDER_STATUS_LABELS.getOrDefault(to, "Status atualizado");
+                resolveOrderCustomer(event).ifPresent(customer -> emailPort.sendOrderStatusUpdate(
+                        customer.email(), customer.nome(), orderReference(event), label));
+            }
+            case ORDER_CANCELLED, ORDER_REFUNDED -> {
+                boolean refunded = event.type() == AuditEvent.EventType.ORDER_REFUNDED;
+                String reason = String.valueOf(event.details().get("reason"));
+                resolveOrderCustomer(event).ifPresent(customer -> emailPort.sendOrderCancellation(
+                        customer.email(), customer.nome(), orderReference(event), reason, refunded));
+            }
             default -> { }
         }
+    }
+
+    private Optional<Customer> resolveOrderCustomer(AuditEvent event) {
+        try {
+            Long orderId = ((Number) event.details().get("orderId")).longValue();
+            return orderRepository.findById(orderId)
+                    .map(Order::customerId)
+                    .filter(customerId -> customerId != null)
+                    .flatMap(customerRepository::findById)
+                    .filter(customer -> customer.email() != null && !customer.email().isBlank());
+        } catch (Exception ex) {
+            log.error("notification.order-email.resolve.failed details={} error={}", event.details(), ex.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    private String orderReference(AuditEvent event) {
+        return "Pedido #" + event.details().get("orderId");
     }
 
     private void dispatch(String username, NotificationType type, String title, String body,

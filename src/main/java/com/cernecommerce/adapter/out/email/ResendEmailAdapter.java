@@ -10,6 +10,7 @@ import org.springframework.http.MediaType;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.web.client.RestClient;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 
@@ -117,6 +118,42 @@ public class ResendEmailAdapter implements EmailPort {
                 "message", "Detectamos o reuso de uma credencial de sessão já utilizada — todas as sessões da sua conta foram encerradas automaticamente.",
                 "footerMessage", "Se não foi você, sua conta pode estar comprometida. Troque sua senha imediatamente."));
         send(to, "Alerta de segurança: acesso suspeito", html, "email.security-alert.token-theft");
+    }
+
+    @Async("emailTaskExecutor")
+    @Override
+    public void sendOrderConfirmation(String to, String customerName, String orderReference, BigDecimal total,
+            int itemCount, String checkoutUrl) {
+        String html = renderer.render("order-confirmation", Map.of(
+                "customerName", customerName,
+                "orderReference", orderReference,
+                "total", total,
+                "itemCount", itemCount,
+                "checkoutUrl", checkoutUrl));
+        send(to, "Recebemos seu pedido " + orderReference, html, "email.order-confirmation");
+    }
+
+    @Async("emailTaskExecutor")
+    @Override
+    public void sendOrderStatusUpdate(String to, String customerName, String orderReference, String newStatusLabel) {
+        String html = renderer.render("order-status-update", Map.of(
+                "customerName", customerName,
+                "orderReference", orderReference,
+                "newStatusLabel", newStatusLabel));
+        send(to, "Atualização do pedido " + orderReference, html, "email.order-status");
+    }
+
+    @Async("emailTaskExecutor")
+    @Override
+    public void sendOrderCancellation(String to, String customerName, String orderReference, String reason,
+            boolean refunded) {
+        String html = renderer.render("order-cancellation", Map.of(
+                "customerName", customerName,
+                "orderReference", orderReference,
+                "reason", reason,
+                "refunded", refunded));
+        String subject = refunded ? "Pedido " + orderReference + " reembolsado" : "Pedido " + orderReference + " cancelado";
+        send(to, subject, html, "email.order-cancellation");
     }
 
     @Override
