@@ -7,12 +7,15 @@ import com.cernecommerce.adapter.in.converter.StockMovementDTOConverter;
 import com.cernecommerce.adapter.in.converter.StockReservationDTOConverter;
 import com.cernecommerce.adapter.in.converter.WarehouseDTOConverter;
 import com.cernecommerce.adapter.in.dtos.request.ActiveRequest;
+import com.cernecommerce.adapter.in.dtos.request.AddVariantsRequest;
 import com.cernecommerce.adapter.in.dtos.request.CategoryPatchRequest;
 import com.cernecommerce.adapter.in.dtos.request.CategoryRequest;
 import com.cernecommerce.adapter.in.dtos.request.LotTrackedRequest;
+import com.cernecommerce.adapter.in.dtos.request.InitialStockRequest;
 import com.cernecommerce.adapter.in.dtos.request.KitRecipeRequest;
 import com.cernecommerce.adapter.in.dtos.request.ProductPatchRequest;
 import com.cernecommerce.adapter.in.dtos.request.ProductRequest;
+import com.cernecommerce.adapter.in.dtos.request.ProductVariantPatchRequest;
 import com.cernecommerce.adapter.in.dtos.request.ReorderPointRequest;
 import com.cernecommerce.adapter.in.dtos.request.StockCountItemRequest;
 import com.cernecommerce.adapter.in.dtos.request.StockCountRequest;
@@ -20,6 +23,7 @@ import com.cernecommerce.adapter.in.dtos.request.StockMovementRequest;
 import com.cernecommerce.adapter.in.dtos.request.WarehousePatchRequest;
 import com.cernecommerce.adapter.in.dtos.request.WarehouseRequest;
 import com.cernecommerce.adapter.in.dtos.response.CategoryResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.EstoqueSummaryResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.KitComponentResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.LotIntegrityMismatchResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.OrphanSkuResponseDTO;
@@ -39,10 +43,12 @@ import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.SortDirection;
 import com.cernecommerce.core.domain.model.estoque.Category;
 import com.cernecommerce.core.domain.model.estoque.LotIntegrityMismatch;
+import com.cernecommerce.core.domain.model.estoque.MeasurementUnit;
 import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductFilter;
 import com.cernecommerce.core.domain.model.estoque.ProductSortField;
+import com.cernecommerce.core.domain.model.estoque.ProductType;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.ReorderPoint;
 import com.cernecommerce.core.domain.model.estoque.ReservationIntegrityMismatch;
@@ -140,14 +146,30 @@ public class EstoqueController {
             @RequestParam(required = false) @Size(max = 100) String category,
             @RequestParam(required = false) @Size(max = 100) String brand,
             @RequestParam(required = false) Boolean active,
+            @RequestParam(required = false) ProductType type,
             @RequestParam(defaultValue = "ID") ProductSortField sort,
             @RequestParam(defaultValue = "ASC") SortDirection direction) {
-        ProductFilter filter = new ProductFilter(search, category, brand, active);
+        ProductFilter filter = new ProductFilter(search, category, brand, active, type);
         PageResult<Product> result = estoqueUseCase.listProducts(page, size, filter, sort, direction);
         PageResult<ProductResponseDTO> response = new PageResult<>(
                 result.content().stream().map(converter::toResponse).toList(),
                 result.page(), result.size(), result.totalElements(), result.totalPages());
         return ResponseEntity.ok(response);
+    }
+
+    @Operation(summary = "Resumo pré-calculado do catálogo de estoque",
+            description = "Números agregados (contagem de produtos/variantes, valor em estoque a "
+                    + "custo, alertas de reposição por severidade, categoria com mais produtos) "
+                    + "para telas/widgets que só precisam do resumo, sem baixar o catálogo "
+                    + "inteiro — badge de alertas, KPIs do Catálogo, painel de Estoque do Dashboard.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/summary")
+    @PreAuthorize("hasAuthority('ESTOQUE_PRODUCT_READ') and hasAuthority('ESTOQUE_WAREHOUSE_READ')")
+    public ResponseEntity<EstoqueSummaryResponseDTO> getSummary() {
+        return ResponseEntity.ok(converter.toResponse(estoqueUseCase.getSummary()));
     }
 
     @Operation(summary = "Busca um produto por SKU",
@@ -163,6 +185,21 @@ public class EstoqueController {
     public ResponseEntity<ProductResponseDTO> getProduct(
             @PathVariable @NotBlank @Size(min = 3, max = 50) String sku) {
         return ResponseEntity.ok(converter.toResponse(estoqueUseCase.findProductBySku(sku)));
+    }
+
+    @Operation(summary = "Resolve um produto pelo código de barras",
+            description = "Aceita o código de barras do produto pai ou o de qualquer variação — "
+                    + "nos dois casos devolve o produto pai. Caminho de leitura do scanner do PDV.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "404", description = "Código de barras não encontrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/products/by-barcode/{barcode}")
+    @PreAuthorize("hasAuthority('ESTOQUE_PRODUCT_READ')")
+    public ResponseEntity<ProductResponseDTO> getProductByBarcode(
+            @PathVariable @NotBlank @Size(min = 8, max = 14) String barcode) {
+        return ResponseEntity.ok(converter.toResponse(estoqueUseCase.findProductByBarcode(barcode)));
     }
 
     // ── Categorias do catálogo ───────────────────────────────────────────────
@@ -284,16 +321,25 @@ public class EstoqueController {
     @PostMapping("/products")
     // touchesPricing() e não "#request.pricing == null": desde EST-F020 o preço também pode vir
     // dentro de variants[], e checar só a raiz deixaria quem tem apenas ESTOQUE_PRODUCT_MANAGE
-    // precificar pela porta lateral.
+    // precificar pela porta lateral. Mesmo raciocínio para touchesStock()/ESTOQUE_STOCK_MANAGE
+    // (EST-F023): sem isso, criar produto com initialStock seria uma porta lateral para lançar
+    // movimentação de estoque sem a permissão que POST /estoque/movements já exige.
     @PreAuthorize("hasAuthority('ESTOQUE_PRODUCT_MANAGE') "
-            + "and (!#request.touchesPricing() or hasAuthority('ESTOQUE_PRODUCT_PRICE_MANAGE'))")
+            + "and (!#request.touchesPricing() or hasAuthority('ESTOQUE_PRODUCT_PRICE_MANAGE')) "
+            + "and (!#request.touchesStock() or hasAuthority('ESTOQUE_STOCK_MANAGE'))")
     public ResponseEntity<ProductResponseDTO> createProduct(@Valid @RequestBody ProductRequest request,
             Authentication authentication) {
         List<ProductVariant> variants = converter.toVariants(request.getVariants());
+        InitialStockRequest initialStock = request.getInitialStock();
         Product created = estoqueUseCase.createProduct(request.getSku(), request.getName(), request.getCategory(),
                 variants, converter.toPricing(request.getPricing()), request.getBrand(), request.getImageUrl(),
                 request.isOnSale(), request.isSuperPromo(), request.getDescription(), request.getVideoUrl(),
-                request.getImages(), converter.toAttributes(request.getAttributes()), request.getCategoryId());
+                request.getImages(), converter.toAttributes(request.getAttributes()), request.getCategoryId(),
+                request.getBarcode(), request.getUnit(), request.isSampleProduct(), request.isKitComponentEligible(),
+                request.getVisibleInPos(), request.getVisibleInMarketplace(), request.getType(),
+                initialStock == null ? null : new EstoqueUseCase.InitialStockCommand(initialStock.getWarehouseCode(),
+                        initialStock.getQuantity(), initialStock.getLotCode(), initialStock.getExpiryDate()),
+                authentication.getName());
         publisher.publishEvent(AuditEvent.of(EventType.PRODUCT_CREATED,
                 authentication.getName(), Map.of("sku", created.sku())));
         return ResponseEntity.created(URI.create("/estoque/products/" + created.sku()))
@@ -326,7 +372,8 @@ public class EstoqueController {
                 request.getOnSale(), request.getSuperPromo(), request.getDescription(), request.getVideoUrl(),
                 request.getImages(),
                 request.getAttributes() == null ? null : converter.toAttributes(request.getAttributes()),
-                request.getCategoryId());
+                request.getCategoryId(), request.getBarcode(), request.getUnit(), request.getSampleProduct(),
+                request.getKitComponentEligible(), request.getVisibleInPos(), request.getVisibleInMarketplace());
         publisher.publishEvent(AuditEvent.of(EventType.PRODUCT_UPDATED,
                 authentication.getName(), Map.of("sku", updated.sku())));
         // Evento próprio para mudança de preço: quem baixou o preço de quê e quando é a pergunta
@@ -338,6 +385,59 @@ public class EstoqueController {
                             "sku", updated.sku(),
                             "effectivePrice", String.valueOf(updated.pricing().effectivePrice()))));
         }
+        return ResponseEntity.ok(converter.toResponse(updated));
+    }
+
+    @Operation(summary = "Acrescenta uma ou mais variações novas à grade de um produto já existente",
+            description = "Puramente aditivo — nenhuma variação já cadastrada é alterada ou "
+                    + "removida. Não existe caminho de substituição em massa da grade nem de "
+                    + "exclusão: excluir de fato deixaria órfão o histórico de estoque que "
+                    + "referencia o SKU da variação como texto livre. Mandar `pricing` em alguma "
+                    + "variação nova exige `ESTOQUE_PRODUCT_PRICE_MANAGE` além de "
+                    + "`ESTOQUE_PRODUCT_MANAGE`.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = ProductResponseDTO.class))),
+            @ApiResponse(responseCode = "404", description = "SKU não encontrado", content = @Content),
+            @ApiResponse(responseCode = "409", description = "SKU ou código de barras já cadastrado, ou produto é KIT", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PostMapping("/products/{sku}/variants")
+    @PreAuthorize("hasAuthority('ESTOQUE_PRODUCT_MANAGE') "
+            + "and (!#request.touchesPricing() or hasAuthority('ESTOQUE_PRODUCT_PRICE_MANAGE'))")
+    public ResponseEntity<ProductResponseDTO> addVariants(
+            @PathVariable @NotBlank @Size(min = 3, max = 50) String sku,
+            @Valid @RequestBody AddVariantsRequest request, Authentication authentication) {
+        List<ProductVariant> newVariants = converter.toVariants(request.getVariants());
+        Product updated = estoqueUseCase.addVariants(sku, newVariants);
+        publisher.publishEvent(AuditEvent.of(EventType.PRODUCT_UPDATED,
+                authentication.getName(), Map.of("sku", sku, "variantsAdded",
+                        String.valueOf(newVariants.size()))));
+        return ResponseEntity.ok(converter.toResponse(updated));
+    }
+
+    @Operation(summary = "Altera parcialmente uma variação já existente (não altera o SKU dela)",
+            description = "Campo ausente ou nulo é mantido, inclusive dentro de `pricing`. Para "
+                    + "tirar a variação de circulação sem apagar histórico, use `active: false` — "
+                    + "não há endpoint de exclusão. Mandar `pricing` exige "
+                    + "`ESTOQUE_PRODUCT_PRICE_MANAGE` além de `ESTOQUE_PRODUCT_MANAGE`.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = ProductResponseDTO.class))),
+            @ApiResponse(responseCode = "404", description = "Produto ou variação não encontrados", content = @Content),
+            @ApiResponse(responseCode = "409", description = "Código de barras já cadastrado em outro SKU", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PatchMapping("/products/{sku}/variants/{variantSku}")
+    @PreAuthorize("hasAuthority('ESTOQUE_PRODUCT_MANAGE') "
+            + "and (!#request.touchesPricing() or hasAuthority('ESTOQUE_PRODUCT_PRICE_MANAGE'))")
+    public ResponseEntity<ProductResponseDTO> updateVariant(
+            @PathVariable @NotBlank @Size(min = 3, max = 50) String sku,
+            @PathVariable @NotBlank @Size(min = 3, max = 50) String variantSku,
+            @Valid @RequestBody ProductVariantPatchRequest request, Authentication authentication) {
+        Product updated = estoqueUseCase.updateVariant(sku, variantSku, request.getActive(),
+                request.getAttributes() == null ? null : converter.toAttributes(request.getAttributes()),
+                converter.toPricing(request.getPricing()), request.getBarcode());
+        publisher.publishEvent(AuditEvent.of(EventType.PRODUCT_UPDATED,
+                authentication.getName(), Map.of("sku", sku, "variantSku", variantSku)));
         return ResponseEntity.ok(converter.toResponse(updated));
     }
 
@@ -510,13 +610,30 @@ public class EstoqueController {
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
         if (sku != null) {
             StockBalance balance = estoqueUseCase.getStockBalance(sku, warehouseCode);
-            return ResponseEntity.ok(warehouseConverter.toResponse(balance, warehouseCode));
+            return ResponseEntity.ok(warehouseConverter.toResponse(balance, warehouseCode, resolveUnit(sku)));
         }
         PageResult<StockBalance> result = estoqueUseCase.listStockBalances(warehouseCode, page, size);
+        Map<String, MeasurementUnit> unitsBySku = new HashMap<>();
         PageResult<StockBalanceResponseDTO> response = new PageResult<>(
-                result.content().stream().map(b -> warehouseConverter.toResponse(b, warehouseCode)).toList(),
+                result.content().stream()
+                        .map(b -> warehouseConverter.toResponse(b, warehouseCode,
+                                unitsBySku.computeIfAbsent(b.sku(), this::resolveUnit)))
+                        .toList(),
                 result.page(), result.size(), result.totalElements(), result.totalPages());
         return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Resolve a unidade de medida de um SKU para eco em {@code StockBalanceResponseDTO}/
+     * {@code StockMovementResponseDTO}. {@code null} quando o SKU não resolve mais a um produto —
+     * ele guarda-se como texto livre nas tabelas de estoque, sem FK (EST-C011).
+     */
+    private MeasurementUnit resolveUnit(String sku) {
+        try {
+            return estoqueUseCase.findProductBySku(sku).unit();
+        } catch (RuntimeException notFound) {
+            return null;
+        }
     }
 
     @Operation(summary = "Registra uma movimentação manual de estoque (entrada, saída ou ajuste)")
@@ -544,7 +661,7 @@ public class EstoqueController {
                         "type", request.getType(), "quantity", request.getQuantity())));
         return ResponseEntity.created(URI.create("/estoque/stock-balance?sku=" + request.getSku()
                         + "&warehouseCode=" + request.getWarehouseCode()))
-                .body(warehouseConverter.toResponse(updated, request.getWarehouseCode()));
+                .body(warehouseConverter.toResponse(updated, request.getWarehouseCode(), resolveUnit(request.getSku())));
     }
 
     @Operation(summary = "Lista o histórico paginado de movimentações de estoque",
@@ -564,10 +681,12 @@ public class EstoqueController {
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
         PageResult<StockMovement> result = estoqueUseCase.listMovements(sku, warehouseCode, page, size);
         Map<Long, String> warehouseCodesById = warehouseCode != null ? Map.of() : resolveWarehouseCodes(result);
+        Map<String, MeasurementUnit> unitsBySku = new HashMap<>();
         PageResult<StockMovementResponseDTO> response = new PageResult<>(
                 result.content().stream()
                         .map(m -> movementConverter.toResponse(m,
-                                warehouseCode != null ? warehouseCode : warehouseCodesById.get(m.warehouseId())))
+                                warehouseCode != null ? warehouseCode : warehouseCodesById.get(m.warehouseId()),
+                                unitsBySku.computeIfAbsent(m.sku(), this::resolveUnit)))
                         .toList(),
                 result.page(), result.size(), result.totalElements(), result.totalPages());
         return ResponseEntity.ok(response);

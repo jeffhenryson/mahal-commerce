@@ -42,4 +42,11 @@ public class PricingRequest {
             + "Puramente valor de exibição — sem relação obrigatória com o preço praticado.",
             example = "99.90")
     private BigDecimal originalPrice;
+
+    @PositiveOrZero
+    @Digits(integer = 12, fraction = 2)
+    @Schema(description = "Preço extraordinário: valor adicional opcional destinado a uma causa, "
+            + "por fora do preço de venda. Puramente informativo — não soma no preço efetivo.",
+            example = "2.00")
+    private BigDecimal causeAmount;
 }

@@ -54,4 +54,22 @@ public class ProductResponseDTO {
 
     /** EST-F008 — opt-in: ENTRADA deste SKU passa a exigir lote e validade. */
     private boolean lotTracked;
+
+    /** Código de barras/EAN, quando cadastrado. */
+    private String barcode;
+
+    /** Unidade de medida. {@code UN} por padrão. */
+    private String unit;
+
+    /** Testador/amostra, distinto de produto padrão da Mahal. */
+    private boolean sampleProduct;
+
+    /** Elegível a entrar como componente de kit. */
+    private boolean kitComponentEligible;
+
+    /** Aparece no PDV. */
+    private boolean visibleInPos;
+
+    /** Aparece no marketplace/app. */
+    private boolean visibleInMarketplace;
 }

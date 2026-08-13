@@ -108,7 +108,9 @@ class KitSaleConcurrencyIT {
 
         estoqueUseCase.createWarehouse(warehouseCode, "Loja de concorrência", WarehouseType.LOJA_FISICA);
         estoqueUseCase.createProduct(componentSku, "Componente de concorrência", "testes", List.of(),
-                Pricing.of(new BigDecimal("10.00"), null, new BigDecimal("20.00")));
+                Pricing.of(new BigDecimal("10.00"), null, new BigDecimal("20.00")),
+                null, null, false, false, null, null, List.of(), List.of(), null,
+                null, null, false, true, null, null);
         estoqueUseCase.adjustStock(componentSku, warehouseCode, MovementType.ENTRADA,
                 new BigDecimal(INITIAL_STOCK), "carga inicial", operator);
 

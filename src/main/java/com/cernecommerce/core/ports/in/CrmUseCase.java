@@ -14,7 +14,9 @@ import com.cernecommerce.core.domain.model.crm.StageTransition;
 import com.cernecommerce.core.domain.model.crm.Tag;
 import com.cernecommerce.core.domain.model.crm.TagSummary;
 
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Port de entrada do domínio <b>crm</b>.
@@ -39,6 +41,14 @@ public interface CrmUseCase {
      * se não existir.
      */
     Customer findCustomerById(Long id);
+
+    /**
+     * Resolve nome de clientes em lote, para enriquecer telas de outro domínio (ex.: pedidos) sem
+     * uma consulta por linha. Id sem cliente correspondente simplesmente não aparece no mapa — ao
+     * contrário de {@link #findCustomerById}, não é um lookup pontual e não lança
+     * {@link com.cernecommerce.core.domain.exception.crm.CustomerNotFoundException}.
+     */
+    Map<Long, String> findCustomerNames(Collection<Long> customerIds);
 
     /**
      * Busca pontual por CPF, email ou contato — o "CPF na nota?" do balcão (CRM-F002). Informe

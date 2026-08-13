@@ -56,6 +56,15 @@ class KitSaleFlowIT {
         return UUID.randomUUID().toString().substring(0, 8);
     }
 
+    /**
+     * Cria um produto SIMPLES já elegível para entrar como componente de kit — os testes deste
+     * arquivo testam a explosão de venda de kit, não a regra de elegibilidade em si.
+     */
+    private void createEligibleComponent(String sku, String name, String category, Pricing pricing) {
+        estoqueUseCase.createProduct(sku, name, category, List.of(), pricing, null, null, false, false, null, null,
+                List.of(), List.of(), null, null, null, false, true, null, null);
+    }
+
     @Test
     void registerSale_ofAKit_explodesIntoComponentMovementsAndDerivesBalanceAndCost() {
         String suffix = uniqueSuffix();
@@ -66,9 +75,9 @@ class KitSaleFlowIT {
         String kitSku = "KIT-" + suffix;
 
         estoqueUseCase.createWarehouse(warehouseCode, "Loja " + suffix, WarehouseType.LOJA_FISICA);
-        estoqueUseCase.createProduct(carvaoSku, "Carvão " + suffix, "carvao", List.of(),
+        createEligibleComponent(carvaoSku, "Carvão " + suffix, "carvao",
                 Pricing.of(new BigDecimal("10.00"), null, new BigDecimal("20.00")));
-        estoqueUseCase.createProduct(essenciaSku, "Essência " + suffix, "essencia", List.of(),
+        createEligibleComponent(essenciaSku, "Essência " + suffix, "essencia",
                 Pricing.of(new BigDecimal("15.00"), null, new BigDecimal("30.00")));
         estoqueUseCase.adjustStock(carvaoSku, warehouseCode, MovementType.ENTRADA, new BigDecimal("20.000"),
                 "carga inicial", operator);
@@ -131,7 +140,7 @@ class KitSaleFlowIT {
         String kitSku = "KIT-" + suffix;
 
         estoqueUseCase.createWarehouse(warehouseCode, "Loja " + suffix, WarehouseType.LOJA_FISICA);
-        estoqueUseCase.createProduct(componentSku, "Carvão " + suffix, "carvao", List.of(),
+        createEligibleComponent(componentSku, "Carvão " + suffix, "carvao",
                 Pricing.of(new BigDecimal("10.00"), null, new BigDecimal("20.00")));
         estoqueUseCase.createProduct(kitSku, "Kit " + suffix, "combo", List.of(),
                 Pricing.of(null, null, new BigDecimal("25.00")));
@@ -153,9 +162,9 @@ class KitSaleFlowIT {
         String kitSku = "KIT-" + suffix;
 
         estoqueUseCase.createWarehouse(warehouseCode, "Loja " + suffix, WarehouseType.LOJA_FISICA);
-        estoqueUseCase.createProduct(componentASku, "Componente A " + suffix, "componente", List.of(),
+        createEligibleComponent(componentASku, "Componente A " + suffix, "componente",
                 Pricing.of(new BigDecimal("10.00"), null, new BigDecimal("20.00")));
-        estoqueUseCase.createProduct(componentBSku, "Componente B " + suffix, "componente", List.of(),
+        createEligibleComponent(componentBSku, "Componente B " + suffix, "componente",
                 Pricing.of(new BigDecimal("15.00"), null, new BigDecimal("30.00")));
         // Componente A tem saldo confortável (10 un.); componente B tem saldo insuficiente para
         // o que a receita do kit vai exigir por unidade vendida (5 un., só 1 disponível).

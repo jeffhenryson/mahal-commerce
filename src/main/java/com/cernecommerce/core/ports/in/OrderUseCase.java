@@ -1,6 +1,7 @@
 package com.cernecommerce.core.ports.in;
 
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.pagamento.OrderPayment;
 import com.cernecommerce.core.domain.model.pedido.Order;
 import com.cernecommerce.core.domain.model.pedido.OrderStatus;
 import com.cernecommerce.core.domain.model.pedido.SalesChannel;
@@ -28,6 +29,14 @@ public interface OrderUseCase {
      * @throws com.cernecommerce.core.domain.exception.pedido.OrderNotFoundException se não existir
      */
     Order getOrder(Long orderId);
+
+    /**
+     * Pagamentos do pedido, de qualquer canal (GET /orders/{id}/receipt). Simétrico a
+     * {@code PdvUseCase.getOrderPayments}, mas nesta superfície cross-canal — o recibo de um
+     * pedido de marketplace não deveria depender de {@code PdvUseCase}, que enxerga só a operação
+     * de um caixa.
+     */
+    List<OrderPayment> getOrderPayments(Long orderId);
 
     /**
      * Avança o pedido na esteira de fulfillment.

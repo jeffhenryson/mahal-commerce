@@ -51,6 +51,12 @@ public class OrderService implements OrderUseCase {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public List<OrderPayment> getOrderPayments(Long orderId) {
+        return orderPaymentRepository.findByOrderId(orderId);
+    }
+
+    @Override
     @Transactional
     public Order changeStatus(Long orderId, OrderStatus newStatus, String username) {
         // A validação da transição mora em OrderStatus/Order e já tem teste — aqui só se orquestra.

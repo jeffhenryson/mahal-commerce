@@ -8,13 +8,18 @@ import com.cernecommerce.core.domain.model.pedido.OrderItem;
 import com.cernecommerce.core.domain.model.pedido.OrderStatus;
 import com.cernecommerce.core.domain.model.pedido.SalesChannel;
 import com.cernecommerce.core.ports.out.pedido.OrderRepository;
+import jakarta.persistence.criteria.Predicate;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 @Repository
@@ -84,14 +89,31 @@ public class OrderRepositoryImpl implements OrderRepository {
                 page, size, result.getTotalElements(), result.getTotalPages());
     }
 
+    /**
+     * Listagem filtrada da visão do administrador. Cada filtro é opcional, resolvido com uma
+     * {@link Specification} — o predicado só é adicionado quando o valor não é nulo, então um
+     * filtro ausente nunca vira um bind ambíguo no Postgres. Era uma query {@code @Query} com o
+     * padrão {@code :param IS NULL OR ...}, mas isso fazia o Postgres real recusar inferir o tipo
+     * do bind de {@code from}/{@code to} (Instant) quando vinham nulos, e o CAST explícito que
+     * corrigiria isso tem um bug conhecido de interação Hibernate/pgjdbc que troca o tipo do
+     * parâmetro por {@code bytea}. Specification evita a classe inteira do problema — mesmo padrão
+     * já usado em {@code AuditLogRepositoryImpl.findFiltered}.
+     */
     @Override
     @Transactional(readOnly = true)
     public PageResult<Order> findAll(SalesChannel channel, OrderStatus status, Long customerId,
             Instant from, Instant to, int page, int size) {
-        Page<OrderEntity> result = orderJpaRepository.findFiltered(
-                channel == null ? null : channel.name(),
-                status == null ? null : status.name(),
-                customerId, from, to, PageRequest.of(page, size));
+        Specification<OrderEntity> spec = (root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
+            if (channel    != null) predicates.add(cb.equal(root.get("channel"), channel.name()));
+            if (status     != null) predicates.add(cb.equal(root.get("status"), status.name()));
+            if (customerId != null) predicates.add(cb.equal(root.get("customerId"), customerId));
+            if (from       != null) predicates.add(cb.greaterThanOrEqualTo(root.get("createdAt"), from));
+            if (to         != null) predicates.add(cb.lessThanOrEqualTo(root.get("createdAt"), to));
+            return cb.and(predicates.toArray(new Predicate[0]));
+        };
+        Page<OrderEntity> result = orderJpaRepository.findAll(spec,
+                PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "id")));
         return new PageResult<>(result.getContent().stream().map(this::toDomain).toList(),
                 page, size, result.getTotalElements(), result.getTotalPages());
     }

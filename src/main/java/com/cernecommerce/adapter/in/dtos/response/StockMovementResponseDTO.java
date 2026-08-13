@@ -20,4 +20,6 @@ public class StockMovementResponseDTO {
     private String username;
     private Instant createdAt;
     private String lotCode;
+    /** Unidade de medida do produto dono da movimentação. Nula quando o SKU não resolve mais a um produto. */
+    private String unit;
 }

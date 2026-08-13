@@ -10,6 +10,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,6 +30,12 @@ public class CustomerRepositoryImpl implements CustomerRepository {
     @Transactional(readOnly = true)
     public Optional<Customer> findById(Long id) {
         return customerJpaRepository.findById(id).map(this::toDomain);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<Customer> findByIds(Collection<Long> ids) {
+        return customerJpaRepository.findAllById(ids).stream().map(this::toDomain).toList();
     }
 
     @Override

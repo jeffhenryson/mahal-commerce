@@ -41,6 +41,7 @@ import com.cernecommerce.core.domain.model.pagamento.PaymentMethod;
 import com.cernecommerce.core.domain.model.pagamento.PaymentStatus;
 import com.cernecommerce.core.ports.out.ecommerce.CartRepository;
 import com.cernecommerce.core.ports.out.ecommerce.PaymentGatewayPort;
+import com.cernecommerce.core.ports.out.notification.EmailPort;
 import com.cernecommerce.core.ports.out.pagamento.OrderPaymentRepository;
 import com.cernecommerce.core.ports.out.pedido.OrderRepository;
 
@@ -74,6 +75,7 @@ class ShopServiceTest {
     @Mock CashbackUseCase cashbackUseCase;
     @Mock PaymentGatewayPort paymentGatewayPort;
     @Mock OrderPaymentRepository orderPaymentRepository;
+    @Mock EmailPort emailPort;
 
     ShopService shopService;
 
@@ -85,7 +87,8 @@ class ShopServiceTest {
     @BeforeEach
     void setUp() {
         shopService = new ShopService(crmUseCase, userUseCase, estoqueUseCase, cartRepository,
-                orderRepository, orderUseCase, cashbackUseCase, paymentGatewayPort, orderPaymentRepository);
+                orderRepository, orderUseCase, cashbackUseCase, paymentGatewayPort, orderPaymentRepository,
+                emailPort);
     }
 
     private void stubAuthenticatedCustomer() {
@@ -427,6 +430,8 @@ class ShopServiceTest {
         assertThat(paymentCaptor.getValue().method()).isEqualTo(PaymentMethod.GATEWAY_PIX);
         assertThat(paymentCaptor.getValue().gatewayRef()).isNull();
         verify(cartRepository).clear(CUSTOMER_ID);
+        verify(emailPort).sendOrderConfirmation(eq(USERNAME), eq("Maria"), eq("Pedido #99"),
+                eq(result.order().netAmount()), eq(2), eq("https://checkout.infinitepay.io/loja?lenc=abc"));
     }
 
     @Test
@@ -446,6 +451,7 @@ class ShopServiceTest {
                 .isInstanceOf(InsufficientStockException.class);
         verify(paymentGatewayPort, never()).createCheckoutLink(any(), any(), any(), any(), any());
         verify(cartRepository, never()).clear(any());
+        verifyNoInteractions(emailPort);
     }
 
     @Test
@@ -466,6 +472,7 @@ class ShopServiceTest {
                 .isInstanceOf(PaymentGatewayException.class);
         verify(orderPaymentRepository, never()).save(any());
         verify(cartRepository, never()).clear(any());
+        verifyNoInteractions(emailPort);
     }
 
     @Test

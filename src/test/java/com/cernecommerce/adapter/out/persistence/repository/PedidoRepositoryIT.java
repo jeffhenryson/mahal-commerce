@@ -169,6 +169,40 @@ class PedidoRepositoryIT {
         assertThat(orderRepository.findBySessionId(999L, 0, 20).content()).isEmpty();
     }
 
+    // ── Filtros de GET /orders (regressão do bug de tipagem de from/to nulos) ─────────────────
+
+    @Test
+    void findAll_toleratesEveryFilterNull() {
+        orderRepository.save(concludedBalcao(twoCharcoals(null)));
+        flushAndClear();
+
+        // É exatamente o cenário do bug: from/to Instant nulos sem cast faziam o Postgres real
+        // recusar inferir o tipo do bind ("could not determine data type of parameter").
+        PageResult<Order> page = orderRepository.findAll(null, null, null, null, null, 0, 20);
+
+        assertThat(page.content()).isNotEmpty();
+    }
+
+    @Test
+    void findAll_toleratesOnlyFromFilled() {
+        orderRepository.save(concludedBalcao(twoCharcoals(null)));
+        flushAndClear();
+
+        PageResult<Order> page = orderRepository.findAll(null, null, null, Instant.now().minusSeconds(60), null, 0, 20);
+
+        assertThat(page.content()).isNotEmpty();
+    }
+
+    @Test
+    void findAll_toleratesOnlyToFilled() {
+        orderRepository.save(concludedBalcao(twoCharcoals(null)));
+        flushAndClear();
+
+        PageResult<Order> page = orderRepository.findAll(null, null, null, null, Instant.now().plusSeconds(60), 0, 20);
+
+        assertThat(page.content()).isNotEmpty();
+    }
+
     // ── Canal ────────────────────────────────────────────────────────────────────────────────
 
     @Test

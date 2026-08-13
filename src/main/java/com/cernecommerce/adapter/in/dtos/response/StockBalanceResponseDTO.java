@@ -22,4 +22,6 @@ public class StockBalanceResponseDTO {
     private BigDecimal reservedQuantity;
     /** {@code quantity - reservedQuantity}. O número que decide se dá para vender. */
     private BigDecimal availableQuantity;
+    /** Unidade de medida do produto dono do saldo. Nula quando o SKU não resolve mais a um produto. */
+    private String unit;
 }

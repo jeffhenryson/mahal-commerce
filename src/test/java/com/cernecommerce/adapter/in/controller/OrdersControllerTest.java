@@ -6,9 +6,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.cernecommerce.adapter.in.converter.OrderDTOConverter;
 import com.cernecommerce.adapter.in.dtos.response.OrderAdminResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.OrderSummaryResponseDTO;
+import com.cernecommerce.core.domain.exception.pedido.InvalidReportPeriodException;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.pedido.Order;
 import com.cernecommerce.core.domain.model.pedido.OrderStatus;
+import com.cernecommerce.core.domain.model.pedido.OrderSummary;
+import com.cernecommerce.core.ports.in.CrmUseCase;
+import com.cernecommerce.core.ports.in.OrderReportUseCase;
 import com.cernecommerce.core.ports.in.OrderUseCase;
 import com.cernecommerce.infra.handler.GlobalExceptionHandler;
 
@@ -20,12 +25,16 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 
 public class OrdersControllerTest {
 
     private MockMvc mockMvc;
     private OrderUseCase orderUseCase;
+    private OrderReportUseCase orderReportUseCase;
+    private CrmUseCase crmUseCase;
     private OrderDTOConverter orderConverter;
     private ApplicationEventPublisher publisher;
 
@@ -35,10 +44,13 @@ public class OrdersControllerTest {
     @BeforeEach
     void setup() {
         orderUseCase = mock(OrderUseCase.class);
+        orderReportUseCase = mock(OrderReportUseCase.class);
+        crmUseCase = mock(CrmUseCase.class);
         orderConverter = mock(OrderDTOConverter.class);
         publisher = mock(ApplicationEventPublisher.class);
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new OrdersController(orderUseCase, orderConverter, publisher))
+                .standaloneSetup(new OrdersController(orderUseCase, orderReportUseCase, crmUseCase, orderConverter,
+                        publisher))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }
@@ -137,5 +149,43 @@ public class OrdersControllerTest {
                 .andExpect(status().isOk());
 
         verify(publisher).publishEvent(any(Object.class));
+    }
+
+    @Test
+    void getSummary_returns_200_withMappedDto() throws Exception {
+        OrderSummary summary = new OrderSummary(0, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
+                Map.of(), Map.of(), BigDecimal.ZERO, List.of(), List.of());
+        when(orderReportUseCase.getSummary(any(), any(), any(), any(), any())).thenReturn(summary);
+
+        OrderSummaryResponseDTO dto = new OrderSummaryResponseDTO();
+        dto.setTotalOrders(0);
+        when(orderConverter.toSummaryResponse(summary)).thenReturn(dto);
+
+        mockMvc.perform(get("/orders/summary")
+                        .principal(AUTH)
+                        .param("from", "2026-01-01T00:00:00Z")
+                        .param("to", "2026-01-31T23:59:59Z"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalOrders").value(0));
+    }
+
+    @Test
+    void getSummary_returns_400_whenFromToMissing() throws Exception {
+        mockMvc.perform(get("/orders/summary").principal(AUTH))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("MISSING_PARAMETER"));
+    }
+
+    @Test
+    void getSummary_returns_400_whenPeriodInvalid() throws Exception {
+        when(orderReportUseCase.getSummary(any(), any(), any(), any(), any()))
+                .thenThrow(new InvalidReportPeriodException("'from' não pode ser depois de 'to'"));
+
+        mockMvc.perform(get("/orders/summary")
+                        .principal(AUTH)
+                        .param("from", "2026-02-01T00:00:00Z")
+                        .param("to", "2026-01-01T00:00:00Z"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("INVALID_REPORT_PERIOD"));
     }
 }

@@ -2,6 +2,7 @@ package com.cernecommerce.adapter.in.dtos.request;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
@@ -24,4 +25,8 @@ public class ProductVariantRequest {
      */
     @Valid
     private PricingRequest pricing;
+
+    /** Código de barras/EAN próprio da variação, opcional. Único quando informado. */
+    @Pattern(regexp = "^[0-9]{8,14}$", message = "barcode deve ter entre 8 e 14 dígitos numéricos")
+    private String barcode;
 }

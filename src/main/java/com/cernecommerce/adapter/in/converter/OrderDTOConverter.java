@@ -2,25 +2,31 @@ package com.cernecommerce.adapter.in.converter;
 
 import com.cernecommerce.adapter.in.dtos.request.SaleItemRequest;
 import com.cernecommerce.adapter.in.dtos.request.SalePaymentRequest;
+import com.cernecommerce.adapter.in.dtos.response.DailyRevenueResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.OrderAdminResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.OrderItemAdminResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.OrderItemResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.OrderPaymentResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.OrderResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.OrderSummaryResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.PaymentTotalResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.SaleReceiptItemResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.SaleReceiptResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.TopProductResponseDTO;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.pagamento.OrderPayment;
 import com.cernecommerce.core.domain.model.pagamento.PaymentMethod;
 import com.cernecommerce.core.domain.model.pedido.Order;
 import com.cernecommerce.core.domain.model.pedido.OrderItem;
+import com.cernecommerce.core.domain.model.pedido.OrderSummary;
 import com.cernecommerce.core.ports.in.PdvUseCase.PaymentCommand;
 import com.cernecommerce.core.ports.in.PdvUseCase.PaymentTotal;
 import com.cernecommerce.core.ports.in.PdvUseCase.SaleItemCommand;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 public class OrderDTOConverter {
 
@@ -213,6 +219,47 @@ public class OrderDTOConverter {
         dto.setNetAmount(item.netAmount());
         dto.setCashbackPercent(item.cashbackPercent());
         dto.setCashbackAmount(item.cashbackAmount());
+        return dto;
+    }
+
+    // ── Resumo agregado de vendas (GET /orders/summary) ──────────────────────────────────────
+
+    public OrderSummaryResponseDTO toSummaryResponse(OrderSummary summary) {
+        OrderSummaryResponseDTO dto = new OrderSummaryResponseDTO();
+        dto.setTotalOrders(summary.totalOrders());
+        dto.setTotalRevenueNet(summary.totalRevenueNet());
+        dto.setTotalRevenueGross(summary.totalRevenueGross());
+        dto.setAverageTicket(summary.averageTicket());
+        dto.setRevenueByChannel(summary.revenueByChannel().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().name(), Map.Entry::getValue)));
+        dto.setOrdersByStatus(summary.ordersByStatus().entrySet().stream()
+                .collect(Collectors.toMap(e -> e.getKey().name(), Map.Entry::getValue)));
+        dto.setCancelledOrRefundedRate(summary.cancelledOrRefundedRate());
+        dto.setDailyRevenue(summary.dailyRevenue().stream().map(this::toResponse).toList());
+        dto.setTopProducts(summary.topProducts().stream().map(this::toResponse).toList());
+        return dto;
+    }
+
+    private DailyRevenueResponseDTO toResponse(OrderSummary.DailyRevenue daily) {
+        DailyRevenueResponseDTO dto = new DailyRevenueResponseDTO();
+        dto.setDate(daily.date());
+        dto.setRevenue(daily.revenue());
+        dto.setOrderCount(daily.orderCount());
+        return dto;
+    }
+
+    // ── Ranking de produtos mais vendidos (GET /orders/analytics/top-products) ──────────────
+
+    public List<TopProductResponseDTO> toTopProductsResponse(List<OrderSummary.TopProduct> topProducts) {
+        return topProducts.stream().map(this::toResponse).toList();
+    }
+
+    private TopProductResponseDTO toResponse(OrderSummary.TopProduct product) {
+        TopProductResponseDTO dto = new TopProductResponseDTO();
+        dto.setSku(product.sku());
+        dto.setProductName(product.productName());
+        dto.setQuantitySold(product.quantitySold());
+        dto.setRevenue(product.revenue());
         return dto;
     }
 }

@@ -69,6 +69,34 @@ public class OrdersControllerSecurityTest {
     }
 
     @Test
+    void get_summary_without_auth_returns_401() throws Exception {
+        mockMvc.perform(get("/orders/summary")
+                .param("from", "2026-01-01T00:00:00Z")
+                .param("to", "2026-01-31T23:59:59Z"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void get_summary_without_order_read_returns_403() throws Exception {
+        mockMvc.perform(get("/orders/summary")
+                .param("from", "2026-01-01T00:00:00Z")
+                .param("to", "2026-01-31T23:59:59Z")
+                .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void get_summary_with_order_read_returns_200() throws Exception {
+        mockMvc.perform(get("/orders/summary")
+                .param("from", "2026-01-01T00:00:00Z")
+                .param("to", "2026-01-31T23:59:59Z")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ORDER_READ"))))
+                .andExpect(status().isOk());
+    }
+
+    @Test
     void get_order_without_auth_returns_401() throws Exception {
         mockMvc.perform(get("/orders/999999"))
                 .andExpect(status().isUnauthorized());

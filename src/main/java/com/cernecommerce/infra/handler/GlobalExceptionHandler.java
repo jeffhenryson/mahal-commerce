@@ -37,7 +37,9 @@ import com.cernecommerce.core.domain.exception.cashback.CashbackRateNotFoundExce
 import com.cernecommerce.core.domain.exception.compras.SupplierNotFoundException;
 import com.cernecommerce.core.domain.exception.ecommerce.CartEmptyException;
 import com.cernecommerce.core.domain.exception.ecommerce.CartItemNotFoundException;
+import com.cernecommerce.core.domain.exception.estoque.BarcodeNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.DefaultWarehouseNotConfiguredException;
+import com.cernecommerce.core.domain.exception.estoque.DuplicateBarcodeException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateKitComponentException;
 import com.cernecommerce.core.domain.exception.estoque.CategoryNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateCategoryNameException;
@@ -48,7 +50,9 @@ import com.cernecommerce.core.domain.exception.estoque.InactiveProductException;
 import com.cernecommerce.core.domain.exception.estoque.InactiveWarehouseException;
 import com.cernecommerce.core.domain.exception.estoque.InsufficientStockException;
 import com.cernecommerce.core.domain.exception.estoque.KitComponentAlreadyInUseException;
+import com.cernecommerce.core.domain.exception.estoque.KitComponentNotEligibleException;
 import com.cernecommerce.core.domain.exception.estoque.KitComponentNotSimpleException;
+import com.cernecommerce.core.domain.exception.estoque.KitInitialStockNotAllowedException;
 import com.cernecommerce.core.domain.exception.estoque.KitCostNotEditableException;
 import com.cernecommerce.core.domain.exception.estoque.KitDirectAdjustmentException;
 import com.cernecommerce.core.domain.exception.estoque.KitHasVariantsException;
@@ -56,6 +60,7 @@ import com.cernecommerce.core.domain.exception.estoque.KitSelfReferenceException
 import com.cernecommerce.core.domain.exception.estoque.LotExpiryDateMismatchException;
 import com.cernecommerce.core.domain.exception.estoque.MissingLotInfoException;
 import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
+import com.cernecommerce.core.domain.exception.estoque.ProductVariantNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountAlreadyOpenException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountNotOpenException;
@@ -80,6 +85,7 @@ import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionNotOwnedEx
 import com.cernecommerce.core.domain.exception.pdv.NoOpenCashRegisterSessionException;
 import com.cernecommerce.core.domain.exception.pedido.DiscountLimitExceededException;
 import com.cernecommerce.core.domain.exception.pedido.InvalidOrderStatusTransitionException;
+import com.cernecommerce.core.domain.exception.pedido.InvalidReportPeriodException;
 import com.cernecommerce.core.domain.exception.pedido.OrderNotFoundException;
 import com.cernecommerce.core.domain.exception.pedido.ProductNotPricedException;
 import com.cernecommerce.core.domain.event.AuditEvent;
@@ -158,6 +164,16 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.CONFLICT, ex.getMessage(), "SKU_ALREADY_EXISTS", req);
     }
 
+    @ExceptionHandler(DuplicateBarcodeException.class)
+    public ResponseEntity<ApiError> handleDuplicateBarcode(DuplicateBarcodeException ex, HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "BARCODE_ALREADY_EXISTS", req);
+    }
+
+    @ExceptionHandler(BarcodeNotFoundException.class)
+    public ResponseEntity<ApiError> handleBarcodeNotFound(BarcodeNotFoundException ex, HttpServletRequest req) {
+        return error(HttpStatus.NOT_FOUND, ex.getMessage(), "BARCODE_NOT_FOUND", req);
+    }
+
     @ExceptionHandler(CategoryNotFoundException.class)
     public ResponseEntity<ApiError> handleCategoryNotFound(CategoryNotFoundException ex, HttpServletRequest req) {
         return error(HttpStatus.NOT_FOUND, ex.getMessage(), "CATEGORY_NOT_FOUND", req);
@@ -202,6 +218,12 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.NOT_FOUND, ex.getMessage(), "PRODUCT_NOT_FOUND", req);
     }
 
+    @ExceptionHandler(ProductVariantNotFoundException.class)
+    public ResponseEntity<ApiError> handleProductVariantNotFound(ProductVariantNotFoundException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.NOT_FOUND, ex.getMessage(), "PRODUCT_VARIANT_NOT_FOUND", req);
+    }
+
     // EST-F015 — kits virtuais, de um nível só.
     @ExceptionHandler(EmptyKitRecipeException.class)
     public ResponseEntity<ApiError> handleEmptyKitRecipe(EmptyKitRecipeException ex, HttpServletRequest req) {
@@ -234,6 +256,18 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiError> handleKitComponentNotSimple(KitComponentNotSimpleException ex,
             HttpServletRequest req) {
         return error(HttpStatus.CONFLICT, ex.getMessage(), "KIT_COMPONENT_NOT_SIMPLE", req);
+    }
+
+    @ExceptionHandler(KitComponentNotEligibleException.class)
+    public ResponseEntity<ApiError> handleKitComponentNotEligible(KitComponentNotEligibleException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "KIT_COMPONENT_NOT_ELIGIBLE", req);
+    }
+
+    @ExceptionHandler(KitInitialStockNotAllowedException.class)
+    public ResponseEntity<ApiError> handleKitInitialStockNotAllowed(KitInitialStockNotAllowedException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "KIT_INITIAL_STOCK_NOT_ALLOWED", req);
     }
 
     @ExceptionHandler(KitDirectAdjustmentException.class)
@@ -721,6 +755,11 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiError> handleInvalidOrderStatusTransition(InvalidOrderStatusTransitionException ex,
             HttpServletRequest req) {
         return error(HttpStatus.CONFLICT, ex.getMessage(), "INVALID_STATUS_TRANSITION", req);
+    }
+
+    @ExceptionHandler(InvalidReportPeriodException.class)
+    public ResponseEntity<ApiError> handleInvalidReportPeriod(InvalidReportPeriodException ex, HttpServletRequest req) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "INVALID_REPORT_PERIOD", req);
     }
 
     @ExceptionHandler(org.springframework.web.servlet.resource.NoResourceFoundException.class)

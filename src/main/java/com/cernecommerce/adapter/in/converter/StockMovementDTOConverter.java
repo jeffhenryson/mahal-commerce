@@ -2,6 +2,7 @@ package com.cernecommerce.adapter.in.converter;
 
 import com.cernecommerce.adapter.in.dtos.response.OrphanSkuResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.StockMovementResponseDTO;
+import com.cernecommerce.core.domain.model.estoque.MeasurementUnit;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.StockMovement;
@@ -13,6 +14,10 @@ public class StockMovementDTOConverter {
     }
 
     public StockMovementResponseDTO toResponse(StockMovement movement, String warehouseCode) {
+        return toResponse(movement, warehouseCode, null);
+    }
+
+    public StockMovementResponseDTO toResponse(StockMovement movement, String warehouseCode, MeasurementUnit unit) {
         StockMovementResponseDTO dto = new StockMovementResponseDTO();
         dto.setId(movement.id());
         dto.setSku(movement.sku());
@@ -23,6 +28,7 @@ public class StockMovementDTOConverter {
         dto.setUsername(movement.username());
         dto.setCreatedAt(movement.createdAt());
         dto.setLotCode(movement.lotCode());
+        dto.setUnit(unit == null ? null : unit.name());
         return dto;
     }
 

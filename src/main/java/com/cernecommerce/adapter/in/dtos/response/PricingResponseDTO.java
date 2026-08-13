@@ -61,4 +61,8 @@ public class PricingResponseDTO {
             + "effectivePrice) / originalPrice × 100. Nulo quando hasDiscount é falso.",
             example = "20.02")
     private BigDecimal discountPercent;
+
+    @Schema(description = "Preço extraordinário: valor adicional destinado a uma causa, quando "
+            + "cadastrado. Puramente informativo — não soma no preço efetivo.", example = "2.00")
+    private BigDecimal causeAmount;
 }

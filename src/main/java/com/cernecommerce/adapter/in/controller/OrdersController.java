@@ -6,12 +6,19 @@ import com.cernecommerce.adapter.in.dtos.request.OrderRefundRequest;
 import com.cernecommerce.adapter.in.dtos.request.OrderStatusRequest;
 import com.cernecommerce.adapter.in.dtos.request.RefundItemLotRequest;
 import com.cernecommerce.adapter.in.dtos.response.OrderAdminResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.OrderSummaryResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.SaleReceiptResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.TopProductResponseDTO;
 import com.cernecommerce.core.domain.event.AuditEvent;
 import com.cernecommerce.core.domain.event.AuditEvent.EventType;
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.pagamento.OrderPayment;
 import com.cernecommerce.core.domain.model.pedido.Order;
 import com.cernecommerce.core.domain.model.pedido.OrderStatus;
+import com.cernecommerce.core.domain.model.pedido.OrderSummary;
 import com.cernecommerce.core.domain.model.pedido.SalesChannel;
+import com.cernecommerce.core.ports.in.CrmUseCase;
+import com.cernecommerce.core.ports.in.OrderReportUseCase;
 import com.cernecommerce.core.ports.in.OrderUseCase;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -23,6 +30,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Pattern;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
@@ -41,6 +49,7 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Visão de <b>pedidos do administrador</b> — atravessa canais.
@@ -58,14 +67,36 @@ import java.util.Map;
 public class OrdersController {
 
     private final OrderUseCase orderUseCase;
+    private final OrderReportUseCase orderReportUseCase;
+    private final CrmUseCase crmUseCase;
     private final OrderDTOConverter orderConverter;
     private final ApplicationEventPublisher publisher;
 
-    public OrdersController(OrderUseCase orderUseCase, OrderDTOConverter orderConverter,
-            ApplicationEventPublisher publisher) {
+    public OrdersController(OrderUseCase orderUseCase, OrderReportUseCase orderReportUseCase,
+            CrmUseCase crmUseCase, OrderDTOConverter orderConverter, ApplicationEventPublisher publisher) {
         this.orderUseCase = orderUseCase;
+        this.orderReportUseCase = orderReportUseCase;
+        this.crmUseCase = crmUseCase;
         this.orderConverter = orderConverter;
         this.publisher = publisher;
+    }
+
+    /**
+     * Resolve {@code customerName} em lote para os pedidos já convertidos — evita uma consulta por
+     * linha numa página de até 100 pedidos (EST-Vendas: nome do cliente denormalizado).
+     */
+    private List<OrderAdminResponseDTO> enrichCustomerNames(List<OrderAdminResponseDTO> content) {
+        List<Long> customerIds = content.stream()
+                .map(OrderAdminResponseDTO::getCustomerId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (customerIds.isEmpty()) {
+            return content;
+        }
+        Map<Long, String> names = crmUseCase.findCustomerNames(customerIds);
+        content.forEach(dto -> dto.setCustomerName(names.get(dto.getCustomerId())));
+        return content;
     }
 
     @Operation(summary = "Lista pedidos com filtros, do mais recente para o mais antigo",
@@ -80,8 +111,54 @@ public class OrdersController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
-        return ResponseEntity.ok(orderConverter.toAdminResponse(
-                orderUseCase.listOrders(channel, status, customerId, from, to, page, size)));
+        PageResult<OrderAdminResponseDTO> result = orderConverter.toAdminResponse(
+                orderUseCase.listOrders(channel, status, customerId, from, to, page, size));
+        enrichCustomerNames(result.content());
+        return ResponseEntity.ok(result);
+    }
+
+    @Operation(summary = "Resumo agregado de vendas do período",
+            description = "from e to são obrigatórios (máx. 366 dias). Totais de receita e produtos "
+                    + "mais vendidos só contam pedidos com pagamento confirmado (PAGO em diante, "
+                    + "exceto REEMBOLSADO); ordersByStatus mostra a distribuição completa, incluindo "
+                    + "CRIADO/AGUARDANDO_PAGAMENTO/CANCELADO.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = OrderSummaryResponseDTO.class))),
+            @ApiResponse(responseCode = "400", description = "from/to ausentes, from depois de to, ou intervalo maior que o teto permitido", content = @Content)
+    })
+    @GetMapping("/summary")
+    @PreAuthorize("hasAuthority('ORDER_READ')")
+    public ResponseEntity<OrderSummaryResponseDTO> getSummary(
+            @RequestParam(required = false) SalesChannel channel,
+            @RequestParam(required = false) OrderStatus status,
+            @RequestParam(required = false) Long customerId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to) {
+        return ResponseEntity.ok(orderConverter.toSummaryResponse(
+                orderReportUseCase.getSummary(channel, status, customerId, from, to)));
+    }
+
+    @Operation(summary = "Produtos mais vendidos do período, por receita ou por quantidade",
+            description = "from/to são opcionais: omitidos, considera o histórico completo (sem "
+                    + "o teto de 366 dias de /summary — pedir o histórico inteiro é o próprio "
+                    + "caso de uso). Mesma regra de pagamento confirmado de /summary: só conta "
+                    + "pedidos PAGO em diante, exceto REEMBOLSADO.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "400", description = "from depois de to, intervalo maior que o teto (quando ambos informados), ou sortBy inválido", content = @Content)
+    })
+    @GetMapping("/analytics/top-products")
+    @PreAuthorize("hasAuthority('ORDER_READ')")
+    public ResponseEntity<List<TopProductResponseDTO>> getTopProducts(
+            @RequestParam(required = false) SalesChannel channel,
+            @RequestParam(required = false) Long customerId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
+            @RequestParam(defaultValue = "10") @Min(1) @Max(50) int limit,
+            @RequestParam(defaultValue = "revenue") @Pattern(regexp = "revenue|quantity") String sortBy) {
+        List<OrderSummary.TopProduct> topProducts = orderReportUseCase.getTopProducts(channel, null,
+                customerId, from, to, limit, "quantity".equals(sortBy));
+        return ResponseEntity.ok(orderConverter.toTopProductsResponse(topProducts));
     }
 
     @Operation(summary = "Detalha um pedido, com custo e margem por item")
@@ -92,7 +169,25 @@ public class OrdersController {
     @GetMapping("/{id}")
     @PreAuthorize("hasAuthority('ORDER_READ')")
     public ResponseEntity<OrderAdminResponseDTO> getOrder(@PathVariable("id") Long orderId) {
-        return ResponseEntity.ok(orderConverter.toAdminResponse(orderUseCase.getOrder(orderId)));
+        OrderAdminResponseDTO dto = orderConverter.toAdminResponse(orderUseCase.getOrder(orderId));
+        enrichCustomerNames(List.of(dto));
+        return ResponseEntity.ok(dto);
+    }
+
+    @Operation(summary = "Recibo do pedido — funciona para BALCAO e MARKETPLACE",
+            description = "Equivalente a GET /pdv/sales/{id}/receipt, mas sem exigir PDV_READ: "
+                    + "pedido de marketplace nunca passa por um caixa. O endpoint do PDV continua "
+                    + "existindo, sem mudança, para o fluxo de balcão.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = SaleReceiptResponseDTO.class))),
+            @ApiResponse(responseCode = "404", description = "Pedido não encontrado", content = @Content)
+    })
+    @GetMapping("/{id}/receipt")
+    @PreAuthorize("hasAuthority('ORDER_READ')")
+    public ResponseEntity<SaleReceiptResponseDTO> getReceipt(@PathVariable("id") Long orderId) {
+        Order order = orderUseCase.getOrder(orderId);
+        List<OrderPayment> payments = orderUseCase.getOrderPayments(orderId);
+        return ResponseEntity.ok(orderConverter.toReceipt(order, payments));
     }
 
     @Operation(summary = "Avança o pedido na esteira de fulfillment",

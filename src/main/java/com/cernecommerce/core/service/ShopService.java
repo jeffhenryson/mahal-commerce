@@ -30,6 +30,7 @@ import com.cernecommerce.core.ports.in.ShopUseCase;
 import com.cernecommerce.core.ports.in.UserUseCase;
 import com.cernecommerce.core.ports.out.ecommerce.CartRepository;
 import com.cernecommerce.core.ports.out.ecommerce.PaymentGatewayPort;
+import com.cernecommerce.core.ports.out.notification.EmailPort;
 import com.cernecommerce.core.ports.out.pagamento.OrderPaymentRepository;
 import com.cernecommerce.core.ports.out.pedido.OrderRepository;
 
@@ -52,11 +53,12 @@ public class ShopService implements ShopUseCase {
     private final CashbackUseCase cashbackUseCase;
     private final PaymentGatewayPort paymentGatewayPort;
     private final OrderPaymentRepository orderPaymentRepository;
+    private final EmailPort emailPort;
 
     public ShopService(CrmUseCase crmUseCase, UserUseCase userUseCase, EstoqueUseCase estoqueUseCase,
             CartRepository cartRepository, OrderRepository orderRepository, OrderUseCase orderUseCase,
             CashbackUseCase cashbackUseCase, PaymentGatewayPort paymentGatewayPort,
-            OrderPaymentRepository orderPaymentRepository) {
+            OrderPaymentRepository orderPaymentRepository, EmailPort emailPort) {
         this.crmUseCase = crmUseCase;
         this.userUseCase = userUseCase;
         this.estoqueUseCase = estoqueUseCase;
@@ -66,6 +68,7 @@ public class ShopService implements ShopUseCase {
         this.cashbackUseCase = cashbackUseCase;
         this.paymentGatewayPort = paymentGatewayPort;
         this.orderPaymentRepository = orderPaymentRepository;
+        this.emailPort = emailPort;
     }
 
     @Override
@@ -210,6 +213,10 @@ public class ShopService implements ShopUseCase {
                 OrderPayment.pending(saved.id(), PaymentMethod.GATEWAY_PIX, saved.netAmount()));
 
         cartRepository.clear(customerId);
+        if (customer.email() != null && !customer.email().isBlank()) {
+            emailPort.sendOrderConfirmation(customer.email(), customer.nome(), "Pedido #" + saved.id(),
+                    saved.netAmount(), orderItems.size(), link.checkoutUrl());
+        }
         return new CheckoutResult(saved, link.checkoutUrl());
     }
 

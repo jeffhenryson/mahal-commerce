@@ -15,7 +15,7 @@
 # atual continua intacto ao migrar. NÃO renomeie sem antes fazer dump.
 #
 # Portas (host → container):
-#   5435 → 5432  Postgres        8082 → 8082  API
+#   5435 → 5432  Postgres        8080 → 8082  API
 #   6382 → 6379  Redis           8083 → 8081  Actuator (sem filtro JWT)
 #   8025 → 8025  Mailpit UI      9092 → 9090  Prometheus
 #   1025 → 1025  Mailpit SMTP    3002 → 3000  Grafana
@@ -116,16 +116,18 @@ services:
       RESEND_FROM: ${RESEND_FROM}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       EMAIL_VERIFICATION_FRONTEND_URL: ${EMAIL_VERIFICATION_FRONTEND_URL}
-      # HmlStartupValidator rejeita "localhost" em avatar.base-url; 127.0.0.1 é o
-      # mesmo host, só não bate no filtro.
-      AVATAR_BASE_URL: http://127.0.0.1:8082
+      # HmlStartupValidator rejeita "localhost" em avatar.base-url/product.image.base-url;
+      # 127.0.0.1 é o mesmo host, só não bate no filtro. Porta é a do HOST (8080), não a
+      # interna do container (8082) — é o que o navegador precisa alcançar.
+      AVATAR_BASE_URL: http://127.0.0.1:8080
+      PRODUCT_IMAGE_BASE_URL: http://127.0.0.1:8080
       # InfinitePay real ainda não configurado (handle vem do cliente depois) —
       # payment.gateway.provider != infinitepay ativa StubPaymentGatewayAdapter
       # (PaymentGatewayAdapterConfig), evitando exigir infinitepay.handle/webhook-url
       # (obrigatórios sem default em application-hml.properties).
       PAYMENT_GATEWAY_PROVIDER: stub
     ports:
-      - "8082:8082"
+      - "8080:8082"
       - "8083:8081"
     volumes:
       - uploads_hml:/app/uploads

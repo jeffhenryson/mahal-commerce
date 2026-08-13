@@ -1,7 +1,11 @@
 package com.cernecommerce.adapter.in.dtos.request;
 
+import com.cernecommerce.core.domain.model.estoque.MeasurementUnit;
+import com.cernecommerce.core.domain.model.estoque.ProductType;
+
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
@@ -73,6 +77,44 @@ public class ProductRequest {
     @Valid
     private PricingRequest pricing;
 
+    /** Código de barras/EAN (GTIN-8/12/14), opcional. Único quando informado. */
+    @Pattern(regexp = "^[0-9]{8,14}$", message = "barcode deve ter entre 8 e 14 dígitos numéricos")
+    private String barcode;
+
+    /** Unidade de medida. Omitido, nasce {@code UN} — mesma semântica de todo produto já cadastrado hoje. */
+    private MeasurementUnit unit;
+
+    /** Testador/amostra, distinto de produto padrão da Mahal. Omitido, nasce {@code false}. */
+    private boolean sampleProduct;
+
+    /** Elegível a entrar como componente de kit (opt-in). Omitido, nasce {@code false}. */
+    private boolean kitComponentEligible;
+
+    /**
+     * Aparece no PDV. {@code Boolean} (wrapper), não primitivo — omitido deve resolver para
+     * {@code true} (produto nasce visível em todos os canais), e um primitivo tornaria "campo
+     * ausente" indistinguível de "false" explícito.
+     */
+    private Boolean visibleInPos;
+
+    /** Aparece no marketplace/app. Mesma convenção de {@code visibleInPos}: omitido resolve para {@code true}. */
+    private Boolean visibleInMarketplace;
+
+    /**
+     * {@code SIMPLES} ou {@code KIT}. Omitido, nasce {@code SIMPLES} — comportamento anterior a
+     * EST-F023 preservado. {@code KIT} não pode vir com {@code variants} nem com
+     * {@code initialStock}: kit não tem grade nem saldo próprio.
+     */
+    private ProductType type;
+
+    /**
+     * Estoque inicial, opcional (EST-F023). Quando informado, a entrada é registrada na MESMA
+     * transação da criação — evita o estado "produto criado, estoque não" das duas chamadas
+     * separadas que o frontend fazia antes.
+     */
+    @Valid
+    private InitialStockRequest initialStock;
+
     /**
      * Indica se este request mexe em preço em <b>qualquer</b> nível — na raiz ou dentro de alguma
      * variação (EST-F020).
@@ -88,5 +130,15 @@ public class ProductRequest {
             return true;
         }
         return variants != null && variants.stream().anyMatch(v -> v != null && v.getPricing() != null);
+    }
+
+    /**
+     * Indica se este request lança movimentação de estoque (EST-F023). Mesmo raciocínio de
+     * {@link #touchesPricing()}: sem esta checagem, quem só tem {@code ESTOQUE_PRODUCT_MANAGE}
+     * (editor de catálogo) poderia lançar estoque pela porta lateral da criação de produto, sem
+     * precisar de {@code ESTOQUE_STOCK_MANAGE}.
+     */
+    public boolean touchesStock() {
+        return initialStock != null;
     }
 }

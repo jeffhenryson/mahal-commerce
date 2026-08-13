@@ -3,6 +3,7 @@ package com.cernecommerce.adapter.in.converter;
 import com.cernecommerce.adapter.in.dtos.response.ReorderPointResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.StockBalanceResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.WarehouseResponseDTO;
+import com.cernecommerce.core.domain.model.estoque.MeasurementUnit;
 import com.cernecommerce.core.domain.model.estoque.ReorderPoint;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
 import com.cernecommerce.core.domain.model.estoque.Warehouse;
@@ -33,12 +34,17 @@ public class WarehouseDTOConverter {
     }
 
     public StockBalanceResponseDTO toResponse(StockBalance balance, String warehouseCode) {
+        return toResponse(balance, warehouseCode, null);
+    }
+
+    public StockBalanceResponseDTO toResponse(StockBalance balance, String warehouseCode, MeasurementUnit unit) {
         StockBalanceResponseDTO dto = new StockBalanceResponseDTO();
         dto.setSku(balance.sku());
         dto.setWarehouseCode(warehouseCode);
         dto.setQuantity(balance.quantity());
         dto.setReservedQuantity(balance.reservedQuantity());
         dto.setAvailableQuantity(balance.availableQuantity());
+        dto.setUnit(unit == null ? null : unit.name());
         return dto;
     }
 

@@ -5,6 +5,7 @@ import com.cernecommerce.adapter.in.dtos.request.KitRecipeRequest;
 import com.cernecommerce.adapter.in.dtos.request.PricingRequest;
 import com.cernecommerce.adapter.in.dtos.request.ProductAttributeRequest;
 import com.cernecommerce.adapter.in.dtos.request.ProductVariantRequest;
+import com.cernecommerce.adapter.in.dtos.response.EstoqueSummaryResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.KitComponentResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.LotIntegrityMismatchResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.PricingResponseDTO;
@@ -12,6 +13,7 @@ import com.cernecommerce.adapter.in.dtos.response.ProductAttributeResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.ProductResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.ProductVariantResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.StockLotResponseDTO;
+import com.cernecommerce.core.domain.model.estoque.EstoqueSummary;
 import com.cernecommerce.core.domain.model.estoque.KitComponent;
 import com.cernecommerce.core.domain.model.estoque.LotIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
@@ -31,7 +33,7 @@ public class ProductDTOConverter {
         }
         return requests.stream()
                 .map(r -> ProductVariant.create(r.getSku(), toAttributes(r.getAttributes()),
-                        toPricing(r.getPricing())))
+                        toPricing(r.getPricing()), r.getBarcode()))
                 .toList();
     }
 
@@ -62,7 +64,7 @@ public class ProductDTOConverter {
             return null;
         }
         return Pricing.of(request.getCostPrice(), request.getMarkupPercent(), request.getSalePrice(),
-                request.getOriginalPrice());
+                request.getOriginalPrice(), request.getCauseAmount());
     }
 
     public ProductResponseDTO toResponse(Product product) {
@@ -85,6 +87,12 @@ public class ProductDTOConverter {
         dto.setPricing(toResponse(product.pricing()));
         dto.setType(product.type().name());
         dto.setLotTracked(product.lotTracked());
+        dto.setBarcode(product.barcode());
+        dto.setUnit(product.unit().name());
+        dto.setSampleProduct(product.sampleProduct());
+        dto.setKitComponentEligible(product.kitComponentEligible());
+        dto.setVisibleInPos(product.visibleInPos());
+        dto.setVisibleInMarketplace(product.visibleInMarketplace());
         return dto;
     }
 
@@ -118,6 +126,7 @@ public class ProductDTOConverter {
         dto.setOriginalPrice(pricing.originalPrice());
         dto.setHasDiscount(pricing.hasDiscount());
         dto.setDiscountPercent(pricing.discountPercent());
+        dto.setCauseAmount(pricing.causeAmount());
         return dto;
     }
 
@@ -129,6 +138,7 @@ public class ProductDTOConverter {
         dto.setAttributes(variant.attributes().stream().map(this::toResponse).toList());
         // Nulo quando a variação herda do pai — a ausência do bloco é o que sinaliza a herança.
         dto.setPricing(variant.pricing() == null ? null : toResponse(variant.pricing()));
+        dto.setBarcode(variant.barcode());
         return dto;
     }
 
@@ -152,6 +162,23 @@ public class ProductDTOConverter {
         dto.setExpiryDate(lot.expiryDate());
         dto.setQuantity(lot.quantity());
         dto.setAlertedAt(lot.alertedAt());
+        return dto;
+    }
+
+    public EstoqueSummaryResponseDTO toResponse(EstoqueSummary summary) {
+        EstoqueSummaryResponseDTO dto = new EstoqueSummaryResponseDTO();
+        dto.setTotalProdutos(summary.totalProdutos());
+        dto.setTotalVariantes(summary.totalVariantes());
+        dto.setValorEstoqueCusto(summary.valorEstoqueCusto());
+        dto.setAlertasCriticos(summary.alertasCriticos());
+        dto.setAlertasAtencao(summary.alertasAtencao());
+        if (summary.categoriaComMaisProdutos() != null) {
+            EstoqueSummaryResponseDTO.CategoriaComMaisProdutosDTO categoria =
+                    new EstoqueSummaryResponseDTO.CategoriaComMaisProdutosDTO();
+            categoria.setNome(summary.categoriaComMaisProdutos().name());
+            categoria.setQuantidade(summary.categoriaComMaisProdutos().count());
+            dto.setCategoriaComMaisProdutos(categoria);
+        }
         return dto;
     }
 

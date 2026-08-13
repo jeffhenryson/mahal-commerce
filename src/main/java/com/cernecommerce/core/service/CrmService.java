@@ -33,8 +33,10 @@ import com.cernecommerce.core.ports.out.notification.EmailPort;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 public class CrmService implements CrmUseCase {
 
@@ -90,6 +92,13 @@ public class CrmService implements CrmUseCase {
     public Customer findCustomerById(Long id) {
         return customerRepository.findById(id)
                 .orElseThrow(() -> new CustomerNotFoundException(id));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Map<Long, String> findCustomerNames(Collection<Long> customerIds) {
+        return customerRepository.findByIds(customerIds).stream()
+                .collect(Collectors.toMap(Customer::id, Customer::nome));
     }
 
     @Override

@@ -4,6 +4,7 @@ import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.crm.Customer;
 import com.cernecommerce.core.domain.model.crm.CustomerStage;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -14,6 +15,9 @@ import java.util.Optional;
 public interface CustomerRepository {
 
     Optional<Customer> findById(Long id);
+
+    /** Busca em lote — evita N+1 ao enriquecer uma página de outro domínio com dado de cliente. */
+    List<Customer> findByIds(Collection<Long> ids);
 
     Optional<Customer> findByEmail(String email);
 

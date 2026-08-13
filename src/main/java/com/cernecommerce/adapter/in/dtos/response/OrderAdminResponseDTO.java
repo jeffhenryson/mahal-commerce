@@ -21,6 +21,10 @@ public class OrderAdminResponseDTO {
     private String status;
     private Long customerId;
 
+    @Schema(description = "Nome do cliente, resolvido a partir de customerId. Nulo se o pedido "
+            + "não tiver cliente vinculado (venda anônima de balcão).")
+    private String customerName;
+
     @Schema(description = "Caixa que liquidou o pedido. Presente em toda venda de balcão e também "
             + "em pedido do app pago na loja.")
     private Long sessionId;

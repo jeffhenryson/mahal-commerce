@@ -2,6 +2,7 @@ package com.cernecommerce.adapter.out.persistence.repository;
 
 import com.cernecommerce.adapter.out.persistence.entity.ReorderPointEntity;
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.estoque.ReorderAlertCounts;
 import com.cernecommerce.core.domain.model.estoque.ReorderPoint;
 import com.cernecommerce.core.ports.out.estoque.ReorderPointRepository;
 import org.springframework.data.domain.Page;
@@ -9,6 +10,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.Optional;
 
 @Repository
@@ -44,6 +46,19 @@ public class ReorderPointRepositoryImpl implements ReorderPointRepository {
         entity.setWarehouseId(reorderPoint.warehouseId());
         entity.setMinQuantity(reorderPoint.minQuantity());
         return toDomain(reorderPointJpaRepository.save(entity));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public ReorderAlertCounts countAlerts() {
+        List<Object[]> rows = reorderPointJpaRepository.countAlertsRaw();
+        if (rows.isEmpty()) {
+            return ReorderAlertCounts.ZERO;
+        }
+        Object[] row = rows.get(0);
+        long criticos = row[0] == null ? 0L : (Long) row[0];
+        long atencao = row[1] == null ? 0L : (Long) row[1];
+        return new ReorderAlertCounts(criticos, atencao);
     }
 
     private ReorderPoint toDomain(ReorderPointEntity e) {

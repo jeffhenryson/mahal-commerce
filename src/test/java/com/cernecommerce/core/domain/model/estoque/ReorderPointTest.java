@@ -84,4 +84,37 @@ class ReorderPointTest {
 
         assertThat(reorderPoint.isBelow(new BigDecimal("10.001"))).isFalse();
     }
+
+    // ── severityFor (EST-F022) ────────────────────────────────────────────────
+
+    @Test
+    void severityFor_criticoQuandoSaldoZeradoOuNegativo() {
+        ReorderPoint reorderPoint = ReorderPoint.create("ESS-001", 1L, new BigDecimal("10"));
+
+        assertThat(reorderPoint.severityFor(BigDecimal.ZERO)).isEqualTo(AlertSeverity.CRITICO);
+        assertThat(reorderPoint.severityFor(new BigDecimal("-1"))).isEqualTo(AlertSeverity.CRITICO);
+    }
+
+    @Test
+    void severityFor_criticoNoLimiarExatoDeMetadeDoMinimo() {
+        ReorderPoint reorderPoint = ReorderPoint.create("ESS-001", 1L, new BigDecimal("10"));
+
+        assertThat(reorderPoint.severityFor(new BigDecimal("5"))).isEqualTo(AlertSeverity.CRITICO);
+        assertThat(reorderPoint.severityFor(new BigDecimal("5.01"))).isEqualTo(AlertSeverity.ATENCAO);
+    }
+
+    @Test
+    void severityFor_atencaoAbaixoDoMinimoEAcimaDoLimiarCritico() {
+        ReorderPoint reorderPoint = ReorderPoint.create("ESS-001", 1L, new BigDecimal("10"));
+
+        assertThat(reorderPoint.severityFor(new BigDecimal("9.999"))).isEqualTo(AlertSeverity.ATENCAO);
+    }
+
+    @Test
+    void severityFor_okNoMinimoOuAcima() {
+        ReorderPoint reorderPoint = ReorderPoint.create("ESS-001", 1L, new BigDecimal("10"));
+
+        assertThat(reorderPoint.severityFor(new BigDecimal("10"))).isEqualTo(AlertSeverity.OK);
+        assertThat(reorderPoint.severityFor(new BigDecimal("11"))).isEqualTo(AlertSeverity.OK);
+    }
 }

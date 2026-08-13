@@ -9,6 +9,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.Optional;
 
 @Repository
@@ -46,6 +47,12 @@ public class StockBalanceRepositoryImpl implements StockBalanceRepository {
         entity.setReservedQuantity(stockBalance.reservedQuantity());
         entity.setVersion(stockBalance.version());
         return toDomain(stockBalanceJpaRepository.save(entity));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public BigDecimal sumInventoryValueAtCost() {
+        return stockBalanceJpaRepository.sumInventoryValueAtCost();
     }
 
     private StockBalance toDomain(StockBalanceEntity e) {

@@ -17,4 +17,7 @@ public class ProductVariantResponseDTO {
      * "tem preço próprio" de "usa o do pai".
      */
     private PricingResponseDTO pricing;
+
+    /** Código de barras/EAN próprio da variação, quando cadastrado. */
+    private String barcode;
 }

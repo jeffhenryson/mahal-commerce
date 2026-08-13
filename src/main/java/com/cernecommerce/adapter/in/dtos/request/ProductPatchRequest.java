@@ -1,6 +1,9 @@
 package com.cernecommerce.adapter.in.dtos.request;
 
+import com.cernecommerce.core.domain.model.estoque.MeasurementUnit;
+
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
@@ -78,6 +81,25 @@ public class ProductPatchRequest {
      */
     @Valid
     private PricingRequest pricing;
+
+    /** Código de barras/EAN. Nulo mantém o atual. */
+    @Pattern(regexp = "^[0-9]{8,14}$", message = "barcode deve ter entre 8 e 14 dígitos numéricos")
+    private String barcode;
+
+    /** Unidade de medida. Nulo mantém a atual. */
+    private MeasurementUnit unit;
+
+    /** Testador/amostra. Nulo mantém; {@code true}/{@code false} troca. */
+    private Boolean sampleProduct;
+
+    /** Elegível a entrar como componente de kit. Nulo mantém; {@code true}/{@code false} troca. */
+    private Boolean kitComponentEligible;
+
+    /** Aparece no PDV. Nulo mantém; {@code true}/{@code false} troca. */
+    private Boolean visibleInPos;
+
+    /** Aparece no marketplace/app. Nulo mantém; {@code true}/{@code false} troca. */
+    private Boolean visibleInMarketplace;
 
     /**
      * Contraparte de {@code ProductRequest.touchesPricing()}, usada pelo mesmo
