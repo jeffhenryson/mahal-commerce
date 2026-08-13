@@ -57,8 +57,9 @@ SET category = c.name
 FROM product_category c
 WHERE p.category_id = c.id AND p.category <> c.name;
 
-INSERT INTO permissions (name, description)
-VALUES ('ESTOQUE_CATEGORY_MANAGE', 'Criar, editar e ativar/desativar categorias do catálogo')
+-- A tabela `permissions` (V4__permissions.sql) só tem `id` e `name` — nunca teve `description`.
+INSERT INTO permissions (name)
+VALUES ('ESTOQUE_CATEGORY_MANAGE')
 ON CONFLICT (name) DO NOTHING;
 
 INSERT INTO role_permissions (role_id, permission_id)

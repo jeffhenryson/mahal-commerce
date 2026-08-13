@@ -52,4 +52,12 @@ public class ProductVariantEntity {
 
     @Column(name = "original_price", precision = 14, scale = 2)
     private BigDecimal originalPrice;
+
+    @Column(name = "cause_amount", precision = 14, scale = 2)
+    private BigDecimal causeAmount;
+
+    // Código de barras/EAN próprio da variação — cada SKU filho da grade tem o seu. Único quando
+    // informado (índice parcial em V91).
+    @Column(name = "barcode", length = 14)
+    private String barcode;
 }

@@ -39,9 +39,15 @@ import java.math.RoundingMode;
  * sensação de desconto na vitrine. Não tem nenhuma relação obrigatória com {@link #salePrice}
  * ou {@link #effectivePrice()}: o domínio não valida que ele seja maior que o preço praticado.
  * {@link #hasDiscount()} é quem decide, na leitura, se o desconto exibido faz sentido.</p>
+ *
+ * <h2>Preço extraordinário</h2>
+ * <p>{@link #causeAmount} é um valor adicional opcional, por fora do preço de venda normal,
+ * destinado a uma causa. Puramente informativo: não entra em {@link #effectivePrice()} nem em
+ * nenhum outro cálculo derivado — se cobrar isso do cliente ou não é decisão de produto ainda em
+ * aberto, então o domínio hoje só registra o valor, sem efeito colateral.</p>
  */
 public record Pricing(BigDecimal costPrice, BigDecimal markupPercent, BigDecimal salePrice,
-        BigDecimal originalPrice) {
+        BigDecimal originalPrice, BigDecimal causeAmount) {
 
     /** Casas decimais de valores monetários — alinhado com {@code NUMERIC(14,2)} no schema. */
     private static final int MONEY_SCALE = 2;
@@ -51,7 +57,7 @@ public record Pricing(BigDecimal costPrice, BigDecimal markupPercent, BigDecimal
 
     private static final BigDecimal HUNDRED = BigDecimal.valueOf(100);
 
-    private static final Pricing EMPTY = new Pricing(null, null, null, null);
+    private static final Pricing EMPTY = new Pricing(null, null, null, null, null);
 
     public Pricing {
         if (costPrice != null && costPrice.signum() < 0) {
@@ -66,6 +72,9 @@ public record Pricing(BigDecimal costPrice, BigDecimal markupPercent, BigDecimal
         if (originalPrice != null && originalPrice.signum() < 0) {
             throw new IllegalArgumentException("originalPrice não pode ser negativo");
         }
+        if (causeAmount != null && causeAmount.signum() < 0) {
+            throw new IllegalArgumentException("causeAmount não pode ser negativo");
+        }
     }
 
     /** Produto sem precificação — nenhum dos campos definido. */
@@ -73,20 +82,26 @@ public record Pricing(BigDecimal costPrice, BigDecimal markupPercent, BigDecimal
         return EMPTY;
     }
 
-    /** Precificação a partir dos quatro campos; qualquer um pode ser nulo. */
+    /** Precificação a partir dos cinco campos; qualquer um pode ser nulo. */
     public static Pricing of(BigDecimal costPrice, BigDecimal markupPercent, BigDecimal salePrice,
-            BigDecimal originalPrice) {
-        return new Pricing(costPrice, markupPercent, salePrice, originalPrice);
+            BigDecimal originalPrice, BigDecimal causeAmount) {
+        return new Pricing(costPrice, markupPercent, salePrice, originalPrice, causeAmount);
     }
 
-    /** Precificação a partir dos três campos originais; {@code originalPrice} fica nulo. */
+    /** Precificação a partir de quatro campos; {@code causeAmount} fica nulo. */
+    public static Pricing of(BigDecimal costPrice, BigDecimal markupPercent, BigDecimal salePrice,
+            BigDecimal originalPrice) {
+        return new Pricing(costPrice, markupPercent, salePrice, originalPrice, null);
+    }
+
+    /** Precificação a partir dos três campos originais; {@code originalPrice}/{@code causeAmount} ficam nulos. */
     public static Pricing of(BigDecimal costPrice, BigDecimal markupPercent, BigDecimal salePrice) {
-        return new Pricing(costPrice, markupPercent, salePrice, null);
+        return new Pricing(costPrice, markupPercent, salePrice, null, null);
     }
 
     /** Precificação por markup: o preço de venda fica a cargo de {@link #suggestedPrice()}. */
     public static Pricing byMarkup(BigDecimal costPrice, BigDecimal markupPercent) {
-        return new Pricing(costPrice, markupPercent, null, null);
+        return new Pricing(costPrice, markupPercent, null, null, null);
     }
 
     /**
@@ -120,7 +135,7 @@ public record Pricing(BigDecimal costPrice, BigDecimal markupPercent, BigDecimal
     }
 
     /**
-     * Indica que <b>nenhum</b> dos quatro campos foi preenchido.
+     * Indica que <b>nenhum</b> dos cinco campos foi preenchido.
      *
      * <p>Distinto de {@code !isPriced()}: uma precificação só com {@code costPrice} não tem preço
      * a cobrar, mas carrega informação. A diferença importa em EST-F020, onde "a variação
@@ -128,7 +143,8 @@ public record Pricing(BigDecimal costPrice, BigDecimal markupPercent, BigDecimal
      * diferentes — usar {@code isPriced()} ali faria um custo próprio da variação ser ignorado.</p>
      */
     public boolean isEmpty() {
-        return costPrice == null && markupPercent == null && salePrice == null && originalPrice == null;
+        return costPrice == null && markupPercent == null && salePrice == null && originalPrice == null
+                && causeAmount == null;
     }
 
     /**
@@ -232,17 +248,24 @@ public record Pricing(BigDecimal costPrice, BigDecimal markupPercent, BigDecimal
      * o máximo é trocá-lo. Despreficicar exige recriar via {@link #of}.</p>
      */
     public Pricing withPatch(BigDecimal newCostPrice, BigDecimal newMarkupPercent, BigDecimal newSalePrice,
-            BigDecimal newOriginalPrice) {
+            BigDecimal newOriginalPrice, BigDecimal newCauseAmount) {
         return new Pricing(
                 newCostPrice == null ? costPrice : newCostPrice,
                 newMarkupPercent == null ? markupPercent : newMarkupPercent,
                 newSalePrice == null ? salePrice : newSalePrice,
-                newOriginalPrice == null ? originalPrice : newOriginalPrice);
+                newOriginalPrice == null ? originalPrice : newOriginalPrice,
+                newCauseAmount == null ? causeAmount : newCauseAmount);
     }
 
-    /** Mesmo que {@link #withPatch(BigDecimal, BigDecimal, BigDecimal, BigDecimal)}, mas sem tocar em {@code originalPrice}. */
+    /** Mesmo que a forma de 5 argumentos, mas sem tocar em {@code causeAmount}. */
+    public Pricing withPatch(BigDecimal newCostPrice, BigDecimal newMarkupPercent, BigDecimal newSalePrice,
+            BigDecimal newOriginalPrice) {
+        return withPatch(newCostPrice, newMarkupPercent, newSalePrice, newOriginalPrice, null);
+    }
+
+    /** Mesmo que a forma de 5 argumentos, mas sem tocar em {@code originalPrice}/{@code causeAmount}. */
     public Pricing withPatch(BigDecimal newCostPrice, BigDecimal newMarkupPercent, BigDecimal newSalePrice) {
-        return withPatch(newCostPrice, newMarkupPercent, newSalePrice, null);
+        return withPatch(newCostPrice, newMarkupPercent, newSalePrice, null, null);
     }
 
     /**
@@ -254,6 +277,6 @@ public record Pricing(BigDecimal costPrice, BigDecimal markupPercent, BigDecimal
      */
     public Pricing materializeSuggestion() {
         BigDecimal suggested = suggestedPrice();
-        return suggested == null ? this : new Pricing(costPrice, markupPercent, suggested, originalPrice);
+        return suggested == null ? this : new Pricing(costPrice, markupPercent, suggested, originalPrice, causeAmount);
     }
 }

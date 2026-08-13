@@ -2,8 +2,10 @@ package com.cernecommerce.core.ports.in;
 
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.Category;
+import com.cernecommerce.core.domain.model.estoque.EstoqueSummary;
 import com.cernecommerce.core.domain.model.estoque.KitComponent;
 import com.cernecommerce.core.domain.model.estoque.LotIntegrityMismatch;
+import com.cernecommerce.core.domain.model.estoque.MeasurementUnit;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
@@ -12,6 +14,7 @@ import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
 import com.cernecommerce.core.domain.model.estoque.ProductFilter;
 import com.cernecommerce.core.domain.model.estoque.ProductSortField;
+import com.cernecommerce.core.domain.model.estoque.ProductType;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.ReorderPoint;
 import com.cernecommerce.core.domain.model.estoque.ReservationIntegrityMismatch;
@@ -107,9 +110,66 @@ public interface EstoqueUseCase {
      * @throws com.cernecommerce.core.domain.exception.estoque.CategoryNotFoundException se
      *         {@code categoryId} for informado e não existir.
      */
+    default Product createProduct(String sku, String name, String category, List<ProductVariant> variants,
+            Pricing pricing, String brand, String imageUrl, boolean onSale, boolean superPromo, String description,
+            String videoUrl, List<String> images, List<ProductAttribute> attributes, Long categoryId) {
+        return createProduct(sku, name, category, variants, pricing, brand, imageUrl, onSale, superPromo, description,
+                videoUrl, images, attributes, categoryId, null, null, false, false, null, null);
+    }
+
+    /**
+     * Forma canônica anterior a EST-F023, sem {@code type}/{@code initialStock}: produto nasce
+     * sempre {@code SIMPLES} e sem estoque inicial, exatamente como hoje.
+     */
+    default Product createProduct(String sku, String name, String category, List<ProductVariant> variants,
+            Pricing pricing, String brand, String imageUrl, boolean onSale, boolean superPromo, String description,
+            String videoUrl, List<String> images, List<ProductAttribute> attributes, Long categoryId, String barcode,
+            MeasurementUnit unit, boolean sampleProduct, boolean kitComponentEligible, Boolean visibleInPos,
+            Boolean visibleInMarketplace) {
+        return createProduct(sku, name, category, variants, pricing, brand, imageUrl, onSale, superPromo, description,
+                videoUrl, images, attributes, categoryId, barcode, unit, sampleProduct, kitComponentEligible,
+                visibleInPos, visibleInMarketplace, null, null, null);
+    }
+
+    /**
+     * Cria um produto (forma canônica completa), incluindo os campos aditivos de catálogo
+     * (EST-F0xx), o tipo explícito e a entrada de estoque inicial atômica (EST-F023). Único
+     * método abstrato de criação — todas as sobrecargas acima delegam até aqui.
+     *
+     * @param visibleInPos {@code null} resolve para {@code true} (visível por padrão) — ver
+     *        {@code EstoqueService.createProduct}.
+     * @param visibleInMarketplace mesma regra de {@code visibleInPos}.
+     * @param type {@code null} resolve para {@code SIMPLES}. {@code KIT} não pode vir com
+     *        {@code variants} não vazio nem com {@code initialStock} — kit não tem grade nem
+     *        saldo próprio, é sempre derivado dos componentes.
+     * @param initialStock opcional; quando informado, registra a entrada de estoque na MESMA
+     *        transação da criação do produto — evita o estado "produto criado, estoque não" de
+     *        duas chamadas separadas. {@code null} preserva o comportamento anterior (produto
+     *        nasce sem nenhum saldo).
+     * @param actorUsername usuário autenticado, gravado como {@code username} da movimentação
+     *        quando {@code initialStock} é informado. Ignorado quando {@code initialStock} é nulo.
+     * @throws com.cernecommerce.core.domain.exception.estoque.CategoryNotFoundException se
+     *         {@code categoryId} for informado e não existir.
+     * @throws com.cernecommerce.core.domain.exception.estoque.DuplicateBarcodeException se
+     *         {@code barcode} já existir no catálogo (pai ou variação).
+     * @throws com.cernecommerce.core.domain.exception.estoque.KitHasVariantsException se
+     *         {@code type == KIT} e {@code variants} não for vazio.
+     * @throws com.cernecommerce.core.domain.exception.estoque.KitInitialStockNotAllowedException
+     *         se {@code type == KIT} e {@code initialStock} for informado.
+     */
     Product createProduct(String sku, String name, String category, List<ProductVariant> variants, Pricing pricing,
             String brand, String imageUrl, boolean onSale, boolean superPromo, String description, String videoUrl,
-            List<String> images, List<ProductAttribute> attributes, Long categoryId);
+            List<String> images, List<ProductAttribute> attributes, Long categoryId, String barcode,
+            MeasurementUnit unit, boolean sampleProduct, boolean kitComponentEligible, Boolean visibleInPos,
+            Boolean visibleInMarketplace, ProductType type, InitialStockCommand initialStock, String actorUsername);
+
+    /**
+     * Estoque inicial informado na criação do produto (EST-F023). {@code quantity} estritamente
+     * positiva — é sempre um {@code ENTRADA}, ao contrário de {@code adjustStock}, que também
+     * aceita {@code AJUSTE} com valor zero.
+     */
+    record InitialStockCommand(String warehouseCode, BigDecimal quantity, String lotCode, LocalDate expiryDate) {
+    }
 
     /** Lista produtos paginados, sem filtro e ordenados por id. */
     default PageResult<Product> listProducts(int page, int size) {
@@ -219,9 +279,63 @@ public interface EstoqueUseCase {
      * Alteração parcial (forma canônica) aceitando os dois caminhos de categoria, com a mesma
      * regra de {@code createProduct}. Nulos nos dois campos mantêm a categoria atual.
      */
+    default Product updateProduct(String sku, String name, String category, Pricing pricing, String brand,
+            String imageUrl, Boolean onSale, Boolean superPromo, String description, String videoUrl,
+            List<String> images, List<ProductAttribute> attributes, Long categoryId) {
+        return updateProduct(sku, name, category, pricing, brand, imageUrl, onSale, superPromo, description, videoUrl,
+                images, attributes, categoryId, null, null, null, null, null, null);
+    }
+
+    /**
+     * Alteração parcial (forma canônica completa), incluindo os campos aditivos de catálogo:
+     * código de barras, unidade de medida, testador, elegibilidade de kit e visibilidade por
+     * canal. Todos seguem a mesma semântica de PATCH do resto do método — {@code null} mantém.
+     * Único método abstrato de alteração — todas as sobrecargas acima delegam até aqui.
+     *
+     * @throws com.cernecommerce.core.domain.exception.estoque.DuplicateBarcodeException se
+     *         {@code barcode} já existir em outro produto do catálogo.
+     */
     Product updateProduct(String sku, String name, String category, Pricing pricing, String brand, String imageUrl,
             Boolean onSale, Boolean superPromo, String description, String videoUrl, List<String> images,
-            List<ProductAttribute> attributes, Long categoryId);
+            List<ProductAttribute> attributes, Long categoryId, String barcode, MeasurementUnit unit,
+            Boolean sampleProduct, Boolean kitComponentEligible, Boolean visibleInPos, Boolean visibleInMarketplace);
+
+    /**
+     * Acrescenta uma ou mais variações novas à grade de um produto já existente (EST-F024).
+     * Puramente aditivo — nenhuma variação já cadastrada é alterada ou removida.
+     *
+     * <p>Deliberadamente não há caminho de substituição/remoção em massa da grade: a coleção é
+     * reconstruída inteira a cada save (EST-C011), e uma variação já existente omitida da lista
+     * viraria uma remoção silenciosa — órfão em {@code stock_balance}/{@code stock_movement}, que
+     * referenciam o SKU como texto livre, sem FK.</p>
+     *
+     * @throws com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException se
+     *         {@code sku} não for um SKU pai existente.
+     * @throws com.cernecommerce.core.domain.exception.estoque.DuplicateSkuException se algum SKU
+     *         novo já existir no catálogo (pai ou variação, inclusive repetido dentro do próprio
+     *         request).
+     * @throws com.cernecommerce.core.domain.exception.estoque.DuplicateBarcodeException se algum
+     *         código de barras novo já existir no catálogo.
+     * @throws com.cernecommerce.core.domain.exception.estoque.KitHasVariantsException se
+     *         {@code sku} for um {@code KIT} — kit não tem grade (EST-F015).
+     */
+    Product addVariants(String sku, List<ProductVariant> newVariants);
+
+    /**
+     * Altera parcialmente uma variação já existente, sem tocar nas demais (EST-F024). Mesma
+     * semântica de PATCH do resto do módulo — {@code null} mantém; {@code attributes} (mesmo
+     * vazia) substitui o conjunto inteiro, igual a {@code updateProduct}. Não altera o SKU da
+     * variação — mesmo motivo de {@code updateProduct} não alterar o SKU do produto.
+     *
+     * @throws com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException se
+     *         {@code productSku} não for um SKU pai existente.
+     * @throws com.cernecommerce.core.domain.exception.estoque.ProductVariantNotFoundException se
+     *         {@code variantSku} não existir na grade de {@code productSku}.
+     * @throws com.cernecommerce.core.domain.exception.estoque.DuplicateBarcodeException se o novo
+     *         código de barras já existir em outra variação/produto do catálogo.
+     */
+    Product updateVariant(String productSku, String variantSku, Boolean active, List<ProductAttribute> attributes,
+            Pricing pricing, String barcode);
 
     // ── Categorias do catálogo ───────────────────────────────────────────────
     //
@@ -280,6 +394,23 @@ public interface EstoqueUseCase {
      *         se o SKU não existir no catálogo.
      */
     Product findProductBySku(String sku);
+
+    /**
+     * Resumo pré-calculado do catálogo de estoque — números agregados que várias telas do admin
+     * hoje recalculam do zero baixando o catálogo inteiro e cruzando com saldos e pontos de
+     * reposição em memória (badge de alertas, tela de Alertas de Reposição, KPIs do Catálogo de
+     * Produtos, painel de Estoque do Dashboard).
+     */
+    EstoqueSummary getSummary();
+
+    /**
+     * Resolve o produto pai a partir do código de barras do próprio pai ou de qualquer variação —
+     * caminho de leitura por scanner do PDV.
+     *
+     * @throws com.cernecommerce.core.domain.exception.estoque.BarcodeNotFoundException se nenhum
+     *         produto tiver esse código de barras.
+     */
+    Product findProductByBarcode(String barcode);
 
     /**
      * Ativa ou desativa um produto (EST-F018). Produto inativo <b>recusa entrada</b> de estoque

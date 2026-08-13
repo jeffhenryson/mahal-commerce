@@ -12,14 +12,19 @@ package com.cernecommerce.core.domain.model.estoque;
  * string vazia) e {@code search} é guardado já em minúsculas, porque a comparação é
  * case-insensitive e fazê-lo aqui evita repetir a normalização em cada adapter.</p>
  */
-public record ProductFilter(String search, String category, String brand, Boolean active) {
+public record ProductFilter(String search, String category, String brand, Boolean active, ProductType type) {
 
-    public static final ProductFilter EMPTY = new ProductFilter(null, null, null, null);
+    public static final ProductFilter EMPTY = new ProductFilter(null, null, null, null, null);
 
     public ProductFilter {
         search = normalize(search);
         category = normalize(category);
         brand = normalize(brand);
+    }
+
+    /** Mesma forma, sem filtro de {@code type} — compatibilidade com chamadores anteriores a EST-F022. */
+    public ProductFilter(String search, String category, String brand, Boolean active) {
+        this(search, category, brand, active, null);
     }
 
     private static String normalize(String value) {
@@ -29,6 +34,6 @@ public record ProductFilter(String search, String category, String brand, Boolea
     }
 
     public boolean isEmpty() {
-        return search == null && category == null && brand == null && active == null;
+        return search == null && category == null && brand == null && active == null && type == null;
     }
 }

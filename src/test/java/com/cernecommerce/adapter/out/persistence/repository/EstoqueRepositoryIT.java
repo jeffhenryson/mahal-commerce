@@ -3,8 +3,10 @@ package com.cernecommerce.adapter.out.persistence.repository;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.SortDirection;
 import com.cernecommerce.core.domain.model.estoque.Category;
+import com.cernecommerce.core.domain.model.estoque.CategoryProductCount;
 import com.cernecommerce.core.domain.model.estoque.KitComponent;
 import com.cernecommerce.core.domain.model.estoque.LotIntegrityMismatch;
+import com.cernecommerce.core.domain.model.estoque.MeasurementUnit;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
@@ -14,6 +16,7 @@ import com.cernecommerce.core.domain.model.estoque.ProductFilter;
 import com.cernecommerce.core.domain.model.estoque.ProductSortField;
 import com.cernecommerce.core.domain.model.estoque.ProductType;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
+import com.cernecommerce.core.domain.model.estoque.ReorderAlertCounts;
 import com.cernecommerce.core.domain.model.estoque.ReorderPoint;
 import com.cernecommerce.core.domain.model.estoque.ReservationIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
@@ -117,6 +120,79 @@ class EstoqueRepositoryIT {
 
         assertThat(productRepository.findBySku("RT-LOT-001")).isPresent()
                 .get().satisfies(p -> assertThat(p.lotTracked()).isTrue());
+    }
+
+    // ---------- Campos aditivos de catálogo (barcode, unit, sampleProduct, kitComponentEligible,
+    // causeAmount, visibilidade por canal) ----------
+
+    @Test
+    void product_roundTrip_preservaCamposAditivosDeCatalogo() {
+        productRepository.save(Product.create("RT-ADD-001", "Narguilé", "narguile", List.of())
+                .withBarcode("7891234567895")
+                .withUnit(MeasurementUnit.CX)
+                .withSampleProduct(true)
+                .withKitComponentEligible(true)
+                .withVisibleInPos(false)
+                .withVisibleInMarketplace(false));
+        flushAndClear();
+
+        Product found = productRepository.findBySku("RT-ADD-001").orElseThrow();
+
+        assertThat(found.barcode()).isEqualTo("7891234567895");
+        assertThat(found.unit()).isEqualTo(MeasurementUnit.CX);
+        assertThat(found.sampleProduct()).isTrue();
+        assertThat(found.kitComponentEligible()).isTrue();
+        assertThat(found.visibleInPos()).isFalse();
+        assertThat(found.visibleInMarketplace()).isFalse();
+    }
+
+    /** Nenhum campo aditivo informado: unidade default UN, visibilidade default true nos dois canais. */
+    @Test
+    void product_semCamposAditivos_voltaComDefaultsDeCompatibilidade() {
+        productRepository.save(Product.create("RT-ADD-002", "Carvão", "carvao", List.of()));
+        flushAndClear();
+
+        Product found = productRepository.findBySku("RT-ADD-002").orElseThrow();
+
+        assertThat(found.barcode()).isNull();
+        assertThat(found.unit()).isEqualTo(MeasurementUnit.UN);
+        assertThat(found.sampleProduct()).isFalse();
+        assertThat(found.kitComponentEligible()).isFalse();
+        assertThat(found.visibleInPos()).isTrue();
+        assertThat(found.visibleInMarketplace()).isTrue();
+    }
+
+    @Test
+    void product_barcode_existsEFindByBarcodeResolvemPeloPaiOuPelaVariacao() {
+        productRepository.save(Product.create("RT-BAR-001", "Essência", "essencia",
+                        List.of(ProductVariant.create("RT-BAR-001-M", List.of(), null, "7891111111116")))
+                .withBarcode("7890000000006"));
+        flushAndClear();
+
+        assertThat(productRepository.existsByBarcode("7890000000006")).isTrue();
+        assertThat(productRepository.existsByBarcode("7891111111116")).isTrue();
+        assertThat(productRepository.existsByBarcode("0000000000000")).isFalse();
+
+        assertThat(productRepository.findByBarcode("7891111111116"))
+                .isPresent().get().satisfies(p -> assertThat(p.sku()).isEqualTo("RT-BAR-001"));
+    }
+
+    @Test
+    void pricing_roundTrip_preservaCauseAmountNoProdutoENaVariacao() {
+        productRepository.save(Product.create("RT-CAUSE-001", "Essência", "essencia",
+                List.of(ProductVariant.create("RT-CAUSE-001-M", List.of(),
+                        Pricing.of(null, null, null, null, new BigDecimal("1.00")))),
+                Pricing.of(new BigDecimal("10.00"), null, new BigDecimal("30.00"), null, new BigDecimal("2.00"))));
+        flushAndClear();
+
+        Product found = productRepository.findBySku("RT-CAUSE-001").orElseThrow();
+
+        assertThat(found.pricing().causeAmount()).isEqualByComparingTo("2.00");
+        ProductVariant variant = found.variants().get(0);
+        assertThat(variant.hasOwnPricing()).isTrue();
+        assertThat(variant.pricing().causeAmount()).isEqualByComparingTo("1.00");
+        // Herança por campo: a variação só declarou causeAmount próprio, o resto vem do pai.
+        assertThat(found.effectivePricingFor("RT-CAUSE-001-M").salePrice()).isEqualByComparingTo("30.00");
     }
 
     /**
@@ -426,7 +502,7 @@ class EstoqueRepositoryIT {
     void catalogoPublico_ordenaPorDestaqueEOrdemDaCategoria() {
         Category destaque = categoryRepository.save(Category.create("Cat Vitrine Destaque", true, 0));
         Category comum = categoryRepository.save(Category.create("Cat Vitrine Comum", false, 5));
-        Pricing precificado = new Pricing(null, null, new BigDecimal("10.00"), null);
+        Pricing precificado = new Pricing(null, null, new BigDecimal("10.00"), null, null);
         // Gravado na ordem inversa da esperada, para a ordenação ter o que provar.
         productRepository.save(Product.create("VIT-001", "Comum", "Cat Vitrine Comum", List.of(), precificado,
                 ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(), List.of(), comum.id()));
@@ -447,7 +523,7 @@ class EstoqueRepositoryIT {
         // LEFT JOIN + COALESCE: sem eles o produto sem categoria sumiria (JOIN) ou cairia numa
         // posição dependente de como o banco trata NULL na ordenação.
         Category destaque = categoryRepository.save(Category.create("Cat Orfa Destaque", true, 0));
-        Pricing precificado = new Pricing(null, null, new BigDecimal("10.00"), null);
+        Pricing precificado = new Pricing(null, null, new BigDecimal("10.00"), null, null);
         productRepository.save(Product.create("ORF-001", "Sem categoria", null, List.of(), precificado));
         productRepository.save(Product.create("ORF-002", "Destacado", "Cat Orfa Destaque", List.of(), precificado,
                 ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(), List.of(),
@@ -466,7 +542,7 @@ class EstoqueRepositoryIT {
     void catalogoPublico_filtraPorCategoria() {
         Category alvo = categoryRepository.save(Category.create("Cat Filtro Alvo"));
         Category outra = categoryRepository.save(Category.create("Cat Filtro Outra"));
-        Pricing precificado = new Pricing(null, null, new BigDecimal("10.00"), null);
+        Pricing precificado = new Pricing(null, null, new BigDecimal("10.00"), null, null);
         productRepository.save(Product.create("FIL-001", "Alvo", "Cat Filtro Alvo", List.of(), precificado,
                 ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(), List.of(), alvo.id()));
         productRepository.save(Product.create("FIL-002", "Outra", "Cat Filtro Outra", List.of(), precificado,
@@ -486,8 +562,8 @@ class EstoqueRepositoryIT {
         productRepository.save(Product.create("RT-VP-001", "Essência", "essencia",
                 List.of(ProductVariant.create("RT-VP-001-100G", List.of(),
                         new Pricing(new BigDecimal("40.00"), new BigDecimal("50.0000"),
-                                new BigDecimal("99.90"), new BigDecimal("120.00")))),
-                new Pricing(new BigDecimal("10.00"), null, new BigDecimal("30.00"), null)));
+                                new BigDecimal("99.90"), new BigDecimal("120.00"), null))),
+                new Pricing(new BigDecimal("10.00"), null, new BigDecimal("30.00"), null, null)));
         flushAndClear();
 
         ProductVariant reloaded = productRepository.findBySku("RT-VP-001").orElseThrow()
@@ -505,7 +581,7 @@ class EstoqueRepositoryIT {
         // O null é o que representa "herda do pai"; um Pricing vazio significaria outra coisa.
         productRepository.save(Product.create("RT-VP-002", "Essência", "essencia",
                 List.of(ProductVariant.create("RT-VP-002-MENTA", List.of())),
-                new Pricing(null, null, new BigDecimal("30.00"), null)));
+                new Pricing(null, null, new BigDecimal("30.00"), null, null)));
         flushAndClear();
 
         ProductVariant reloaded = productRepository.findBySku("RT-VP-002").orElseThrow()
@@ -520,7 +596,7 @@ class EstoqueRepositoryIT {
         productRepository.save(Product.create("RT-VP-003", "Essência", "essencia",
                 List.of(ProductVariant.create("RT-VP-003-A", List.of(),
                         Pricing.of(new BigDecimal("40.00"), null, null))),
-                new Pricing(new BigDecimal("10.00"), null, new BigDecimal("30.00"), null)));
+                new Pricing(new BigDecimal("10.00"), null, new BigDecimal("30.00"), null, null)));
         flushAndClear();
 
         Product reloaded = productRepository.findBySku("RT-VP-003").orElseThrow();
@@ -535,7 +611,7 @@ class EstoqueRepositoryIT {
         productRepository.save(Product.create("RT-VP-004", "Essência", "essencia",
                 List.of(ProductVariant.create("RT-VP-004-A", List.of(),
                         Pricing.of(null, null, new BigDecimal("99.90")))),
-                new Pricing(null, null, new BigDecimal("30.00"), null)));
+                new Pricing(null, null, new BigDecimal("30.00"), null, null)));
         flushAndClear();
 
         Product reloaded = productRepository.findBySku("RT-VP-004").orElseThrow();
@@ -630,13 +706,13 @@ class EstoqueRepositoryIT {
 
     private void givenCatalogoParaFiltro() {
         productRepository.save(Product.create("FLT-001", "Essência Menta", "flt-essencia", List.of(),
-                new Pricing(new BigDecimal("10.00"), null, new BigDecimal("30.00"), null),
+                new Pricing(new BigDecimal("10.00"), null, new BigDecimal("30.00"), null, null),
                 ProductType.SIMPLES, false, "flt-zomo"));
         productRepository.save(Product.create("FLT-002", "Essência Melancia", "flt-essencia", List.of(),
-                new Pricing(new BigDecimal("10.00"), null, new BigDecimal("10.00"), null),
+                new Pricing(new BigDecimal("10.00"), null, new BigDecimal("10.00"), null, null),
                 ProductType.SIMPLES, false, "flt-adalya"));
         productRepository.save(Product.create("FLT-003", "Narguilé Grande", "flt-narguile", List.of(),
-                new Pricing(new BigDecimal("10.00"), null, new BigDecimal("20.00"), null),
+                new Pricing(new BigDecimal("10.00"), null, new BigDecimal("20.00"), null, null),
                 ProductType.SIMPLES, false, "flt-zomo"));
         Product inativo = productRepository.save(Product.create("FLT-004", "Carvão Menta", "flt-carvao", List.of(),
                 Pricing.empty(), ProductType.SIMPLES, false, "flt-zomo"));
@@ -704,6 +780,19 @@ class EstoqueRepositoryIT {
         // active=false é filtro de verdade, não ausência de filtro.
         assertThat(skus(filtrar(new ProductFilter("flt-00", null, null, false))))
                 .containsExactly("FLT-004");
+    }
+
+    @Test
+    void findAll_filtraPorType() {
+        productRepository.save(Product.create("FLT-TYPE-SIMPLES", "Componente", "flt-type", List.of()));
+        productRepository.save(Product.create("FLT-TYPE-KIT", "Kit", "flt-type", List.of(),
+                Pricing.empty(), ProductType.KIT));
+        flushAndClear();
+
+        assertThat(skus(filtrar(new ProductFilter(null, "flt-type", null, null, ProductType.KIT))))
+                .containsExactly("FLT-TYPE-KIT");
+        assertThat(skus(filtrar(new ProductFilter(null, "flt-type", null, null, ProductType.SIMPLES))))
+                .containsExactly("FLT-TYPE-SIMPLES");
     }
 
     @Test
@@ -1562,5 +1651,97 @@ class EstoqueRepositoryIT {
                 .as("SKU é componente de KIT-003: não pode ser promovido a kit também").isTrue();
         assertThat(kitComponentRepository.isUsedAsComponent("KIT-003-COMP-NAO-USADO"))
                 .as("SKU não aparece em nenhuma receita").isFalse();
+    }
+
+    // ── Resumo do catálogo (EST-F022 — GET /estoque/summary) ─────────────────
+    //
+    // Banco compartilhado com o resto da suíte: as asserções comparam antes/depois em vez de
+    // total absoluto, para não quebrar por dado que já existia na base de dev.
+
+    @Test
+    void countProducts_eCountVariants_contamTudoIncluindoInativos() {
+        long produtosAntes = productRepository.countProducts();
+        long variantesAntes = productRepository.countVariants();
+
+        Product inativo = productRepository.save(Product.create("SUM-CNT-001", "Produto", "sum-cnt",
+                List.of(ProductVariant.create("SUM-CNT-001-A", List.of()),
+                        ProductVariant.create("SUM-CNT-001-B", List.of()))));
+        productRepository.save(inativo.withActive(false));
+        flushAndClear();
+
+        assertThat(productRepository.countProducts()).isEqualTo(produtosAntes + 1);
+        assertThat(productRepository.countVariants()).isEqualTo(variantesAntes + 2);
+    }
+
+    @Test
+    void findCategoryWithMostProducts_contaCorretamenteOsProdutosVinculados() {
+        Category categoria = categoryRepository.save(Category.create("Cat Resumo " + System.nanoTime()));
+        productRepository.save(Product.create("SUM-CAT-001", "P1", null, List.of(), Pricing.empty(),
+                ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(), List.of(),
+                categoria.id()));
+        productRepository.save(Product.create("SUM-CAT-002", "P2", null, List.of(), Pricing.empty(),
+                ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(), List.of(),
+                categoria.id()));
+        flushAndClear();
+
+        // Não afirma que ESTA categoria vence globalmente (o banco é compartilhado e outra
+        // categoria pode ter mais vínculos) — só que a vencedora tem pelo menos os 2 vínculos
+        // criados agora, provando que o JOIN/GROUP BY conta certo.
+        Optional<CategoryProductCount> found = productRepository.findCategoryWithMostProducts();
+        assertThat(found).isPresent();
+        assertThat(found.get().count()).isGreaterThanOrEqualTo(2);
+    }
+
+    @Test
+    void sumInventoryValueAtCost_somaSaldoXCustoEfetivoComHerancaDeVariacao() {
+        BigDecimal antes = stockBalanceRepository.sumInventoryValueAtCost();
+        Warehouse deposito = givenWarehouse("SUM-VAL-WH-" + System.nanoTime());
+
+        // Produto simples: 10 un × custo 5.00 = 50.00.
+        productRepository.save(Product.create("SUM-VAL-001", "Produto", "sum-val", List.of(),
+                Pricing.of(new BigDecimal("5.00"), null, new BigDecimal("9.90"))));
+        stockBalanceRepository.save(
+                StockBalance.of(null, "SUM-VAL-001", deposito.id(), new BigDecimal("10"), 0L));
+
+        // Variação com custo próprio: 4 un × custo 8.00 (não o do pai, 3.00) = 32.00.
+        productRepository.save(Product.create("SUM-VAL-002", "Essência", "sum-val",
+                List.of(ProductVariant.create("SUM-VAL-002-A", List.of(),
+                        Pricing.of(new BigDecimal("8.00"), null, null))),
+                Pricing.of(new BigDecimal("3.00"), null, new BigDecimal("15.00"))));
+        stockBalanceRepository.save(
+                StockBalance.of(null, "SUM-VAL-002-A", deposito.id(), new BigDecimal("4"), 0L));
+
+        // Saldo sem custo conhecido: contribui zero, não invalida a soma.
+        productRepository.save(Product.create("SUM-VAL-003", "Sem custo", "sum-val", List.of()));
+        stockBalanceRepository.save(
+                StockBalance.of(null, "SUM-VAL-003", deposito.id(), new BigDecimal("100"), 0L));
+        flushAndClear();
+
+        BigDecimal depois = stockBalanceRepository.sumInventoryValueAtCost();
+        assertThat(depois.subtract(antes)).isEqualByComparingTo("82.00");
+    }
+
+    @Test
+    void countAlerts_classificaCriticoEAtencaoPelaMesmaRegraDeSeverityFor() {
+        ReorderAlertCounts antes = reorderPointRepository.countAlerts();
+        Warehouse deposito = givenWarehouse("SUM-ALERT-WH-" + System.nanoTime());
+
+        // Crítico: saldo zerado.
+        reorderPointRepository.save(ReorderPoint.create("SUM-ALERT-CRIT", deposito.id(), new BigDecimal("10")));
+        stockBalanceRepository.save(StockBalance.of(null, "SUM-ALERT-CRIT", deposito.id(), BigDecimal.ZERO, 0L));
+
+        // Atenção: abaixo do mínimo (10), acima do limiar crítico (5).
+        reorderPointRepository.save(ReorderPoint.create("SUM-ALERT-ATENCAO", deposito.id(), new BigDecimal("10")));
+        stockBalanceRepository.save(
+                StockBalance.of(null, "SUM-ALERT-ATENCAO", deposito.id(), new BigDecimal("7"), 0L));
+
+        // OK: no mínimo.
+        reorderPointRepository.save(ReorderPoint.create("SUM-ALERT-OK", deposito.id(), new BigDecimal("10")));
+        stockBalanceRepository.save(StockBalance.of(null, "SUM-ALERT-OK", deposito.id(), new BigDecimal("10"), 0L));
+        flushAndClear();
+
+        ReorderAlertCounts depois = reorderPointRepository.countAlerts();
+        assertThat(depois.criticos()).isEqualTo(antes.criticos() + 1);
+        assertThat(depois.atencao()).isEqualTo(antes.atencao() + 1);
     }
 }

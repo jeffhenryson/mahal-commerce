@@ -14,14 +14,18 @@ import com.cernecommerce.adapter.in.converter.StockReservationDTOConverter;
 import com.cernecommerce.adapter.in.converter.WarehouseDTOConverter;
 import com.cernecommerce.core.domain.exception.storage.ImageTooLargeException;
 import com.cernecommerce.core.domain.exception.storage.InvalidImageFormatException;
+import com.cernecommerce.core.domain.exception.estoque.BarcodeNotFoundException;
+import com.cernecommerce.core.domain.exception.estoque.DuplicateBarcodeException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateSkuException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateWarehouseCodeException;
 import com.cernecommerce.core.domain.exception.estoque.InactiveProductException;
 import com.cernecommerce.core.domain.exception.estoque.InactiveWarehouseException;
 import com.cernecommerce.core.domain.exception.estoque.InsufficientStockException;
+import com.cernecommerce.core.domain.exception.estoque.KitHasVariantsException;
 import com.cernecommerce.core.domain.exception.estoque.LotExpiryDateMismatchException;
 import com.cernecommerce.core.domain.exception.estoque.MissingLotInfoException;
 import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
+import com.cernecommerce.core.domain.exception.estoque.ProductVariantNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.UnexpectedLotInfoException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountAlreadyOpenException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountNotFoundException;
@@ -38,6 +42,8 @@ import com.cernecommerce.core.domain.model.estoque.Category;
 import com.cernecommerce.core.domain.exception.estoque.CategoryNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateCategoryNameException;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
+import com.cernecommerce.core.domain.model.estoque.CategoryProductCount;
+import com.cernecommerce.core.domain.model.estoque.EstoqueSummary;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductType;
 import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
@@ -110,6 +116,31 @@ public class EstoqueControllerTest {
                 .andExpect(jsonPath("$.content[0].sku").value("NARG-001"))
                 .andExpect(jsonPath("$.content[0].variants[0].attributes[0].type").value("sabor"))
                 .andExpect(jsonPath("$.totalElements").value(1));
+    }
+
+    @Test
+    void getSummary_returns_200_withAggregatedNumbers() throws Exception {
+        when(estoqueUseCase.getSummary()).thenReturn(new EstoqueSummary(342L, 891L,
+                new BigDecimal("128450.30"), 7L, 15L, new CategoryProductCount("Bebidas", 58)));
+
+        mockMvc.perform(get("/estoque/summary").principal(AUTH))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalProdutos").value(342))
+                .andExpect(jsonPath("$.totalVariantes").value(891))
+                .andExpect(jsonPath("$.valorEstoqueCusto").value(128450.30))
+                .andExpect(jsonPath("$.alertasCriticos").value(7))
+                .andExpect(jsonPath("$.alertasAtencao").value(15))
+                .andExpect(jsonPath("$.categoriaComMaisProdutos.nome").value("Bebidas"))
+                .andExpect(jsonPath("$.categoriaComMaisProdutos.quantidade").value(58));
+    }
+
+    @Test
+    void getSummary_semCategoriaVinculada_categoriaComMaisProdutosVemNula() throws Exception {
+        when(estoqueUseCase.getSummary()).thenReturn(new EstoqueSummary(0L, 0L, BigDecimal.ZERO, 0L, 0L, null));
+
+        mockMvc.perform(get("/estoque/summary").principal(AUTH))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.categoriaComMaisProdutos").doesNotExist());
     }
 
     @Test
@@ -213,7 +244,8 @@ public class EstoqueControllerTest {
     void create_returns_201() throws Exception {
         Product created = product("NARG-001");
         when(estoqueUseCase.createProduct(eq("NARG-001"), eq("Narguile Aladin"), eq("narguile"), any(), any(), any(),
-                any(), anyBoolean(), anyBoolean(), any(), any(), any(), any(), any())).thenReturn(created);
+                any(), anyBoolean(), anyBoolean(), any(), any(), any(), any(), any(),
+                any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any(), any())).thenReturn(created);
 
         String body = "{\"sku\":\"NARG-001\",\"name\":\"Narguile Aladin\",\"category\":\"narguile\","
                 + "\"variants\":[{\"sku\":\"NARG-001-M\",\"attributes\":[{\"type\":\"sabor\",\"value\":\"menta\"}]}]}";
@@ -238,7 +270,8 @@ public class EstoqueControllerTest {
     @Test
     void create_duplicate_sku_returns_409() throws Exception {
         when(estoqueUseCase.createProduct(eq("NARG-001"), any(), any(), any(), any(), any(), any(), anyBoolean(),
-                anyBoolean(), any(), any(), any(), any(), any()))
+                anyBoolean(), any(), any(), any(), any(), any(),
+                any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any(), any()))
                 .thenThrow(new DuplicateSkuException("NARG-001"));
 
         mockMvc.perform(post("/estoque/products")
@@ -253,7 +286,8 @@ public class EstoqueControllerTest {
     void create_product_without_variants_returns_201() throws Exception {
         Product created = Product.of(2L, "CARV-001", "Carvão Coco", "carvao", true, List.of());
         when(estoqueUseCase.createProduct(eq("CARV-001"), eq("Carvão Coco"), eq("carvao"), any(), any(), any(),
-                any(), anyBoolean(), anyBoolean(), any(), any(), any(), any(), any())).thenReturn(created);
+                any(), anyBoolean(), anyBoolean(), any(), any(), any(), any(), any(),
+                any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any(), any())).thenReturn(created);
 
         mockMvc.perform(post("/estoque/products")
                         .principal(AUTH)
@@ -261,6 +295,39 @@ public class EstoqueControllerTest {
                         .content("{\"sku\":\"CARV-001\",\"name\":\"Carvão Coco\",\"category\":\"carvao\"}"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.variants").isEmpty());
+    }
+
+    @Test
+    void createProduct_duplicateBarcode_returns_409() throws Exception {
+        when(estoqueUseCase.createProduct(eq("NARG-001"), any(), any(), any(), any(), any(), any(), anyBoolean(),
+                anyBoolean(), any(), any(), any(), any(), any(),
+                any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any(), any()))
+                .thenThrow(new DuplicateBarcodeException("7891234567895"));
+
+        mockMvc.perform(post("/estoque/products")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sku\":\"NARG-001\",\"name\":\"Narguile Aladin\",\"barcode\":\"7891234567895\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.errorCode").value("BARCODE_ALREADY_EXISTS"));
+    }
+
+    @Test
+    void getProductByBarcode_returns_200() throws Exception {
+        when(estoqueUseCase.findProductByBarcode("7891234567895")).thenReturn(product("NARG-001"));
+
+        mockMvc.perform(get("/estoque/products/by-barcode/7891234567895").principal(AUTH))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sku").value("NARG-001"));
+    }
+
+    @Test
+    void getProductByBarcode_notFound_returns_404() throws Exception {
+        when(estoqueUseCase.findProductByBarcode("00000000")).thenThrow(new BarcodeNotFoundException("00000000"));
+
+        mockMvc.perform(get("/estoque/products/by-barcode/00000000").principal(AUTH))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.errorCode").value("BARCODE_NOT_FOUND"));
     }
 
     @Test
@@ -515,7 +582,8 @@ public class EstoqueControllerTest {
         // EST-C010: rede de segurança — antes, qualquer violação de constraint virava 500 com o
         // texto do driver (nome de tabela, constraint e valores da linha) no corpo da resposta.
         when(estoqueUseCase.createProduct(any(), any(), any(), any(), any(), any(), any(), anyBoolean(),
-                anyBoolean(), any(), any(), any(), any(), any()))
+                anyBoolean(), any(), any(), any(), any(), any(),
+                any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any(), any()))
                 .thenThrow(new org.springframework.dao.DataIntegrityViolationException(
                         "ERROR: duplicate key value violates unique constraint \"uk_product_variant_sku\""));
 
@@ -990,7 +1058,7 @@ public class EstoqueControllerTest {
     @Test
     void updateProduct_returns_200_withUpdatedBody() throws Exception {
         when(estoqueUseCase.updateProduct("NARG-001", "Narguilé Aladin 2.0", null, null, null, null, null, null,
-                null, null, null, null, null))
+                null, null, null, null, null, null, null, null, null, null, null))
                 .thenReturn(Product.of(1L, "NARG-001", "Narguilé Aladin 2.0", "narguile", true, List.of()));
 
         mockMvc.perform(patch("/estoque/products/NARG-001")
@@ -1002,13 +1070,14 @@ public class EstoqueControllerTest {
                 .andExpect(jsonPath("$.sku").value("NARG-001"));
 
         verify(estoqueUseCase).updateProduct("NARG-001", "Narguilé Aladin 2.0", null, null, null, null, null, null,
-                null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /** Corpo vazio é um no-op válido: nenhum campo veio, nada muda. */
     @Test
     void updateProduct_comCorpoVazio_naoAlteraNada() throws Exception {
-        when(estoqueUseCase.updateProduct("NARG-001", null, null, null, null, null, null, null, null, null, null, null, null))
+        when(estoqueUseCase.updateProduct("NARG-001", null, null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null))
                 .thenReturn(product("NARG-001"));
 
         mockMvc.perform(patch("/estoque/products/NARG-001")
@@ -1017,13 +1086,14 @@ public class EstoqueControllerTest {
                         .content("{}"))
                 .andExpect(status().isOk());
 
-        verify(estoqueUseCase).updateProduct("NARG-001", null, null, null, null, null, null, null, null, null, null, null, null);
+        verify(estoqueUseCase).updateProduct("NARG-001", null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null);
     }
 
     @Test
     void updateProduct_skuInexistente_returns_404() throws Exception {
         when(estoqueUseCase.updateProduct(eq("SKU-FANTASMA"), any(), any(), any(), any(), any(), any(), any(), any(),
-                any(), any(), any(), any()))
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenThrow(new ProductNotFoundException("SKU-FANTASMA"));
 
         mockMvc.perform(patch("/estoque/products/SKU-FANTASMA")
@@ -1053,7 +1123,8 @@ public class EstoqueControllerTest {
     @Test
     void createProduct_comPricing_repassaAoUseCase() throws Exception {
         when(estoqueUseCase.createProduct(eq("NARG-001"), any(), any(), any(), any(), any(), any(), anyBoolean(),
-                anyBoolean(), any(), any(), any(), any(), any()))
+                anyBoolean(), any(), any(), any(), any(), any(),
+                any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any(), any()))
                 .thenReturn(Product.of(1L, "NARG-001", "Narguile", "narguile", true, List.of(),
                         Pricing.of(new BigDecimal("45.00"), new BigDecimal("80"), new BigDecimal("79.90"))));
 
@@ -1068,7 +1139,8 @@ public class EstoqueControllerTest {
 
         ArgumentCaptor<Pricing> captor = ArgumentCaptor.forClass(Pricing.class);
         verify(estoqueUseCase).createProduct(eq("NARG-001"), any(), any(), any(), captor.capture(), any(), any(),
-                anyBoolean(), anyBoolean(), any(), any(), any(), any(), any());
+                anyBoolean(), anyBoolean(), any(), any(), any(), any(), any(),
+                any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any(), any());
         assertThat(captor.getValue().costPrice()).isEqualByComparingTo("45.00");
     }
 
@@ -1088,7 +1160,7 @@ public class EstoqueControllerTest {
     @Test
     void updateProduct_comPricing_repassaOBlocoAoUseCase() throws Exception {
         when(estoqueUseCase.updateProduct(eq("NARG-001"), any(), any(), any(), any(), any(), any(), any(), any(),
-                any(), any(), any(), any()))
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(Product.of(1L, "NARG-001", "Narguile", "narguile", true, List.of(),
                         Pricing.of(new BigDecimal("60.00"), new BigDecimal("80"), new BigDecimal("79.90"))));
 
@@ -1101,7 +1173,7 @@ public class EstoqueControllerTest {
 
         ArgumentCaptor<Pricing> captor = ArgumentCaptor.forClass(Pricing.class);
         verify(estoqueUseCase).updateProduct(eq("NARG-001"), any(), any(), captor.capture(), any(), any(), any(),
-                any(), any(), any(), any(), any(), any());
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
         assertThat(captor.getValue().costPrice()).isEqualByComparingTo("60.00");
         assertThat(captor.getValue().markupPercent()).as("campo ausente vira nulo = manter").isNull();
     }
@@ -1129,7 +1201,8 @@ public class EstoqueControllerTest {
                 ProductType.SIMPLES, false, "Aladin", "http://img.png", true, true, "Descrição longa",
                 "http://video.mp4", List.of("http://img1.png", "http://img2.png"));
         when(estoqueUseCase.createProduct(eq("NARG-001"), any(), any(), any(), any(), any(), any(), anyBoolean(),
-                anyBoolean(), any(), any(), any(), any(), any())).thenReturn(created);
+                anyBoolean(), any(), any(), any(), any(), any(),
+                any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any(), any())).thenReturn(created);
 
         mockMvc.perform(post("/estoque/products")
                         .principal(AUTH)
@@ -1151,7 +1224,8 @@ public class EstoqueControllerTest {
         ArgumentCaptor<Boolean> superPromoCaptor = ArgumentCaptor.forClass(Boolean.class);
         verify(estoqueUseCase).createProduct(eq("NARG-001"), any(), any(), any(), any(), any(), any(), anyBoolean(),
                 superPromoCaptor.capture(), eq("Descrição longa"), eq("http://video.mp4"),
-                eq(List.of("http://img1.png", "http://img2.png")), any(), any());
+                eq(List.of("http://img1.png", "http://img2.png")), any(), any(),
+                any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any(), any());
         assertThat(superPromoCaptor.getValue()).isTrue();
     }
 
@@ -1206,7 +1280,7 @@ public class EstoqueControllerTest {
                 Pricing.empty(), ProductType.SIMPLES, false, null, null, false, true, "Nova descrição",
                 "http://video.mp4", List.of("http://img1.png"));
         when(estoqueUseCase.updateProduct(eq("NARG-001"), any(), any(), any(), any(), any(), any(), any(), any(),
-                any(), any(), any(), any())).thenReturn(updated);
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(updated);
 
         mockMvc.perform(patch("/estoque/products/NARG-001")
                         .principal(AUTH)
@@ -1220,7 +1294,8 @@ public class EstoqueControllerTest {
                 .andExpect(jsonPath("$.images[0]").value("http://img1.png"));
 
         verify(estoqueUseCase).updateProduct(eq("NARG-001"), any(), any(), any(), any(), any(), any(), eq(true),
-                eq("Nova descrição"), eq("http://video.mp4"), eq(List.of("http://img1.png")), any(), any());
+                eq("Nova descrição"), eq("http://video.mp4"), eq(List.of("http://img1.png")), any(), any(),
+                any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -1688,7 +1763,8 @@ public class EstoqueControllerTest {
                 ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(),
                 List.of(new ProductAttribute("Origem", "Brasil")));
         when(estoqueUseCase.createProduct(anyString(), anyString(), any(), anyList(), any(), any(), any(),
-                anyBoolean(), anyBoolean(), any(), any(), any(), anyList(), any())).thenReturn(criado);
+                anyBoolean(), anyBoolean(), any(), any(), any(), anyList(), any(),
+                any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any(), any())).thenReturn(criado);
 
         mockMvc.perform(post("/estoque/products")
                         .principal(AUTH)
@@ -1702,14 +1778,16 @@ public class EstoqueControllerTest {
 
         ArgumentCaptor<List<ProductAttribute>> captor = ArgumentCaptor.forClass(List.class);
         verify(estoqueUseCase).createProduct(anyString(), anyString(), any(), anyList(), any(), any(), any(),
-                anyBoolean(), anyBoolean(), any(), any(), any(), captor.capture(), any());
+                anyBoolean(), anyBoolean(), any(), any(), any(), captor.capture(), any(),
+                any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any(), any());
         assertThat(captor.getValue()).extracting(ProductAttribute::type).containsExactly("Origem");
     }
 
     @Test
     void createProduct_semAtributos_repassaListaVazia() throws Exception {
         when(estoqueUseCase.createProduct(anyString(), anyString(), any(), anyList(), any(), any(), any(),
-                anyBoolean(), anyBoolean(), any(), any(), any(), anyList(), any())).thenReturn(product("ATR-002"));
+                anyBoolean(), anyBoolean(), any(), any(), any(), anyList(), any(),
+                any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any(), any())).thenReturn(product("ATR-002"));
 
         mockMvc.perform(post("/estoque/products")
                         .principal(AUTH)
@@ -1720,7 +1798,8 @@ public class EstoqueControllerTest {
 
         ArgumentCaptor<List<ProductAttribute>> captor = ArgumentCaptor.forClass(List.class);
         verify(estoqueUseCase).createProduct(anyString(), anyString(), any(), anyList(), any(), any(), any(),
-                anyBoolean(), anyBoolean(), any(), any(), any(), captor.capture(), any());
+                anyBoolean(), anyBoolean(), any(), any(), any(), captor.capture(), any(),
+                any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any(), any());
         assertThat(captor.getValue()).isEmpty();
     }
 
@@ -1728,7 +1807,7 @@ public class EstoqueControllerTest {
     void updateProduct_atributosAusentes_chegamComoNullEnaoComoListaVazia() throws Exception {
         // A diferença é o que separa "não mexer" de "apagar todos".
         when(estoqueUseCase.updateProduct(anyString(), any(), any(), any(), any(), any(), any(), any(), any(),
-                any(), any(), any(), any())).thenReturn(product("ATR-003"));
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(product("ATR-003"));
 
         mockMvc.perform(patch("/estoque/products/ATR-003")
                         .principal(AUTH)
@@ -1737,13 +1816,13 @@ public class EstoqueControllerTest {
                 .andExpect(status().isOk());
 
         verify(estoqueUseCase).updateProduct(eq("ATR-003"), eq("Novo Nome"), any(), any(), any(), any(), any(),
-                any(), any(), any(), any(), isNull(), any());
+                any(), any(), any(), any(), isNull(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
     void updateProduct_atributosComListaVazia_chegamComoListaVaziaParaLimpar() throws Exception {
         when(estoqueUseCase.updateProduct(anyString(), any(), any(), any(), any(), any(), any(), any(), any(),
-                any(), any(), any(), any())).thenReturn(product("ATR-004"));
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any())).thenReturn(product("ATR-004"));
 
         mockMvc.perform(patch("/estoque/products/ATR-004")
                         .principal(AUTH)
@@ -1753,7 +1832,7 @@ public class EstoqueControllerTest {
 
         ArgumentCaptor<List<ProductAttribute>> captor = ArgumentCaptor.forClass(List.class);
         verify(estoqueUseCase).updateProduct(anyString(), any(), any(), any(), any(), any(), any(), any(), any(),
-                any(), any(), captor.capture(), any());
+                any(), any(), captor.capture(), any(), any(), any(), any(), any(), any(), any());
         assertThat(captor.getValue()).isNotNull().isEmpty();
     }
 
@@ -1791,7 +1870,8 @@ public class EstoqueControllerTest {
     @Test
     void createProduct_comPricingNaVariante_repassaAoUseCase() throws Exception {
         when(estoqueUseCase.createProduct(anyString(), anyString(), any(), anyList(), any(), any(), any(),
-                anyBoolean(), anyBoolean(), any(), any(), any(), anyList(), any())).thenReturn(product("VAR-001"));
+                anyBoolean(), anyBoolean(), any(), any(), any(), anyList(), any(),
+                any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any(), any())).thenReturn(product("VAR-001"));
 
         mockMvc.perform(post("/estoque/products")
                         .principal(AUTH)
@@ -1805,7 +1885,8 @@ public class EstoqueControllerTest {
 
         ArgumentCaptor<List<ProductVariant>> captor = ArgumentCaptor.forClass(List.class);
         verify(estoqueUseCase).createProduct(anyString(), anyString(), any(), captor.capture(), any(), any(), any(),
-                anyBoolean(), anyBoolean(), any(), any(), any(), anyList(), any());
+                anyBoolean(), anyBoolean(), any(), any(), any(), anyList(), any(),
+                any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any(), any());
 
         assertThat(captor.getValue())
                 .extracting(ProductVariant::sku, ProductVariant::hasOwnPricing)
@@ -1841,6 +1922,101 @@ public class EstoqueControllerTest {
                 .andExpect(status().isBadRequest());
 
         verifyNoInteractions(estoqueUseCase);
+    }
+
+    // ===== Mutação da grade de variantes pós-criação (EST-F024) =====
+
+    @Test
+    void addVariants_returns_200() throws Exception {
+        Product updated = Product.of(1L, "GRADE-001", "Essência", "essencia", true,
+                List.of(ProductVariant.of(1L, "GRADE-001-A", List.of(), true),
+                        ProductVariant.of(2L, "GRADE-001-B", List.of(), true)));
+        when(estoqueUseCase.addVariants(eq("GRADE-001"), any())).thenReturn(updated);
+
+        mockMvc.perform(post("/estoque/products/GRADE-001/variants")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"variants\":[{\"sku\":\"GRADE-001-B\"}]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.variants.length()").value(2));
+    }
+
+    @Test
+    void addVariants_semVariantsNoCorpo_returns_400() throws Exception {
+        mockMvc.perform(post("/estoque/products/GRADE-002/variants")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"variants\":[]}"))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(estoqueUseCase);
+    }
+
+    @Test
+    void addVariants_produtoNaoEncontrado_returns_404() throws Exception {
+        when(estoqueUseCase.addVariants(eq("SKU-FANTASMA"), any()))
+                .thenThrow(new ProductNotFoundException("SKU-FANTASMA"));
+
+        mockMvc.perform(post("/estoque/products/SKU-FANTASMA/variants")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"variants\":[{\"sku\":\"SKU-FANTASMA-A\"}]}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.errorCode").value("PRODUCT_NOT_FOUND"));
+    }
+
+    @Test
+    void addVariants_produtoEKit_returns_409() throws Exception {
+        when(estoqueUseCase.addVariants(eq("KIT-001"), any()))
+                .thenThrow(new KitHasVariantsException("KIT-001"));
+
+        mockMvc.perform(post("/estoque/products/KIT-001/variants")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"variants\":[{\"sku\":\"KIT-001-A\"}]}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.errorCode").value("KIT_HAS_VARIANTS"));
+    }
+
+    @Test
+    void updateVariant_returns_200() throws Exception {
+        Product updated = Product.of(1L, "GRADE-003", "Essência", "essencia", true,
+                List.of(ProductVariant.of(1L, "GRADE-003-A", List.of(), false)));
+        when(estoqueUseCase.updateVariant(eq("GRADE-003"), eq("GRADE-003-A"), eq(false), any(), any(), any()))
+                .thenReturn(updated);
+
+        mockMvc.perform(patch("/estoque/products/GRADE-003/variants/GRADE-003-A")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"active\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.variants[0].active").value(false));
+    }
+
+    @Test
+    void updateVariant_variacaoNaoEncontrada_returns_404() throws Exception {
+        when(estoqueUseCase.updateVariant(eq("GRADE-004"), eq("GRADE-004-FANTASMA"), any(), any(), any(), any()))
+                .thenThrow(new ProductVariantNotFoundException("GRADE-004", "GRADE-004-FANTASMA"));
+
+        mockMvc.perform(patch("/estoque/products/GRADE-004/variants/GRADE-004-FANTASMA")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"active\":false}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.errorCode").value("PRODUCT_VARIANT_NOT_FOUND"));
+    }
+
+    @Test
+    void updateVariant_corpoVazio_naoAlteraNadaERepassaTudoNulo() throws Exception {
+        when(estoqueUseCase.updateVariant(eq("GRADE-005"), eq("GRADE-005-A"), isNull(), isNull(), isNull(), isNull()))
+                .thenReturn(Product.of(1L, "GRADE-005", "Essência", "essencia", true,
+                        List.of(ProductVariant.of(1L, "GRADE-005-A", List.of(), true))));
+
+        mockMvc.perform(patch("/estoque/products/GRADE-005/variants/GRADE-005-A")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isOk());
     }
 
 
@@ -1954,7 +2130,8 @@ public class EstoqueControllerTest {
     @Test
     void createProduct_repassaCategoryIdAoUseCase() throws Exception {
         when(estoqueUseCase.createProduct(anyString(), anyString(), any(), anyList(), any(), any(), any(),
-                anyBoolean(), anyBoolean(), any(), any(), any(), anyList(), any())).thenReturn(product("CAT-P1"));
+                anyBoolean(), anyBoolean(), any(), any(), any(), anyList(), any(),
+                any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any(), any())).thenReturn(product("CAT-P1"));
 
         mockMvc.perform(post("/estoque/products")
                         .principal(AUTH)
@@ -1963,7 +2140,8 @@ public class EstoqueControllerTest {
                 .andExpect(status().isCreated());
 
         verify(estoqueUseCase).createProduct(anyString(), anyString(), any(), anyList(), any(), any(), any(),
-                anyBoolean(), anyBoolean(), any(), any(), any(), anyList(), eq(7L));
+                anyBoolean(), anyBoolean(), any(), any(), any(), anyList(), eq(7L),
+                any(), any(), anyBoolean(), anyBoolean(), any(), any(), any(), any(), any());
     }
 
     @Test

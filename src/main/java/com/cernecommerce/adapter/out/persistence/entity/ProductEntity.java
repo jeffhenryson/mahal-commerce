@@ -120,4 +120,36 @@ public class ProductEntity {
     // ninguém pedir. Nulo = produto ainda não vinculado, estado válido para o legado.
     @Column(name = "category_id")
     private Long categoryId;
+
+    // Código de barras/EAN — GTIN-8/12/14, texto para preservar zeros à esquerda. Único quando
+    // informado (índice parcial em V91, não constraint de coluna, porque é opcional).
+    @Column(name = "barcode", length = 14)
+    private String barcode;
+
+    // Unidade de medida. Sem @Enumerated: mesma convenção enum-como-string já usada em "type".
+    @Column(name = "unit", nullable = false, length = 10)
+    private String unit;
+
+    // Testador/amostra, ortogonal a "type" (SIMPLES/KIT) — controla se o campo de estoque mínimo
+    // de reposição faz sentido no formulário do admin.
+    @Column(name = "sample_product", nullable = false)
+    private boolean sampleProduct;
+
+    // Elegível a entrar como componente de kit (opt-in) — checado em EstoqueService.defineKitRecipe.
+    @Column(name = "kit_component_eligible", nullable = false)
+    private boolean kitComponentEligible;
+
+    // Visibilidade por canal — produto pode existir só no PDV (balcão) ou só no marketplace, sem
+    // precisar inativar o cadastro inteiro.
+    @Column(name = "visible_in_pos", nullable = false)
+    private boolean visibleInPos;
+
+    @Column(name = "visible_in_marketplace", nullable = false)
+    private boolean visibleInMarketplace;
+
+    // Preço extraordinário — valor adicional destinado a uma causa, por fora do preço de venda.
+    // Puramente informativo (ver Pricing.causeAmount); nullable pelo mesmo motivo dos demais
+    // campos de precificação.
+    @Column(name = "cause_amount", precision = 14, scale = 2)
+    private BigDecimal causeAmount;
 }

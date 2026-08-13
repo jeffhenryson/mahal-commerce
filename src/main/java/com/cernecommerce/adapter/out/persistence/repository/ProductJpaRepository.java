@@ -29,6 +29,19 @@ public interface ProductJpaRepository extends JpaRepository<ProductEntity, Long>
             + "WHERE p.sku = :sku OR p.id IN (SELECT v2.product.id FROM ProductVariantEntity v2 WHERE v2.sku = :sku)")
     Optional<ProductEntity> findByAnySku(String sku);
 
+    // Mesmo padrão de existsBySkuOrVariantSku, mas para código de barras — cobre o EAN do próprio
+    // pai e o de qualquer variação numa consulta só.
+    @Query("SELECT CASE WHEN COUNT(p) > 0 THEN TRUE ELSE FALSE END FROM ProductEntity p "
+            + "LEFT JOIN p.variants v WHERE p.barcode = :barcode OR v.barcode = :barcode")
+    boolean existsByBarcodeOrVariantBarcode(String barcode);
+
+    // Resolve o produto pai a partir do código de barras do próprio pai ou de qualquer variação —
+    // caminho de leitura por scanner do PDV, mesmo formato de findByAnySku.
+    @Query("SELECT DISTINCT p FROM ProductEntity p LEFT JOIN FETCH p.variants v LEFT JOIN FETCH v.attributes "
+            + "WHERE p.barcode = :barcode OR p.id IN "
+            + "(SELECT v2.product.id FROM ProductVariantEntity v2 WHERE v2.barcode = :barcode)")
+    Optional<ProductEntity> findByAnyBarcode(String barcode);
+
     // EST-F018: um SKU só conta como ativo se o produto pai estiver ativo. Para SKU de variação
     // exige-se as duas pontas — desativar o pai tira a grade inteira de circulação, sem precisar
     // percorrer variação por variação.
@@ -38,9 +51,11 @@ public interface ProductJpaRepository extends JpaRepository<ProductEntity, Long>
     boolean isSkuActive(String sku);
 
     /**
-     * Listagem filtrada do catálogo, no mesmo idioma {@code :param IS NULL OR ...} de
-     * {@code OrderJpaRepository.findFiltered} — uma Specification daria o mesmo para quatro
-     * critérios fixos, com muito mais cerimônia.
+     * Listagem filtrada do catálogo pelo idioma {@code :param IS NULL OR ...} — uma Specification
+     * daria o mesmo para quatro critérios fixos, com muito mais cerimônia. Só vale para filtros de
+     * {@code String}/{@code Boolean}: para {@code Instant} este padrão tem um bug de tipagem no
+     * Postgres real quando o valor é nulo (ver {@code OrderRepositoryImpl.findAll}, que por isso
+     * usa Specification para o filtro de data de pedidos).
      *
      * <p>Sem {@code ORDER BY} na query, de propósito: a ordenação chega pelo {@code Pageable},
      * porque o campo é escolhido pelo cliente dentro de uma lista fechada
@@ -60,17 +75,19 @@ public interface ProductJpaRepository extends JpaRepository<ProductEntity, Long>
               AND (:category IS NULL OR LOWER(p.category) = :category)
               AND (:brand    IS NULL OR LOWER(p.brand)    = :brand)
               AND (:active   IS NULL OR p.active = :active)
+              AND (:type     IS NULL OR p.type = :type)
             """)
     Page<Long> findFilteredIds(@Param("search") String search,
             @Param("category") String category,
             @Param("brand") String brand,
             @Param("active") Boolean active,
+            @Param("type") String type,
             Pageable pageable);
 
     // ECM-F002: mesma condição de Pricing#isPriced() traduzida para SQL — salePrice preenchido,
     // ou custo+markup preenchidos o bastante para sugerir um preço. Kit nunca tem costPrice
     // próprio (KitCostNotEditableException), então só o ramo do salePrice se aplica a ele.
-    // onSale segue o mesmo idioma de filtro opcional de OrderJpaRepository.findFiltered: nulo não filtra.
+    // onSale segue o mesmo idioma de filtro opcional de findFilteredIds acima: nulo não filtra.
     /**
      * Catálogo público, ordenado pela vitrine: categoria em destaque primeiro, depois a ordem de
      * exibição da categoria, e só então o id — que segue como desempate final, porque destaque e
@@ -94,6 +111,17 @@ public interface ProductJpaRepository extends JpaRepository<ProductEntity, Long>
     @Query("SELECT DISTINCT p FROM ProductEntity p LEFT JOIN FETCH p.variants v LEFT JOIN FETCH v.attributes "
             + "WHERE p.id IN :ids ORDER BY p.id")
     List<ProductEntity> findAllByIdsWithVariants(List<Long> ids);
+
+    // EST-F022 — GET /estoque/summary. COUNT(v) e não v.id: variantes sem atributos ainda contam.
+    @Query("SELECT COUNT(v) FROM ProductVariantEntity v")
+    long countVariants();
+
+    // Categoria com mais produtos vinculados, para o KPI de resumo. Só considera categoryId
+    // preenchido — produto sem vínculo não participa da contagem por categoria nenhuma.
+    // Pageable.ofSize(1) traz só a linha vencedora, sem precisar de um LIMIT nativo.
+    @Query("SELECT c.name, COUNT(p) FROM ProductEntity p JOIN ProductCategoryEntity c ON c.id = p.categoryId "
+            + "WHERE p.categoryId IS NOT NULL GROUP BY c.name ORDER BY COUNT(p) DESC, c.name ASC")
+    List<Object[]> findCategoryWithMostProductsRaw(Pageable pageable);
 
     // Propaga o rename da categoria para a coluna denormalizada. @Modifying com
     // clearAutomatically: o update ignora o contexto de persistência, então instâncias já

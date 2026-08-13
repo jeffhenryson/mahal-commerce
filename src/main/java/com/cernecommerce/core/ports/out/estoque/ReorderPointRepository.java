@@ -1,6 +1,7 @@
 package com.cernecommerce.core.ports.out.estoque;
 
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.estoque.ReorderAlertCounts;
 import com.cernecommerce.core.domain.model.estoque.ReorderPoint;
 
 import java.util.Optional;
@@ -16,4 +17,10 @@ public interface ReorderPointRepository {
     PageResult<ReorderPoint> findByWarehouseId(Long warehouseId, int page, int size);
 
     ReorderPoint save(ReorderPoint reorderPoint);
+
+    /**
+     * Contagem de pares SKU/depósito em alerta, por severidade ({@link ReorderPoint#severityFor}),
+     * em todos os depósitos — ver {@link com.cernecommerce.core.domain.model.estoque.EstoqueSummary}.
+     */
+    ReorderAlertCounts countAlerts();
 }

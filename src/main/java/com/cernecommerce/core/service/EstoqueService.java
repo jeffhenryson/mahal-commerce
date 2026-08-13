@@ -1,7 +1,9 @@
 package com.cernecommerce.core.service;
 
+import com.cernecommerce.core.domain.exception.estoque.BarcodeNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.CategoryNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.DefaultWarehouseNotConfiguredException;
+import com.cernecommerce.core.domain.exception.estoque.DuplicateBarcodeException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateCategoryNameException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateKitComponentException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateSkuException;
@@ -10,14 +12,17 @@ import com.cernecommerce.core.domain.exception.estoque.EmptyKitRecipeException;
 import com.cernecommerce.core.domain.exception.estoque.InactiveProductException;
 import com.cernecommerce.core.domain.exception.estoque.InactiveWarehouseException;
 import com.cernecommerce.core.domain.exception.estoque.KitComponentAlreadyInUseException;
+import com.cernecommerce.core.domain.exception.estoque.KitComponentNotEligibleException;
 import com.cernecommerce.core.domain.exception.estoque.KitComponentNotSimpleException;
 import com.cernecommerce.core.domain.exception.estoque.KitCostNotEditableException;
 import com.cernecommerce.core.domain.exception.estoque.KitDirectAdjustmentException;
 import com.cernecommerce.core.domain.exception.estoque.KitHasVariantsException;
+import com.cernecommerce.core.domain.exception.estoque.KitInitialStockNotAllowedException;
 import com.cernecommerce.core.domain.exception.estoque.KitSelfReferenceException;
 import com.cernecommerce.core.domain.exception.estoque.LotExpiryDateMismatchException;
 import com.cernecommerce.core.domain.exception.estoque.MissingLotInfoException;
 import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
+import com.cernecommerce.core.domain.exception.estoque.ProductVariantNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountAlreadyOpenException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountNotOpenException;
@@ -28,8 +33,10 @@ import com.cernecommerce.core.domain.exception.estoque.UnexpectedLotInfoExceptio
 import com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.Category;
+import com.cernecommerce.core.domain.model.estoque.EstoqueSummary;
 import com.cernecommerce.core.domain.model.estoque.KitComponent;
 import com.cernecommerce.core.domain.model.estoque.LotIntegrityMismatch;
+import com.cernecommerce.core.domain.model.estoque.MeasurementUnit;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
@@ -41,6 +48,7 @@ import com.cernecommerce.core.domain.model.estoque.ProductSortField;
 import com.cernecommerce.core.domain.model.estoque.ProductType;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.ReorderAlert;
+import com.cernecommerce.core.domain.model.estoque.ReorderAlertCounts;
 import com.cernecommerce.core.domain.model.estoque.ReorderPoint;
 import com.cernecommerce.core.domain.model.estoque.ReservationIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.ReservationStatus;
@@ -138,8 +146,21 @@ public class EstoqueService implements EstoqueUseCase {
     @Transactional
     public Product createProduct(String sku, String name, String category, List<ProductVariant> variants,
             Pricing pricing, String brand, String imageUrl, boolean onSale, boolean superPromo, String description,
-            String videoUrl, List<String> images, List<ProductAttribute> attributes, Long categoryId) {
+            String videoUrl, List<String> images, List<ProductAttribute> attributes, Long categoryId,
+            String barcode, MeasurementUnit unit, boolean sampleProduct, boolean kitComponentEligible,
+            Boolean visibleInPos, Boolean visibleInMarketplace, ProductType type, InitialStockCommand initialStock,
+            String actorUsername) {
         List<ProductVariant> safeVariants = variants == null ? List.of() : variants;
+        ProductType resolvedType = type == null ? ProductType.SIMPLES : type;
+        // Kit não tem grade nem saldo próprio (EST-F015) — checado ANTES de qualquer escrita, na
+        // mesma ordem tanto faça o kit nascer assim ou ser promovido depois via defineKitRecipe,
+        // que já lança esta mesma exceção para variants não vazio.
+        if (resolvedType == ProductType.KIT && !safeVariants.isEmpty()) {
+            throw new KitHasVariantsException(sku);
+        }
+        if (resolvedType == ProductType.KIT && initialStock != null) {
+            throw new KitInitialStockNotAllowedException(sku);
+        }
         // O SKU pai e os das variações compartilham o mesmo espaço de nomes: uk_product_sku e
         // uk_product_variant_sku. Checar os dois aqui evita que a violação de constraint escape
         // como DataIntegrityViolationException, que o contrato do use case não prevê.
@@ -155,13 +176,43 @@ public class EstoqueService implements EstoqueUseCase {
                 throw new DuplicateSkuException(candidate);
             }
         }
+        // Mesmo raciocínio acima, para o espaço de nomes de código de barras (pai + variações).
+        Set<String> barcodeCandidates = new LinkedHashSet<>();
+        if (barcode != null) {
+            barcodeCandidates.add(barcode);
+        }
+        for (ProductVariant variant : safeVariants) {
+            if (variant.barcode() != null && !barcodeCandidates.add(variant.barcode())) {
+                throw new DuplicateBarcodeException(variant.barcode());
+            }
+        }
+        for (String barcodeCandidate : barcodeCandidates) {
+            if (productRepository.existsByBarcode(barcodeCandidate)) {
+                throw new DuplicateBarcodeException(barcodeCandidate);
+            }
+        }
         Category resolved = resolveCategory(categoryId, category);
         Product product = Product.create(sku, name,
                 resolved == null ? category : resolved.name(), safeVariants,
-                pricing == null ? Pricing.empty() : pricing, ProductType.SIMPLES, false, brand, imageUrl, onSale,
+                pricing == null ? Pricing.empty() : pricing, resolvedType, false, brand, imageUrl, onSale,
                 superPromo, description, videoUrl, images, attributes,
-                resolved == null ? null : resolved.id());
-        return productRepository.save(product);
+                resolved == null ? null : resolved.id())
+                .withBarcode(barcode)
+                .withUnit(unit)
+                .withSampleProduct(sampleProduct)
+                .withKitComponentEligible(kitComponentEligible)
+                .withVisibleInPos(visibleInPos == null || visibleInPos)
+                .withVisibleInMarketplace(visibleInMarketplace == null || visibleInMarketplace);
+        Product saved = productRepository.save(product);
+        // Mesma transação da criação (self-invocation do bean, mesmo idioma de
+        // explodeKitMovement): se o depósito não existir ou faltar dado de lote, o rollback
+        // desfaz o produto também — não há mais o estado "criado, mas sem estoque" de duas
+        // chamadas separadas.
+        if (initialStock != null) {
+            adjustStock(saved.sku(), initialStock.warehouseCode(), MovementType.ENTRADA, initialStock.quantity(),
+                    "Estoque inicial no cadastro", actorUsername, initialStock.lotCode(), initialStock.expiryDate());
+        }
+        return saved;
     }
 
     @Override
@@ -181,7 +232,9 @@ public class EstoqueService implements EstoqueUseCase {
     @Transactional
     public Product updateProduct(String sku, String name, String category, Pricing pricing, String brand,
             String imageUrl, Boolean onSale, Boolean superPromo, String description, String videoUrl,
-            List<String> images, List<ProductAttribute> attributes, Long categoryId) {
+            List<String> images, List<ProductAttribute> attributes, Long categoryId, String barcode,
+            MeasurementUnit unit, Boolean sampleProduct, Boolean kitComponentEligible, Boolean visibleInPos,
+            Boolean visibleInMarketplace) {
         Product current = productRepository.findBySku(sku)
                 .orElseThrow(() -> new ProductNotFoundException(sku));
         Product updated = current.withDetails(name, category, brand, imageUrl, description, videoUrl);
@@ -214,10 +267,110 @@ public class EstoqueService implements EstoqueUseCase {
             // withPatch e não substituição: um PATCH que manda só o custo não pode apagar o
             // markup e o preço já cadastrados. Cada campo de Pricing carrega a mesma semântica
             // de "nulo mantém" que name e category têm em withDetails.
-            updated = updated.withPricing(current.pricing().withPatch(
-                    pricing.costPrice(), pricing.markupPercent(), pricing.salePrice(), pricing.originalPrice()));
+            updated = updated.withPricing(current.pricing().withPatch(pricing.costPrice(), pricing.markupPercent(),
+                    pricing.salePrice(), pricing.originalPrice(), pricing.causeAmount()));
+        }
+        if (barcode != null && !barcode.equals(current.barcode()) && productRepository.existsByBarcode(barcode)) {
+            throw new DuplicateBarcodeException(barcode);
+        }
+        if (barcode != null) {
+            updated = updated.withBarcode(barcode);
+        }
+        if (unit != null) {
+            updated = updated.withUnit(unit);
+        }
+        if (sampleProduct != null) {
+            updated = updated.withSampleProduct(sampleProduct);
+        }
+        if (kitComponentEligible != null) {
+            updated = updated.withKitComponentEligible(kitComponentEligible);
+        }
+        if (visibleInPos != null) {
+            updated = updated.withVisibleInPos(visibleInPos);
+        }
+        if (visibleInMarketplace != null) {
+            updated = updated.withVisibleInMarketplace(visibleInMarketplace);
         }
         return productRepository.save(updated);
+    }
+
+    @Override
+    @Transactional
+    public Product addVariants(String sku, List<ProductVariant> newVariants) {
+        Product current = productRepository.findBySku(sku)
+                .orElseThrow(() -> new ProductNotFoundException(sku));
+        // Kit não tem grade (EST-F015) — mesma invariante de createProduct, aqui contra a porta
+        // dos fundos de acrescentar variação a um kit já existente.
+        if (current.isKit()) {
+            throw new KitHasVariantsException(sku);
+        }
+        List<ProductVariant> safeNewVariants = newVariants == null ? List.of() : newVariants;
+        // Mesma checagem de duplicidade de createProduct — as novas variações entram no mesmo
+        // espaço de nomes compartilhado por todo o catálogo (SKU e barcode).
+        Set<String> skuCandidates = new LinkedHashSet<>();
+        for (ProductVariant variant : safeNewVariants) {
+            if (!skuCandidates.add(variant.sku())) {
+                throw new DuplicateSkuException(variant.sku());
+            }
+        }
+        for (String candidate : skuCandidates) {
+            if (productRepository.existsBySku(candidate)) {
+                throw new DuplicateSkuException(candidate);
+            }
+        }
+        Set<String> barcodeCandidates = new LinkedHashSet<>();
+        for (ProductVariant variant : safeNewVariants) {
+            if (variant.barcode() != null && !barcodeCandidates.add(variant.barcode())) {
+                throw new DuplicateBarcodeException(variant.barcode());
+            }
+        }
+        for (String barcodeCandidate : barcodeCandidates) {
+            if (productRepository.existsByBarcode(barcodeCandidate)) {
+                throw new DuplicateBarcodeException(barcodeCandidate);
+            }
+        }
+        // Append, nunca substituição: toda variação já existente precisa continuar presente na
+        // lista, ou o rebuild completo de ProductRepositoryImpl.save() a apagaria (EST-C011).
+        List<ProductVariant> merged = new ArrayList<>(current.variants());
+        merged.addAll(safeNewVariants);
+        return productRepository.save(current.withVariants(merged));
+    }
+
+    @Override
+    @Transactional
+    public Product updateVariant(String productSku, String variantSku, Boolean active,
+            List<ProductAttribute> attributes, Pricing pricing, String barcode) {
+        Product current = productRepository.findBySku(productSku)
+                .orElseThrow(() -> new ProductNotFoundException(productSku));
+        ProductVariant target = current.variants().stream()
+                .filter(v -> v.sku().equals(variantSku))
+                .findFirst()
+                .orElseThrow(() -> new ProductVariantNotFoundException(productSku, variantSku));
+        if (barcode != null && !barcode.equals(target.barcode()) && productRepository.existsByBarcode(barcode)) {
+            throw new DuplicateBarcodeException(barcode);
+        }
+        ProductVariant updated = target;
+        if (active != null) {
+            updated = updated.withActive(active);
+        }
+        if (attributes != null) {
+            updated = updated.withAttributes(attributes);
+        }
+        if (barcode != null) {
+            updated = updated.withBarcode(barcode);
+        }
+        if (pricing != null) {
+            // withPatch e não substituição, mesma razão de updateProduct: um PATCH que manda só
+            // o custo não pode apagar o preço de venda próprio já cadastrado na variação.
+            Pricing basePricing = target.pricing() == null ? Pricing.empty() : target.pricing();
+            updated = updated.withPricing(basePricing.withPatch(pricing.costPrice(), pricing.markupPercent(),
+                    pricing.salePrice(), pricing.originalPrice(), pricing.causeAmount()));
+        }
+        ProductVariant finalUpdated = updated;
+        List<ProductVariant> merged = current.variants().stream()
+                .map(v -> v.sku().equals(variantSku) ? finalUpdated : v)
+                .toList();
+        return productRepository.save(current.withVariants(merged));
     }
 
     // ── Categorias do catálogo ───────────────────────────────────────────────
@@ -355,6 +508,26 @@ public class EstoqueService implements EstoqueUseCase {
         // Mesma razão de findPricingBySku: a variação não tem categoria própria, herda a do pai.
         return productRepository.findByAnySku(sku)
                 .orElseThrow(() -> new ProductNotFoundException(sku));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public EstoqueSummary getSummary() {
+        ReorderAlertCounts alerts = reorderPointRepository.countAlerts();
+        return new EstoqueSummary(
+                productRepository.countProducts(),
+                productRepository.countVariants(),
+                stockBalanceRepository.sumInventoryValueAtCost(),
+                alerts.criticos(),
+                alerts.atencao(),
+                productRepository.findCategoryWithMostProducts().orElse(null));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Product findProductByBarcode(String barcode) {
+        return productRepository.findByBarcode(barcode)
+                .orElseThrow(() -> new BarcodeNotFoundException(barcode));
     }
 
     @Override
@@ -1029,6 +1202,9 @@ public class EstoqueService implements EstoqueUseCase {
                     .orElseThrow(() -> new ProductNotFoundException(componentSku));
             if (component.isKit()) {
                 throw new KitComponentNotSimpleException(kitSku, componentSku, component.type());
+            }
+            if (!component.kitComponentEligible()) {
+                throw new KitComponentNotEligibleException(kitSku, componentSku);
             }
             recipe.add(KitComponent.create(kitSku, componentSku, command.quantity()));
         }

@@ -5,6 +5,8 @@ import com.cernecommerce.adapter.out.persistence.entity.ProductEntity;
 import com.cernecommerce.adapter.out.persistence.entity.ProductVariantEntity;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.SortDirection;
+import com.cernecommerce.core.domain.model.estoque.CategoryProductCount;
+import com.cernecommerce.core.domain.model.estoque.MeasurementUnit;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductFilter;
 import com.cernecommerce.core.domain.model.estoque.ProductSortField;
@@ -57,6 +59,13 @@ public class ProductRepositoryImpl implements ProductRepository {
         entity.setOriginalPrice(product.pricing().originalPrice());
         entity.setType(product.type().name());
         entity.setLotTracked(product.lotTracked());
+        entity.setBarcode(product.barcode());
+        entity.setUnit(product.unit().name());
+        entity.setSampleProduct(product.sampleProduct());
+        entity.setKitComponentEligible(product.kitComponentEligible());
+        entity.setVisibleInPos(product.visibleInPos());
+        entity.setVisibleInMarketplace(product.visibleInMarketplace());
+        entity.setCauseAmount(product.pricing().causeAmount());
         entity.getImages().addAll(product.images());
         entity.getAttributes().addAll(product.attributes().stream()
                 .map(a -> new ProductAttributeEmbeddable(a.type(), a.value()))
@@ -75,7 +84,9 @@ public class ProductRepositoryImpl implements ProductRepository {
                 variantEntity.setMarkupPercent(variantPricing.markupPercent());
                 variantEntity.setSalePrice(variantPricing.salePrice());
                 variantEntity.setOriginalPrice(variantPricing.originalPrice());
+                variantEntity.setCauseAmount(variantPricing.causeAmount());
             }
+            variantEntity.setBarcode(variant.barcode());
             variantEntity.getAttributes().addAll(variant.attributes().stream()
                     .map(a -> new ProductAttributeEmbeddable(a.type(), a.value()))
                     .toList());
@@ -88,6 +99,29 @@ public class ProductRepositoryImpl implements ProductRepository {
     @Override
     public int renameCategory(Long categoryId, String newName) {
         return productJpaRepository.renameCategory(categoryId, newName);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public long countProducts() {
+        return productJpaRepository.count();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public long countVariants() {
+        return productJpaRepository.countVariants();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<CategoryProductCount> findCategoryWithMostProducts() {
+        List<Object[]> rows = productJpaRepository.findCategoryWithMostProductsRaw(PageRequest.of(0, 1));
+        if (rows.isEmpty()) {
+            return Optional.empty();
+        }
+        Object[] row = rows.get(0);
+        return Optional.of(new CategoryProductCount((String) row[0], (Long) row[1]));
     }
 
     @Override
@@ -116,11 +150,24 @@ public class ProductRepositoryImpl implements ProductRepository {
 
     @Override
     @Transactional(readOnly = true)
+    public boolean existsByBarcode(String barcode) {
+        return productJpaRepository.existsByBarcodeOrVariantBarcode(barcode);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<Product> findByBarcode(String barcode) {
+        return productJpaRepository.findByAnyBarcode(barcode).map(this::toDomain);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public PageResult<Product> findAll(int page, int size, ProductFilter filter,
             ProductSortField sortField, SortDirection direction) {
         Pageable pageable = PageRequest.of(page, size, toSort(sortField, direction));
         Page<Long> idPage = productJpaRepository.findFilteredIds(
-                likePattern(filter.search()), filter.category(), filter.brand(), filter.active(), pageable);
+                likePattern(filter.search()), filter.category(), filter.brand(), filter.active(),
+                filter.type() == null ? null : filter.type().name(), pageable);
         return toPageResult(idPage, page, size);
     }
 
@@ -178,32 +225,36 @@ public class ProductRepositoryImpl implements ProductRepository {
         List<ProductVariant> variants = e.getVariants().stream()
                 .map(this::toDomain)
                 .toList();
-        Pricing pricing = Pricing.of(e.getCostPrice(), e.getMarkupPercent(), e.getSalePrice(), e.getOriginalPrice());
+        Pricing pricing = Pricing.of(e.getCostPrice(), e.getMarkupPercent(), e.getSalePrice(), e.getOriginalPrice(),
+                e.getCauseAmount());
         ProductType type = ProductType.valueOf(e.getType());
+        MeasurementUnit unit = MeasurementUnit.valueOf(e.getUnit());
         List<ProductAttribute> attributes = e.getAttributes().stream()
                 .map(a -> new ProductAttribute(a.getType(), a.getValue()))
                 .toList();
         return Product.of(e.getId(), e.getSku(), e.getName(), e.getCategory(), e.isActive(), variants, pricing, type,
                 e.isLotTracked(), e.getBrand(), e.getImageUrl(), e.isOnSale(), e.isSuperPromo(), e.getDescription(),
-                e.getVideoUrl(), List.copyOf(e.getImages()), attributes, e.getCategoryId());
+                e.getVideoUrl(), List.copyOf(e.getImages()), attributes, e.getCategoryId(), e.getBarcode(), unit,
+                e.isSampleProduct(), e.isKitComponentEligible(), e.isVisibleInPos(), e.isVisibleInMarketplace());
     }
 
     private ProductVariant toDomain(ProductVariantEntity e) {
         List<ProductAttribute> attributes = e.getAttributes().stream()
                 .map(a -> new ProductAttribute(a.getType(), a.getValue()))
                 .toList();
-        return ProductVariant.of(e.getId(), e.getSku(), attributes, e.isActive(), toVariantPricing(e));
+        return ProductVariant.of(e.getId(), e.getSku(), attributes, e.isActive(), toVariantPricing(e), e.getBarcode());
     }
 
     /**
-     * Reconstitui a precificação própria da variação, ou {@code null} quando as quatro colunas
+     * Reconstitui a precificação própria da variação, ou {@code null} quando as cinco colunas
      * estão vazias — é esse {@code null} que o domínio lê como "herda do pai" (EST-F020).
      */
     private static Pricing toVariantPricing(ProductVariantEntity e) {
-        if (e.getCostPrice() == null && e.getMarkupPercent() == null
-                && e.getSalePrice() == null && e.getOriginalPrice() == null) {
+        if (e.getCostPrice() == null && e.getMarkupPercent() == null && e.getSalePrice() == null
+                && e.getOriginalPrice() == null && e.getCauseAmount() == null) {
             return null;
         }
-        return Pricing.of(e.getCostPrice(), e.getMarkupPercent(), e.getSalePrice(), e.getOriginalPrice());
+        return Pricing.of(e.getCostPrice(), e.getMarkupPercent(), e.getSalePrice(), e.getOriginalPrice(),
+                e.getCauseAmount());
     }
 }

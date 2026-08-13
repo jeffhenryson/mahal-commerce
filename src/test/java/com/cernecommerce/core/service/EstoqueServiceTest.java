@@ -6,6 +6,7 @@ import com.cernecommerce.core.domain.exception.estoque.InactiveProductException;
 import com.cernecommerce.core.domain.exception.estoque.InactiveWarehouseException;
 import com.cernecommerce.core.domain.exception.estoque.InsufficientStockException;
 import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
+import com.cernecommerce.core.domain.exception.estoque.ProductVariantNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountAlreadyOpenException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountNotOpenException;
@@ -20,14 +21,19 @@ import com.cernecommerce.core.domain.model.estoque.ProductSortField;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateKitComponentException;
 import com.cernecommerce.core.domain.exception.estoque.EmptyKitRecipeException;
 import com.cernecommerce.core.domain.exception.estoque.KitComponentAlreadyInUseException;
+import com.cernecommerce.core.domain.exception.estoque.KitComponentNotEligibleException;
 import com.cernecommerce.core.domain.exception.estoque.KitComponentNotSimpleException;
 import com.cernecommerce.core.domain.exception.estoque.KitCostNotEditableException;
 import com.cernecommerce.core.domain.exception.estoque.KitDirectAdjustmentException;
 import com.cernecommerce.core.domain.exception.estoque.KitHasVariantsException;
+import com.cernecommerce.core.domain.exception.estoque.DuplicateBarcodeException;
+import com.cernecommerce.core.domain.exception.estoque.KitInitialStockNotAllowedException;
 import com.cernecommerce.core.domain.exception.estoque.KitSelfReferenceException;
 import com.cernecommerce.core.domain.exception.estoque.LotExpiryDateMismatchException;
 import com.cernecommerce.core.domain.exception.estoque.MissingLotInfoException;
 import com.cernecommerce.core.domain.exception.estoque.UnexpectedLotInfoException;
+import com.cernecommerce.core.domain.model.estoque.CategoryProductCount;
+import com.cernecommerce.core.domain.model.estoque.EstoqueSummary;
 import com.cernecommerce.core.domain.model.estoque.KitComponent;
 import com.cernecommerce.core.domain.model.estoque.LotIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
@@ -40,6 +46,7 @@ import com.cernecommerce.core.domain.exception.estoque.DuplicateCategoryNameExce
 import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
 import com.cernecommerce.core.domain.model.estoque.ProductType;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
+import com.cernecommerce.core.domain.model.estoque.ReorderAlertCounts;
 import com.cernecommerce.core.domain.model.estoque.ReorderPoint;
 import com.cernecommerce.core.domain.model.estoque.ReservationStatus;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
@@ -53,6 +60,7 @@ import com.cernecommerce.core.domain.model.estoque.Warehouse;
 import com.cernecommerce.core.domain.model.estoque.WarehouseType;
 import com.cernecommerce.core.domain.model.notification.NotificationType;
 import com.cernecommerce.core.ports.in.NotificationUseCase;
+import com.cernecommerce.core.ports.in.EstoqueUseCase.InitialStockCommand;
 import com.cernecommerce.core.ports.in.EstoqueUseCase.KitComponentCommand;
 import com.cernecommerce.core.ports.out.AfterCommitExecutor;
 import com.cernecommerce.core.ports.out.estoque.CategoryRepository;
@@ -213,6 +221,97 @@ class EstoqueServiceTest {
                 collidesWithParent))
                 .isInstanceOf(DuplicateSkuException.class);
         verify(productRepository, never()).save(any());
+    }
+
+    // ── Tipo explícito e estoque inicial na criação (EST-F023) ───────────────
+
+    @Test
+    void createProduct_tipoKitComVariantsNaoVazio_throwsKitHasVariantsException() {
+        List<ProductVariant> variants = List.of(ProductVariant.create("KIT-001-A", List.of()));
+
+        assertThatThrownBy(() -> estoqueService.createProduct("KIT-001", "Kit", "combo", variants, Pricing.empty(),
+                null, null, false, false, null, null, List.of(), List.of(), null,
+                null, null, false, false, null, null, ProductType.KIT, null, null))
+                .isInstanceOf(KitHasVariantsException.class);
+        verify(productRepository, never()).save(any());
+    }
+
+    @Test
+    void createProduct_tipoKitComEstoqueInicial_throwsKitInitialStockNotAllowedException() {
+        InitialStockCommand initialStock =
+                new InitialStockCommand("LOJA-01", BigDecimal.TEN, null, null);
+
+        assertThatThrownBy(() -> estoqueService.createProduct("KIT-002", "Kit", "combo", List.of(), Pricing.empty(),
+                null, null, false, false, null, null, List.of(), List.of(), null,
+                null, null, false, false, null, null, ProductType.KIT, initialStock, "gerente"))
+                .isInstanceOf(KitInitialStockNotAllowedException.class);
+        verify(productRepository, never()).save(any());
+    }
+
+    @Test
+    void createProduct_tipoKitSemVariantsESemEstoqueInicial_nasceComoKit() {
+        when(productRepository.existsBySku(any())).thenReturn(false);
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Product result = estoqueService.createProduct("KIT-003", "Kit", "combo", List.of(), Pricing.empty(),
+                null, null, false, false, null, null, List.of(), List.of(), null,
+                null, null, false, false, null, null, ProductType.KIT, null, null);
+
+        assertThat(result.type()).isEqualTo(ProductType.KIT);
+    }
+
+    @Test
+    void createProduct_tipoAusente_nasceComoSimples() {
+        when(productRepository.existsBySku(any())).thenReturn(false);
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Product result = estoqueService.createProduct("SMP-001", "Produto", "categoria", List.of(), Pricing.empty(),
+                null, null, false, false, null, null, List.of(), List.of(), null,
+                null, null, false, false, null, null, null, null, null);
+
+        assertThat(result.type()).isEqualTo(ProductType.SIMPLES);
+    }
+
+    @Test
+    void createProduct_comEstoqueInicial_registraEntradaNaMesmaChamada() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        // false na checagem de duplicidade (antes do save), true na checagem de requireKnownSku
+        // que adjustStock faz internamente (depois do save) — o mock não tem noção de tempo, então
+        // a segunda chamada precisa refletir que o produto "já existe" nesse ponto.
+        when(productRepository.existsBySku(any())).thenReturn(false, true);
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(productRepository.findByAnySku("NOVO-001"))
+                .thenReturn(Optional.of(Product.create("NOVO-001", "Produto Novo", "testes", List.of())));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("NOVO-001", 1L)).thenReturn(Optional.empty());
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        InitialStockCommand initialStock =
+                new InitialStockCommand("LOJA-01", new BigDecimal("15"), null, null);
+
+        Product result = estoqueService.createProduct("NOVO-001", "Produto Novo", "testes", List.of(), Pricing.empty(),
+                null, null, false, false, null, null, List.of(), List.of(), null,
+                null, null, false, false, null, null, null, initialStock, "gerente");
+
+        assertThat(result.sku()).isEqualTo("NOVO-001");
+        verify(stockMovementRepository).save(argThat(m -> m.type() == MovementType.ENTRADA
+                && m.quantity().compareTo(new BigDecimal("15")) == 0
+                && m.username().equals("gerente")
+                && m.reason().equals("Estoque inicial no cadastro")));
+        verify(stockBalanceRepository).save(argThat(b -> b.quantity().compareTo(new BigDecimal("15")) == 0));
+    }
+
+    @Test
+    void createProduct_semEstoqueInicial_naoTocaEmMovimentoOuSaldo() {
+        when(productRepository.existsBySku(any())).thenReturn(false);
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        estoqueService.createProduct("SEM-ESTOQUE-001", "Produto", "testes", List.of(), Pricing.empty(),
+                null, null, false, false, null, null, List.of(), List.of(), null,
+                null, null, false, false, null, null, null, null, null);
+
+        verify(stockMovementRepository, never()).save(any());
+        verify(stockBalanceRepository, never()).save(any());
     }
 
     @Test
@@ -666,7 +765,8 @@ class EstoqueServiceTest {
     private Product simpleProduct(String sku, String costPrice) {
         BigDecimal cost = costPrice == null ? null : new BigDecimal(costPrice);
         return Product.of(2L, sku, "Componente " + sku, "insumo", true, List.of(),
-                Pricing.of(cost, null, new BigDecimal("999.00")));
+                Pricing.of(cost, null, new BigDecimal("999.00")))
+                .withKitComponentEligible(true);
     }
 
     @Test
@@ -697,6 +797,36 @@ class EstoqueServiceTest {
 
         // Ausência é "desconhecido", nunca zero — mesma convenção de Pricing.
         assertThat(estoqueService.findPricingBySku("KIT-001").costPrice()).isNull();
+    }
+
+    @Test
+    void getSummary_agregaOsQuatroRepositoriosNumSoResumo() {
+        when(productRepository.countProducts()).thenReturn(342L);
+        when(productRepository.countVariants()).thenReturn(891L);
+        when(stockBalanceRepository.sumInventoryValueAtCost()).thenReturn(new BigDecimal("128450.30"));
+        when(reorderPointRepository.countAlerts()).thenReturn(new ReorderAlertCounts(7, 15));
+        when(productRepository.findCategoryWithMostProducts())
+                .thenReturn(Optional.of(new CategoryProductCount("Bebidas", 58)));
+
+        EstoqueSummary summary = estoqueService.getSummary();
+
+        assertThat(summary.totalProdutos()).isEqualTo(342L);
+        assertThat(summary.totalVariantes()).isEqualTo(891L);
+        assertThat(summary.valorEstoqueCusto()).isEqualByComparingTo("128450.30");
+        assertThat(summary.alertasCriticos()).isEqualTo(7L);
+        assertThat(summary.alertasAtencao()).isEqualTo(15L);
+        assertThat(summary.categoriaComMaisProdutos()).isEqualTo(new CategoryProductCount("Bebidas", 58));
+    }
+
+    @Test
+    void getSummary_categoriaComMaisProdutosNuloQuandoNenhumProdutoVinculado() {
+        when(productRepository.countProducts()).thenReturn(0L);
+        when(productRepository.countVariants()).thenReturn(0L);
+        when(stockBalanceRepository.sumInventoryValueAtCost()).thenReturn(BigDecimal.ZERO);
+        when(reorderPointRepository.countAlerts()).thenReturn(ReorderAlertCounts.ZERO);
+        when(productRepository.findCategoryWithMostProducts()).thenReturn(Optional.empty());
+
+        assertThat(estoqueService.getSummary().categoriaComMaisProdutos()).isNull();
     }
 
     @Test
@@ -848,6 +978,20 @@ class EstoqueServiceTest {
         assertThat(result.type()).isEqualTo(ProductType.KIT);
         verify(kitComponentRepository).replaceRecipe(eq("KIT-001"), argThat(recipe -> recipe.size() == 1
                 && recipe.get(0).componentSku().equals("CARV-001")));
+    }
+
+    @Test
+    void defineKitRecipe_throwsWhenComponentNotEligible() {
+        Product product = Product.of(1L, "KIT-001", "Kit Narguile", "combo", true, List.of());
+        when(productRepository.findBySku("KIT-001")).thenReturn(Optional.of(product));
+        when(kitComponentRepository.isUsedAsComponent("KIT-001")).thenReturn(false);
+        Product notEligible = Product.of(2L, "CARV-001", "Carvão Coco", "insumo", true, List.of(),
+                Pricing.of(new BigDecimal("20.00"), null, new BigDecimal("999.00")));
+        when(productRepository.findByAnySku("CARV-001")).thenReturn(Optional.of(notEligible));
+
+        assertThatThrownBy(() -> estoqueService.defineKitRecipe("KIT-001",
+                List.of(new KitComponentCommand("CARV-001", BigDecimal.ONE))))
+                .isInstanceOf(KitComponentNotEligibleException.class);
     }
 
     @Test
@@ -2924,5 +3068,159 @@ class EstoqueServiceTest {
         verify(productRepository).save(captor.capture());
         assertThat(captor.getValue().categoryId()).isEqualTo(7L);
         assertThat(captor.getValue().category()).isEqualTo("Narguilé");
+    }
+
+    // ── Mutação da grade de variantes pós-criação (EST-F024) ──────────────────
+
+    @Test
+    void addVariants_anexaSemTocarNasExistentes() {
+        ProductVariant existente = ProductVariant.of(1L, "GRADE-001-A", List.of(), true);
+        Product current = Product.of(10L, "GRADE-001", "Essência", "essencia", true, List.of(existente));
+        when(productRepository.findBySku("GRADE-001")).thenReturn(Optional.of(current));
+        when(productRepository.existsBySku(any())).thenReturn(false);
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        List<ProductVariant> novas = List.of(ProductVariant.create("GRADE-001-B", List.of()));
+        Product result = estoqueService.addVariants("GRADE-001", novas);
+
+        assertThat(result.variants()).extracting(ProductVariant::sku)
+                .containsExactlyInAnyOrder("GRADE-001-A", "GRADE-001-B");
+        // A existente preserva o id — sem isso, ProductRepositoryImpl.save() (rebuild completo da
+        // coleção) apagaria e recriaria a linha, quebrando o histórico de estoque que a referencia.
+        assertThat(result.variants()).filteredOn(v -> v.sku().equals("GRADE-001-A"))
+                .singleElement().extracting(ProductVariant::id).isEqualTo(1L);
+    }
+
+    @Test
+    void addVariants_throwsWhenProductNotFound() {
+        when(productRepository.findBySku("SKU-FANTASMA")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.addVariants("SKU-FANTASMA",
+                List.of(ProductVariant.create("SKU-FANTASMA-A", List.of()))))
+                .isInstanceOf(ProductNotFoundException.class);
+    }
+
+    @Test
+    void addVariants_throwsWhenProductIsKit() {
+        Product kit = Product.of(1L, "KIT-001", "Kit", "combo", true, List.of(), Pricing.empty(), ProductType.KIT);
+        when(productRepository.findBySku("KIT-001")).thenReturn(Optional.of(kit));
+
+        assertThatThrownBy(() -> estoqueService.addVariants("KIT-001",
+                List.of(ProductVariant.create("KIT-001-A", List.of()))))
+                .isInstanceOf(KitHasVariantsException.class);
+        verify(productRepository, never()).save(any());
+    }
+
+    @Test
+    void addVariants_throwsWhenNewSkuAlreadyExists() {
+        Product current = Product.of(10L, "GRADE-002", "Essência", "essencia", true, List.of());
+        when(productRepository.findBySku("GRADE-002")).thenReturn(Optional.of(current));
+        when(productRepository.existsBySku("GRADE-002-X")).thenReturn(true);
+
+        assertThatThrownBy(() -> estoqueService.addVariants("GRADE-002",
+                List.of(ProductVariant.create("GRADE-002-X", List.of()))))
+                .isInstanceOf(DuplicateSkuException.class);
+        verify(productRepository, never()).save(any());
+    }
+
+    @Test
+    void addVariants_throwsWhenNewBarcodeAlreadyExists() {
+        Product current = Product.of(10L, "GRADE-003", "Essência", "essencia", true, List.of());
+        when(productRepository.findBySku("GRADE-003")).thenReturn(Optional.of(current));
+        when(productRepository.existsBySku(any())).thenReturn(false);
+        when(productRepository.existsByBarcode("7891234567895")).thenReturn(true);
+
+        assertThatThrownBy(() -> estoqueService.addVariants("GRADE-003",
+                List.of(ProductVariant.create("GRADE-003-A", List.of(), null, "7891234567895"))))
+                .isInstanceOf(DuplicateBarcodeException.class);
+        verify(productRepository, never()).save(any());
+    }
+
+    @Test
+    void updateVariant_aplicaPatchPreservandoAsDemaisVariacoes() {
+        ProductVariant alvo = ProductVariant.of(1L, "GRADE-004-A", List.of(new ProductAttribute("sabor", "menta")),
+                true);
+        ProductVariant outra = ProductVariant.of(2L, "GRADE-004-B", List.of(), true);
+        Product current = Product.of(10L, "GRADE-004", "Essência", "essencia", true, List.of(alvo, outra));
+        when(productRepository.findBySku("GRADE-004")).thenReturn(Optional.of(current));
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        List<ProductAttribute> novosAtributos = List.of(new ProductAttribute("sabor", "uva"));
+        Product result = estoqueService.updateVariant("GRADE-004", "GRADE-004-A", false, novosAtributos, null, null);
+
+        ProductVariant atualizada = result.variants().stream()
+                .filter(v -> v.sku().equals("GRADE-004-A")).findFirst().orElseThrow();
+        assertThat(atualizada.active()).isFalse();
+        assertThat(atualizada.attributes()).containsExactly(new ProductAttribute("sabor", "uva"));
+        assertThat(atualizada.id()).as("preserva o id da linha existente").isEqualTo(1L);
+
+        ProductVariant intocada = result.variants().stream()
+                .filter(v -> v.sku().equals("GRADE-004-B")).findFirst().orElseThrow();
+        assertThat(intocada).isEqualTo(outra);
+    }
+
+    @Test
+    void updateVariant_camposNulosMantemOsAtuais() {
+        Pricing pricingAtual = Pricing.of(new BigDecimal("40.00"), null, new BigDecimal("99.90"));
+        ProductVariant alvo = ProductVariant.of(1L, "GRADE-005-A", List.of(), true, pricingAtual, "7891111111116");
+        Product current = Product.of(10L, "GRADE-005", "Essência", "essencia", true, List.of(alvo));
+        when(productRepository.findBySku("GRADE-005")).thenReturn(Optional.of(current));
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Product result = estoqueService.updateVariant("GRADE-005", "GRADE-005-A", null, null, null, null);
+
+        ProductVariant unchanged = result.variants().get(0);
+        assertThat(unchanged.active()).isTrue();
+        assertThat(unchanged.barcode()).isEqualTo("7891111111116");
+        assertThat(unchanged.pricing().salePrice()).isEqualByComparingTo("99.90");
+    }
+
+    @Test
+    void updateVariant_pricingUsaWithPatchSemApagarCamposJaCadastrados() {
+        Pricing pricingAtual = Pricing.of(new BigDecimal("40.00"), null, new BigDecimal("99.90"));
+        ProductVariant alvo = ProductVariant.of(1L, "GRADE-006-A", List.of(), true, pricingAtual);
+        Product current = Product.of(10L, "GRADE-006", "Essência", "essencia", true, List.of(alvo));
+        when(productRepository.findBySku("GRADE-006")).thenReturn(Optional.of(current));
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        // Manda só markupPercent — costPrice e salePrice já cadastrados não podem sumir.
+        Pricing patch = Pricing.byMarkup(null, new BigDecimal("50.0000"));
+        Product result = estoqueService.updateVariant("GRADE-006", "GRADE-006-A", null, null, patch, null);
+
+        Pricing updated = result.variants().get(0).pricing();
+        assertThat(updated.costPrice()).isEqualByComparingTo("40.00");
+        assertThat(updated.salePrice()).isEqualByComparingTo("99.90");
+        assertThat(updated.markupPercent()).isEqualByComparingTo("50.0000");
+    }
+
+    @Test
+    void updateVariant_throwsWhenProductNotFound() {
+        when(productRepository.findBySku("SKU-FANTASMA")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.updateVariant("SKU-FANTASMA", "SKU-FANTASMA-A", true, null, null, null))
+                .isInstanceOf(ProductNotFoundException.class);
+    }
+
+    @Test
+    void updateVariant_throwsWhenVariantNotFound() {
+        Product current = Product.of(10L, "GRADE-007", "Essência", "essencia", true, List.of());
+        when(productRepository.findBySku("GRADE-007")).thenReturn(Optional.of(current));
+
+        assertThatThrownBy(() -> estoqueService.updateVariant("GRADE-007", "GRADE-007-FANTASMA", true, null, null, null))
+                .isInstanceOf(ProductVariantNotFoundException.class);
+        verify(productRepository, never()).save(any());
+    }
+
+    @Test
+    void updateVariant_throwsWhenNewBarcodeAlreadyExists() {
+        ProductVariant alvo = ProductVariant.of(1L, "GRADE-008-A", List.of(), true);
+        Product current = Product.of(10L, "GRADE-008", "Essência", "essencia", true, List.of(alvo));
+        when(productRepository.findBySku("GRADE-008")).thenReturn(Optional.of(current));
+        when(productRepository.existsByBarcode("7891234567895")).thenReturn(true);
+
+        assertThatThrownBy(() -> estoqueService.updateVariant("GRADE-008", "GRADE-008-A", null, null, null,
+                "7891234567895"))
+                .isInstanceOf(DuplicateBarcodeException.class);
+        verify(productRepository, never()).save(any());
     }
 }

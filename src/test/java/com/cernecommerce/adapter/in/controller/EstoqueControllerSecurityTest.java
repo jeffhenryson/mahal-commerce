@@ -71,6 +71,41 @@ public class EstoqueControllerSecurityTest {
     }
 
     @Test
+    void get_summary_without_auth_returns_401() throws Exception {
+        mockMvc.perform(get("/estoque/summary"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    /** Exige AS DUAS permissões — só ESTOQUE_PRODUCT_READ não basta (bloco blenda catálogo e saldo). */
+    @Test
+    void get_summary_with_only_product_read_returns_403() throws Exception {
+        mockMvc.perform(get("/estoque/summary")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_READ"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void get_summary_with_only_warehouse_read_returns_403() throws Exception {
+        mockMvc.perform(get("/estoque/summary")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_WAREHOUSE_READ"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void get_summary_with_both_permissions_returns_200() throws Exception {
+        mockMvc.perform(get("/estoque/summary")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_READ"),
+                        new SimpleGrantedAuthority("ESTOQUE_WAREHOUSE_READ"))))
+                .andExpect(status().isOk());
+    }
+
+    @Test
     void create_product_without_auth_returns_401() throws Exception {
         mockMvc.perform(post("/estoque/products")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -1093,7 +1128,15 @@ public class EstoqueControllerSecurityTest {
     @Test
     void define_kit_recipe_with_estoque_kit_manage_returns_200() throws Exception {
         String kitSku = givenProduct();
-        String componentSku = givenProduct();
+        String componentSku = "SKU_SEC_TEST_" + System.nanoTime();
+        mockMvc.perform(post("/estoque/products")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"sku\":\"" + componentSku + "\",\"name\":\"Componente Teste\",\"category\":\"testes\","
+                        + "\"kitComponentEligible\":true}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_MANAGE"))))
+                .andExpect(status().isCreated());
 
         mockMvc.perform(put("/estoque/products/" + kitSku + "/kit")
                 .contentType(MediaType.APPLICATION_JSON)

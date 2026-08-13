@@ -17,7 +17,7 @@ import java.util.List;
  * nulos significaria a segunda coisa e apagaria a herança.</p>
  */
 public record ProductVariant(Long id, String sku, List<ProductAttribute> attributes, boolean active,
-                             Pricing pricing) {
+                             Pricing pricing, String barcode) {
 
     public ProductVariant {
         if (sku == null || sku.isBlank()) {
@@ -33,7 +33,13 @@ public record ProductVariant(Long id, String sku, List<ProductAttribute> attribu
 
     /** Cria uma nova variação (sem id, ativa por padrão). {@code pricing} nulo herda do pai. */
     public static ProductVariant create(String sku, List<ProductAttribute> attributes, Pricing pricing) {
-        return new ProductVariant(null, sku, attributes, true, pricing);
+        return create(sku, attributes, pricing, null);
+    }
+
+    /** Cria uma nova variação (sem id, ativa por padrão), com código de barras próprio. */
+    public static ProductVariant create(String sku, List<ProductAttribute> attributes, Pricing pricing,
+            String barcode) {
+        return new ProductVariant(null, sku, attributes, true, pricing, barcode);
     }
 
     /** Reconstitui uma variação sem preço próprio a partir de persistência. */
@@ -44,7 +50,13 @@ public record ProductVariant(Long id, String sku, List<ProductAttribute> attribu
     /** Reconstitui uma variação a partir de persistência. */
     public static ProductVariant of(Long id, String sku, List<ProductAttribute> attributes, boolean active,
             Pricing pricing) {
-        return new ProductVariant(id, sku, attributes, active, pricing);
+        return of(id, sku, attributes, active, pricing, null);
+    }
+
+    /** Reconstitui uma variação a partir de persistência, com código de barras próprio. */
+    public static ProductVariant of(Long id, String sku, List<ProductAttribute> attributes, boolean active,
+            Pricing pricing, String barcode) {
+        return new ProductVariant(id, sku, attributes, active, pricing, barcode);
     }
 
     /**
@@ -64,6 +76,26 @@ public record ProductVariant(Long id, String sku, List<ProductAttribute> attribu
 
     /** Substitui a precificação própria, preservando o resto. {@code null} volta a herdar do pai. */
     public ProductVariant withPricing(Pricing newPricing) {
-        return new ProductVariant(id, sku, attributes, active, newPricing);
+        return new ProductVariant(id, sku, attributes, active, newPricing, barcode);
+    }
+
+    /** Define o código de barras/EAN próprio da variação, preservando o resto. */
+    public ProductVariant withBarcode(String newBarcode) {
+        return new ProductVariant(id, sku, attributes, active, pricing, newBarcode);
+    }
+
+    /**
+     * Ativa/desativa a variação, preservando o resto (EST-F024). É o caminho seguro para tirar
+     * uma variação de circulação sem apagá-la: {@code stock_balance}/{@code stock_movement}
+     * referenciam o SKU como texto livre, sem FK, então excluir a linha de fato deixaria esse
+     * histórico órfão.
+     */
+    public ProductVariant withActive(boolean newActive) {
+        return new ProductVariant(id, sku, attributes, newActive, pricing, barcode);
+    }
+
+    /** Substitui os atributos da variação, preservando o resto (EST-F024). */
+    public ProductVariant withAttributes(List<ProductAttribute> newAttributes) {
+        return new ProductVariant(id, sku, newAttributes, active, pricing, barcode);
     }
 }

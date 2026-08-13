@@ -2,6 +2,8 @@ package com.cernecommerce.core.ports.out.estoque;
 
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.SortDirection;
+import com.cernecommerce.core.domain.model.estoque.CategoryProductCount;
+import com.cernecommerce.core.domain.model.estoque.EstoqueSummary;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductFilter;
 import com.cernecommerce.core.domain.model.estoque.ProductSortField;
@@ -78,7 +80,31 @@ public interface ProductRepository {
      */
     boolean isSkuActive(String sku);
 
+    /**
+     * Indica se o código de barras existe no catálogo, seja no produto pai ou em alguma variação.
+     * Mesma checagem de {@link #existsBySku(String)}, para o campo aditivo de EAN/GTIN.
+     */
+    boolean existsByBarcode(String barcode);
+
+    /**
+     * Busca o produto pai a partir do código de barras do próprio pai ou de qualquer variação —
+     * o caminho de resolução usado pelo scanner do PDV.
+     */
+    Optional<Product> findByBarcode(String barcode);
+
     Product save(Product product);
+
+    /** Quantidade de SKUs pai no catálogo, ativos ou não — ver {@link EstoqueSummary#totalProdutos}. */
+    long countProducts();
+
+    /** Quantidade de variações (SKU filho) em todo o catálogo — ver {@link EstoqueSummary#totalVariantes}. */
+    long countVariants();
+
+    /**
+     * Categoria com mais produtos vinculados, ou vazio se nenhum produto está vinculado a uma
+     * categoria — ver {@link EstoqueSummary#categoriaComMaisProdutos}.
+     */
+    Optional<CategoryProductCount> findCategoryWithMostProducts();
 
     /**
      * Atualiza em lote a coluna denormalizada {@code category} de todos os produtos vinculados a
