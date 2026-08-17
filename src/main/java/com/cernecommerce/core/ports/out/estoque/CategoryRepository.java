@@ -26,4 +26,10 @@ public interface CategoryRepository {
 
     /** Categorias ativas na ordem da vitrine: destaque primeiro, depois ordem, depois nome. */
     java.util.List<Category> findActiveOrdered();
+
+    /**
+     * Remove a categoria (Bloco 2.3). O chamador ({@code EstoqueService.deleteCategory}) já
+     * garantiu que não há produto vinculado — esta camada não repete a checagem.
+     */
+    void deleteById(Long id);
 }

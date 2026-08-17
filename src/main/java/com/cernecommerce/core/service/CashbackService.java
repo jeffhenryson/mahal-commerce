@@ -3,6 +3,7 @@ package com.cernecommerce.core.service;
 import com.cernecommerce.core.domain.exception.cashback.CashbackRateAlreadyExistsException;
 import com.cernecommerce.core.domain.exception.cashback.CashbackRateNotFoundException;
 import com.cernecommerce.core.domain.exception.crm.CustomerNotFoundException;
+import com.cernecommerce.core.domain.model.Money;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.cashback.CashbackBalance;
 import com.cernecommerce.core.domain.model.cashback.CashbackEntry;
@@ -22,7 +23,6 @@ import com.cernecommerce.core.ports.out.crm.CustomerRepository;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -38,7 +38,6 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class CashbackService implements CashbackUseCase {
 
-    private static final BigDecimal HUNDRED = BigDecimal.valueOf(100);
     private static final int MARGIN_IMPACT_PAGE_SIZE = 200;
     private static final int EXPIRING_SOON_WINDOW_DAYS = 30;
 
@@ -128,9 +127,9 @@ public class CashbackService implements CashbackUseCase {
                 }
                 BigDecimal cashbackPercent = rate.get().percent();
                 BigDecimal share = cashbackPercent
-                        .divide(marginPercent, 6, RoundingMode.HALF_UP)
-                        .multiply(HUNDRED)
-                        .setScale(2, RoundingMode.HALF_UP);
+                        .divide(marginPercent, Money.INTERMEDIATE_SCALE, Money.ROUNDING)
+                        .multiply(Money.HUNDRED)
+                        .setScale(Money.PERCENT_SCALE, Money.ROUNDING);
                 if (share.compareTo(maxSharePercent) > 0) {
                     result.add(new CashbackMarginImpactItem(product.sku(), product.name(),
                             marginPercent, cashbackPercent, share));

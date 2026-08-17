@@ -10,5 +10,6 @@ public enum NotificationType {
     ROLE_ASSIGNED,
     ROLE_REMOVED,
     ACCOUNT_DISABLED,
-    SYSTEM
+    SYSTEM,
+    ESTOQUE
 }

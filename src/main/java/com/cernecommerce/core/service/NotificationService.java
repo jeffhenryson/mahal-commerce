@@ -19,8 +19,9 @@ public class NotificationService implements NotificationUseCase {
 
     @Override
     @Transactional
-    public Notification notify(String username, NotificationType type, String title, String body) {
-        return notificationRepository.save(new Notification(null, username, type, title, body, null, Instant.now()));
+    public Notification notify(String username, NotificationType type, String title, String body, String targetUrl) {
+        return notificationRepository.save(
+                new Notification(null, username, type, title, body, targetUrl, null, Instant.now()));
     }
 
     @Override

@@ -6,7 +6,17 @@ import com.cernecommerce.core.domain.model.notification.NotificationType;
 
 public interface NotificationUseCase {
 
-    Notification notify(String username, NotificationType type, String title, String body);
+    /** Sem vínculo de navegação — equivalente a {@code notify(..., targetUrl = null)}. */
+    default Notification notify(String username, NotificationType type, String title, String body) {
+        return notify(username, type, title, body, null);
+    }
+
+    /**
+     * @param targetUrl opcional — rota do admin para onde o clique na notificação deve levar
+     *        (ex.: {@code /app/estoque/kits/KIT-INICIANTE}). {@code null} quando não há destino
+     *        natural.
+     */
+    Notification notify(String username, NotificationType type, String title, String body, String targetUrl);
 
     PageResult<Notification> getNotifications(String username, boolean unreadOnly, int page, int size);
 

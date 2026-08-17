@@ -27,4 +27,11 @@ public interface KitComponentRepository {
      * no sentido direto (checar se o componente novo é SIMPLES), nunca no inverso.
      */
     boolean isUsedAsComponent(String sku);
+
+    /**
+     * Kits que usam {@code componentSku} na receita — usado para detectar quando uma
+     * baixa/reserva torna algum kit sem estoque suficiente para ser montado (Bloco 1.2 do
+     * BACKEND_TODO de mahal-admin).
+     */
+    List<String> findKitSkusByComponentSku(String componentSku);
 }

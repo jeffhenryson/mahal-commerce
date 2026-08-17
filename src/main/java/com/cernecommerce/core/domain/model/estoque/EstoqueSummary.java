@@ -11,8 +11,10 @@ import java.math.BigDecimal;
  * @param totalProdutos quantidade de SKUs pai no catálogo, ativos ou não — KPI de tamanho do
  *        catálogo, distinto de "vendável agora".
  * @param totalVariantes quantidade de variações (SKU filho) em todo o catálogo.
- * @param valorEstoqueCusto soma de {@code quantity * costPrice efetivo} de todo saldo em todos os
- *        depósitos. Saldo sem preço conhecido contribui zero, não envenena a soma.
+ * @param valorEstoqueCusto soma de {@code quantity * custo efetivo} de todo saldo em todos os
+ *        depósitos — custo efetivo é o custo médio ponderado (EST-F007) quando existe, com
+ *        fallback para o {@code costPrice} manual do produto. Saldo sem nenhum custo conhecido
+ *        contribui zero, não envenena a soma.
  * @param alertasCriticos quantidade de pares SKU/depósito em {@link AlertSeverity#CRITICO}.
  * @param alertasAtencao quantidade de pares SKU/depósito em {@link AlertSeverity#ATENCAO}.
  * @param categoriaComMaisProdutos categoria com mais produtos vinculados, ou {@code null} se

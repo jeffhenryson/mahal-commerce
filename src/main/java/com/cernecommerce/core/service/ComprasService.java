@@ -41,11 +41,12 @@ public class ComprasService implements ComprasUseCase {
                 .orElseThrow(() -> new SupplierNotFoundException(supplierId));
 
         for (GoodsReceiptItem item : items) {
-            // Sempre a sobrecarga de 8 argumentos (EST-F008): para SKU não lote-rastreado,
-            // lotCode/expiryDate chegam nulos e o comportamento é idêntico ao overload antigo.
+            // Sempre a sobrecarga de 9 argumentos (EST-F007/EST-F008): para SKU não lote-rastreado
+            // ou sem custo conhecido, lotCode/expiryDate/unitCost chegam nulos e o comportamento é
+            // idêntico ao overload antigo.
             estoqueUseCase.adjustStock(item.sku(), warehouseCode, MovementType.ENTRADA, item.quantity(),
                     "Recebimento de mercadoria - fornecedor #" + supplierId, username,
-                    item.lotCode(), item.expiryDate());
+                    item.lotCode(), item.expiryDate(), item.unitCost());
         }
 
         GoodsReceipt receipt = GoodsReceipt.create(supplierId, warehouseCode, items, username);

@@ -9,6 +9,7 @@ import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionNotOwnedEx
 import com.cernecommerce.core.domain.exception.pdv.NoOpenCashRegisterSessionException;
 import com.cernecommerce.core.domain.exception.pedido.DiscountLimitExceededException;
 import com.cernecommerce.core.domain.exception.pedido.OrderNotFoundException;
+import com.cernecommerce.core.domain.model.Money;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.cashback.CashbackRate;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
@@ -31,14 +32,11 @@ import com.cernecommerce.core.ports.out.pedido.OrderRepository;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
 public class PdvService implements PdvUseCase {
-
-    private static final BigDecimal HUNDRED = BigDecimal.valueOf(100);
 
     private final CashRegisterRepository cashRegisterRepository;
     private final CashMovementRepository cashMovementRepository;
@@ -307,9 +305,9 @@ public class PdvService implements PdvUseCase {
             return;
         }
         BigDecimal percent = order.discountAmount()
-                .divide(order.grossAmount(), 6, RoundingMode.HALF_UP)
-                .multiply(HUNDRED)
-                .setScale(2, RoundingMode.HALF_UP);
+                .divide(order.grossAmount(), Money.INTERMEDIATE_SCALE, Money.ROUNDING)
+                .multiply(Money.HUNDRED)
+                .setScale(Money.PERCENT_SCALE, Money.ROUNDING);
         if (percent.compareTo(maxDiscountPercent) > 0) {
             throw new DiscountLimitExceededException(percent, maxDiscountPercent);
         }

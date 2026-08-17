@@ -1,7 +1,8 @@
 package com.cernecommerce.core.domain.model.estoque;
 
+import com.cernecommerce.core.domain.model.Money;
+
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 
 /**
  * Precificação de um {@link Product} (EST-F019): custo de aquisição, markup desejado e preço
@@ -48,14 +49,6 @@ import java.math.RoundingMode;
  */
 public record Pricing(BigDecimal costPrice, BigDecimal markupPercent, BigDecimal salePrice,
         BigDecimal originalPrice, BigDecimal causeAmount) {
-
-    /** Casas decimais de valores monetários — alinhado com {@code NUMERIC(14,2)} no schema. */
-    private static final int MONEY_SCALE = 2;
-
-    /** Casas decimais dos percentuais derivados. Exibição, não armazenamento. */
-    private static final int PERCENT_SCALE = 2;
-
-    private static final BigDecimal HUNDRED = BigDecimal.valueOf(100);
 
     private static final Pricing EMPTY = new Pricing(null, null, null, null, null);
 
@@ -115,8 +108,9 @@ public record Pricing(BigDecimal costPrice, BigDecimal markupPercent, BigDecimal
         if (costPrice == null || markupPercent == null) {
             return null;
         }
-        BigDecimal multiplier = BigDecimal.ONE.add(markupPercent.divide(HUNDRED, 6, RoundingMode.HALF_UP));
-        return costPrice.multiply(multiplier).setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+        BigDecimal multiplier = BigDecimal.ONE.add(
+                markupPercent.divide(Money.HUNDRED, Money.INTERMEDIATE_SCALE, Money.ROUNDING));
+        return costPrice.multiply(multiplier).setScale(Money.MONEY_SCALE, Money.ROUNDING);
     }
 
     /**
@@ -158,7 +152,7 @@ public record Pricing(BigDecimal costPrice, BigDecimal markupPercent, BigDecimal
         if (costPrice == null || price == null) {
             return null;
         }
-        return price.subtract(costPrice).setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+        return price.subtract(costPrice).setScale(Money.MONEY_SCALE, Money.ROUNDING);
     }
 
     /**
@@ -175,9 +169,9 @@ public record Pricing(BigDecimal costPrice, BigDecimal markupPercent, BigDecimal
             return null;
         }
         return price.subtract(costPrice)
-                .divide(price, 6, RoundingMode.HALF_UP)
-                .multiply(HUNDRED)
-                .setScale(PERCENT_SCALE, RoundingMode.HALF_UP);
+                .divide(price, Money.INTERMEDIATE_SCALE, Money.ROUNDING)
+                .multiply(Money.HUNDRED)
+                .setScale(Money.PERCENT_SCALE, Money.ROUNDING);
     }
 
     /**
@@ -195,9 +189,9 @@ public record Pricing(BigDecimal costPrice, BigDecimal markupPercent, BigDecimal
             return null;
         }
         return price.subtract(costPrice)
-                .divide(costPrice, 6, RoundingMode.HALF_UP)
-                .multiply(HUNDRED)
-                .setScale(PERCENT_SCALE, RoundingMode.HALF_UP);
+                .divide(costPrice, Money.INTERMEDIATE_SCALE, Money.ROUNDING)
+                .multiply(Money.HUNDRED)
+                .setScale(Money.PERCENT_SCALE, Money.ROUNDING);
     }
 
     /**
@@ -234,9 +228,9 @@ public record Pricing(BigDecimal costPrice, BigDecimal markupPercent, BigDecimal
         }
         BigDecimal price = effectivePrice();
         return originalPrice.subtract(price)
-                .divide(originalPrice, 6, RoundingMode.HALF_UP)
-                .multiply(HUNDRED)
-                .setScale(PERCENT_SCALE, RoundingMode.HALF_UP);
+                .divide(originalPrice, Money.INTERMEDIATE_SCALE, Money.ROUNDING)
+                .multiply(Money.HUNDRED)
+                .setScale(Money.PERCENT_SCALE, Money.ROUNDING);
     }
 
     /**

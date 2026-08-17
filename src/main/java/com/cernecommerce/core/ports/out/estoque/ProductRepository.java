@@ -2,12 +2,16 @@ package com.cernecommerce.core.ports.out.estoque;
 
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.SortDirection;
+import com.cernecommerce.core.domain.model.estoque.BrandSummary;
 import com.cernecommerce.core.domain.model.estoque.CategoryProductCount;
 import com.cernecommerce.core.domain.model.estoque.EstoqueSummary;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductFilter;
 import com.cernecommerce.core.domain.model.estoque.ProductSortField;
+import com.cernecommerce.core.domain.model.estoque.ProductType;
 
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -117,4 +121,27 @@ public interface ProductRepository {
      * @return quantidade de produtos atualizados
      */
     int renameCategory(Long categoryId, String newName);
+
+    /**
+     * Todos os produtos de um tipo, sem paginação (Bloco 1.1) — usado para disponibilidade de
+     * kits: o catálogo de kits é um subconjunto pequeno do catálogo geral, então carregar todos
+     * de uma vez e paginar/filtrar em memória é seguro e evita ter que tornar
+     * {@code buildableQuantity} (calculado, não uma coluna) SQL-friendly.
+     */
+    List<Product> findAllByType(ProductType type);
+
+    /**
+     * Contagem de produtos por categoria, para todos os ids informados, numa única consulta
+     * (Bloco 2.1). Categoria sem produto vinculado não aparece no mapa (contagem zero, implícita).
+     */
+    Map<Long, Long> countProductsByCategoryIds(List<Long> categoryIds);
+
+    /** Quantos produtos estão vinculados a uma categoria — usado para bloquear DELETE (Bloco 2.3). */
+    long countByCategoryId(Long categoryId);
+
+    /**
+     * Marcas em uso no catálogo, paginadas, agregadas do campo texto livre {@code brand}
+     * (Bloco 2.2). {@code search} filtra por substring, sem diferenciar maiúsculas.
+     */
+    PageResult<BrandSummary> findBrands(String search, int page, int size);
 }

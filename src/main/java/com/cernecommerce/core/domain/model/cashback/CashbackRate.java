@@ -1,5 +1,7 @@
 package com.cernecommerce.core.domain.model.cashback;
 
+import com.cernecommerce.core.domain.model.Money;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 
@@ -15,8 +17,6 @@ import java.time.Instant;
 public record CashbackRate(Long id, CashbackScope scope, String scopeRef, BigDecimal percent,
         boolean active, Instant validFrom, Instant validTo, Instant createdAt) {
 
-    private static final BigDecimal HUNDRED = BigDecimal.valueOf(100);
-
     public CashbackRate {
         if (scope == null) {
             throw new IllegalArgumentException("scope é obrigatório");
@@ -28,7 +28,7 @@ public record CashbackRate(Long id, CashbackScope scope, String scopeRef, BigDec
         if (scope != CashbackScope.GLOBAL && !hasScopeRef) {
             throw new IllegalArgumentException("scope " + scope + " exige scopeRef");
         }
-        if (percent == null || percent.signum() < 0 || percent.compareTo(HUNDRED) > 0) {
+        if (percent == null || percent.signum() < 0 || percent.compareTo(Money.HUNDRED) > 0) {
             throw new IllegalArgumentException("percent deve estar entre 0 e 100");
         }
         if (validFrom == null) {

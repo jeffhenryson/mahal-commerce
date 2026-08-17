@@ -1,10 +1,10 @@
 package com.cernecommerce.core.domain.model.pedido;
 
 import com.cernecommerce.core.domain.exception.pedido.ProductNotPricedException;
+import com.cernecommerce.core.domain.model.Money;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 
 /**
  * Item de um {@link Order} (PDV-F004): o que foi vendido, por quanto, quanto custou e qual taxa de
@@ -43,11 +43,6 @@ public record OrderItem(
         BigDecimal discountAmount,
         BigDecimal cashbackPercent) {
 
-    /** Casas decimais de valores monetários — alinhado com {@code NUMERIC(14,2)} no schema. */
-    private static final int MONEY_SCALE = 2;
-
-    private static final BigDecimal HUNDRED = BigDecimal.valueOf(100);
-
     public OrderItem {
         if (sku == null || sku.isBlank()) {
             throw new IllegalArgumentException("sku é obrigatório");
@@ -70,7 +65,7 @@ public record OrderItem(
                     "discountAmount não pode ser maior que o bruto do item: desconto que zera o item é devolução, não venda");
         }
         if (cashbackPercent != null
-                && (cashbackPercent.signum() < 0 || cashbackPercent.compareTo(HUNDRED) > 0)) {
+                && (cashbackPercent.signum() < 0 || cashbackPercent.compareTo(Money.HUNDRED) > 0)) {
             throw new IllegalArgumentException("cashbackPercent deve estar entre 0 e 100");
         }
     }
@@ -119,7 +114,7 @@ public record OrderItem(
      * @return {@code null} para item legado sem preço congelado.
      */
     public BigDecimal grossAmount() {
-        return unitPrice == null ? null : quantity.multiply(unitPrice).setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+        return unitPrice == null ? null : quantity.multiply(unitPrice).setScale(Money.MONEY_SCALE, Money.ROUNDING);
     }
 
     /**
@@ -145,7 +140,7 @@ public record OrderItem(
             return null;
         }
         return net.multiply(cashbackPercent)
-                .divide(HUNDRED, MONEY_SCALE, RoundingMode.HALF_UP);
+                .divide(Money.HUNDRED, Money.MONEY_SCALE, Money.ROUNDING);
     }
 
     /**
@@ -160,6 +155,6 @@ public record OrderItem(
         if (net == null || costPrice == null) {
             return null;
         }
-        return net.subtract(quantity.multiply(costPrice)).setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+        return net.subtract(quantity.multiply(costPrice)).setScale(Money.MONEY_SCALE, Money.ROUNDING);
     }
 }

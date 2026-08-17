@@ -2,6 +2,7 @@ package com.cernecommerce.core.domain.model.estoque;
 
 import com.cernecommerce.core.domain.exception.estoque.InsufficientStockException;
 import com.cernecommerce.core.domain.exception.estoque.ReservedStockException;
+import com.cernecommerce.core.domain.model.Money;
 
 import java.math.BigDecimal;
 
@@ -20,9 +21,18 @@ import java.math.BigDecimal;
  * saldo, e não numa soma sobre a tabela de reservas. É isso que faz duas reservas concorrentes do
  * mesmo SKU disputarem a mesma linha e uma delas levar 409 — exatamente como duas movimentações
  * concorrentes já se comportam. Uma agregação à parte não travaria nada.</p>
+ *
+ * <h2>Custo médio ponderado (EST-F007)</h2>
+ * <p>{@link #averageCost} é métrica de valorização de estoque, distinta de
+ * {@code Pricing.costPrice} (o input manual do lojista, usado em tempo real pelo PDV). É
+ * recalculado só em {@code ENTRADA} quando a movimentação informa {@code unitCost} — a fórmula do
+ * custo médio ponderado móvel mora em {@link #apply(MovementType, BigDecimal, BigDecimal)}.
+ * {@code null} até a primeira entrada com custo conhecido, e volta a {@code null} quando o saldo
+ * chega a zero: sem estoque, custo é "desconhecido" de novo, mesma convenção de ausência-não-é-zero
+ * já usada em {@code Pricing}.</p>
  */
 public record StockBalance(Long id, String sku, Long warehouseId, BigDecimal quantity,
-        BigDecimal reservedQuantity, long version) {
+        BigDecimal reservedQuantity, BigDecimal averageCost, long version) {
 
     public StockBalance {
         if (sku == null || sku.isBlank()) {
@@ -46,19 +56,21 @@ public record StockBalance(Long id, String sku, Long warehouseId, BigDecimal qua
 
     /** Saldo inicial (zero) de um SKU em um depósito, quando ainda não houve nenhuma movimentação. */
     public static StockBalance zero(String sku, Long warehouseId) {
-        return new StockBalance(null, sku, warehouseId, BigDecimal.ZERO, BigDecimal.ZERO, 0L);
+        return new StockBalance(null, sku, warehouseId, BigDecimal.ZERO, BigDecimal.ZERO, null, 0L);
     }
 
     /**
      * Saldo DERIVADO de um kit virtual (EST-F015): nunca corresponde a uma linha real de
      * {@code stock_balance} — {@code id} nulo e {@code version} zero são placeholders
      * estruturais, nunca persistidos. {@code reservedQuantity} é sempre zero: reserva de kit não
-     * existe nesta fatia. Existe como fábrica própria (em vez de reaproveitar {@link #zero}) só
-     * para deixar explícito, no call site de {@code EstoqueService}, que aquele saldo é calculado
-     * na hora, não lido do banco.
+     * existe nesta fatia. {@code averageCost} também é sempre nulo: kit não tem linha própria de
+     * saldo, então não acumula custo médio — o custo do kit continua derivado da soma dos
+     * componentes em {@code EstoqueService.derivedKitPricing}. Existe como fábrica própria (em vez
+     * de reaproveitar {@link #zero}) só para deixar explícito, no call site de
+     * {@code EstoqueService}, que aquele saldo é calculado na hora, não lido do banco.
      */
     public static StockBalance derived(String sku, Long warehouseId, BigDecimal quantity) {
-        return new StockBalance(null, sku, warehouseId, quantity, BigDecimal.ZERO, 0L);
+        return new StockBalance(null, sku, warehouseId, quantity, BigDecimal.ZERO, null, 0L);
     }
 
     /**
@@ -66,13 +78,19 @@ public record StockBalance(Long id, String sku, Long warehouseId, BigDecimal qua
      * para os chamadores anteriores a EST-F021 — equivale a {@code reservedQuantity = 0}.
      */
     public static StockBalance of(Long id, String sku, Long warehouseId, BigDecimal quantity, long version) {
-        return new StockBalance(id, sku, warehouseId, quantity, BigDecimal.ZERO, version);
+        return new StockBalance(id, sku, warehouseId, quantity, BigDecimal.ZERO, null, version);
     }
 
-    /** Reconstitui um saldo a partir de persistência. */
+    /** Reconstitui um saldo a partir de persistência, sem custo médio — chamadores anteriores a EST-F007. */
     public static StockBalance of(Long id, String sku, Long warehouseId, BigDecimal quantity,
             BigDecimal reservedQuantity, long version) {
-        return new StockBalance(id, sku, warehouseId, quantity, reservedQuantity, version);
+        return new StockBalance(id, sku, warehouseId, quantity, reservedQuantity, null, version);
+    }
+
+    /** Reconstitui um saldo a partir de persistência, com custo médio ponderado (EST-F007). */
+    public static StockBalance of(Long id, String sku, Long warehouseId, BigDecimal quantity,
+            BigDecimal reservedQuantity, BigDecimal averageCost, long version) {
+        return new StockBalance(id, sku, warehouseId, quantity, reservedQuantity, averageCost, version);
     }
 
     /**
@@ -84,10 +102,23 @@ public record StockBalance(Long id, String sku, Long warehouseId, BigDecimal qua
     }
 
     /**
+     * Aplica uma movimentação sem custo de entrada — ver
+     * {@link #apply(MovementType, BigDecimal, BigDecimal)}. Equivale a {@code unitCost = null}:
+     * {@code averageCost} propaga sem mudar (exceto o reset a zero, ver abaixo).
+     */
+    public StockBalance apply(MovementType type, BigDecimal movementQuantity) {
+        return apply(type, movementQuantity, null);
+    }
+
+    /**
      * Aplica uma movimentação e retorna o saldo resultante.
      *
      * <ul>
-     *   <li>{@code ENTRADA} — soma {@code movementQuantity} ao saldo.</li>
+     *   <li>{@code ENTRADA} — soma {@code movementQuantity} ao saldo. Se {@code unitCost} vier
+     *       informado, recalcula {@link #averageCost} pelo custo médio ponderado móvel
+     *       (EST-F007): {@code (saldoAtual × custoAtual_ou_0 + qtdEntrada × unitCost) /
+     *       (saldoAtual + qtdEntrada)}. {@code unitCost} nulo não é erro — só não atualiza o
+     *       custo médio daquela vez (ex.: entrada sem custo conhecido).</li>
      *   <li>{@code SAIDA} — subtrai, validando contra o <b>disponível</b>. Lança
      *       {@link InsufficientStockException} se nem o físico bastaria, ou
      *       {@link ReservedStockException} se o físico bastaria mas parte dele está reservada.
@@ -104,8 +135,15 @@ public record StockBalance(Long id, String sku, Long warehouseId, BigDecimal qua
      *
      * <p>A distinção entre as duas exceções de saída importa para quem está no balcão: "não tem" e
      * "tem, mas está separado para um pedido online" pedem ações diferentes.</p>
+     *
+     * <p>{@code SAIDA}/{@code AJUSTE} nunca recalculam {@code averageCost} — só propagam o valor
+     * atual, exceto quando o saldo resultante chega a zero, caso em que ele volta a {@code null}
+     * (sem estoque, custo é "desconhecido" de novo). Validar que {@code unitCost} só chega aqui em
+     * {@code ENTRADA} é responsabilidade de quem chama (mesma régua de lote em
+     * {@code EstoqueService.validateLotInfo}) — este método não rejeita, apenas ignora o parâmetro
+     * fora do ramo {@code ENTRADA}.</p>
      */
-    public StockBalance apply(MovementType type, BigDecimal movementQuantity) {
+    public StockBalance apply(MovementType type, BigDecimal movementQuantity, BigDecimal unitCost) {
         if (type == MovementType.AJUSTE) {
             if (movementQuantity == null || movementQuantity.signum() < 0) {
                 throw new IllegalArgumentException("quantidade de AJUSTE não pode ser negativa");
@@ -113,7 +151,9 @@ public record StockBalance(Long id, String sku, Long warehouseId, BigDecimal qua
             if (movementQuantity.compareTo(reservedQuantity) < 0) {
                 throw new ReservedStockException(sku, warehouseId, quantity, reservedQuantity, movementQuantity);
             }
-            return new StockBalance(id, sku, warehouseId, movementQuantity, reservedQuantity, version);
+            BigDecimal newAverageCost = movementQuantity.signum() == 0 ? null : averageCost;
+            return new StockBalance(id, sku, warehouseId, movementQuantity, reservedQuantity, newAverageCost,
+                    version);
         }
         if (type == MovementType.SAIDA) {
             BigDecimal remainingPhysical = quantity.subtract(movementQuantity);
@@ -125,9 +165,25 @@ public record StockBalance(Long id, String sku, Long warehouseId, BigDecimal qua
             if (remainingPhysical.compareTo(reservedQuantity) < 0) {
                 throw new ReservedStockException(sku, warehouseId, quantity, reservedQuantity, movementQuantity);
             }
-            return new StockBalance(id, sku, warehouseId, remainingPhysical, reservedQuantity, version);
+            BigDecimal newAverageCost = remainingPhysical.signum() == 0 ? null : averageCost;
+            return new StockBalance(id, sku, warehouseId, remainingPhysical, reservedQuantity, newAverageCost,
+                    version);
         }
-        return new StockBalance(id, sku, warehouseId, quantity.add(movementQuantity), reservedQuantity, version);
+        BigDecimal newQuantity = quantity.add(movementQuantity);
+        BigDecimal newAverageCost = unitCost == null ? averageCost
+                : recalculateAverageCost(newQuantity, movementQuantity, unitCost);
+        return new StockBalance(id, sku, warehouseId, newQuantity, reservedQuantity, newAverageCost, version);
+    }
+
+    /** Custo médio ponderado móvel (EST-F007) — só chamado do ramo ENTRADA de {@link #apply}. */
+    private BigDecimal recalculateAverageCost(BigDecimal newQuantity, BigDecimal entryQuantity,
+            BigDecimal unitCost) {
+        BigDecimal currentCost = averageCost == null ? BigDecimal.ZERO : averageCost;
+        BigDecimal totalValueBefore = quantity.multiply(currentCost);
+        BigDecimal totalValueEntry = entryQuantity.multiply(unitCost);
+        return totalValueBefore.add(totalValueEntry)
+                .divide(newQuantity, Money.INTERMEDIATE_SCALE, Money.ROUNDING)
+                .setScale(Money.MONEY_SCALE, Money.ROUNDING);
     }
 
     /**
@@ -144,7 +200,8 @@ public record StockBalance(Long id, String sku, Long warehouseId, BigDecimal qua
         if (reserveQuantity.compareTo(availableQuantity()) > 0) {
             throw new InsufficientStockException(sku, warehouseId, availableQuantity(), reserveQuantity);
         }
-        return new StockBalance(id, sku, warehouseId, quantity, reservedQuantity.add(reserveQuantity), version);
+        return new StockBalance(id, sku, warehouseId, quantity, reservedQuantity.add(reserveQuantity),
+                averageCost, version);
     }
 
     /**
@@ -152,12 +209,14 @@ public record StockBalance(Long id, String sku, Long warehouseId, BigDecimal qua
      * ou venceu, e a mercadoria nunca saiu.
      */
     public StockBalance releaseReservation(BigDecimal releaseQuantity) {
-        return new StockBalance(id, sku, warehouseId, quantity, subtractReserved(releaseQuantity), version);
+        return new StockBalance(id, sku, warehouseId, quantity, subtractReserved(releaseQuantity),
+                averageCost, version);
     }
 
     /**
      * Converte a reserva em saída de verdade: o físico e o reservado caem <b>juntos</b>, e o
-     * disponível não se mexe — ele já estava descontado desde a reserva.
+     * disponível não se mexe — ele já estava descontado desde a reserva. Mesma regra de
+     * {@code averageCost} de {@link #apply}: propaga, exceto se o saldo resultante zera.
      */
     public StockBalance consumeReservation(BigDecimal consumeQuantity) {
         BigDecimal newReserved = subtractReserved(consumeQuantity);
@@ -165,7 +224,8 @@ public record StockBalance(Long id, String sku, Long warehouseId, BigDecimal qua
         if (newQuantity.signum() < 0) {
             throw new InsufficientStockException(sku, warehouseId, quantity, consumeQuantity);
         }
-        return new StockBalance(id, sku, warehouseId, newQuantity, newReserved, version);
+        BigDecimal newAverageCost = newQuantity.signum() == 0 ? null : averageCost;
+        return new StockBalance(id, sku, warehouseId, newQuantity, newReserved, newAverageCost, version);
     }
 
     private BigDecimal subtractReserved(BigDecimal amount) {

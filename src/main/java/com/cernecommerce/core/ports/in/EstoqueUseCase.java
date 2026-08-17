@@ -1,9 +1,12 @@
 package com.cernecommerce.core.ports.in;
 
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.estoque.BrandSummary;
 import com.cernecommerce.core.domain.model.estoque.Category;
 import com.cernecommerce.core.domain.model.estoque.EstoqueSummary;
+import com.cernecommerce.core.domain.model.estoque.KitAvailability;
 import com.cernecommerce.core.domain.model.estoque.KitComponent;
+import com.cernecommerce.core.domain.model.estoque.KitComponentDetail;
 import com.cernecommerce.core.domain.model.estoque.LotIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.MeasurementUnit;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
@@ -31,6 +34,7 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -132,9 +136,25 @@ public interface EstoqueUseCase {
     }
 
     /**
+     * Forma canônica completa anterior à criação atômica de kit (Bloco 3.1) — delega com
+     * {@code kitComponents = null}, ou seja, kit nasce sem receita (precisa de
+     * {@code PUT .../kit} depois), exatamente como já funcionava.
+     */
+    default Product createProduct(String sku, String name, String category, List<ProductVariant> variants,
+            Pricing pricing, String brand, String imageUrl, boolean onSale, boolean superPromo, String description,
+            String videoUrl, List<String> images, List<ProductAttribute> attributes, Long categoryId, String barcode,
+            MeasurementUnit unit, boolean sampleProduct, boolean kitComponentEligible, Boolean visibleInPos,
+            Boolean visibleInMarketplace, ProductType type, InitialStockCommand initialStock, String actorUsername) {
+        return createProduct(sku, name, category, variants, pricing, brand, imageUrl, onSale, superPromo, description,
+                videoUrl, images, attributes, categoryId, barcode, unit, sampleProduct, kitComponentEligible,
+                visibleInPos, visibleInMarketplace, type, initialStock, actorUsername, null);
+    }
+
+    /**
      * Cria um produto (forma canônica completa), incluindo os campos aditivos de catálogo
-     * (EST-F0xx), o tipo explícito e a entrada de estoque inicial atômica (EST-F023). Único
-     * método abstrato de criação — todas as sobrecargas acima delegam até aqui.
+     * (EST-F0xx), o tipo explícito, a entrada de estoque inicial atômica (EST-F023) e a receita de
+     * kit opcional (Bloco 3.1). Único método abstrato de criação — todas as sobrecargas acima
+     * delegam até aqui.
      *
      * @param visibleInPos {@code null} resolve para {@code true} (visível por padrão) — ver
      *        {@code EstoqueService.createProduct}.
@@ -148,6 +168,11 @@ public interface EstoqueUseCase {
      *        nasce sem nenhum saldo).
      * @param actorUsername usuário autenticado, gravado como {@code username} da movimentação
      *        quando {@code initialStock} é informado. Ignorado quando {@code initialStock} é nulo.
+     * @param kitComponents receita do kit, opcional, só considerada quando {@code type == KIT}.
+     *        Ausente ou vazia preserva o comportamento anterior (kit nasce sem receita). Presente
+     *        e não vazia é validada com as mesmas regras de {@link #defineKitRecipe} e persistida
+     *        na MESMA transação da criação — fecha a janela de "kit órfão sem receita" do fluxo
+     *        POST-depois-PUT.
      * @throws com.cernecommerce.core.domain.exception.estoque.CategoryNotFoundException se
      *         {@code categoryId} for informado e não existir.
      * @throws com.cernecommerce.core.domain.exception.estoque.DuplicateBarcodeException se
@@ -161,7 +186,8 @@ public interface EstoqueUseCase {
             String brand, String imageUrl, boolean onSale, boolean superPromo, String description, String videoUrl,
             List<String> images, List<ProductAttribute> attributes, Long categoryId, String barcode,
             MeasurementUnit unit, boolean sampleProduct, boolean kitComponentEligible, Boolean visibleInPos,
-            Boolean visibleInMarketplace, ProductType type, InitialStockCommand initialStock, String actorUsername);
+            Boolean visibleInMarketplace, ProductType type, InitialStockCommand initialStock, String actorUsername,
+            List<KitComponentCommand> kitComponents);
 
     /**
      * Estoque inicial informado na criação do produto (EST-F023). {@code quantity} estritamente
@@ -376,6 +402,32 @@ public interface EstoqueUseCase {
     List<Category> listActiveCategories();
 
     /**
+     * Quantos produtos estão vinculados a cada categoria da lista, numa única consulta agregada
+     * (Bloco 2.1 do BACKEND_TODO de mahal-admin) — evita N+1 ao montar {@code productCount} por
+     * página de {@code GET /estoque/categories}. Categoria sem produto vinculado simplesmente não
+     * aparece no mapa retornado (contagem zero, implícita).
+     */
+    Map<Long, Long> countProductsByCategoryIds(List<Long> categoryIds);
+
+    /**
+     * Remove uma categoria (Bloco 2.3). Bloqueada com
+     * {@link com.cernecommerce.core.domain.exception.estoque.CategoryHasProductsException} se
+     * houver produto vinculado — apagar deixaria {@code product.category_id} órfão contra a FK
+     * sem {@code ON DELETE}.
+     *
+     * @throws com.cernecommerce.core.domain.exception.estoque.CategoryNotFoundException se o id
+     *         não existir.
+     */
+    void deleteCategory(Long id);
+
+    /**
+     * Marcas em uso no catálogo, agregadas a partir do campo texto livre {@code Product.brand}
+     * (Bloco 2.2) — não existe entidade {@code Brand} própria; ver decisão registrada no plano.
+     * {@code search} filtra por prefixo/substring, sem diferenciar maiúsculas.
+     */
+    PageResult<BrandSummary> listBrands(String search, int page, int size);
+
+    /**
      * Resolve a precificação vigente de <b>qualquer</b> SKU do catálogo — pai ou variação
      * (EST-F019). Variação herda o preço do pai. É a consulta que o PDV e a vitrine usam antes
      * de montar o item de venda.
@@ -538,6 +590,21 @@ public interface EstoqueUseCase {
      */
     StockBalance adjustStock(String sku, String warehouseCode, MovementType type, BigDecimal quantity,
             String reason, String username, String lotCode, LocalDate expiryDate);
+
+    /**
+     * Mesmo que {@link #adjustStock(String, String, MovementType, BigDecimal, String, String, String, LocalDate)},
+     * com custo unitário de entrada explícito (EST-F007) — alimenta o recálculo do custo médio
+     * ponderado ({@link StockBalance#averageCost()}) do par SKU/depósito.
+     *
+     * @param unitCost custo unitário da entrada, opcional mesmo em {@code ENTRADA} — nem toda
+     *        entrada tem custo conhecido no momento (ex.: balanço de inventário nunca tem). Ausência
+     *        não é erro, só não atualiza o custo médio daquela vez.
+     * @throws com.cernecommerce.core.domain.exception.estoque.UnexpectedUnitCostException se
+     *         {@code unitCost} vier preenchido para um tipo diferente de {@code ENTRADA}, ou para um
+     *         SKU que é kit (kit não tem saldo próprio, não acumula custo médio)
+     */
+    StockBalance adjustStock(String sku, String warehouseCode, MovementType type, BigDecimal quantity,
+            String reason, String username, String lotCode, LocalDate expiryDate, BigDecimal unitCost);
 
     /**
      * Lista os lotes de um SKU num depósito (EST-F008), do que vence primeiro em diante. Lista
@@ -830,6 +897,8 @@ public interface EstoqueUseCase {
      *         o mesmo {@code componentSku} aparecer mais de uma vez na lista
      * @throws com.cernecommerce.core.domain.exception.estoque.KitComponentNotSimpleException se
      *         algum componente não for {@code SIMPLES}
+     * @throws com.cernecommerce.core.domain.exception.estoque.KitComponentInactiveException se
+     *         algum componente estiver com {@code active = false}
      */
     Product defineKitRecipe(String kitSku, List<KitComponentCommand> components);
 
@@ -840,4 +909,38 @@ public interface EstoqueUseCase {
      *         não existir no catálogo
      */
     List<KitComponent> getKitRecipe(String kitSku);
+
+    /**
+     * Mesma receita de {@link #getKitRecipe}, enriquecida com dados de catálogo de cada componente
+     * (nome, imagem, preço de venda, se está ativo) — para a tela de edição de receita não
+     * precisar de N chamadas extras nem de {@code warehouseCode} (para dados de saldo, ver
+     * {@link #getKitAvailability}).
+     *
+     * @throws com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException se o SKU
+     *         não existir no catálogo
+     */
+    List<KitComponentDetail> getKitRecipeDetailed(String kitSku);
+
+    /**
+     * Remove a receita de um kit e rebaixa o produto para {@code SIMPLES} (Bloco 3.2) — decisão
+     * consciente: kit sem receita fica inutilizável em qualquer venda
+     * ({@code EmptyKitRecipeException}), então "esvaziar" e "deixar de ser kit" são a mesma
+     * operação neste domínio. Idempotente: chamar num produto que já é {@code SIMPLES} não faz
+     * nada e devolve o produto como está.
+     *
+     * @throws com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException se o SKU
+     *         não existir no catálogo
+     */
+    Product clearKitRecipe(String kitSku);
+
+    /**
+     * Disponibilidade de montagem de todos os kits de um depósito — resolve no servidor o que o
+     * frontend hoje deriva com {@code N+1} chamadas (catálogo de kits + catálogo de componentes +
+     * saldos + uma consulta de receita por kit). {@code blocked} filtra só os kits travados
+     * ({@code buildableQuantity == 0}) quando informado.
+     *
+     * @throws com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException se
+     *         {@code warehouseCode} não existir
+     */
+    PageResult<KitAvailability> getKitAvailability(String warehouseCode, Boolean blocked, int page, int size);
 }
