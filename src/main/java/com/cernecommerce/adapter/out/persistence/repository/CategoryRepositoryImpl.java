@@ -62,6 +62,11 @@ public class CategoryRepositoryImpl implements CategoryRepository {
                 .toList();
     }
 
+    @Override
+    public void deleteById(Long id) {
+        jpaRepository.deleteById(id);
+    }
+
     private Category toDomain(ProductCategoryEntity e) {
         return Category.of(e.getId(), e.getName(), e.isFeatured(), e.getDisplayOrder(), e.isActive());
     }

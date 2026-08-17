@@ -37,4 +37,8 @@ public class GoodsReceiptItemEntity {
 
     @Column(name = "expiry_date")
     private LocalDate expiryDate;
+
+    /** Custo unitário informado no recebimento (EST-F007), opcional. */
+    @Column(name = "unit_cost", precision = 14, scale = 2)
+    private BigDecimal unitCost;
 }

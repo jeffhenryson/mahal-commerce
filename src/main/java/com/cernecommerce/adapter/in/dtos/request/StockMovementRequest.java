@@ -48,4 +48,12 @@ public class StockMovementRequest {
 
     /** Validade do lote recebido — ver {@link #lotCode}. */
     private LocalDate expiryDate;
+
+    /**
+     * Custo unitário da entrada (EST-F007), opcional mesmo em {@code ENTRADA} — nem toda entrada
+     * tem custo conhecido no momento (ex.: balanço de inventário nunca tem). Alimenta o recálculo
+     * do custo médio ponderado do SKU. Rejeitado em {@code SAIDA}/{@code AJUSTE}.
+     */
+    @DecimalMin(value = "0.0", inclusive = false)
+    private BigDecimal unitCost;
 }

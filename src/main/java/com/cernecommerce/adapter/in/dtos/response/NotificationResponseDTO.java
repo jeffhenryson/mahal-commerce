@@ -10,11 +10,12 @@ public record NotificationResponseDTO(
         String body,
         boolean read,
         Instant readAt,
-        Instant createdAt
+        Instant createdAt,
+        String targetUrl
 ) {
     public static NotificationResponseDTO from(Notification n) {
         return new NotificationResponseDTO(
                 n.id(), n.type().name(), n.title(), n.body(),
-                n.isRead(), n.readAt(), n.createdAt());
+                n.isRead(), n.readAt(), n.createdAt(), n.targetUrl());
     }
 }

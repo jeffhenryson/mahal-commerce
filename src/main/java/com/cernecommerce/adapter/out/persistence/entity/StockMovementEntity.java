@@ -43,4 +43,8 @@ public class StockMovementEntity {
 
     @Column(name = "lot_code", length = 50)
     private String lotCode;
+
+    /** Custo unitário da entrada (EST-F007), opcional. {@code null} em SAIDA/AJUSTE. */
+    @Column(name = "unit_cost", precision = 14, scale = 2)
+    private BigDecimal unitCost;
 }

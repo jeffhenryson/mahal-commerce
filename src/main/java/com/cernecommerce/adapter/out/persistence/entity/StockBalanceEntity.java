@@ -37,6 +37,13 @@ public class StockBalanceEntity {
     @Column(name = "reserved_quantity", nullable = false, precision = 14, scale = 3)
     private BigDecimal reservedQuantity;
 
+    /**
+     * Custo médio ponderado móvel (EST-F007), recalculado a cada ENTRADA com custo informado.
+     * {@code null} = nunca recebeu entrada com custo conhecido — distinto de zero.
+     */
+    @Column(name = "average_cost", precision = 14, scale = 2)
+    private BigDecimal averageCost;
+
     @Version
     @Column(nullable = false)
     private long version;

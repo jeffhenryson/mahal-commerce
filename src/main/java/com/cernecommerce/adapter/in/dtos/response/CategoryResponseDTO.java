@@ -14,4 +14,7 @@ public class CategoryResponseDTO {
     private int displayOrder;
 
     private boolean active;
+
+    /** Produtos vinculados a esta categoria (Bloco 2.1) — evita a varredura de catálogo no admin. */
+    private long productCount;
 }

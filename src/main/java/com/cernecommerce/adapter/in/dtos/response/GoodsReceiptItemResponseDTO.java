@@ -11,4 +11,5 @@ public class GoodsReceiptItemResponseDTO {
     private BigDecimal quantity;
     private String lotCode;
     private LocalDate expiryDate;
+    private BigDecimal unitCost;
 }

@@ -1,5 +1,6 @@
 package com.cernecommerce.adapter.out.persistence.repository;
 
+import com.cernecommerce.core.domain.model.Money;
 import com.cernecommerce.core.domain.model.pedido.OrderStatus;
 import com.cernecommerce.core.domain.model.pedido.OrderSummary;
 import com.cernecommerce.core.domain.model.pedido.SalesChannel;
@@ -51,7 +52,7 @@ public class OrderReportRepositoryImpl implements OrderReportRepository {
                 .findRevenueTotals(channelName, statusName, customerId, from, to);
         BigDecimal averageTicket = totals.getOrderCount() == 0 ? BigDecimal.ZERO
                 : totals.getTotalRevenueNet()
-                        .divide(BigDecimal.valueOf(totals.getOrderCount()), 2, RoundingMode.HALF_UP);
+                        .divide(BigDecimal.valueOf(totals.getOrderCount()), Money.MONEY_SCALE, Money.ROUNDING);
 
         Map<SalesChannel, BigDecimal> revenueByChannel = orderJpaRepository
                 .findRevenueByChannel(channelName, statusName, customerId, from, to).stream()

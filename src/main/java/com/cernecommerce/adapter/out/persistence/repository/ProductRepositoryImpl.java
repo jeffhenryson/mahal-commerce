@@ -5,6 +5,7 @@ import com.cernecommerce.adapter.out.persistence.entity.ProductEntity;
 import com.cernecommerce.adapter.out.persistence.entity.ProductVariantEntity;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.SortDirection;
+import com.cernecommerce.core.domain.model.estoque.BrandSummary;
 import com.cernecommerce.core.domain.model.estoque.CategoryProductCount;
 import com.cernecommerce.core.domain.model.estoque.MeasurementUnit;
 import com.cernecommerce.core.domain.model.estoque.Product;
@@ -103,6 +104,51 @@ public class ProductRepositoryImpl implements ProductRepository {
 
     @Override
     @Transactional(readOnly = true)
+    public List<Product> findAllByType(ProductType type) {
+        return productJpaRepository.findByType(type.name()).stream().map(this::toDomain).toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Map<Long, Long> countProductsByCategoryIds(List<Long> categoryIds) {
+        if (categoryIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, Long> counts = new java.util.LinkedHashMap<>();
+        for (Object[] row : productJpaRepository.countProductsByCategoryIdsRaw(categoryIds)) {
+            counts.put((Long) row[0], (Long) row[1]);
+        }
+        return counts;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public long countByCategoryId(Long categoryId) {
+        return productJpaRepository.countByCategoryId(categoryId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResult<BrandSummary> findBrands(String search, int page, int size) {
+        Page<Object[]> result = productJpaRepository.findBrandsRaw(likePattern(normalizeSearch(search)),
+                PageRequest.of(page, size));
+        List<BrandSummary> content = result.getContent().stream()
+                .map(row -> new BrandSummary((String) row[0], (Long) row[1]))
+                .toList();
+        return new PageResult<>(content, page, size, result.getTotalElements(), result.getTotalPages());
+    }
+
+    /** Mesma normalização de {@link ProductFilter}: branco vira nulo, comparação sem maiúsculas. */
+    private static String normalizeSearch(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed.toLowerCase();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public long countProducts() {
         return productJpaRepository.count();
     }
@@ -167,7 +213,7 @@ public class ProductRepositoryImpl implements ProductRepository {
         Pageable pageable = PageRequest.of(page, size, toSort(sortField, direction));
         Page<Long> idPage = productJpaRepository.findFilteredIds(
                 likePattern(filter.search()), filter.category(), filter.brand(), filter.active(),
-                filter.type() == null ? null : filter.type().name(), pageable);
+                filter.type() == null ? null : filter.type().name(), filter.kitComponentEligible(), pageable);
         return toPageResult(idPage, page, size);
     }
 

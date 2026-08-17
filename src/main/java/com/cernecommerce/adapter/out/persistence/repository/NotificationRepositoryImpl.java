@@ -79,6 +79,7 @@ public class NotificationRepositoryImpl implements NotificationRepository {
         e.setType(n.type().name());
         e.setTitle(n.title());
         e.setBody(n.body());
+        e.setTargetUrl(n.targetUrl());
         e.setReadAt(n.readAt());
         e.setCreatedAt(n.createdAt());
         return e;
@@ -91,6 +92,7 @@ public class NotificationRepositoryImpl implements NotificationRepository {
                 NotificationType.valueOf(e.getType()),
                 e.getTitle(),
                 e.getBody(),
+                e.getTargetUrl(),
                 e.getReadAt(),
                 e.getCreatedAt()
         );

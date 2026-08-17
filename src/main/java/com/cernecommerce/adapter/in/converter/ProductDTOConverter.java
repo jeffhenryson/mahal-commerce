@@ -5,7 +5,10 @@ import com.cernecommerce.adapter.in.dtos.request.KitRecipeRequest;
 import com.cernecommerce.adapter.in.dtos.request.PricingRequest;
 import com.cernecommerce.adapter.in.dtos.request.ProductAttributeRequest;
 import com.cernecommerce.adapter.in.dtos.request.ProductVariantRequest;
+import com.cernecommerce.adapter.in.dtos.response.BrandResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.EstoqueSummaryResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.KitAvailabilityResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.KitComponentAvailabilityResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.KitComponentResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.LotIntegrityMismatchResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.PricingResponseDTO;
@@ -13,8 +16,12 @@ import com.cernecommerce.adapter.in.dtos.response.ProductAttributeResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.ProductResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.ProductVariantResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.StockLotResponseDTO;
+import com.cernecommerce.core.domain.model.estoque.BrandSummary;
 import com.cernecommerce.core.domain.model.estoque.EstoqueSummary;
+import com.cernecommerce.core.domain.model.estoque.KitAvailability;
 import com.cernecommerce.core.domain.model.estoque.KitComponent;
+import com.cernecommerce.core.domain.model.estoque.KitComponentAvailability;
+import com.cernecommerce.core.domain.model.estoque.KitComponentDetail;
 import com.cernecommerce.core.domain.model.estoque.LotIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.estoque.Product;
@@ -98,7 +105,19 @@ public class ProductDTOConverter {
 
     /** Converte a receita do request (EST-F015) no comando que o use case espera. */
     public List<KitComponentCommand> toKitComponentCommands(KitRecipeRequest request) {
-        return request.getComponents().stream()
+        return toKitComponentCommands(request.getComponents());
+    }
+
+    /**
+     * Mesma conversão, para a receita opcional embutida em {@link ProductRequest#getComponents()}
+     * (criação atômica de kit). {@code null} propaga como {@code null} — distinto de lista vazia:
+     * ausência significa "kit nasce sem receita" (comportamento anterior preservado).
+     */
+    public List<KitComponentCommand> toKitComponentCommands(List<KitComponentRequest> components) {
+        if (components == null) {
+            return null;
+        }
+        return components.stream()
                 .map(c -> new KitComponentCommand(c.getComponentSku(), c.getQuantity()))
                 .toList();
     }
@@ -107,6 +126,46 @@ public class ProductDTOConverter {
         KitComponentResponseDTO dto = new KitComponentResponseDTO();
         dto.setComponentSku(component.componentSku());
         dto.setQuantity(component.quantity());
+        return dto;
+    }
+
+    /** Mesmo DTO, com os dados de catálogo do componente já embutidos (Bloco 3.3). */
+    public KitComponentResponseDTO toKitComponentResponse(KitComponentDetail detail) {
+        KitComponentResponseDTO dto = new KitComponentResponseDTO();
+        dto.setComponentSku(detail.componentSku());
+        dto.setQuantity(detail.quantity());
+        dto.setComponentName(detail.componentName());
+        dto.setComponentImageUrl(detail.componentImageUrl());
+        dto.setUnitPrice(detail.unitPrice());
+        dto.setComponentActive(detail.componentActive());
+        return dto;
+    }
+
+    /** Bloco 1.1 — disponibilidade de montagem de um kit num depósito. */
+    public KitAvailabilityResponseDTO toKitAvailabilityResponse(KitAvailability availability) {
+        KitAvailabilityResponseDTO dto = new KitAvailabilityResponseDTO();
+        dto.setSku(availability.kitSku());
+        dto.setName(availability.kitName());
+        dto.setBuildableQuantity(availability.buildableQuantity());
+        dto.setBlocked(availability.blocked());
+        dto.setComponents(availability.components().stream().map(this::toResponse).toList());
+        return dto;
+    }
+
+    private KitComponentAvailabilityResponseDTO toResponse(KitComponentAvailability availability) {
+        KitComponentAvailabilityResponseDTO dto = new KitComponentAvailabilityResponseDTO();
+        dto.setComponentSku(availability.componentSku());
+        dto.setQuantity(availability.recipeQuantity());
+        dto.setAvailableQuantity(availability.availableQuantity());
+        dto.setBuildableQuantity(availability.buildableQuantity());
+        return dto;
+    }
+
+    /** Bloco 2.2 — marca agregada do catálogo. */
+    public BrandResponseDTO toResponse(BrandSummary brand) {
+        BrandResponseDTO dto = new BrandResponseDTO();
+        dto.setName(brand.name());
+        dto.setProductCount(brand.productCount());
         return dto;
     }
 

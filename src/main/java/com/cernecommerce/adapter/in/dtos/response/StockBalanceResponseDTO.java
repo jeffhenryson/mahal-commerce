@@ -22,6 +22,11 @@ public class StockBalanceResponseDTO {
     private BigDecimal reservedQuantity;
     /** {@code quantity - reservedQuantity}. O número que decide se dá para vender. */
     private BigDecimal availableQuantity;
+    /**
+     * Custo médio ponderado móvel (EST-F007). Nulo até a primeira ENTRADA com custo conhecido —
+     * distinto de {@code Pricing.costPrice}, o input manual do lojista.
+     */
+    private BigDecimal averageCost;
     /** Unidade de medida do produto dono do saldo. Nula quando o SKU não resolve mais a um produto. */
     private String unit;
 }

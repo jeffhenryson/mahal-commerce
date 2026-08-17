@@ -27,6 +27,9 @@ public class NotificationEntity {
     @Column(columnDefinition = "TEXT")
     private String body;
 
+    @Column(name = "target_url", length = 255)
+    private String targetUrl;
+
     @Column(name = "read_at")
     private Instant readAt;
 
@@ -47,6 +50,9 @@ public class NotificationEntity {
 
     public String getBody() { return body; }
     public void setBody(String body) { this.body = body; }
+
+    public String getTargetUrl() { return targetUrl; }
+    public void setTargetUrl(String targetUrl) { this.targetUrl = targetUrl; }
 
     public Instant getReadAt() { return readAt; }
     public void setReadAt(Instant readAt) { this.readAt = readAt; }

@@ -45,6 +45,7 @@ public class StockBalanceRepositoryImpl implements StockBalanceRepository {
         entity.setWarehouseId(stockBalance.warehouseId());
         entity.setQuantity(stockBalance.quantity());
         entity.setReservedQuantity(stockBalance.reservedQuantity());
+        entity.setAverageCost(stockBalance.averageCost());
         entity.setVersion(stockBalance.version());
         return toDomain(stockBalanceJpaRepository.save(entity));
     }
@@ -57,6 +58,6 @@ public class StockBalanceRepositoryImpl implements StockBalanceRepository {
 
     private StockBalance toDomain(StockBalanceEntity e) {
         return StockBalance.of(e.getId(), e.getSku(), e.getWarehouseId(), e.getQuantity(),
-                e.getReservedQuantity(), e.getVersion());
+                e.getReservedQuantity(), e.getAverageCost(), e.getVersion());
     }
 }

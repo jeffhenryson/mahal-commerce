@@ -116,6 +116,17 @@ public class ProductRequest {
     private InitialStockRequest initialStock;
 
     /**
+     * Receita do kit, opcional, só considerada quando {@code type == KIT}. Ausente ou vazia: kit
+     * nasce sem receita, do jeito que já funcionava antes — ainda precisa de
+     * {@code PUT .../kit} depois. Presente e não vazia: a receita é validada e gravada na MESMA
+     * transação da criação do produto, fechando a janela de "kit órfão sem receita" que existia
+     * com o fluxo em duas chamadas (POST seguido de PUT).
+     */
+    @Valid
+    @Size(max = 100)
+    private List<KitComponentRequest> components;
+
+    /**
      * Indica se este request mexe em preço em <b>qualquer</b> nível — na raiz ou dentro de alguma
      * variação (EST-F020).
      *

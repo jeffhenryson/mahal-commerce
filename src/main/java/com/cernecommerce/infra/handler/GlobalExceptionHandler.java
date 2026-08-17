@@ -50,6 +50,7 @@ import com.cernecommerce.core.domain.exception.estoque.InactiveProductException;
 import com.cernecommerce.core.domain.exception.estoque.InactiveWarehouseException;
 import com.cernecommerce.core.domain.exception.estoque.InsufficientStockException;
 import com.cernecommerce.core.domain.exception.estoque.KitComponentAlreadyInUseException;
+import com.cernecommerce.core.domain.exception.estoque.KitComponentInactiveException;
 import com.cernecommerce.core.domain.exception.estoque.KitComponentNotEligibleException;
 import com.cernecommerce.core.domain.exception.estoque.KitComponentNotSimpleException;
 import com.cernecommerce.core.domain.exception.estoque.KitInitialStockNotAllowedException;
@@ -68,6 +69,7 @@ import com.cernecommerce.core.domain.exception.estoque.StockLotNotFoundException
 import com.cernecommerce.core.domain.exception.estoque.StockReservationNotActiveException;
 import com.cernecommerce.core.domain.exception.estoque.StockReservationNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.UnexpectedLotInfoException;
+import com.cernecommerce.core.domain.exception.estoque.UnexpectedUnitCostException;
 import com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException;
 import com.cernecommerce.core.domain.exception.crm.CampaignAutomationNotFoundException;
 import com.cernecommerce.core.domain.exception.crm.CustomerNotFoundException;
@@ -264,6 +266,12 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.CONFLICT, ex.getMessage(), "KIT_COMPONENT_NOT_ELIGIBLE", req);
     }
 
+    @ExceptionHandler(KitComponentInactiveException.class)
+    public ResponseEntity<ApiError> handleKitComponentInactive(KitComponentInactiveException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "KIT_COMPONENT_INACTIVE", req);
+    }
+
     @ExceptionHandler(KitInitialStockNotAllowedException.class)
     public ResponseEntity<ApiError> handleKitInitialStockNotAllowed(KitInitialStockNotAllowedException ex,
             HttpServletRequest req) {
@@ -326,6 +334,12 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(UnexpectedLotInfoException.class)
     public ResponseEntity<ApiError> handleUnexpectedLotInfo(UnexpectedLotInfoException ex, HttpServletRequest req) {
         return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "LOT_INFO_NOT_APPLICABLE", req);
+    }
+
+    // EST-F007 — custo médio ponderado.
+    @ExceptionHandler(UnexpectedUnitCostException.class)
+    public ResponseEntity<ApiError> handleUnexpectedUnitCost(UnexpectedUnitCostException ex, HttpServletRequest req) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "UNIT_COST_NOT_APPLICABLE", req);
     }
 
     @ExceptionHandler(LotExpiryDateMismatchException.class)

@@ -76,13 +76,38 @@ public interface ProductJpaRepository extends JpaRepository<ProductEntity, Long>
               AND (:brand    IS NULL OR LOWER(p.brand)    = :brand)
               AND (:active   IS NULL OR p.active = :active)
               AND (:type     IS NULL OR p.type = :type)
+              AND (:kitComponentEligible IS NULL OR p.kitComponentEligible = :kitComponentEligible)
             """)
     Page<Long> findFilteredIds(@Param("search") String search,
             @Param("category") String category,
             @Param("brand") String brand,
             @Param("active") Boolean active,
             @Param("type") String type,
+            @Param("kitComponentEligible") Boolean kitComponentEligible,
             Pageable pageable);
+
+    /** Bloco 1.1 — todos os kits do catálogo, sem paginação (subconjunto pequeno do catálogo geral). */
+    List<ProductEntity> findByType(String type);
+
+    /**
+     * Contagem de produtos por categoria, numa única query agregada (Bloco 2.1) — evita N+1 ao
+     * montar {@code productCount} por página de {@code GET /estoque/categories}.
+     */
+    @Query("SELECT p.categoryId, COUNT(p) FROM ProductEntity p WHERE p.categoryId IN :categoryIds GROUP BY p.categoryId")
+    List<Object[]> countProductsByCategoryIdsRaw(@Param("categoryIds") List<Long> categoryIds);
+
+    /** Bloco 2.3 — usado para bloquear DELETE de categoria com produto vinculado. */
+    long countByCategoryId(Long categoryId);
+
+    /**
+     * Marcas em uso no catálogo, agregadas do campo texto livre {@code brand} (Bloco 2.2) — não
+     * existe entidade {@code Brand} própria. Mesmo idioma de {@code search} de
+     * {@link #findFilteredIds}: já em minúsculas e com os {@code %} aplicados pelo adapter.
+     */
+    @Query("SELECT p.brand, COUNT(p) FROM ProductEntity p "
+            + "WHERE p.brand IS NOT NULL AND (:search IS NULL OR LOWER(p.brand) LIKE :search) "
+            + "GROUP BY p.brand ORDER BY p.brand ASC")
+    Page<Object[]> findBrandsRaw(@Param("search") String search, Pageable pageable);
 
     // ECM-F002: mesma condição de Pricing#isPriced() traduzida para SQL — salePrice preenchido,
     // ou custo+markup preenchidos o bastante para sugerir um preço. Kit nunca tem costPrice

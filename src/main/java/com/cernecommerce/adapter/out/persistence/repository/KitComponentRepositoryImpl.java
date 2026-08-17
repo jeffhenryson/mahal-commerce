@@ -37,6 +37,12 @@ public class KitComponentRepositoryImpl implements KitComponentRepository {
         return jpaRepository.existsByComponentSku(sku);
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public List<String> findKitSkusByComponentSku(String componentSku) {
+        return jpaRepository.findKitSkusByComponentSku(componentSku);
+    }
+
     private KitComponent toDomain(ProductKitComponentEntity e) {
         return KitComponent.of(e.getId(), e.getKitSku(), e.getComponentSku(), e.getQuantity());
     }

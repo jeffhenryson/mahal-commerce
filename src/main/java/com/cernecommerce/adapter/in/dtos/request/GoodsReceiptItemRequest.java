@@ -21,4 +21,8 @@ public class GoodsReceiptItemRequest {
     private String lotCode;
 
     private LocalDate expiryDate;
+
+    /** Custo unitário do recebimento (EST-F007), opcional — alimenta o custo médio ponderado. */
+    @DecimalMin(value = "0.0", inclusive = false)
+    private BigDecimal unitCost;
 }

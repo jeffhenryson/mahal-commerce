@@ -44,6 +44,7 @@ public class WarehouseDTOConverter {
         dto.setQuantity(balance.quantity());
         dto.setReservedQuantity(balance.reservedQuantity());
         dto.setAvailableQuantity(balance.availableQuantity());
+        dto.setAverageCost(balance.averageCost());
         dto.setUnit(unit == null ? null : unit.name());
         return dto;
     }
