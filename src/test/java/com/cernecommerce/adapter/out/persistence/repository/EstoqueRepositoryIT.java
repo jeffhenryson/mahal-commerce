@@ -1722,6 +1722,77 @@ class EstoqueRepositoryIT {
     }
 
     @Test
+    void sumInventoryValueAtCost_usaAverageCostComFallbackParaCostPrice() {
+        // EST-F007: average_cost tem precedência sobre costPrice manual quando os dois existem.
+        BigDecimal antes = stockBalanceRepository.sumInventoryValueAtCost();
+        Warehouse deposito = givenWarehouse("SUM-AVG-WH-" + System.nanoTime());
+
+        // SKU com averageCost E costPrice manual: usa o averageCost (6.00), não o costPrice (5.00).
+        // 10 un × 6.00 = 60.00.
+        productRepository.save(Product.create("SUM-AVG-001", "Produto", "sum-avg", List.of(),
+                Pricing.of(new BigDecimal("5.00"), null, new BigDecimal("9.90"))));
+        stockBalanceRepository.save(
+                StockBalance.of(null, "SUM-AVG-001", deposito.id(), new BigDecimal("10"), BigDecimal.ZERO,
+                        new BigDecimal("6.00"), 0L));
+
+        // SKU só com costPrice manual (nunca recebeu entrada com custo): fallback, como antes.
+        // 4 un × 3.00 = 12.00.
+        productRepository.save(Product.create("SUM-AVG-002", "Produto sem average", "sum-avg", List.of(),
+                Pricing.of(new BigDecimal("3.00"), null, null)));
+        stockBalanceRepository.save(
+                StockBalance.of(null, "SUM-AVG-002", deposito.id(), new BigDecimal("4"), 0L));
+        flushAndClear();
+
+        BigDecimal depois = stockBalanceRepository.sumInventoryValueAtCost();
+        assertThat(depois.subtract(antes)).isEqualByComparingTo("72.00");
+    }
+
+    @Test
+    void stockBalance_roundTrip_preservaAverageCost() {
+        Warehouse deposito = givenWarehouse("RT-AVG-WH-" + System.nanoTime());
+        productRepository.save(Product.create("RT-AVG-001", "Produto", "rt-avg", List.of()));
+
+        stockBalanceRepository.save(
+                StockBalance.of(null, "RT-AVG-001", deposito.id(), new BigDecimal("20"), BigDecimal.ZERO,
+                        new BigDecimal("6.00"), 0L));
+        flushAndClear();
+
+        Optional<StockBalance> found = stockBalanceRepository.findBySkuAndWarehouseId("RT-AVG-001", deposito.id());
+
+        assertThat(found).isPresent();
+        assertThat(found.get().averageCost()).isEqualByComparingTo("6.00");
+    }
+
+    @Test
+    void stockBalance_roundTrip_averageCostNuloPermanceNulo() {
+        Warehouse deposito = givenWarehouse("RT-AVG-NULL-WH-" + System.nanoTime());
+        productRepository.save(Product.create("RT-AVG-002", "Produto", "rt-avg", List.of()));
+
+        stockBalanceRepository.save(StockBalance.of(null, "RT-AVG-002", deposito.id(), new BigDecimal("5"), 0L));
+        flushAndClear();
+
+        Optional<StockBalance> found = stockBalanceRepository.findBySkuAndWarehouseId("RT-AVG-002", deposito.id());
+
+        assertThat(found).isPresent();
+        assertThat(found.get().averageCost()).isNull();
+    }
+
+    @Test
+    void stockMovement_roundTrip_preservaUnitCost() {
+        Warehouse deposito = givenWarehouse("RT-UC-WH-" + System.nanoTime());
+
+        stockMovementRepository.save(StockMovement.create("RT-UC-001", deposito.id(), MovementType.ENTRADA,
+                new BigDecimal("10"), "Recebimento", "gerente", null, new BigDecimal("7.50")));
+        flushAndClear();
+
+        PageResult<StockMovement> result = stockMovementRepository
+                .findBySkuAndWarehouseId("RT-UC-001", deposito.id(), 0, 10);
+
+        assertThat(result.content()).singleElement()
+                .satisfies(m -> assertThat(m.unitCost()).isEqualByComparingTo("7.50"));
+    }
+
+    @Test
     void countAlerts_classificaCriticoEAtencaoPelaMesmaRegraDeSeverityFor() {
         ReorderAlertCounts antes = reorderPointRepository.countAlerts();
         Warehouse deposito = givenWarehouse("SUM-ALERT-WH-" + System.nanoTime());

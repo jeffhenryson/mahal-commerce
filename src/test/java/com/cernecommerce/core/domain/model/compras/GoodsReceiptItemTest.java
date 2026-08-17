@@ -41,17 +41,18 @@ class GoodsReceiptItemTest {
     }
 
     @Test
-    void construtorDeDoisArgumentos_deixaLoteEExpiryNulos() {
+    void construtorDeDoisArgumentos_deixaLoteExpiryEUnitCostNulos() {
         GoodsReceiptItem item = new GoodsReceiptItem("NARG-001", BigDecimal.TEN);
 
         assertThat(item.sku()).isEqualTo("NARG-001");
         assertThat(item.quantity()).isEqualByComparingTo("10");
         assertThat(item.lotCode()).isNull();
         assertThat(item.expiryDate()).isNull();
+        assertThat(item.unitCost()).isNull();
     }
 
     @Test
-    void construtorCompleto_preservaLotCodeEExpiryDate() {
+    void construtorDeQuatroArgumentos_preservaLotCodeEExpiryDate_deixaUnitCostNulo() {
         GoodsReceiptItem item = new GoodsReceiptItem("ESSE-001", BigDecimal.TEN, "L1",
                 LocalDate.parse("2027-01-01"));
 
@@ -59,5 +60,14 @@ class GoodsReceiptItemTest {
         assertThat(item.quantity()).isEqualByComparingTo("10");
         assertThat(item.lotCode()).isEqualTo("L1");
         assertThat(item.expiryDate()).isEqualTo(LocalDate.parse("2027-01-01"));
+        assertThat(item.unitCost()).isNull();
+    }
+
+    @Test
+    void construtorCompleto_preservaUnitCost() {
+        GoodsReceiptItem item = new GoodsReceiptItem("ESSE-001", BigDecimal.TEN, "L1",
+                LocalDate.parse("2027-01-01"), new BigDecimal("7.50"));
+
+        assertThat(item.unitCost()).isEqualByComparingTo("7.50");
     }
 }

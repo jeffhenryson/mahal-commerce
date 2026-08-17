@@ -166,7 +166,7 @@ class StockBalanceTest {
 
     @Test
     void construtor_reservedQuantityNulo_defaultaParaZero() {
-        StockBalance balance = new StockBalance(1L, "NARG-001", 1L, new BigDecimal("5.000"), null, 0L);
+        StockBalance balance = new StockBalance(1L, "NARG-001", 1L, new BigDecimal("5.000"), null, null, 0L);
 
         assertThat(balance.reservedQuantity()).isEqualByComparingTo(BigDecimal.ZERO);
     }
@@ -410,5 +410,121 @@ class StockBalanceTest {
 
         assertThatThrownBy(() -> balance.apply(MovementType.AJUSTE, new BigDecimal("3.000")))
                 .isInstanceOf(ReservedStockException.class);
+    }
+
+    // ── Custo médio ponderado (EST-F007) ────────────────────────────────────────────────────
+
+    @Test
+    void apply_entrada_comUnitCost_primeiraEntradaAssumeOCustoInformado() {
+        StockBalance balance = StockBalance.zero("NARG-001", 1L);
+
+        StockBalance result = balance.apply(MovementType.ENTRADA, new BigDecimal("10"), new BigDecimal("5.00"));
+
+        assertThat(result.averageCost()).isEqualByComparingTo("5.00");
+    }
+
+    @Test
+    void apply_entrada_comUnitCost_segundaEntradaPonderaPeloSaldo() {
+        // 10 un a R$5 + 10 un a R$7 = 20 un a R$6 (exemplo didático do plano).
+        StockBalance balance = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("10"),
+                BigDecimal.ZERO, new BigDecimal("5.00"), 0L);
+
+        StockBalance result = balance.apply(MovementType.ENTRADA, new BigDecimal("10"), new BigDecimal("7.00"));
+
+        assertThat(result.quantity()).isEqualByComparingTo("20");
+        assertThat(result.averageCost()).isEqualByComparingTo("6.00");
+    }
+
+    @Test
+    void apply_entrada_semUnitCost_naoAlteraAverageCost() {
+        StockBalance balance = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("10"),
+                BigDecimal.ZERO, new BigDecimal("5.00"), 0L);
+
+        StockBalance result = balance.apply(MovementType.ENTRADA, new BigDecimal("10"));
+
+        assertThat(result.quantity()).isEqualByComparingTo("20");
+        assertThat(result.averageCost()).isEqualByComparingTo("5.00");
+    }
+
+    @Test
+    void apply_entrada_semUnitCostENuncaTeveCusto_permaneceNulo() {
+        StockBalance balance = StockBalance.zero("NARG-001", 1L);
+
+        StockBalance result = balance.apply(MovementType.ENTRADA, new BigDecimal("10"));
+
+        assertThat(result.averageCost()).isNull();
+    }
+
+    @Test
+    void apply_saida_propagaAverageCostSemRecalcular() {
+        StockBalance balance = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("10"),
+                BigDecimal.ZERO, new BigDecimal("6.00"), 0L);
+
+        StockBalance result = balance.apply(MovementType.SAIDA, new BigDecimal("4"));
+
+        assertThat(result.averageCost()).isEqualByComparingTo("6.00");
+    }
+
+    @Test
+    void apply_saida_ateZero_resetaAverageCostParaNulo() {
+        StockBalance balance = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("10"),
+                BigDecimal.ZERO, new BigDecimal("6.00"), 0L);
+
+        StockBalance result = balance.apply(MovementType.SAIDA, new BigDecimal("10"));
+
+        assertThat(result.quantity()).isEqualByComparingTo(BigDecimal.ZERO);
+        assertThat(result.averageCost()).isNull();
+    }
+
+    @Test
+    void apply_ajuste_propagaAverageCostSemRecalcular() {
+        StockBalance balance = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("10"),
+                BigDecimal.ZERO, new BigDecimal("6.00"), 0L);
+
+        StockBalance result = balance.apply(MovementType.AJUSTE, new BigDecimal("3"));
+
+        assertThat(result.averageCost()).isEqualByComparingTo("6.00");
+    }
+
+    @Test
+    void apply_ajuste_paraZero_resetaAverageCostParaNulo() {
+        StockBalance balance = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("10"),
+                BigDecimal.ZERO, new BigDecimal("6.00"), 0L);
+
+        StockBalance result = balance.apply(MovementType.AJUSTE, BigDecimal.ZERO);
+
+        assertThat(result.averageCost()).isNull();
+    }
+
+    @Test
+    void apply_entrada_comUnitCost_arredondaComDizima() {
+        // 3 un a R$10.00 + 7 un a R$10.005 = (30 + 70.035) / 10 = 10.0035 → 10.00 (HALF_UP, 2 casas).
+        StockBalance balance = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("3"),
+                BigDecimal.ZERO, new BigDecimal("10.00"), 0L);
+
+        StockBalance result = balance.apply(MovementType.ENTRADA, new BigDecimal("7"), new BigDecimal("10.005"));
+
+        assertThat(result.averageCost()).isEqualByComparingTo("10.00");
+    }
+
+    @Test
+    void consumeReservation_ateZero_resetaAverageCostParaNulo() {
+        StockBalance balance = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("5"),
+                new BigDecimal("5"), new BigDecimal("6.00"), 0L);
+
+        StockBalance result = balance.consumeReservation(new BigDecimal("5"));
+
+        assertThat(result.quantity()).isEqualByComparingTo(BigDecimal.ZERO);
+        assertThat(result.averageCost()).isNull();
+    }
+
+    @Test
+    void consumeReservation_acimaDeZero_propagaAverageCost() {
+        StockBalance balance = StockBalance.of(1L, "NARG-001", 1L, new BigDecimal("10"),
+                new BigDecimal("5"), new BigDecimal("6.00"), 0L);
+
+        StockBalance result = balance.consumeReservation(new BigDecimal("5"));
+
+        assertThat(result.averageCost()).isEqualByComparingTo("6.00");
     }
 }

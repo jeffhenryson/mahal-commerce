@@ -75,9 +75,9 @@ class ComprasServiceTest {
         assertThat(result.warehouseCode()).isEqualTo("LOJA-01");
         assertThat(result.items()).hasSize(2);
         verify(estoqueUseCase).adjustStock(eq("NARG-001"), eq("LOJA-01"), eq(MovementType.ENTRADA),
-                eq(new BigDecimal("10.000")), anyString(), eq("gerente"), isNull(), isNull());
+                eq(new BigDecimal("10.000")), anyString(), eq("gerente"), isNull(), isNull(), isNull());
         verify(estoqueUseCase).adjustStock(eq("CARV-001"), eq("LOJA-01"), eq(MovementType.ENTRADA),
-                eq(new BigDecimal("5.000")), anyString(), eq("gerente"), isNull(), isNull());
+                eq(new BigDecimal("5.000")), anyString(), eq("gerente"), isNull(), isNull(), isNull());
         verify(goodsReceiptRepository).save(any());
     }
 
@@ -91,7 +91,35 @@ class ComprasServiceTest {
         comprasService.receiveGoods(1L, "LOJA-01", items, "gerente");
 
         verify(estoqueUseCase).adjustStock(eq("ESSE-001"), eq("LOJA-01"), eq(MovementType.ENTRADA),
-                eq(new BigDecimal("10.000")), anyString(), eq("gerente"), eq("L1"), eq(LocalDate.parse("2027-01-01")));
+                eq(new BigDecimal("10.000")), anyString(), eq("gerente"), eq("L1"),
+                eq(LocalDate.parse("2027-01-01")), isNull());
+    }
+
+    @Test
+    void receiveGoods_comUnitCost_propagaCustoParaAdjustStock() {
+        List<GoodsReceiptItem> items = List.of(
+                new GoodsReceiptItem("NARG-001", new BigDecimal("10.000"), null, null, new BigDecimal("7.50")));
+        when(supplierRepository.findById(1L)).thenReturn(Optional.of(supplier()));
+        when(goodsReceiptRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        comprasService.receiveGoods(1L, "LOJA-01", items, "gerente");
+
+        verify(estoqueUseCase).adjustStock(eq("NARG-001"), eq("LOJA-01"), eq(MovementType.ENTRADA),
+                eq(new BigDecimal("10.000")), anyString(), eq("gerente"), isNull(), isNull(),
+                eq(new BigDecimal("7.50")));
+    }
+
+    @Test
+    void receiveGoods_semUnitCost_fluxoLegadoContinuaFuncionando() {
+        List<GoodsReceiptItem> items = List.of(new GoodsReceiptItem("NARG-001", new BigDecimal("10.000")));
+        when(supplierRepository.findById(1L)).thenReturn(Optional.of(supplier()));
+        when(goodsReceiptRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        GoodsReceipt result = comprasService.receiveGoods(1L, "LOJA-01", items, "gerente");
+
+        assertThat(result.items().get(0).unitCost()).isNull();
+        verify(estoqueUseCase).adjustStock(eq("NARG-001"), eq("LOJA-01"), eq(MovementType.ENTRADA),
+                eq(new BigDecimal("10.000")), anyString(), eq("gerente"), isNull(), isNull(), isNull());
     }
 
     @Test
@@ -102,7 +130,7 @@ class ComprasServiceTest {
                 List.of(new GoodsReceiptItem("NARG-001", BigDecimal.ONE)), "gerente"))
                 .isInstanceOf(SupplierNotFoundException.class);
 
-        verify(estoqueUseCase, never()).adjustStock(any(), any(), any(), any(), any(), any(), any(), any());
+        verify(estoqueUseCase, never()).adjustStock(any(), any(), any(), any(), any(), any(), any(), any(), any());
         verify(goodsReceiptRepository, never()).save(any());
     }
 
@@ -111,7 +139,7 @@ class ComprasServiceTest {
         // EST-C002: recebimento com SKU não cadastrado agora reverte tudo, em vez de dar entrada
         // de saldo num SKU que não existe no catálogo.
         when(supplierRepository.findById(1L)).thenReturn(Optional.of(supplier()));
-        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any(), any(), any()))
+        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenThrow(new ProductNotFoundException("SKU-FANTASMA"));
 
         assertThatThrownBy(() -> comprasService.receiveGoods(1L, "LOJA-01",
@@ -124,7 +152,7 @@ class ComprasServiceTest {
     @Test
     void receiveGoods_propagatesExceptionFromEstoqueAndDoesNotSaveReceipt() {
         when(supplierRepository.findById(1L)).thenReturn(Optional.of(supplier()));
-        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any(), any(), any()))
+        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenThrow(new WarehouseNotFoundException("INEXISTENTE"));
 
         assertThatThrownBy(() -> comprasService.receiveGoods(1L, "INEXISTENTE",

@@ -103,4 +103,32 @@ class StockMovementTest {
                 BigDecimal.ONE, "motivo", "  "))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+
+    // ── Custo unitário de entrada (EST-F007) ─────────────────────────────────────────────────
+
+    @Test
+    void create_semUnitCost_deixaUnitCostNulo() {
+        StockMovement movement = StockMovement.create("NARG-001", 1L, MovementType.ENTRADA,
+                new BigDecimal("5.000"), "Recebimento", "gerente");
+
+        assertThat(movement.unitCost()).isNull();
+    }
+
+    @Test
+    void create_comLoteEUnitCost_preservaAmbos() {
+        StockMovement movement = StockMovement.create("ESS-001", 1L, MovementType.ENTRADA,
+                new BigDecimal("5.000"), "Recebimento", "gerente", "LOTE-A", new BigDecimal("7.50"));
+
+        assertThat(movement.lotCode()).isEqualTo("LOTE-A");
+        assertThat(movement.unitCost()).isEqualByComparingTo("7.50");
+    }
+
+    @Test
+    void of_reconstitutesWithUnitCost() {
+        Instant createdAt = Instant.parse("2026-07-01T10:00:00Z");
+        StockMovement movement = StockMovement.of(9L, "NARG-001", 1L, MovementType.ENTRADA,
+                new BigDecimal("2.000"), "Recebimento", "gerente", createdAt, null, new BigDecimal("3.00"));
+
+        assertThat(movement.unitCost()).isEqualByComparingTo("3.00");
+    }
 }

@@ -32,6 +32,7 @@ import com.cernecommerce.core.domain.exception.estoque.KitSelfReferenceException
 import com.cernecommerce.core.domain.exception.estoque.LotExpiryDateMismatchException;
 import com.cernecommerce.core.domain.exception.estoque.MissingLotInfoException;
 import com.cernecommerce.core.domain.exception.estoque.UnexpectedLotInfoException;
+import com.cernecommerce.core.domain.exception.estoque.UnexpectedUnitCostException;
 import com.cernecommerce.core.domain.model.estoque.CategoryProductCount;
 import com.cernecommerce.core.domain.model.estoque.EstoqueSummary;
 import com.cernecommerce.core.domain.model.estoque.KitComponent;
@@ -41,6 +42,7 @@ import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.Category;
+import com.cernecommerce.core.domain.exception.estoque.CategoryHasProductsException;
 import com.cernecommerce.core.domain.exception.estoque.CategoryNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateCategoryNameException;
 import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
@@ -87,6 +89,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
@@ -693,6 +696,80 @@ class EstoqueServiceTest {
         verify(stockBalanceRepository, never()).save(any());
     }
 
+    // ── Custo médio ponderado (EST-F007) ─────────────────────────────────────────────────────
+
+    @Test
+    void adjustStock_entrada_comUnitCost_atualizaAverageCost() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        StockBalance existing = StockBalance.of(10L, "NARG-001", 1L, new BigDecimal("10"),
+                BigDecimal.ZERO, new BigDecimal("5.00"), 2L);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("NARG-001", 1L)).thenReturn(Optional.of(existing));
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        StockBalance result = estoqueService.adjustStock("NARG-001", "LOJA-01", MovementType.ENTRADA,
+                new BigDecimal("10"), "Recebimento", "gerente", null, null, new BigDecimal("7.00"));
+
+        assertThat(result.averageCost()).isEqualByComparingTo("6.00");
+        verify(stockMovementRepository).save(argThat(m -> m.unitCost() != null
+                && m.unitCost().compareTo(new BigDecimal("7.00")) == 0));
+    }
+
+    @Test
+    void adjustStock_entrada_semUnitCost_naoAlteraAverageCost() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        StockBalance existing = StockBalance.of(10L, "NARG-001", 1L, new BigDecimal("10"),
+                BigDecimal.ZERO, new BigDecimal("5.00"), 2L);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("NARG-001", 1L)).thenReturn(Optional.of(existing));
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        StockBalance result = estoqueService.adjustStock("NARG-001", "LOJA-01", MovementType.ENTRADA,
+                new BigDecimal("10"), "Recebimento", "gerente");
+
+        assertThat(result.averageCost()).isEqualByComparingTo("5.00");
+        verify(stockMovementRepository).save(argThat(m -> m.unitCost() == null));
+    }
+
+    @Test
+    void adjustStock_saida_comUnitCost_lancaUnexpectedUnitCost() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        StockBalance existing = StockBalance.of(10L, "NARG-001", 1L, new BigDecimal("10"), 0L);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+
+        assertThatThrownBy(() -> estoqueService.adjustStock("NARG-001", "LOJA-01", MovementType.SAIDA,
+                new BigDecimal("1"), "Venda", "gerente", null, null, new BigDecimal("5.00")))
+                .isInstanceOf(UnexpectedUnitCostException.class);
+
+        verify(stockBalanceRepository, never()).save(any());
+    }
+
+    @Test
+    void adjustStock_ajuste_comUnitCost_lancaUnexpectedUnitCost() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+
+        assertThatThrownBy(() -> estoqueService.adjustStock("NARG-001", "LOJA-01", MovementType.AJUSTE,
+                new BigDecimal("4"), "Balanço", "gerente", null, null, new BigDecimal("5.00")))
+                .isInstanceOf(UnexpectedUnitCostException.class);
+
+        verify(stockBalanceRepository, never()).save(any());
+    }
+
+    @Test
+    void adjustStock_kit_comUnitCost_lancaUnexpectedUnitCost() {
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(
+                Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true)));
+        when(productRepository.findByAnySku("KIT-001")).thenReturn(Optional.of(kitProduct("KIT-001", "80.00")));
+
+        assertThatThrownBy(() -> estoqueService.adjustStock("KIT-001", "LOJA-01", MovementType.ENTRADA,
+                BigDecimal.ONE, "motivo", "gerente", null, null, new BigDecimal("5.00")))
+                .isInstanceOf(UnexpectedUnitCostException.class);
+
+        verify(stockMovementRepository, never()).save(any());
+        verify(kitComponentRepository, never()).findByKitSku(any());
+    }
+
     @Test
     void adjustStock_saida_loteRastreado_consomeUmLoteSoPorFefo() {
         Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
@@ -1104,6 +1181,167 @@ class EstoqueServiceTest {
     }
 
     @Test
+    void defineKitRecipe_throwsWhenComponentInactive() {
+        when(productRepository.findBySku("KIT-001")).thenReturn(Optional.of(
+                Product.of(1L, "KIT-001", "Kit Narguile", "combo", true, List.of())));
+        when(kitComponentRepository.isUsedAsComponent("KIT-001")).thenReturn(false);
+        Product inactive = simpleProduct("CARV-001", "20.00").withActive(false);
+        when(productRepository.findByAnySku("CARV-001")).thenReturn(Optional.of(inactive));
+
+        assertThatThrownBy(() -> estoqueService.defineKitRecipe("KIT-001",
+                List.of(new KitComponentCommand("CARV-001", BigDecimal.ONE))))
+                .isInstanceOf(com.cernecommerce.core.domain.exception.estoque.KitComponentInactiveException.class);
+    }
+
+    @Test
+    void getKitRecipeDetailed_enrichesWithCatalogData() {
+        when(productRepository.findBySku("KIT-001")).thenReturn(Optional.of(
+                Product.of(1L, "KIT-001", "Kit", "combo", true, List.of())));
+        when(kitComponentRepository.findByKitSku("KIT-001")).thenReturn(
+                List.of(KitComponent.of(5L, "KIT-001", "CARV-001", new BigDecimal("2"))));
+        when(productRepository.findByAnySku("CARV-001")).thenReturn(Optional.of(simpleProduct("CARV-001", "20.00")));
+
+        List<com.cernecommerce.core.domain.model.estoque.KitComponentDetail> detail =
+                estoqueService.getKitRecipeDetailed("KIT-001");
+
+        assertThat(detail).hasSize(1);
+        assertThat(detail.get(0).componentSku()).isEqualTo("CARV-001");
+        assertThat(detail.get(0).componentName()).isEqualTo("Componente CARV-001");
+        assertThat(detail.get(0).componentActive()).isTrue();
+    }
+
+    @Test
+    void getKitRecipeDetailed_componentMissingFromCatalog_returnsNullFields() {
+        when(productRepository.findBySku("KIT-001")).thenReturn(Optional.of(
+                Product.of(1L, "KIT-001", "Kit", "combo", true, List.of())));
+        when(kitComponentRepository.findByKitSku("KIT-001")).thenReturn(
+                List.of(KitComponent.of(5L, "KIT-001", "SUMIU-001", new BigDecimal("1"))));
+        when(productRepository.findByAnySku("SUMIU-001")).thenReturn(Optional.empty());
+
+        List<com.cernecommerce.core.domain.model.estoque.KitComponentDetail> detail =
+                estoqueService.getKitRecipeDetailed("KIT-001");
+
+        assertThat(detail.get(0).componentName()).isNull();
+        assertThat(detail.get(0).componentActive()).isFalse();
+    }
+
+    @Test
+    void clearKitRecipe_demotesKitToSimplesAndEmptiesRecipe() {
+        Product kit = kitProduct("KIT-001", "80.00");
+        when(productRepository.findBySku("KIT-001")).thenReturn(Optional.of(kit));
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Product result = estoqueService.clearKitRecipe("KIT-001");
+
+        assertThat(result.type()).isEqualTo(ProductType.SIMPLES);
+        verify(kitComponentRepository).replaceRecipe("KIT-001", List.of());
+    }
+
+    @Test
+    void clearKitRecipe_noOpWhenAlreadySimples() {
+        Product simples = Product.of(1L, "SIMP-001", "Produto Simples", "insumo", true, List.of());
+        when(productRepository.findBySku("SIMP-001")).thenReturn(Optional.of(simples));
+
+        Product result = estoqueService.clearKitRecipe("SIMP-001");
+
+        assertThat(result.type()).isEqualTo(ProductType.SIMPLES);
+        verify(kitComponentRepository, never()).replaceRecipe(any(), any());
+        verify(productRepository, never()).save(any());
+    }
+
+    @Test
+    void clearKitRecipe_throwsWhenSkuNotFound() {
+        when(productRepository.findBySku("KIT-FANTASMA")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.clearKitRecipe("KIT-FANTASMA"))
+                .isInstanceOf(ProductNotFoundException.class);
+    }
+
+    @Test
+    void createProduct_withKitComponents_persistsRecipeAtomicallyAndPromotesToKit() {
+        when(productRepository.existsBySku(anyString())).thenReturn(false);
+        when(productRepository.findByAnySku("CARV-001")).thenReturn(Optional.of(simpleProduct("CARV-001", "20.00")));
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        estoqueService.createProduct("KIT-NOVO", "Kit Novo", "combo", List.of(), Pricing.empty(),
+                null, null, false, false, null, null, List.of(), List.of(), null, null, null, false, false,
+                null, null, ProductType.KIT, null, "gerente",
+                List.of(new KitComponentCommand("CARV-001", new BigDecimal("2"))));
+
+        ArgumentCaptor<Product> captor = ArgumentCaptor.forClass(Product.class);
+        verify(productRepository).save(captor.capture());
+        assertThat(captor.getValue().type()).isEqualTo(ProductType.KIT);
+        verify(kitComponentRepository).replaceRecipe(eq("KIT-NOVO"), argThat(recipe -> recipe.size() == 1
+                && recipe.get(0).componentSku().equals("CARV-001")));
+    }
+
+    @Test
+    void createProduct_kitWithoutComponents_doesNotTouchRecipe() {
+        when(productRepository.existsBySku(anyString())).thenReturn(false);
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        estoqueService.createProduct("KIT-VAZIO", "Kit Vazio", "combo", List.of(), Pricing.empty(),
+                null, null, false, false, null, null, List.of(), List.of(), null, null, null, false, false,
+                null, null, ProductType.KIT, null, "gerente", null);
+
+        verify(kitComponentRepository, never()).replaceRecipe(any(), any());
+    }
+
+    @Test
+    void createProduct_kitComponents_throwsWhenComponentInactive() {
+        Product inactive = simpleProduct("CARV-001", "20.00").withActive(false);
+        when(productRepository.findByAnySku("CARV-001")).thenReturn(Optional.of(inactive));
+
+        assertThatThrownBy(() -> estoqueService.createProduct("KIT-NOVO", "Kit Novo", "combo", List.of(),
+                Pricing.empty(), null, null, false, false, null, null, List.of(), List.of(), null, null, null,
+                false, false, null, null, ProductType.KIT, null, "gerente",
+                List.of(new KitComponentCommand("CARV-001", BigDecimal.ONE))))
+                .isInstanceOf(com.cernecommerce.core.domain.exception.estoque.KitComponentInactiveException.class);
+        verify(productRepository, never()).save(any());
+    }
+
+    @Test
+    void getKitAvailability_returnsBuildableQuantityAndBlockedFlag() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        Product blockedKit = kitProduct("KIT-BLOQ", "80.00");
+        Product buildableKit = kitProduct("KIT-OK", "50.00");
+        when(productRepository.findAllByType(ProductType.KIT)).thenReturn(List.of(blockedKit, buildableKit));
+        when(kitComponentRepository.findByKitSku("KIT-BLOQ")).thenReturn(
+                List.of(KitComponent.of(1L, "KIT-BLOQ", "COMP-001", BigDecimal.ONE)));
+        when(kitComponentRepository.findByKitSku("KIT-OK")).thenReturn(
+                List.of(KitComponent.of(2L, "KIT-OK", "COMP-002", BigDecimal.ONE)));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("COMP-001", 1L)).thenReturn(
+                Optional.of(StockBalance.zero("COMP-001", 1L)));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("COMP-002", 1L)).thenReturn(
+                Optional.of(StockBalance.of(1L, "COMP-002", 1L, new BigDecimal("5"), 0L)));
+
+        PageResult<com.cernecommerce.core.domain.model.estoque.KitAvailability> result =
+                estoqueService.getKitAvailability("LOJA-01", null, 0, 20);
+
+        assertThat(result.content()).hasSize(2);
+        assertThat(result.content()).filteredOn(a -> a.kitSku().equals("KIT-BLOQ"))
+                .allMatch(a -> a.blocked() && a.buildableQuantity().signum() == 0);
+        assertThat(result.content()).filteredOn(a -> a.kitSku().equals("KIT-OK"))
+                .allMatch(a -> !a.blocked() && a.buildableQuantity().compareTo(new BigDecimal("5")) == 0);
+    }
+
+    @Test
+    void getKitAvailability_filtersByBlocked() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        Product blockedKit = kitProduct("KIT-BLOQ", "80.00");
+        when(productRepository.findAllByType(ProductType.KIT)).thenReturn(List.of(blockedKit));
+        when(kitComponentRepository.findByKitSku("KIT-BLOQ")).thenReturn(List.of());
+
+        PageResult<com.cernecommerce.core.domain.model.estoque.KitAvailability> result =
+                estoqueService.getKitAvailability("LOJA-01", false, 0, 20);
+
+        assertThat(result.content()).isEmpty();
+        assertThat(result.totalElements()).isZero();
+    }
+
+    @Test
     void recordCountedItem_rejectsKitSku() {
         when(stockCountRepository.findById(1L)).thenReturn(Optional.of(
                 StockCount.open(1L, "gerente")));
@@ -1244,6 +1482,52 @@ class EstoqueServiceTest {
 
         verify(notificationUseCase, never()).notify(any(), any(), any(), any());
         verify(userRepository, never()).findUsernamesByPermission(any());
+    }
+
+    @Test
+    void adjustStock_kitBecomesUnbuildable_notifiesEstoqueOnTransition() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        StockBalance beforeSaida = StockBalance.of(10L, "COMP-001", 1L, new BigDecimal("1.000"), 0L);
+        StockBalance afterSaida = StockBalance.of(10L, "COMP-001", 1L, BigDecimal.ZERO, 1L);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        // Duas leituras "antes" (snapshot do kit + saldo atual do próprio adjustStock) e uma
+        // "depois" (recálculo do buildable após o save) — mesma ordem de chamada do método real.
+        when(stockBalanceRepository.findBySkuAndWarehouseId("COMP-001", 1L))
+                .thenReturn(Optional.of(beforeSaida), Optional.of(beforeSaida), Optional.of(afterSaida));
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(kitComponentRepository.findKitSkusByComponentSku("COMP-001")).thenReturn(List.of("KIT-001"));
+        Product kit = kitProduct("KIT-001", "80.00");
+        when(productRepository.findBySku("KIT-001")).thenReturn(Optional.of(kit));
+        when(kitComponentRepository.findByKitSku("KIT-001")).thenReturn(
+                List.of(KitComponent.of(1L, "KIT-001", "COMP-001", BigDecimal.ONE)));
+        when(userRepository.findUsernamesByPermission("ESTOQUE_STOCK_MANAGE")).thenReturn(Set.of("gerente-estoque"));
+
+        estoqueService.adjustStock("COMP-001", "LOJA-01", MovementType.SAIDA, new BigDecimal("1.000"),
+                "Venda balcão", "vendedor");
+
+        verify(notificationUseCase).notify(eq("gerente-estoque"), eq(NotificationType.ESTOQUE), any(), any(),
+                eq("/app/estoque/kits/KIT-001"));
+    }
+
+    @Test
+    void adjustStock_kitAlreadyBlocked_doesNotNotifyAgain() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        StockBalance existing = StockBalance.of(10L, "COMP-002", 1L, new BigDecimal("5.000"), 0L);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("COMP-002", 1L)).thenReturn(Optional.of(existing));
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(kitComponentRepository.findKitSkusByComponentSku("COMP-002")).thenReturn(List.of("KIT-002"));
+        Product kit = kitProduct("KIT-002", "80.00");
+        when(productRepository.findBySku("KIT-002")).thenReturn(Optional.of(kit));
+        // Receita pede 10 por kit — com 5 disponíveis, buildable já é zero ANTES da baixa, então
+        // não há transição >0 -> 0, só continua zero.
+        when(kitComponentRepository.findByKitSku("KIT-002")).thenReturn(
+                List.of(KitComponent.of(1L, "KIT-002", "COMP-002", BigDecimal.TEN)));
+
+        estoqueService.adjustStock("COMP-002", "LOJA-01", MovementType.SAIDA, new BigDecimal("1.000"),
+                "Venda balcão", "vendedor");
+
+        verify(notificationUseCase, never()).notify(any(), eq(NotificationType.ESTOQUE), any(), any(), any());
     }
 
     @Test
@@ -2972,6 +3256,59 @@ class EstoqueServiceTest {
 
         assertThat(desativada.active()).isFalse();
         verifyNoInteractions(productRepository);
+    }
+
+    @Test
+    void deleteCategory_throwsWhenProductsLinked() {
+        when(categoryRepository.findById(1L))
+                .thenReturn(Optional.of(Category.of(1L, "Narguilé", false, 0, true)));
+        when(productRepository.countByCategoryId(1L)).thenReturn(3L);
+
+        assertThatThrownBy(() -> estoqueService.deleteCategory(1L))
+                .isInstanceOf(CategoryHasProductsException.class);
+        verify(categoryRepository, never()).deleteById(any());
+    }
+
+    @Test
+    void deleteCategory_succeedsWhenEmpty() {
+        when(categoryRepository.findById(1L))
+                .thenReturn(Optional.of(Category.of(1L, "Narguilé", false, 0, true)));
+        when(productRepository.countByCategoryId(1L)).thenReturn(0L);
+
+        estoqueService.deleteCategory(1L);
+
+        verify(categoryRepository).deleteById(1L);
+    }
+
+    @Test
+    void deleteCategory_throwsWhenIdNotFound() {
+        when(categoryRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.deleteCategory(99L))
+                .isInstanceOf(CategoryNotFoundException.class);
+        verify(categoryRepository, never()).deleteById(any());
+    }
+
+    @Test
+    void listBrands_delegatesToRepository() {
+        PageResult<com.cernecommerce.core.domain.model.estoque.BrandSummary> page = new PageResult<>(
+                List.of(new com.cernecommerce.core.domain.model.estoque.BrandSummary("Mahal", 24L)),
+                0, 20, 1L, 1);
+        when(productRepository.findBrands("mahal", 0, 20)).thenReturn(page);
+
+        var result = estoqueService.listBrands("mahal", 0, 20);
+
+        assertThat(result.content()).extracting("name").containsExactly("Mahal");
+    }
+
+    @Test
+    void countProductsByCategoryIds_delegatesToRepository() {
+        when(productRepository.countProductsByCategoryIds(List.of(1L, 2L)))
+                .thenReturn(Map.of(1L, 5L));
+
+        Map<Long, Long> result = estoqueService.countProductsByCategoryIds(List.of(1L, 2L));
+
+        assertThat(result).containsEntry(1L, 5L);
     }
 
     // ── Resolução de categoria no cadastro de produto (compatibilidade) ───────
