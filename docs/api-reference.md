@@ -972,14 +972,22 @@ Query: sku (obrigatório, 3..50), warehouseCode (obrigatório, 2..50)
   "warehouseCode": "LOJA-01",   // obrigatório
   "type": "ENTRADA",            // obrigatório — ENTRADA | SAIDA | AJUSTE
   "quantity": 5.000,             // obrigatório; > 0 em ENTRADA/SAIDA, >= 0 em AJUSTE
-  "reason": "Recebimento de fornecedor" // obrigatório, máx. 255 chars
+  "reason": "Recebimento de fornecedor", // obrigatório, máx. 255 chars
+  "unitCost": 7.50                // opcional (EST-F007) — só ENTRADA; alimenta o custo médio ponderado
 }
 // Response 201 + Location → StockBalanceResponse (saldo já atualizado)
 // 404 PRODUCT_NOT_FOUND (SKU não existe no catálogo) / 404 WAREHOUSE_NOT_FOUND
 // 400 INSUFFICIENT_STOCK (SAIDA deixaria o saldo negativo) / 400 VALIDATION_ERROR
+// 400 UNIT_COST_NOT_APPLICABLE (unitCost fora de ENTRADA, ou SKU é kit)
 // 409 STOCK_UPDATE_CONFLICT (conflito de concorrência otimista — tente novamente)
 // 409 DATA_INTEGRITY_VIOLATION (corrida na primeira movimentação do par — refazer resolve)
 ```
+
+`unitCost` é opcional mesmo em `ENTRADA` (EST-F007) — nem toda entrada tem custo conhecido (ex.:
+balanço de inventário nunca tem). Quando informado, recalcula o custo médio ponderado móvel do par
+SKU/depósito (`StockBalanceResponse.averageCost`), distinto de `Pricing.costPrice` (o custo manual
+do produto, usado em tempo real pelo PDV). Informado fora de `ENTRADA`, ou para um SKU que é kit
+(kit não tem saldo próprio), é recusado com 400 `UNIT_COST_NOT_APPLICABLE`.
 
 `username` **não** é enviado no corpo — é sempre o usuário autenticado (JWT), nunca informado
 pelo cliente da API.
@@ -1007,7 +1015,8 @@ onde um SKU desconhecido reverte a venda ou o recebimento inteiro.
 {
   "sku": "NARG-001",
   "warehouseCode": "LOJA-01",
-  "quantity": 5.000
+  "quantity": 5.000,
+  "averageCost": 7.50 // custo médio ponderado móvel (EST-F007); null até a 1ª ENTRADA com unitCost
 }
 ```
 

@@ -1222,10 +1222,9 @@ Escopo cortado é decisão de arquitetura, e cada item abaixo é uma decisão, n
    documentação declara isso. Introduzir tenant agora contamina toda consulta em troca de zero
    valor imediato.
 
-9. **Não fazer custo médio ponderado (EST-F007) antes da Fatia 4.** É desejável para calibrar o
-   cashback com precisão, mas o `costPrice` manual da V63 já entrega a ordem de grandeza — e a
-   ordem de grandeza é o que decide se a taxa do carvão é 2% ou 8%. Depois do cashback rodando, o
-   custo médio refina; antes, ele atrasa.
+9. **Não fazer custo médio ponderado (EST-F007) antes da Fatia 4.** ✅ Resolvido — fechou em
+   2026-08-16, depois da Fatia 4 (cashback) já rodando, como recomendado aqui. Ver Histórico de
+   `estoque/README.md`.
 
 10. **Não fazer painel administrativo agora.** O dono pediu um, e ele é necessário — mas é frontend
     sobre uma API que ainda vai mudar de forma na Fatia 0. Construir tela sobre `SaleItem.unitPrice`
@@ -1271,5 +1270,6 @@ abaixo traz o ID **efetivamente atribuído**.
 
 Três itens já existentes receberam **nota de decisão** no README de estoque em vez de item novo,
 porque o plano mudou o julgamento sobre eles e não o escopo: `EST-F007` (custo médio — não antes da
-Fatia 4, §8.9), `EST-F012` (transferência entre depósitos — só com um segundo local físico real,
-§2.2) e `EST-F020` (preço por variação — desaconselhado, §8.5).
+Fatia 4, §8.9; ✅ fechou em 2026-08-16), `EST-F012` (transferência entre depósitos — só com um
+segundo local físico real, §2.2) e `EST-F020` (preço por variação — desaconselhado, §8.5; foi
+implementado mesmo assim em 2026-08-10, a pedido do dono).

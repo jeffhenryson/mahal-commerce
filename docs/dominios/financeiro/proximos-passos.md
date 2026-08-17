@@ -74,10 +74,11 @@ DECISÕES JÁ TOMADAS — não reabrir
   processo antigo, não para ligar o PDV.
 - Troco é change_amount no pedido, nunca linha de pagamento negativa.
 - Cashback é provisão reconhecida no ganho; resgate não é forma de pagamento.
-- EST-F007 (custo médio ponderado), que destrava o DRE, NÃO deve ser feito antes do cashback
-  (Fatia 4): o costPrice manual de V63 já entrega a ordem de grandeza, e é a ordem de
-  grandeza que decide se a taxa do carvão é 2% ou 8%. Depois do cashback rodando, o custo
-  médio refina; antes, ele atrasa. §8.9.
+- EST-F007 (custo médio ponderado) fechou em 2026-08-16, depois do cashback (Fatia 4) já estar
+  rodando, como o §8.9 recomendava. `StockBalance.averageCost` está disponível por SKU/depósito,
+  e `GET /estoque/summary` já soma o valor de estoque com ele (fallback para o costPrice manual
+  quando o SKU nunca recebeu entrada com custo). O DRE ainda não foi construído — quando for,
+  esses dois pontos são o ponto de partida, sem endpoint novo a criar por conta disso.
 
 COMO TRABALHAR
 - Um item por vez. Ao terminar cada um, PARE e me mostre o resultado.
@@ -103,6 +104,7 @@ calendário pode ser de semanas. Comece a parte burocrática cedo, mesmo com a F
 ## O que "módulo entregue" significa aqui
 
 Fechar `FIN-F001` (provisão de cashback), `FIN-F002` (NFC-e via emissor) e `FIN-C001` (documentar),
-mais o DRE propriamente dito — que depende de `EST-F007` (custo médio) e ainda não tem item de
-backlog próprio. Quando as Fatias 0 a 4 estiverem prontas, vale rodar `/1-analise financeiro` para
-levantar o backlog real do módulo, que hoje é só o esqueleto herdado.
+mais o DRE propriamente dito — `EST-F007` (custo médio) já fechou (2026-08-16) e não bloqueia mais
+nada, mas o DRE em si ainda não tem item de backlog próprio. Quando as Fatias 0 a 4 estiverem
+prontas, vale rodar `/1-analise financeiro` para levantar o backlog real do módulo, que hoje é só
+o esqueleto herdado.

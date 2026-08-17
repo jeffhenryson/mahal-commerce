@@ -82,8 +82,13 @@ Convenções, variáveis e o environment compartilhado estão em
 | FIN-F002 | 🟡 Média | Feature | nfce-via-emissor-terceiro | Port fiscal + adapter para Focus NFe ou PlugNotas, campos fiscais (NCM/CEST/CFOP) no produto, emissão na conclusão do pedido e cancelamento dentro da janela legal. **Nunca construir emissão própria** (§2.8/§8.1): schemas XML por UF, certificado A1/A3, contingência, homologação SEFAZ e manutenção perpétua, contra ~R$100–300/mês de prateleira. Para tabacaria o argumento é mais forte ainda — fumo tem ICMS-ST e IPI, e errar CST 60/NCM/CEST não gera bug, gera autuação. **Não é bloqueante para o PDV rodar**; é o portão para desligar o processo fiscal atual. Fatia 11 — calendário (certificado, cadastro fiscal, homologação) maior que o esforço. | Pendente |
 | FIN-C001 | 🟡 Importante | Correção | auditar-e-documentar-o-modulo | README ainda no molde de esqueleto: faltam Modelo de Domínio, Regras de Negócio, API, Schema e Cobertura de Testes. Rode `/1-analise financeiro`. Padrão: [`estoque`](../estoque/README.md). | Pendente |
 
-> `EST-F007` (`valorizacao-custo-medio`, que alimenta o DRE) é um cruzamento
-> `estoque↔financeiro` e está rastreado em [`estoque`](../estoque/README.md#backlog-do-módulo).
+> `EST-F007` (`valorizacao-custo-medio`) fechou em 2026-08-16 — ver
+> [Histórico de Implementações do estoque](../estoque/README.md#histórico-de-implementações).
+> `StockBalance.averageCost` (custo médio ponderado móvel por SKU/depósito) e `GET
+> /estoque/summary` (`valorEstoqueCusto`, com fallback para `costPrice` manual) já estão
+> disponíveis para o financeiro consumir quando o DRE for construído — nenhum endpoint dedicado
+> de valorização foi criado nesta entrega (decisão: estender o que já existia em vez de expor
+> superfície nova).
 
 > O que o financeiro precisa que seja decidido **agora**, mesmo sem construir nada de fiscal
 > ([`plano-pdv-marketplace.md`](../../plano-pdv-marketplace.md) §2.8): o pedido nasce **imutável

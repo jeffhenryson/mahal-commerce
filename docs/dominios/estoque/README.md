@@ -1,9 +1,9 @@
 # Domínio: estoque
 
-**Status:** 🟢 Operacional — grade de produtos, saldo multi-depósito, ledger de movimentações (gravação e consulta), alerta de ponto de reposição, reserva, kits e lote/validade em produção
+**Status:** 🟢 Operacional — grade de produtos, saldo multi-depósito, ledger de movimentações (gravação e consulta), alerta de ponto de reposição, reserva, kits, lote/validade e custo médio ponderado em produção
 **Pacote Java:** `com.cernecommerce.core.domain.model.estoque`
 **Rota HTTP base:** `/estoque`
-**Última atualização deste doc:** 2026-07-30 (lote e validade — EST-F008)
+**Última atualização deste doc:** 2026-08-16 (custo médio ponderado — EST-F007)
 
 ## Objetivo
 
@@ -465,7 +465,6 @@ Convenções, variáveis e o environment compartilhado estão em
 | ID | Prioridade | Tipo | Item | Descrição | Status |
 |---|---|---|---|---|---|
 | EST-F005 | 🟡 Média | Feature | importacao-nfe-xml | Entrada de mercadoria por XML de NF-e (`NfeXmlImportPort`) gerando `StockMovement` de entrada — diferencial operacional. | Backlog (Sprint 4) |
-| EST-F007 | 🟡 Média | Feature | valorizacao-custo-medio | Custo médio ponderado por SKU e valor total de estoque — alimenta o DRE do domínio `financeiro`. **Não fazer antes do cashback** ([`plano-pdv-marketplace.md`](../../plano-pdv-marketplace.md) §8.9): o `costPrice` manual de V63 já entrega a ordem de grandeza, e é a ordem de grandeza que decide se a taxa do carvão é 2% ou 8%. Depois do cashback rodando, o custo médio refina; antes, ele atrasa. Agora que EST-F008 fechou, o custo por lote já tem onde entrar. | Backlog (Sprint 3) |
 | EST-F011 | 🟢 Baixa | Feature | curva-abc-giro | Análise ABC e giro de produtos para priorização de compras (domínio `relatorios`). | Backlog (Sprint 6) |
 | EST-F012 | 🟢 Baixa | Feature | transferencia-entre-depositos | `MovementType.TRANSFER`: saída atômica de um `Warehouse` + entrada em outro, distinto do ajuste manual. **Só faz sentido quando existir um segundo local físico de verdade** ([`plano-pdv-marketplace.md`](../../plano-pdv-marketplace.md) §2.2): o marketplace **não** vai usar `WarehouseType.ECOMMERCE` para separar canal — para uma tabacaria de uma loja, a prateleira é uma só, e partir o pool geraria rebalanceamento manual permanente e o absurdo de "o site tem 5 e a loja tem 0" com tudo no mesmo armário. A reserva (EST-F013) é o mecanismo que permite um pool servir dois canais. | Backlog (Sprint 4) |
 | EST-F016 | 🟢 Baixa | Feature | unidade-medida-conversao | Múltiplas unidades por produto (compra em kg, venda em porção/g) com fator de conversão nas movimentações. | Backlog (Sprint 6) |
@@ -670,6 +669,37 @@ Convenções, variáveis e o environment compartilhado estão em
   postgres:16 real. Permissão `ESTOQUE_CATEGORY_MANAGE`, com `ON CONFLICT DO NOTHING` (a convenção
   que V45/V47 violaram — EST-C006) e semeada em `SeedConfig`/`DevRoleBootstrapConfig` para não
   repetir o furo de EST-C001 em `dev`.
+- **2026-08-16** — `valorizacao-custo-medio` (EST-F007): o backlog presumia que "o custo já entra
+  por lote" desde EST-F008 — **não entrava**: nem `StockLot`, nem `StockMovement`, nem
+  `GoodsReceiptItem` capturavam custo de entrada em lugar nenhum. Escopo real acabou maior que o
+  descrito: instrumentar a captura de `unitCost` na entrada, e só depois calcular a média. Novo
+  campo `StockBalance.averageCost` (nullable), custo médio ponderado **móvel**, recalculado dentro
+  da mesma transação de `adjustStock(ENTRADA)` que já escreve saldo e ledger juntos — aditivo,
+  mesmo espírito de `reservedQuantity` (EST-F021) e `StockLot` (EST-F008): não mexe em
+  `@Version`/granularidade do saldo. Fórmula clássica de custo médio ponderado móvel, com
+  `Money.INTERMEDIATE_SCALE`/`Money.ROUNDING` na divisão e `Money.MONEY_SCALE` no resultado final —
+  motivo de o refactor de constantes `Money` (`domain/model/Money.java`, consolidando
+  `MONEY_SCALE`/`PERCENT_SCALE`/`HUNDRED`/`ROUNDING` antes duplicados em `Pricing`, `OrderItem`,
+  `CashbackService`, `PdvService`, e agora também `CashbackRate`/`OrderReportRepositoryImpl`) ter
+  sido feito primeiro. **Distinto de `Pricing.costPrice`** (o input manual do lojista, V63, ainda o
+  que o PDV usa em tempo real para margem) — os dois coexistem, sem um substituir o outro.
+  `unitCost` é opcional mesmo em `ENTRADA` (nem toda entrada tem custo conhecido — balanço de
+  inventário nunca tem) e é rejeitado em `SAIDA`/`AJUSTE`/kit com `UnexpectedUnitCostException`
+  nova, mesmo molde de `UnexpectedLotInfoException`. `averageCost` volta a `null` quando o saldo
+  chega a zero (por `SAIDA`, `AJUSTE` ou `consumeReservation`) — sem estoque, custo é "desconhecido"
+  de novo, mesma convenção de ausência-não-é-zero de `Pricing`. Nova sobrecarga de 9 argumentos em
+  `EstoqueUseCase.adjustStock`/`ComprasService.receiveGoods` (as anteriores continuam existindo,
+  delegando com `unitCost = null` — nenhum chamador existente precisou mudar). `GET
+  /estoque/summary` (`valorEstoqueCusto`) passou a usar `COALESCE(average_cost, costPrice efetivo,
+  0)` em vez de só `costPrice` — sem endpoint novo, sem permissão nova, mesma precedência de
+  variação → pai → produto → zero já documentada na query. Migration V94: `stock_balance
+  .average_cost`, `stock_movement.unit_cost`, `goods_receipt_item.unit_cost`, todas
+  `NUMERIC(14,2) NULL`. Cobertura: 12 casos novos em `StockBalanceTest` (fórmula, arredondamento,
+  reset a zero em `apply`/`consumeReservation`), 5 em `EstoqueServiceTest`, round-trip e query de
+  valorização em `EstoqueRepositoryIT`, propagação em `ComprasServiceTest`, aceitação/rejeição em
+  `EstoqueControllerTest`. **Kit não ganhou `averageCost` próprio** — kit não tem linha em
+  `stock_balance`, e `derivedKitPricing` continua derivando o custo da soma dos componentes; sem
+  consumidor no escopo atual para custo por lote (`StockLot` também não ganhou o campo).
 
 ## Próximos passos
 
@@ -687,9 +717,9 @@ O roteiro completo para o que resta — ordem de execução, dependências entre
 que não cabem em estoque — está em [`proximos-passos.md`](proximos-passos.md). Resumo da
 prioridade imediata (nenhuma bloqueia outro módulo):
 
-1. **EST-F007** (custo médio) — o custo entra por lote (F008 já fechou), e F007 destrava o DRE do `financeiro`.
-2. **EST-F016** (unidade de medida) e **EST-F005** (entrada por XML de NF-e).
-3. **EST-F012** (transferência entre depósitos) segue despriorizado por decisão — ver `proximos-passos.md`. **EST-F020** (preço por variação) saiu do backlog: foi implementado em 2026-08-10 a pedido do dono, com herança do pai como padrão, o que preserva o argumento do §8.5 em vez de contrariá-lo.
+1. **EST-F016** (unidade de medida) e **EST-F005** (entrada por XML de NF-e). **EST-F007** (custo
+   médio) fechou em 2026-08-16 e destrava o DRE do `financeiro`.
+2. **EST-F012** (transferência entre depósitos) segue despriorizado por decisão — ver `proximos-passos.md`. **EST-F020** (preço por variação) saiu do backlog: foi implementado em 2026-08-10 a pedido do dono, com herança do pai como padrão, o que preserva o argumento do §8.5 em vez de contrariá-lo.
 
 Fora do roteiro de código, EST-C011 deixou uma **pendência operacional**: rodar
 `GET /estoque/integrity/orphan-skus` (ou o script) contra a base de produção e decidir o destino
