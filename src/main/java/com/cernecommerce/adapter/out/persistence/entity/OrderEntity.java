@@ -79,6 +79,24 @@ public class OrderEntity {
     @Column(name = "refunded_at")
     private Instant refundedAt;
 
+    // PDV-F008 — venda de balcão reservada para retirada depois. Histórico, sem CHECK de
+    // coexistência com "status" (diferente de cancelled_at/refunded_at): permanece preenchido
+    // mesmo depois de RESERVADO -> CONCLUIDO (retirada), mesma régua de paid_at.
+    @Column(name = "reserved_at")
+    private Instant reservedAt;
+
+    // Timestamps por etapa da esteira de fulfillment (BACKEND_TODO.md do mahal-admin,
+    // §"Vendas: timestamps por etapa"). Histórico, sem CHECK de coexistência com "status" — mesma
+    // régua de reserved_at/paid_at.
+    @Column(name = "separated_at")
+    private Instant separatedAt;
+
+    @Column(name = "shipped_at")
+    private Instant shippedAt;
+
+    @Column(name = "delivered_at")
+    private Instant deliveredAt;
+
     /**
      * Bloqueio otimista. A {@code Sale} anterior não tinha — era irrelevante numa tabela
      * insert-only, e passa a importar quando o pedido ganha transição de estado.

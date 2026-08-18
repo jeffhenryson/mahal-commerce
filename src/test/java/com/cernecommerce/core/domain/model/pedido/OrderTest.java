@@ -178,6 +178,73 @@ class OrderTest {
                 .hasMessageContaining("orderNumber");
     }
 
+    // PDV-F008 — reserva para retirada
+
+    @Test
+    void reserved_stampsNumberAndReservedAt() {
+        Order reserved = balcao().reserved("000042", new BigDecimal("6.00"), NOW);
+
+        assertThat(reserved.status()).isEqualTo(OrderStatus.RESERVADO);
+        assertThat(reserved.orderNumber()).isEqualTo("000042");
+        assertThat(reserved.reservedAt()).isEqualTo(NOW);
+        assertThat(reserved.changeAmount()).isEqualByComparingTo("6.00");
+        assertThat(reserved.concludedAt()).as("concludedAt só é gravado na retirada, não na reserva").isNull();
+    }
+
+    @Test
+    void reserved_stampsPaidAtWhenTheCounterCapturesThePayment() {
+        assertThat(balcao().reserved("000042", null, NOW).paidAt()).isEqualTo(NOW);
+    }
+
+    @Test
+    void reserved_requiresOrderNumber() {
+        assertThatThrownBy(() -> balcao().reserved("  ", null, NOW))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("orderNumber");
+    }
+
+    @Test
+    void reserved_isUnreachableAfterTheOrderIsAlreadyConcluded() {
+        Order concluded = balcao().concluded("000042", null, NOW);
+
+        assertThatThrownBy(() -> concluded.reserved("000043", null, NOW))
+                .isInstanceOf(InvalidOrderStatusTransitionException.class);
+    }
+
+    @Test
+    void pickedUp_stampsConcludedAtAndKeepsReservedAtAsHistory() {
+        Order reserved = balcao().reserved("000042", new BigDecimal("6.00"), NOW);
+        Instant later = NOW.plusSeconds(3600);
+
+        Order pickedUp = reserved.pickedUp(later);
+
+        assertThat(pickedUp.status()).isEqualTo(OrderStatus.CONCLUIDO);
+        assertThat(pickedUp.concludedAt()).isEqualTo(later);
+        assertThat(pickedUp.reservedAt()).as("reservedAt é histórico, sobrevive à retirada").isEqualTo(NOW);
+        assertThat(pickedUp.changeAmount()).isEqualByComparingTo("6.00");
+    }
+
+    /**
+     * {@code pickedUp} só valida "pode chegar a CONCLUIDO" — o mesmo que {@code CRIADO} também
+     * pode (via {@code concluded}), então o teste precisa de um estado que realmente não alcança
+     * CONCLUIDO: {@code PAGO} só chega a SEPARADO/REEMBOLSADO.
+     */
+    @Test
+    void pickedUp_onlyReachableWhenTheStateMachineAllowsConcluido() {
+        Order paid = Order.openMarketplace(7L, "LOJA-01", twoCharcoals()).paid(NOW);
+
+        assertThatThrownBy(() -> paid.pickedUp(NOW))
+                .isInstanceOf(InvalidOrderStatusTransitionException.class);
+    }
+
+    @Test
+    void reservedOrder_canBeRefundedWhenTheCustomerNeverComesBack() {
+        Order refunded = balcao().reserved("000042", null, NOW).refunded("cliente não retirou", NOW);
+
+        assertThat(refunded.status()).isEqualTo(OrderStatus.REEMBOLSADO);
+        assertThat(refunded.reservedAt()).as("histórico preservado mesmo após o reembolso").isEqualTo(NOW);
+    }
+
     @Test
     void marketplaceGoesThroughTheFullFulfillmentChain() {
         Order order = Order.openMarketplace(7L, "LOJA-01", twoCharcoals())
@@ -188,6 +255,38 @@ class OrderTest {
 
         assertThat(order.status()).isEqualTo(OrderStatus.ENTREGUE);
         assertThat(order.paidAt()).isEqualTo(NOW);
+    }
+
+    /** Timestamps por etapa da esteira — pedido do BACKEND_TODO.md do mahal-admin. */
+    @Test
+    void withStatus_stampsTheTimestampOfEachStageReached() {
+        Order separado = Order.openMarketplace(7L, "LOJA-01", twoCharcoals())
+                .paid(NOW)
+                .withStatus(OrderStatus.SEPARADO);
+        assertThat(separado.separatedAt()).isNotNull();
+        assertThat(separado.shippedAt()).isNull();
+        assertThat(separado.deliveredAt()).isNull();
+
+        Order enviado = separado.withStatus(OrderStatus.ENVIADO);
+        assertThat(enviado.separatedAt()).as("histórico preservado").isEqualTo(separado.separatedAt());
+        assertThat(enviado.shippedAt()).isNotNull();
+        assertThat(enviado.deliveredAt()).isNull();
+
+        Order entregue = enviado.withStatus(OrderStatus.ENTREGUE);
+        assertThat(entregue.separatedAt()).isEqualTo(separado.separatedAt());
+        assertThat(entregue.shippedAt()).isEqualTo(enviado.shippedAt());
+        assertThat(entregue.deliveredAt()).isNotNull();
+    }
+
+    @Test
+    void withStatus_refundDoesNotStampAnyEsteiraTimestamp() {
+        Order refundTarget = Order.openMarketplace(7L, "LOJA-01", twoCharcoals()).paid(NOW);
+
+        Order refunded = refundTarget.refunded("engano", NOW);
+
+        assertThat(refunded.separatedAt()).isNull();
+        assertThat(refunded.shippedAt()).isNull();
+        assertThat(refunded.deliveredAt()).isNull();
     }
 
     @Test

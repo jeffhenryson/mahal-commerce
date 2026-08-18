@@ -28,4 +28,10 @@ public class SaleRequest {
     @Valid
     @Schema(description = "Pelo menos uma linha (PDV-F006). Várias linhas = pagamento dividido.")
     private List<SalePaymentRequest> payments;
+
+    @Schema(description = "PDV-F008 — reservar para retirada depois em vez de concluir na hora. "
+            + "Omitido/false: comportamento de sempre (CONCLUIDO). true: mercadoria já baixada e "
+            + "pagamento já capturado, mas o pedido grava RESERVADO até o cliente voltar para "
+            + "retirar.")
+    private boolean reserveForPickup;
 }

@@ -831,6 +831,11 @@ Query: page (default 0, >= 0), size (default 20, 1..100)
 // Response 201 + Location → ProductResponse / 409 SKU_ALREADY_EXISTS / 400 VALIDATION_ERROR
 ```
 
+> **EST-F023 (rascunho):** aceita também `"status": "RASCUNHO" | "ATIVO"` (default `ATIVO`).
+> Rascunho não exige nenhum campo além de `sku`/`name`. Teto de 5 rascunhos no catálogo — o 6º
+> devolve `409 DRAFT_LIMIT_REACHED`. `GET /estoque/products` aceita `status` como filtro. `PATCH
+> /estoque/products/{sku}` também aceita `status` (promover/rebaixar).
+
 ```json
 // ProductResponse
 {
@@ -1341,6 +1346,68 @@ um `StockMovement` de `ENTRADA` via `EstoqueUseCase.adjustStock`, atualizando o 
 }
 ```
 
+### POST /compras/goods-receipts/nfe-preview — Permissão: COMPRAS_RECEIPT_MANAGE
+
+EST-F005: primeira fase da importação de NF-e. Upload `multipart/form-data`, campo `file` (o XML
+da NF-e). Casa o fornecedor pelo CNPJ do emitente e cada item pelo EAN (`cEAN`) contra
+`Product.barcode` — **nada é persistido em `GoodsReceipt` ainda**. `400 MALFORMED_NFE_XML` (XML
+malformado ou rejeitado pelo hardening contra XXE); `404 SUPPLIER_NOT_FOUND_BY_TAX_ID` (nenhum
+fornecedor cadastrado com aquele CNPJ — sem criação automática, de propósito).
+
+```json
+// Response 200 → NfeImportResponseDTO
+{
+  "id": 1,
+  "supplierId": 7,
+  "emitterCnpj": "12345678000199",
+  "warehouseCode": null,
+  "status": "PREVIEWED",
+  "goodsReceiptId": null,
+  "lines": [
+    {
+      "id": 10, "itemNumber": 1, "supplierProductCode": "FORN-001",
+      "ean": "7891234567890", "description": "Essência Menta 50g",
+      "quantity": 10.000, "unitPrice": 12.50,
+      "lotCode": "L2026A", "expiryDate": "2027-06-01",
+      "matchStatus": "MATCHED", "matchedSku": "ESS-MENTA-50"
+    },
+    {
+      "id": 11, "itemNumber": 2, "supplierProductCode": "FORN-002",
+      "ean": null, "description": "Carvão a granel",
+      "quantity": 5.000, "unitPrice": 8.00,
+      "lotCode": null, "expiryDate": null,
+      "matchStatus": "UNMATCHED", "matchedSku": null
+    }
+  ],
+  "uploadedBy": "comprador1",
+  "uploadedAt": "2026-08-18T14:00:00Z",
+  "confirmedAt": null
+}
+```
+
+Linha sem `cEAN` (ou `cEAN = "SEM GTIN"`, comum em NF-e real de item não-branded/a granel) volta
+`UNMATCHED` — resolva com um override manual em `POST .../nfe-confirm` antes de confirmar.
+
+### POST /compras/goods-receipts/nfe-confirm — Permissão: COMPRAS_RECEIPT_MANAGE
+
+Segunda fase: confirma um import previamente aceito, cobrindo com `overrides` toda linha que
+ficou `UNMATCHED` no preview, e delega para o mesmo caminho de `POST /compras/goods-receipts`. O
+estoque só é debitado/creditado aqui, nunca no preview.
+
+```json
+{
+  "nfeImportId": 1,          // obrigatório — id devolvido pelo preview
+  "warehouseCode": "LOJA-01", // obrigatório — a NF-e não diz o depósito de destino
+  "overrides": [
+    { "itemNumber": 2, "sku": "CARV-GRANEL" }
+  ]
+}
+// Response 201 → GoodsReceiptResponseDTO (mesmo shape do POST /compras/goods-receipts)
+// 400 UNMATCHED_NFE_LINE (linha UNMATCHED sem override) / VALIDATION_ERROR
+// 404 NFE_IMPORT_NOT_FOUND / WAREHOUSE_NOT_FOUND
+// 409 NFE_IMPORT_ALREADY_PROCESSED (import já confirmado ou rejeitado)
+```
+
 ---
 
 ## PDV (Vendas Balcão) — `/pdv`
@@ -1458,6 +1525,13 @@ pedido é `pdv.sale.max-discount-percent` (default **10%**).
 Produto sem preço no catálogo **recusa a venda** com `409 PRODUCT_NOT_PRICED` — preço zero e preço
 desconhecido não são a mesma coisa.
 
+> **PDV-F008 (reserva para retirada):** o request aceita `"reserveForPickup": true` (default
+> `false`) — grava `RESERVADO` em vez de `CONCLUIDO`: mercadoria já baixada e pagamento já
+> capturado, só a retirada fica pendente. Marcar como retirado depois é
+> `POST /orders/{id}/status` com `{"status": "CONCLUIDO"}` — mesmo endpoint da esteira de
+> fulfillment. `RESERVADO` só é alcançável a partir de venda de balcão (`CRIADO`); pedido de
+> marketplace nunca alcança esse status.
+
 ```json
 // OrderResponseDTO
 {
@@ -1498,6 +1572,53 @@ Retorna `OrderResponseDTO`. `404 ORDER_NOT_FOUND`.
 
 `PageResult<OrderResponseDTO>` dos pedidos da sessão, do mais recente para o mais antigo
 (`page` ≥ 0, `size` 1–100). `404 CASH_REGISTER_SESSION_NOT_FOUND`.
+
+## Comanda de mesa (PDV-F009) — `/pdv/comandas`
+
+Pedidos incrementais numa sessão de caixa aberta por horas — o caso do lounge de narguilé, distinto
+da venda pontual de `POST /pdv/sessions/{id}/sales`. **A baixa de estoque acontece a cada item
+lançado**, não no fechamento — ver a nota de limitação conhecida no README do módulo.
+
+### POST /pdv/comandas?sessionId= — Permissão: PDV_COMANDA_MANAGE
+
+```json
+{ "tableOrCustomerLabel": "Mesa 4" }
+```
+`201` com `ComandaResponseDTO`, status `ABERTA`. `403 SESSION_NOT_OWNED`; `404 CASH_REGISTER_SESSION_NOT_FOUND`;
+`409 CASH_REGISTER_SESSION_CLOSED`.
+
+### POST /pdv/comandas/{id}/items — Permissão: PDV_COMANDA_MANAGE
+
+```json
+{ "sku": "ESS-MENTA-50", "quantity": 1 }
+```
+Preço e custo vêm do catálogo, igual à venda de balcão. `201` com a comanda atualizada
+(`runningTotal` recalculado). `400 INSUFFICIENT_STOCK`; `403 SESSION_NOT_OWNED`;
+`404 COMANDA_NOT_FOUND`/`PRODUCT_NOT_FOUND`; `409 COMANDA_NOT_OPEN`/`PRODUCT_NOT_PRICED`.
+
+### GET /pdv/comandas/{id} — Permissão: PDV_READ
+
+`ComandaResponseDTO`, com os itens lançados e o `runningTotal`. `404 COMANDA_NOT_FOUND`.
+
+### GET /pdv/comandas?sessionId= — Permissão: PDV_READ
+
+Lista de `ComandaResponseDTO` das comandas `ABERTA` da sessão — as "mesas ocupadas".
+
+### POST /pdv/comandas/{id}/close — Permissão: PDV_COMANDA_MANAGE
+
+```json
+{ "payments": [{ "method": "DINHEIRO", "amount": 50.00 }] }
+```
+Mesmo contrato de pagamento de `POST /pdv/sessions/{id}/sales`: pelo menos uma linha, só
+`DINHEIRO` pode exceder o total para gerar troco. Converte os itens acumulados num `Order`
+concluído — `201`~`200` com `OrderResponseDTO`. **Sem novo débito de estoque**: já saiu item a
+item em cada lançamento. `400 INSUFFICIENT_PAYMENT`; `403 SESSION_NOT_OWNED`;
+`404 COMANDA_NOT_FOUND`; `409 COMANDA_NOT_OPEN`/`COMANDA_EMPTY`/`PAYMENT_EXCEEDS_ORDER_TOTAL`.
+
+### POST /pdv/comandas/{id}/cancel — Permissão: PDV_COMANDA_MANAGE
+
+Abandona a comanda sem cobrança, devolvendo ao estoque (`ENTRADA`) cada item já lançado. `200`
+com a comanda `CANCELADA`. `403 SESSION_NOT_OWNED`; `404 COMANDA_NOT_FOUND`; `409 COMANDA_NOT_OPEN`.
 
 ---
 
@@ -2554,11 +2675,13 @@ interface TotpConfirmResponse {
 | `CASHBACK_RATE_MANAGE` | `POST`/`PATCH /cashback/rates` — criar e alterar taxa de cashback |
 | `CASHBACK_READ` | Leituras de `/cashback/**` — taxas, saldo, extrato e diagnóstico de margem |
 | `COMPRAS_READ` | `GET /compras/suppliers` |
-| `COMPRAS_RECEIPT_MANAGE` | `POST /compras/goods-receipts` — recebimento de mercadoria |
+| `COMPRAS_RECEIPT_MANAGE` | `POST /compras/goods-receipts` — recebimento de mercadoria; também `POST /compras/goods-receipts/nfe-preview`/`.../nfe-confirm` — importação de NF-e (EST-F005) |
 | `PDV_READ` | `GET /pdv/sessions` |
 | `PDV_SALE_MANAGE` | `POST /pdv/sessions/{id}/sales` — venda com baixa de estoque |
+| `PDV_COMANDA_MANAGE` | `POST /pdv/comandas` e `.../items`/`.../close`/`.../cancel` — comanda de mesa (PDV-F009) |
 | `ECOMMERCE_READ` | Acesso ao endpoint stub `GET /ecommerce/carts` |
-| `FINANCEIRO_READ` | Acesso ao endpoint stub `GET /financeiro/cash-flow` |
+| `FINANCEIRO_READ` | `GET /financeiro/cash-flow` e `.../cash-flow/summary` |
+| `FINANCEIRO_CASH_FLOW_MANAGE` | `POST`/`PATCH`/`DELETE /financeiro/cash-flow` — criar, editar e remover lançamento |
 | `LOGISTICA_READ` | Acesso ao endpoint stub `GET /logistica/shipments` |
 
 ---

@@ -8,6 +8,7 @@ import com.cernecommerce.core.domain.model.estoque.EstoqueSummary;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductFilter;
 import com.cernecommerce.core.domain.model.estoque.ProductSortField;
+import com.cernecommerce.core.domain.model.estoque.ProductStatus;
 import com.cernecommerce.core.domain.model.estoque.ProductType;
 
 import java.util.List;
@@ -144,4 +145,10 @@ public interface ProductRepository {
      * (Bloco 2.2). {@code search} filtra por substring, sem diferenciar maiúsculas.
      */
     PageResult<BrandSummary> findBrands(String search, int page, int size);
+
+    /**
+     * Quantidade de produtos/kits com o {@code status} informado (EST-F023) — usado para aplicar
+     * o teto de 5 rascunhos no servidor antes de gravar.
+     */
+    long countByStatus(ProductStatus status);
 }

@@ -60,7 +60,14 @@ public class OrderService implements OrderUseCase {
     @Transactional
     public Order changeStatus(Long orderId, OrderStatus newStatus, String username) {
         // A validação da transição mora em OrderStatus/Order e já tem teste — aqui só se orquestra.
-        return orderRepository.save(getOrder(orderId).withStatus(newStatus));
+        // RESERVADO -> CONCLUIDO (retirada, PDV-F008) usa pickedUp() em vez do withStatus genérico,
+        // porque só pickedUp() carimba concludedAt — withStatus não grava timestamp nenhum (é o
+        // caminho da esteira SEPARADO/ENVIADO/ENTREGUE, que hoje mesmo não tem timestamp por etapa).
+        Order order = getOrder(orderId);
+        Order updated = order.status() == OrderStatus.RESERVADO && newStatus == OrderStatus.CONCLUIDO
+                ? order.pickedUp(Instant.now())
+                : order.withStatus(newStatus);
+        return orderRepository.save(updated);
     }
 
     @Override

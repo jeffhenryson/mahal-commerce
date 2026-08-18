@@ -54,10 +54,24 @@ public enum OrderStatus {
      * <p>Distinto de {@link #CANCELADO} de propósito: cancelar e reembolsar são eventos diferentes,
      * e contá-los juntos esconderia quanto dinheiro de fato voltou ao cliente.</p>
      */
-    REEMBOLSADO;
+    REEMBOLSADO,
+
+    /**
+     * Venda de balcão paga e baixada do estoque, aguardando o cliente retirar (PDV-F008). Sub-estado
+     * de "pago, aguardando entrega" — o pedido já está tão fixado quanto {@link #CONCLUIDO} (número
+     * emitido, pagamento capturado, estoque baixado), só que a mercadoria ainda não saiu da loja.
+     *
+     * <p>Só alcançável a partir de {@link #CRIADO}, nunca de {@link #PAGO}/{@link
+     * #AGUARDANDO_PAGAMENTO}: uma venda de balcão nunca fica persistida em {@code PAGO} (ela vai
+     * direto de {@code CRIADO} para {@code CONCLUIDO} ou, agora, para {@code RESERVADO}, na mesma
+     * transação — ver {@code PdvService.registerSale}). Como {@code CRIADO} só é produzido por
+     * {@code Order.openBalcao}, um pedido de marketplace nunca alcança este estado por construção,
+     * sem precisar de nenhuma checagem de canal em código.</p>
+     */
+    RESERVADO;
 
     private static final Map<OrderStatus, Set<OrderStatus>> ALLOWED = Map.of(
-            CRIADO, EnumSet.of(CONCLUIDO, CANCELADO),
+            CRIADO, EnumSet.of(CONCLUIDO, RESERVADO, CANCELADO),
             // CONCLUIDO aqui é a retirada no balcão: o cliente montou o pedido no app, veio à loja,
             // pagou no caixa e levou a mercadoria. Terminou exatamente como uma venda de balcão
             // termina — inventar um caminho de "retirada" pela esteira de envio faria o pedido
@@ -71,7 +85,11 @@ public enum OrderStatus {
             ENTREGUE, EnumSet.of(REEMBOLSADO),
             CONCLUIDO, EnumSet.of(REEMBOLSADO),
             CANCELADO, EnumSet.noneOf(OrderStatus.class),
-            REEMBOLSADO, EnumSet.noneOf(OrderStatus.class));
+            REEMBOLSADO, EnumSet.noneOf(OrderStatus.class),
+            // A retirada normal é RESERVADO -> CONCLUIDO (Order.pickedUp). REEMBOLSADO cobre o
+            // caso do cliente que pagou e nunca voltou para retirar — o dinheiro já foi capturado
+            // e o estoque já saiu, então é reembolso, não cancelamento (mesma régua de PAGO acima).
+            RESERVADO, EnumSet.of(CONCLUIDO, REEMBOLSADO));
 
     /**
      * Indica se este estado é final — nenhuma transição parte dele.

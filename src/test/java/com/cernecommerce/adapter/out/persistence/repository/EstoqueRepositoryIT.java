@@ -14,6 +14,7 @@ import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
 import com.cernecommerce.core.domain.model.estoque.ProductFilter;
 import com.cernecommerce.core.domain.model.estoque.ProductSortField;
+import com.cernecommerce.core.domain.model.estoque.ProductStatus;
 import com.cernecommerce.core.domain.model.estoque.ProductType;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.ReorderAlertCounts;
@@ -793,6 +794,30 @@ class EstoqueRepositoryIT {
                 .containsExactly("FLT-TYPE-KIT");
         assertThat(skus(filtrar(new ProductFilter(null, "flt-type", null, null, ProductType.SIMPLES))))
                 .containsExactly("FLT-TYPE-SIMPLES");
+    }
+
+    @Test
+    void findAll_filtraPorStatus() {
+        productRepository.save(Product.create("FLT-STATUS-ATIVO", "Produto", "flt-status", List.of()));
+        productRepository.save(Product.create("FLT-STATUS-RASCUNHO", "Rascunho", "flt-status", List.of())
+                .withStatus(ProductStatus.RASCUNHO));
+        flushAndClear();
+
+        assertThat(skus(filtrar(new ProductFilter(null, "flt-status", null, null, null, null, ProductStatus.RASCUNHO))))
+                .containsExactly("FLT-STATUS-RASCUNHO");
+        assertThat(skus(filtrar(new ProductFilter(null, "flt-status", null, null, null, null, ProductStatus.ATIVO))))
+                .containsExactly("FLT-STATUS-ATIVO");
+    }
+
+    @Test
+    void countByStatus_contaSoOsRascunhos() {
+        long antes = productRepository.countByStatus(ProductStatus.RASCUNHO);
+        productRepository.save(Product.create("CNT-STATUS-001", "Rascunho", "cnt-status", List.of())
+                .withStatus(ProductStatus.RASCUNHO));
+        productRepository.save(Product.create("CNT-STATUS-002", "Ativo", "cnt-status", List.of()));
+        flushAndClear();
+
+        assertThat(productRepository.countByStatus(ProductStatus.RASCUNHO)).isEqualTo(antes + 1);
     }
 
     @Test

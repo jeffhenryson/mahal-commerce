@@ -48,4 +48,10 @@ public class OrderItemEntity {
 
     @Column(name = "cashback_percent", precision = 9, scale = 4)
     private BigDecimal cashbackPercent;
+
+    // Nome do produto congelado no instante da venda — mesma razão de cost_price: se o produto for
+    // renomeado depois, o histórico do pedido não pode mudar junto. Nulo para itens anteriores a
+    // esta migration.
+    @Column(name = "product_name", length = 255)
+    private String productName;
 }

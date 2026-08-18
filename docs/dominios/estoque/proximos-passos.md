@@ -107,12 +107,14 @@ F020 e categoria, ver README §Histórico de Implementações)
  2. ~~EST-F015 + EST-F022~~ ✅ kit virtual de um nível + custo derivado no Pricing (Fatia 6).
  3. ~~EST-F008~~ ✅ lote e validade — desenho aditivo (StockLot ao lado de StockBalance), sem
               reescrever a granularidade do saldo. Ver bloco acima.
- 4. EST-F007  custo médio ponderado. Agora que F008 fechou, o custo já entra por lote — e
-              DEPOIS DO CASHBACK (Fatia 4, já fechada): o costPrice manual de V63 já dá a ordem
-              de grandeza, que é o que decide se a taxa do carvão é 2% ou 8%.
+ 4. ~~EST-F007~~ ✅ custo médio ponderado — fechado em 2026-08-16. `StockBalance.averageCost`,
+              recalculado a cada ENTRADA com `unitCost` informado. Ver README §Histórico.
  5. EST-F016  unidade de medida e conversão — mexe na semântica de quantity em todo lugar.
- 6. EST-F005  entrada por XML de NF-e (NfeXmlImportPort). Por último entre as features
-              de entrada, porque o XML traz lote e custo — depende de F008 (fechado) e F007.
+              Único item de código que resta na fila imediata deste módulo.
+ 6. ~~EST-F005~~ ✅ entrada por XML de NF-e — fechado em 2026-08-18. Parser JDK puro
+              (`DocumentBuilderFactory`/DOM, hardening contra XXE), fluxo preview→confirm,
+              casamento por CNPJ/EAN. Endpoints em `/compras/goods-receipts/nfe-*`. Ver README
+              §Histórico e `docs/dominios/compras/README.md`.
 
 DESPRIORIZADOS POR DECISÃO (não são esquecimento — §2.2 do plano)
 - EST-F012 (transferência entre depósitos) só faz sentido quando existir um SEGUNDO LOCAL
@@ -164,7 +166,8 @@ ARMADILHAS DESTE PROJETO (já me custaram build quebrado)
 - Testes de contexto real que escrevem estoque precisam cadastrar o SKU antes —
   desde EST-C002 movimentar SKU inexistente é 404.
 
-Comece lendo o README do módulo e me apresentando o plano para EST-F007 (custo médio ponderado).
+Comece lendo o README do módulo e me apresentando o plano para EST-F016 (unidade de medida) —
+único item de código que resta na fila imediata deste módulo (F007/F005 fecharam em 08-16/08-18).
 ```
 
 ---

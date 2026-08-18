@@ -17,6 +17,11 @@ public class OrderItemResponseDTO {
 
     private Long id;
     private String sku;
+
+    @Schema(description = "Nome do produto, congelado no instante da venda. Nulo em pedidos "
+            + "anteriores a esta coluna.")
+    private String productName;
+
     private BigDecimal quantity;
 
     @Schema(description = "Preço praticado, congelado do catálogo no instante da venda.")

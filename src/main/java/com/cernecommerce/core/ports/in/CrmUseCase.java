@@ -13,6 +13,7 @@ import com.cernecommerce.core.domain.model.crm.CustomerStage;
 import com.cernecommerce.core.domain.model.crm.StageTransition;
 import com.cernecommerce.core.domain.model.crm.Tag;
 import com.cernecommerce.core.domain.model.crm.TagSummary;
+import com.cernecommerce.core.domain.model.crm.WebhookTestResult;
 
 import java.util.Collection;
 import java.util.List;
@@ -149,7 +150,7 @@ public interface CrmUseCase {
 
     /** Cria uma automação de campanha (ativa por padrão). */
     CampaignAutomation createAutomation(String nome, CampaignTrigger gatilho, CustomerStage segmentoAlvo,
-            CampaignChannel canal, String template);
+            CampaignChannel canal, String template, String webhookUrl, Map<String, String> webhookHeaders);
 
     /** Lista todas as automações de campanha. */
     List<CampaignAutomation> listAutomations();
@@ -162,6 +163,15 @@ public interface CrmUseCase {
     CampaignAutomation setAutomationActive(Long automationId, boolean ativa);
 
     /**
+     * Atualiza todos os campos editáveis de uma automação existente, sem precisar recriá-la.
+     * Lança {@link com.cernecommerce.core.domain.exception.crm.CampaignAutomationNotFoundException}
+     * se não existir.
+     */
+    CampaignAutomation updateAutomation(Long automationId, String nome, CampaignTrigger gatilho,
+            CustomerStage segmentoAlvo, CampaignChannel canal, String template, String webhookUrl,
+            Map<String, String> webhookHeaders);
+
+    /**
      * Remove uma automação e seu log de disparos. Lança
      * {@link com.cernecommerce.core.domain.exception.crm.CampaignAutomationNotFoundException}
      * se não existir.
@@ -170,12 +180,25 @@ public interface CrmUseCase {
 
     /**
      * Dispara uma automação manualmente: resolve os clientes do {@code segmentoAlvo} e cria uma
-     * {@link CampaignLogEntry} por cliente, status {@code PENDENTE_INTEGRACAO} — não envia
-     * mensagem real (ver crm/integracao-canal-envio, F008). Lança
+     * {@link CampaignLogEntry} por cliente. Quando a automação tem {@code webhookUrl} configurado,
+     * envia de verdade um POST para essa URL (status {@code ENVIADO}/{@code FALHA} conforme o
+     * resultado); sem {@code webhookUrl}, mantém o comportamento legado — status
+     * {@code PENDENTE_INTEGRACAO}, sem envio real. Um cliente-alvo com webhook indisponível não
+     * interrompe o disparo para os demais. Lança
      * {@link com.cernecommerce.core.domain.exception.crm.CampaignAutomationNotFoundException}
      * se a automação não existir.
      */
     List<CampaignLogEntry> dispatchAutomation(Long automationId);
+
+    /**
+     * Dispara um payload de teste para o webhook configurado, com um cliente fictício — não
+     * persiste {@link CampaignLogEntry}. Lança
+     * {@link com.cernecommerce.core.domain.exception.crm.CampaignAutomationNotFoundException}
+     * se a automação não existir, ou
+     * {@link com.cernecommerce.core.domain.exception.crm.AutomationWebhookNotConfiguredException}
+     * se não tiver {@code webhookUrl} configurado.
+     */
+    WebhookTestResult testAutomation(Long automationId);
 
     /**
      * Lista o log de disparos de uma automação, mais recentes primeiro. Lança

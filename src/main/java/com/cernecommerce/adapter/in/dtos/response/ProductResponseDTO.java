@@ -72,4 +72,7 @@ public class ProductResponseDTO {
 
     /** Aparece no marketplace/app. */
     private boolean visibleInMarketplace;
+
+    /** {@code RASCUNHO} ou {@code ATIVO} (EST-F023). */
+    private String status;
 }

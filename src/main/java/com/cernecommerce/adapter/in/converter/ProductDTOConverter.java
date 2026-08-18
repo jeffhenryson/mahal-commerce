@@ -100,6 +100,7 @@ public class ProductDTOConverter {
         dto.setKitComponentEligible(product.kitComponentEligible());
         dto.setVisibleInPos(product.visibleInPos());
         dto.setVisibleInMarketplace(product.visibleInMarketplace());
+        dto.setStatus(product.status().name());
         return dto;
     }
 

@@ -3,6 +3,7 @@ package com.cernecommerce.core.domain.model.crm;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -27,11 +28,39 @@ class CampaignAutomationTest {
     void of_reconstitutesFromPersistence() {
         Instant criadoEm = Instant.parse("2026-01-01T00:00:00Z");
         CampaignAutomation automation = CampaignAutomation.of(1L, "Boas-vindas", CampaignTrigger.MANUAL,
-                CustomerStage.NOVO_LEAD, CampaignChannel.EMAIL, "Ola {nome}", false, criadoEm);
+                CustomerStage.NOVO_LEAD, CampaignChannel.EMAIL, "Ola {nome}", false, criadoEm, null, Map.of());
 
         assertThat(automation.id()).isEqualTo(1L);
         assertThat(automation.ativa()).isFalse();
         assertThat(automation.criadoEm()).isEqualTo(criadoEm);
+        assertThat(automation.hasWebhook()).isFalse();
+    }
+
+    @Test
+    void withDetails_returnsNewInstanceWithUpdatedFieldsAndWebhook() {
+        CampaignAutomation automation = CampaignAutomation.create("Boas-vindas", CampaignTrigger.MANUAL,
+                CustomerStage.NOVO_LEAD, CampaignChannel.EMAIL, "Ola {nome}");
+
+        CampaignAutomation updated = automation.withDetails("Novo nome", CampaignTrigger.MANUAL,
+                CustomerStage.QUALIFICADO, CampaignChannel.WHATSAPP, "Novo template",
+                "https://n8n.example.com/webhook/abc", Map.of("Authorization", "Bearer token"));
+
+        assertThat(updated.nome()).isEqualTo("Novo nome");
+        assertThat(updated.segmentoAlvo()).isEqualTo(CustomerStage.QUALIFICADO);
+        assertThat(updated.canal()).isEqualTo(CampaignChannel.WHATSAPP);
+        assertThat(updated.template()).isEqualTo("Novo template");
+        assertThat(updated.webhookUrl()).isEqualTo("https://n8n.example.com/webhook/abc");
+        assertThat(updated.webhookHeaders()).containsEntry("Authorization", "Bearer token");
+        assertThat(updated.hasWebhook()).isTrue();
+        assertThat(automation.hasWebhook()).isFalse();
+    }
+
+    @Test
+    void throwsWhenWebhookUrlIsMalformed() {
+        assertThatThrownBy(() -> CampaignAutomation.of(1L, "Boas-vindas", CampaignTrigger.MANUAL,
+                CustomerStage.NOVO_LEAD, CampaignChannel.EMAIL, "Ola {nome}", true, Instant.now(),
+                "http://[invalid", Map.of()))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test

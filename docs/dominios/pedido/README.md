@@ -3,7 +3,7 @@
 **Status:** 🟢 Operacional — visão do administrador entregue; o pedido nasce em `vendas-balcao` (balcão) e em `ecommerce` (marketplace, checkout + webhook InfinitePay, Fatia 10, entregue em 2026-08-03)
 **Pacote Java:** `com.cernecommerce.core.domain.model.pedido`
 **Rota HTTP base:** `/orders`
-**Última atualização deste doc:** 2026-08-03 (`Order.paid(...)` ganhou seu primeiro caller: o webhook de pagamento do marketplace, ECM-F004)
+**Última atualização deste doc:** 2026-08-18 (PED-C002 — N+1 crítico em `GET /orders` — auditoria `/1-analise ambas`)
 
 ## Objetivo
 
@@ -158,7 +158,9 @@ ao menos um pedido.
 | ID | Prioridade | Tipo | Item | Descrição | Status |
 |---|---|---|---|---|---|
 | PED-C001 | 🟡 Importante | Correção | auditar-e-documentar-o-modulo | Este README foi escrito junto com a entrega, não a partir de auditoria do código. Faltam Regras de Negócio e Cobertura de Testes no padrão de [`estoque`](../estoque/README.md). | Pendente |
+| PED-C002 | 🔴 Alta | Correção | n-mais-1-em-get-orders | **N+1 confirmado** em `OrderRepositoryImpl.findAll`/`findBySessionId` (`adapter/out/persistence/repository/OrderRepositoryImpl.java:90-121`), usado por `GET /orders` (endpoint admin mais provável de rodar sob carga, `size` máx. 100 — `OrdersController.java:113`). `OrderEntity.items` é `@OneToMany(fetch = FetchType.LAZY)` (`OrderEntity.java:108`) e `toDomain(OrderEntity e)` (linha 142) itera `e.getItems()` por entidade da página, sem JOIN FETCH nem `@EntityGraph` — até **101 queries** por página de 100 pedidos. Aplicar o mesmo padrão de duas fases (IDs paginados → `SELECT DISTINCT o FROM OrderEntity o LEFT JOIN FETCH o.items WHERE o.id IN (:ids)`) já usado em `ProductRepositoryImpl.findAllByIdsWithVariants`. Achado em auditoria `analyze-domain`/performance de 2026-08-18. | Pendente |
 | PED-F001 | 🟢 Baixa | Feature | filtro-por-numero-do-pedido | `GET /orders?orderNumber=` — hoje só dá para achar um pedido pelo id interno, e o número é o que o cliente tem em mãos. | Pendente |
+| PED-F003 | 🟢 Baixa | Feature | paginacao-server-side-por-cliente | `GET /orders?customerId=` já existe e é o caminho oficial para o histórico de pedidos do cliente (substituiu o placeholder `GET /crm/customers/{id}/orders`, ver `CRM-F001`), mas o front (`mahal-admin`) hoje busca 50 de uma vez e pagina em memória (5/10/15/25) porque `page`/`size` não é usado nesse caminho — vira pesado em cliente com histórico grande. `GET /orders` já aceita `page`/`size`; falta só o front trocar a chamada — item de coordenação, não de código novo no backend. Sinalizado pelo front em `Docs/BACKEND_TODO.md`, 2026-08-18. | Pendente |
 
 `PDV-F007` (status `REEMBOLSADO`, distinto de `CANCELADO`) foi entregue em 2026-07-29 — ver
 [Histórico de Implementações](#histórico-de-implementações) abaixo e o registro em
@@ -182,6 +184,26 @@ ao menos um pedido.
   fora de teste — `PaymentWebhookService`, chamado por `POST /webhooks/payments/{provider}`.
   Nenhuma mudança de schema neste domínio; V79 (em `ecommerce`) só amplia o `CHECK` de
   `order_payment.method` para aceitar `GATEWAY_PIX`.
+- **2026-08-17** — `reserva-para-retirada` (**PDV-F008**): novo status `RESERVADO`, entre
+  `CRIADO` e `CONCLUIDO`/`REEMBOLSADO` — venda de balcão paga e baixada do estoque, aguardando o
+  cliente retirar depois. Detalhes completos em
+  [`vendas-balcao/README.md`](../vendas-balcao/README.md#histórico-de-implementações). Migration
+  V98.
+- **2026-08-17** — `product-name-e-timestamps-da-esteira` (**PED-F002**): `OrderItem` ganha
+  `productName`, congelado no instante da venda (mesma razão de `costPrice` — produto renomeado
+  depois não pode reescrever o histórico), exposto em `OrderItemAdminResponseDto`,
+  `OrderItemResponseDto` e `SaleReceiptItemResponseDto`. Novo `EstoqueUseCase.resolveSaleInfo`
+  resolve nome e precificação numa consulta só (evita repetir o `findByAnySku` que
+  `findPricingBySku` já faz) — `PdvService.registerSale` e `ShopService` (checkout e
+  `settleOnlineOrder`) passaram a usá-lo. `Order` ganha `separatedAt`/`shippedAt`/`deliveredAt`,
+  carimbados por `withStatus` quando o pedido alcança `SEPARADO`/`ENVIADO`/`ENTREGUE`
+  respectivamente — histórico, sem `CHECK` de coexistência com o status atual (mesma régua de
+  `reservedAt`/`paidAt`): um pedido que já foi separado mantém `separatedAt` preenchido mesmo
+  depois de `ENTREGUE` ou reembolsado. Pedido do `BACKEND_TODO.md` do `mahal-admin`
+  §"Vendas: nome do cliente, ranking de produtos e recibo de marketplace" — os outros três itens
+  dessa seção (`customerName`, ranking de produtos, recibo de marketplace) já estavam
+  implementados antes desta entrega. Migrations V99 (`order_item.product_name`) e V100
+  (`sales_order.separated_at`/`shipped_at`/`delivered_at`).
 
 ## Próximos passos
 

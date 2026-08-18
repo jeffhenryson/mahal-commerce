@@ -13,9 +13,9 @@ package com.cernecommerce.core.domain.model.estoque;
  * case-insensitive e fazê-lo aqui evita repetir a normalização em cada adapter.</p>
  */
 public record ProductFilter(String search, String category, String brand, Boolean active, ProductType type,
-        Boolean kitComponentEligible) {
+        Boolean kitComponentEligible, ProductStatus status) {
 
-    public static final ProductFilter EMPTY = new ProductFilter(null, null, null, null, null, null);
+    public static final ProductFilter EMPTY = new ProductFilter(null, null, null, null, null, null, null);
 
     public ProductFilter {
         search = normalize(search);
@@ -25,7 +25,7 @@ public record ProductFilter(String search, String category, String brand, Boolea
 
     /** Mesma forma, sem filtro de {@code type} — compatibilidade com chamadores anteriores a EST-F022. */
     public ProductFilter(String search, String category, String brand, Boolean active) {
-        this(search, category, brand, active, null, null);
+        this(search, category, brand, active, null, null, null);
     }
 
     /**
@@ -33,7 +33,13 @@ public record ProductFilter(String search, String category, String brand, Boolea
      * anteriores ao Bloco 2.4.
      */
     public ProductFilter(String search, String category, String brand, Boolean active, ProductType type) {
-        this(search, category, brand, active, type, null);
+        this(search, category, brand, active, type, null, null);
+    }
+
+    /** Mesma forma, sem filtro de {@code status} — compatibilidade com chamadores anteriores a EST-F023. */
+    public ProductFilter(String search, String category, String brand, Boolean active, ProductType type,
+            Boolean kitComponentEligible) {
+        this(search, category, brand, active, type, kitComponentEligible, null);
     }
 
     private static String normalize(String value) {
@@ -44,6 +50,6 @@ public record ProductFilter(String search, String category, String brand, Boolea
 
     public boolean isEmpty() {
         return search == null && category == null && brand == null && active == null && type == null
-                && kitComponentEligible == null;
+                && kitComponentEligible == null && status == null;
     }
 }

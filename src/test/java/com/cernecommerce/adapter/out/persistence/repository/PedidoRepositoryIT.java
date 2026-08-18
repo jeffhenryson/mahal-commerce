@@ -228,4 +228,89 @@ class PedidoRepositoryIT {
         return Order.openBalcao(1L, "LOJA-01", null, items)
                 .concluded(orderRepository.nextOrderNumber(), null, Instant.now());
     }
+
+    private Order reservedBalcao(List<OrderItem> items) {
+        return Order.openBalcao(1L, "LOJA-01", null, items)
+                .reserved(orderRepository.nextOrderNumber(), null, Instant.now());
+    }
+
+    // ── PDV-F008 — reserva para retirada ────────────────────────────────────────────────────
+
+    @Test
+    void save_persistsReservedAtAndSurvivesReload() {
+        Order saved = orderRepository.save(reservedBalcao(twoCharcoals(null)));
+        flushAndClear();
+
+        Order reloaded = orderRepository.findById(saved.id()).orElseThrow();
+
+        assertThat(reloaded.status()).isEqualTo(OrderStatus.RESERVADO);
+        assertThat(reloaded.reservedAt()).isNotNull();
+        assertThat(reloaded.concludedAt()).as("retirada ainda não aconteceu").isNull();
+        assertThat(reloaded.orderNumber()).isNotBlank();
+    }
+
+    @Test
+    void save_pickedUp_keepsReservedAtAsHistoryAfterConcluido() {
+        Order saved = orderRepository.save(reservedBalcao(twoCharcoals(null)));
+        flushAndClear();
+        Order reloaded = orderRepository.findById(saved.id()).orElseThrow();
+
+        Order pickedUp = orderRepository.save(reloaded.pickedUp(Instant.now()));
+        flushAndClear();
+        Order reloadedAfterPickup = orderRepository.findById(pickedUp.id()).orElseThrow();
+
+        assertThat(reloadedAfterPickup.status()).isEqualTo(OrderStatus.CONCLUIDO);
+        assertThat(reloadedAfterPickup.concludedAt()).isNotNull();
+        assertThat(reloadedAfterPickup.reservedAt())
+                .as("reservedAt permanece preenchido depois da retirada, como histórico")
+                .isEqualTo(reloaded.reservedAt());
+    }
+
+    @Test
+    void findAll_filtraPorStatusReservado() {
+        orderRepository.save(reservedBalcao(twoCharcoals(null)));
+        orderRepository.save(concludedBalcao(twoCharcoals(null)));
+        flushAndClear();
+
+        PageResult<Order> page = orderRepository.findAll(SalesChannel.BALCAO, OrderStatus.RESERVADO, null,
+                null, null, 0, 20);
+
+        assertThat(page.content()).allSatisfy(order -> assertThat(order.status()).isEqualTo(OrderStatus.RESERVADO));
+        assertThat(page.content()).isNotEmpty();
+    }
+
+    // ── productName no item do pedido (BACKEND_TODO.md do mahal-admin) ────────────────────────
+
+    @Test
+    void save_persistsProductNameAndSurvivesReload() {
+        List<OrderItem> items = List.of(OrderItem.fromCatalog("CARV-001", new BigDecimal("2.000"), carvao(),
+                null, "Carvão em Barra"));
+        Order saved = orderRepository.save(concludedBalcao(items));
+        flushAndClear();
+
+        Order reloaded = orderRepository.findById(saved.id()).orElseThrow();
+
+        assertThat(reloaded.items()).singleElement()
+                .extracting(OrderItem::productName).isEqualTo("Carvão em Barra");
+    }
+
+    // ── Timestamps por etapa da esteira (BACKEND_TODO.md do mahal-admin) ──────────────────────
+
+    @Test
+    void save_persistsEsteiraTimestampsAndSurvivesReload() {
+        Order marketplace = Order.openMarketplace(1L, "LOJA-01", twoCharcoals(null));
+        Order saved = orderRepository.save(marketplace);
+        flushAndClear();
+
+        Order paid = orderRepository.save(orderRepository.findById(saved.id()).orElseThrow().paid(Instant.now()));
+        Order separado = orderRepository.save(paid.withStatus(OrderStatus.SEPARADO));
+        flushAndClear();
+
+        Order reloaded = orderRepository.findById(separado.id()).orElseThrow();
+
+        assertThat(reloaded.status()).isEqualTo(OrderStatus.SEPARADO);
+        assertThat(reloaded.separatedAt()).isNotNull();
+        assertThat(reloaded.shippedAt()).isNull();
+        assertThat(reloaded.deliveredAt()).isNull();
+    }
 }

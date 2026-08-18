@@ -87,4 +87,59 @@ public class PdvControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(1));
     }
+
+    // PDV-F008 — reserva para retirada
+
+    private static Order reservedOrder() {
+        return Order.openBalcao(1L, "LOJA-01", null, List.of(
+                        com.cernecommerce.core.domain.model.pedido.OrderItem.fromCatalog("CARV-001",
+                                new BigDecimal("2.000"),
+                                com.cernecommerce.core.domain.model.estoque.Pricing.of(
+                                        new BigDecimal("18.00"), null, new BigDecimal("22.00")), null)))
+                .reserved("000001000", null, Instant.now());
+    }
+
+    @Test
+    void registerSale_reserveForPickupTrue_repassaAoUseCaseEDevolveReservado() throws Exception {
+        when(pdvUseCase.registerSale(eq(1L), any(), any(), any(), anyString(), eq(true)))
+                .thenReturn(reservedOrder());
+        when(pdvUseCase.getOrderPayments(any())).thenReturn(List.of());
+
+        mockMvc.perform(post("/pdv/sessions/1/sales")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"items":[{"sku":"CARV-001","quantity":2}],
+                                 "payments":[{"method":"DINHEIRO","amount":44.00}],
+                                 "reserveForPickup":true}"""))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("RESERVADO"))
+                .andExpect(jsonPath("$.reservedAt").exists());
+
+        verify(pdvUseCase).registerSale(eq(1L), any(), any(), any(), anyString(), eq(true));
+    }
+
+    @Test
+    void registerSale_reserveForPickupAusente_repassaFalse() throws Exception {
+        Order concluido = Order.openBalcao(1L, "LOJA-01", null, List.of(
+                        com.cernecommerce.core.domain.model.pedido.OrderItem.fromCatalog("CARV-001",
+                                new BigDecimal("2.000"),
+                                com.cernecommerce.core.domain.model.estoque.Pricing.of(
+                                        new BigDecimal("18.00"), null, new BigDecimal("22.00")), null)))
+                .concluded("000001000", null, Instant.now());
+        when(pdvUseCase.registerSale(eq(1L), any(), any(), any(), anyString(), eq(false)))
+                .thenReturn(concluido);
+        when(pdvUseCase.getOrderPayments(any())).thenReturn(List.of());
+
+        mockMvc.perform(post("/pdv/sessions/1/sales")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"items":[{"sku":"CARV-001","quantity":2}],
+                                 "payments":[{"method":"DINHEIRO","amount":44.00}]}"""))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("CONCLUIDO"));
+
+        verify(pdvUseCase).registerSale(eq(1L), any(), any(), any(), anyString(), eq(false));
+    }
 }

@@ -159,16 +159,17 @@ public class PdvService implements PdvUseCase {
     @Override
     @Transactional
     public Order registerSale(Long sessionId, Long customerId, List<SaleItemCommand> items,
-            List<PaymentCommand> payments, String username) {
+            List<PaymentCommand> payments, String username, boolean reserveForPickup) {
         CashRegisterSession session = requireOwnOpenSession(sessionId, username);
 
-        // PDV-F004: o preço e o custo vêm do catálogo. findPricingBySku já lança
+        // PDV-F004: o preço e o custo vêm do catálogo. resolveSaleInfo já lança
         // ProductNotFoundException para SKU inexistente, e fromCatalog recusa produto sem preço —
         // as duas checagens acontecem ANTES de qualquer escrita de estoque.
         List<OrderItem> orderItems = new ArrayList<>(items.size());
         for (SaleItemCommand command : items) {
+            EstoqueUseCase.CatalogSaleInfo saleInfo = estoqueUseCase.resolveSaleInfo(command.sku());
             OrderItem item = OrderItem.fromCatalog(command.sku(), command.quantity(),
-                    estoqueUseCase.findPricingBySku(command.sku()), command.discountAmount());
+                    saleInfo.pricing(), command.discountAmount(), saleInfo.productName());
             // CRM-F003: a taxa é resolvida e carimbada aqui — mudar a taxa amanhã não pode
             // reescrever o cashback gerado por pedidos de ontem.
             CashbackRate resolvedRate = cashbackUseCase.resolveApplicableRate(command.sku());
@@ -193,10 +194,12 @@ public class PdvService implements PdvUseCase {
                     "Venda balcão sessão #" + sessionId, username);
         }
 
-        // No balcão a mercadoria sai e o dinheiro entra no mesmo instante: CRIADO → CONCLUIDO na
-        // mesma transação. A numeração é consumida aqui, na conclusão, e não na criação.
-        Order saved = orderRepository.save(
-                order.concluded(orderRepository.nextOrderNumber(), changeAmount, Instant.now()));
+        // No balcão a mercadoria sai e o dinheiro entra no mesmo instante: CRIADO → CONCLUIDO (ou,
+        // com reserva para retirada depois — PDV-F008 —, CRIADO → RESERVADO) na mesma transação. A
+        // numeração é consumida aqui, e não na criação, nos dois casos.
+        Order saved = orderRepository.save(reserveForPickup
+                ? order.reserved(orderRepository.nextOrderNumber(), changeAmount, Instant.now())
+                : order.concluded(orderRepository.nextOrderNumber(), changeAmount, Instant.now()));
 
         for (PaymentCommand payment : payments) {
             orderPaymentRepository.save(OrderPayment.captured(saved.id(), payment.method(),
@@ -220,8 +223,13 @@ public class PdvService implements PdvUseCase {
      * crédito e PIX são lançados pelo valor exato que o operador decide cobrar, e só dinheiro pode
      * ser tendido a mais. Isso garante que todo excedente é explicável por dinheiro, e o troco é
      * simplesmente {@code total pago − líquido}.</p>
+     *
+     * <p>Package-private — ver a nota em {@link #requireOwnOpenSession}: {@code ComandaService}
+     * reaproveita esta mesma regra no fechamento da comanda, em vez de duplicar uma lógica que já
+     * foi endurecida uma vez (a regra de troco em pagamento dividido é mais estrita que o desenho
+     * original do plano).</p>
      */
-    private BigDecimal validatePaymentsAndComputeChange(List<PaymentCommand> payments, BigDecimal netAmount) {
+    BigDecimal validatePaymentsAndComputeChange(List<PaymentCommand> payments, BigDecimal netAmount) {
         BigDecimal nonCashTotal = BigDecimal.ZERO;
         BigDecimal cashTotal = BigDecimal.ZERO;
         for (PaymentCommand payment : payments) {
@@ -288,8 +296,12 @@ public class PdvService implements PdvUseCase {
      * Sessão aberta <b>e</b> do próprio operador. É a checagem que fecha o buraco de isolamento
      * documentado no README do módulo: antes, qualquer um com {@code PDV_SALE_MANAGE} vendia na
      * sessão de outro, e o fechamento daquele caixa acusava uma diferença sem dono.
+     *
+     * <p>Package-private (não {@code private}) de propósito: {@code ComandaService} (PDV-F009,
+     * mesmo pacote) reaproveita esta checagem via injeção do bean concreto {@code PdvService}, em
+     * vez de duplicar a regra de posse de sessão.</p>
      */
-    private CashRegisterSession requireOwnOpenSession(Long sessionId, String username) {
+    CashRegisterSession requireOwnOpenSession(Long sessionId, String username) {
         CashRegisterSession session = getSession(sessionId);
         if (!session.isOpen()) {
             throw new CashRegisterSessionClosedException(sessionId);
@@ -300,7 +312,8 @@ public class PdvService implements PdvUseCase {
         return session;
     }
 
-    private void requireDiscountWithinLimit(Order order) {
+    /** Package-private — ver a nota em {@link #requireOwnOpenSession}. */
+    void requireDiscountWithinLimit(Order order) {
         if (order.discountAmount().signum() == 0 || order.grossAmount().signum() == 0) {
             return;
         }

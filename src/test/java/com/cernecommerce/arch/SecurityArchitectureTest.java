@@ -57,7 +57,11 @@ class SecurityArchitectureTest {
             "ProductImageController");
 
     private static final Set<String> SELF_SERVICE_CONTROLLERS = Set.of(
-            "NotificationController", "NotificationPreferenceController", "AvatarController");
+            "NotificationController", "NotificationPreferenceController", "AvatarController",
+            // POST /support/bug-reports: qualquer usuário autenticado pode reportar um bug sobre a
+            // própria sessão — não há permissão de negócio a checar, mesmo raciocínio do
+            // NotificationController (reportedBy vem de auth.getName(), não de input do cliente).
+            "SupportController");
 
     // Exceções pontuais, método a método, dentro de um controller que por outro lado exige
     // permissão normalmente — "ClasseSimples#metodo". UserController#me/changeOwnPassword/

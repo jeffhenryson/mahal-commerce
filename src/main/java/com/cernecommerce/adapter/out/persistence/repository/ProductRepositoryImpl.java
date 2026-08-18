@@ -13,6 +13,7 @@ import com.cernecommerce.core.domain.model.estoque.ProductFilter;
 import com.cernecommerce.core.domain.model.estoque.ProductSortField;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
+import com.cernecommerce.core.domain.model.estoque.ProductStatus;
 import com.cernecommerce.core.domain.model.estoque.ProductType;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.ports.out.estoque.ProductRepository;
@@ -59,6 +60,7 @@ public class ProductRepositoryImpl implements ProductRepository {
         entity.setSalePrice(product.pricing().salePrice());
         entity.setOriginalPrice(product.pricing().originalPrice());
         entity.setType(product.type().name());
+        entity.setStatus(product.status().name());
         entity.setLotTracked(product.lotTracked());
         entity.setBarcode(product.barcode());
         entity.setUnit(product.unit().name());
@@ -213,8 +215,15 @@ public class ProductRepositoryImpl implements ProductRepository {
         Pageable pageable = PageRequest.of(page, size, toSort(sortField, direction));
         Page<Long> idPage = productJpaRepository.findFilteredIds(
                 likePattern(filter.search()), filter.category(), filter.brand(), filter.active(),
-                filter.type() == null ? null : filter.type().name(), filter.kitComponentEligible(), pageable);
+                filter.type() == null ? null : filter.type().name(), filter.kitComponentEligible(),
+                filter.status() == null ? null : filter.status().name(), pageable);
         return toPageResult(idPage, page, size);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public long countByStatus(ProductStatus status) {
+        return productJpaRepository.countByStatus(status.name());
     }
 
     @Override
@@ -275,13 +284,16 @@ public class ProductRepositoryImpl implements ProductRepository {
                 e.getCauseAmount());
         ProductType type = ProductType.valueOf(e.getType());
         MeasurementUnit unit = MeasurementUnit.valueOf(e.getUnit());
+        // Dado legado (linha anterior a EST-F023, antes do backfill da migration) lê como ATIVO.
+        ProductStatus status = e.getStatus() == null ? ProductStatus.ATIVO : ProductStatus.valueOf(e.getStatus());
         List<ProductAttribute> attributes = e.getAttributes().stream()
                 .map(a -> new ProductAttribute(a.getType(), a.getValue()))
                 .toList();
         return Product.of(e.getId(), e.getSku(), e.getName(), e.getCategory(), e.isActive(), variants, pricing, type,
                 e.isLotTracked(), e.getBrand(), e.getImageUrl(), e.isOnSale(), e.isSuperPromo(), e.getDescription(),
                 e.getVideoUrl(), List.copyOf(e.getImages()), attributes, e.getCategoryId(), e.getBarcode(), unit,
-                e.isSampleProduct(), e.isKitComponentEligible(), e.isVisibleInPos(), e.isVisibleInMarketplace());
+                e.isSampleProduct(), e.isKitComponentEligible(), e.isVisibleInPos(), e.isVisibleInMarketplace(),
+                status);
     }
 
     private ProductVariant toDomain(ProductVariantEntity e) {

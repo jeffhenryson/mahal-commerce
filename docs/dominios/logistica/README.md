@@ -3,7 +3,7 @@
 **Status:** 🟡 Esqueleto criado — implementação pendente
 **Pacote Java:** `com.cernecommerce...logistica`
 **Rota HTTP base:** `/logistica`
-**Última atualização deste doc:** 2026-07-27 (seção de Segurança e Infraestrutura)
+**Última atualização deste doc:** 2026-08-18 (LOG-F001 — análise de inovação + `Docs/BACKEND_TODO.md` do `mahal-admin`)
 
 ## Objetivo
 
@@ -78,6 +78,7 @@ Convenções, variáveis e o environment compartilhado estão em
 | ID | Prioridade | Tipo | Item | Descrição | Status |
 |---|---|---|---|---|---|
 | LOG-C001 | 🟡 Importante | Correção | auditar-e-documentar-o-modulo | README ainda no molde de esqueleto: faltam Modelo de Domínio, Regras de Negócio, API, Schema e Cobertura de Testes. Rode `/1-analise logistica`. Padrão: [`estoque`](../estoque/README.md). | Pendente |
+| LOG-F001 | 🟡 Média | Feature | entrega-propria-por-bairro-com-motoboy | O README de [`ecommerce`](../ecommerce/README.md) registra a decisão explícita de que "retirada na loja + entrega própria com taxa fixa por bairro cobre a operação regional" (§8.4 do plano), mas nada disso foi construído — o checkout do marketplace hoje não tem opção de frete nenhuma. O front (`mahal-admin`, `Docs/BACKEND_TODO.md`, 2026-08-18) pede ainda mais: CRUD de **Entregadores** (nome, telefone/WhatsApp, veículo, placa, taxa de repasse, status disponível/em entrega) e CRUD de **Regiões & Tarifas**, hoje inexistentes. Proposta: `DeliveryFee` por bairro/CEP consultado no checkout (`ShopService.checkout`), `Shipment` real substituindo o stub de `LogisticaService`, status `SEPARANDO→DESPACHADO→ENTREGUE` com `AuditEvent`, permissões granulares (`LOGISTICA_DISPATCH`, `LOGISTICA_DELIVER`) em vez do único `LOGISTICA_READ` atual. **Antes de iniciar: confirmar com o dono do produto se a decisão registrada em `ecommerce` §8.4 mudou** — este item propõe retomar algo explicitamente adiado. Ver `Docs/MODULO_LOGISTICA.md` no `mahal-admin` para o detalhamento de tela (campos já especificados desde a fase de mock). Sugerido em análise de inovação de 2026-08-18. | Pendente |
 
 ## Próximos passos
 

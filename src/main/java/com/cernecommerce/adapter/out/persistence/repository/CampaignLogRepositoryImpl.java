@@ -27,6 +27,7 @@ public class CampaignLogRepositoryImpl implements CampaignLogRepository {
         entity.setStatus(entry.status());
         entity.setDisparadoEm(entry.disparadoEm());
         entity.setConvertidoEm(entry.convertidoEm());
+        entity.setErroDetalhe(entry.erroDetalhe());
         CampaignLogEntryEntity saved = campaignLogJpaRepository.save(entity);
         return toDomain(saved);
     }
@@ -41,6 +42,6 @@ public class CampaignLogRepositoryImpl implements CampaignLogRepository {
 
     private CampaignLogEntry toDomain(CampaignLogEntryEntity e) {
         return CampaignLogEntry.of(e.getId(), e.getAutomationId(), e.getCustomerId(), e.getStatus(),
-                e.getDisparadoEm(), e.getConvertidoEm());
+                e.getDisparadoEm(), e.getConvertidoEm(), e.getErroDetalhe());
     }
 }

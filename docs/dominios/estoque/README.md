@@ -1,9 +1,9 @@
 # Domínio: estoque
 
-**Status:** 🟢 Operacional — grade de produtos, saldo multi-depósito, ledger de movimentações (gravação e consulta), alerta de ponto de reposição, reserva, kits, lote/validade e custo médio ponderado em produção
+**Status:** 🟢 Operacional — grade de produtos, saldo multi-depósito, ledger de movimentações (gravação e consulta), alerta de ponto de reposição, reserva, kits, lote/validade, custo médio ponderado e importação de entrada de mercadoria por XML de NF-e em produção
 **Pacote Java:** `com.cernecommerce.core.domain.model.estoque`
 **Rota HTTP base:** `/estoque`
-**Última atualização deste doc:** 2026-08-16 (custo médio ponderado — EST-F007)
+**Última atualização deste doc:** 2026-08-18 (EST-F005, importação de NF-e; EST-C014, teste do `ProductImageController`)
 
 ## Objetivo
 
@@ -464,11 +464,12 @@ Convenções, variáveis e o environment compartilhado estão em
 
 | ID | Prioridade | Tipo | Item | Descrição | Status |
 |---|---|---|---|---|---|
-| EST-F005 | 🟡 Média | Feature | importacao-nfe-xml | Entrada de mercadoria por XML de NF-e (`NfeXmlImportPort`) gerando `StockMovement` de entrada — diferencial operacional. | Backlog (Sprint 4) |
+| EST-F005 | 🟡 Média | Feature | importacao-nfe-xml | Entrada de mercadoria por XML de NF-e (`NfeXmlImportPort`) gerando `StockMovement` de entrada — diferencial operacional. | ✅ Fechado (2026-08-18) — ver Histórico abaixo. |
 | EST-F011 | 🟢 Baixa | Feature | curva-abc-giro | Análise ABC e giro de produtos para priorização de compras (domínio `relatorios`). | Backlog (Sprint 6) |
 | EST-F012 | 🟢 Baixa | Feature | transferencia-entre-depositos | `MovementType.TRANSFER`: saída atômica de um `Warehouse` + entrada em outro, distinto do ajuste manual. **Só faz sentido quando existir um segundo local físico de verdade** ([`plano-pdv-marketplace.md`](../../plano-pdv-marketplace.md) §2.2): o marketplace **não** vai usar `WarehouseType.ECOMMERCE` para separar canal — para uma tabacaria de uma loja, a prateleira é uma só, e partir o pool geraria rebalanceamento manual permanente e o absurdo de "o site tem 5 e a loja tem 0" com tudo no mesmo armário. A reserva (EST-F013) é o mecanismo que permite um pool servir dois canais. | Backlog (Sprint 4) |
 | EST-F016 | 🟢 Baixa | Feature | unidade-medida-conversao | Múltiplas unidades por produto (compra em kg, venda em porção/g) com fator de conversão nas movimentações. | Backlog (Sprint 6) |
 | EST-C006 | 🟢 Melhoria | Correção | migrations-v45-v47-sem-on-conflict | V45 e V47 inserem permissões sem `ON CONFLICT DO NOTHING`, ao contrário de V56/V57/V60. Re-execução em base parcialmente populada quebra. Herdado do antigo C018. | Pendente |
+| EST-C014 | 🔴 Alta | Correção | productimagecontroller-sem-teste | `ProductImageController` (`adapter/in/controller/ProductImageController.java:39-45`) implementa a mesma guarda anti-path-traversal que `AvatarController`, mas não existe nenhum `ProductImageControllerTest` — só `ProductImageServiceTest`, que não passa pelo MockMvc/guard do controller. Endpoint **público** (`GET /product-images/{filename}`, sem autenticação): a defesa nunca foi exercitada via HTTP real. Criar `ProductImageControllerTest` espelhando `AvatarControllerTest` (casos `".."`/`"/"`/`"\\"`). Achado em auditoria `analyze-domain`/testes de 2026-08-18. | ✅ Fechado (2026-08-18) — `ProductImageControllerTest` criado, cópia adaptada de `AvatarControllerTest` (4 casos: `LocalFile`, `Redirect`, `NotFound`, guarda de `..`). |
 
 ## Histórico de Implementações
 
@@ -700,6 +701,68 @@ Convenções, variáveis e o environment compartilhado estão em
   `EstoqueControllerTest`. **Kit não ganhou `averageCost` próprio** — kit não tem linha em
   `stock_balance`, e `derivedKitPricing` continua derivando o custo da soma dos componentes; sem
   consumidor no escopo atual para custo por lote (`StockLot` também não ganhou o campo).
+- **2026-08-17** — `rascunho-de-produto-kit` (EST-F023): novo `ProductStatus` (`RASCUNHO`/`ATIVO`)
+  em `Product`, eixo independente de `active` (disponibilidade) e `type` (produto/kit) — um
+  rascunho pode estar `active=true` e ainda assim ficar fora das listagens que filtram por
+  `status=ATIVO`. **Sem validação nova no domínio:** a exploração confirmou que hoje só
+  `sku`+`name` já são exigidos mesmo em produto "normal" (`EstoqueService.createProduct` não pede
+  categoria/preço), então `RASCUNHO` não precisou relaxar nada — e a promoção `RASCUNHO → ATIVO`
+  também não ganhou exigência extra, por decisão (manter o comportamento já existente em vez de
+  criar uma inconsistência nova). Teto de **5 rascunhos validado no servidor**
+  (`ProductRepository.countByStatus`, 409 `DRAFT_LIMIT_REACHED` no 6º) — o frontend já validava,
+  mas em memória, e duas abas do mesmo operador furariam o limite sem a checagem aqui; editar um
+  rascunho que já é rascunho não conta contra o próprio teto. Filtro novo `GET
+  /estoque/products?status=`, mesmo idioma de parâmetro nulo de `type`/`kitComponentEligible`.
+  `status` default `ATIVO` quando ausente (dado legado lê como `ATIVO`). Migration V97:
+  `product.status VARCHAR(20) NOT NULL DEFAULT 'ATIVO'` + índice. Sem permissão nova — reaproveita
+  `ESTOQUE_PRODUCT_MANAGE`/`READ`. Pedido do `mahal-admin` `BACKEND_TODO.md` §"Estoque: rascunho de
+  produto/kit", frontend já pronto atrás de `DRAFTS_ENABLED`. Cobertura: `ProductTest`
+  (`withStatus`/`isDraft`/default), `EstoqueServiceTest` (limite, edição de rascunho já-rascunho,
+  criação sem categoria/preço), `EstoqueControllerTest` (filtro, 409, campo no request/response),
+  `EstoqueRepositoryIT` (round-trip do filtro, `countByStatus`).
+- **2026-08-18** — `teste-do-productimagecontroller` (EST-C014): `ProductImageController`
+  reimplementava a guarda anti-path-traversal de `AvatarController`, mas o endpoint público
+  `GET /product-images/{filename}` nunca tinha sido exercitado via HTTP real — só
+  `ProductImageServiceTest`, que não passa pelo MockMvc/guard do controller. Novo
+  `ProductImageControllerTest`, cópia adaptada de `AvatarControllerTest`: mocka
+  `ProductImageUseCase` (não o storage port) e stuba as três variantes de `FileServeResult`. 4
+  casos: `LocalFile` (200 + cache), `Redirect` (308), `NotFound` (404), guarda de `..` (404) — sem
+  caso separado para `/`/`\`, porque o roteamento do Spring já barra `/` literal num único
+  `{filename}` antes de o guard rodar. Sem mudança de comportamento, sem migration.
+- **2026-08-18** — `importacao-nfe-xml` (EST-F005): entrada de mercadoria automática lendo o XML
+  da NF-e do fornecedor. Fluxo em **duas fases — preview → confirm** — porque
+  `ComprasUseCase.receiveGoods` é `@Transactional` tudo-ou-nada, e uma NF-e real com item sem EAN
+  batido (comum: `cEAN` ausente ou "SEM GTIN") não pode abortar o recebimento inteiro; o operador
+  resolve a pendência manualmente no fechamento, sem editar o XML do fornecedor. **Parser em JDK
+  puro** (`DocumentBuilderFactory`/DOM, `adapter/out/nfe/JdkDomNfeXmlImportAdapter`) — o projeto
+  não tinha nenhuma lib de XML, e só ~6 campos planos por item precisam ser extraídos, sem
+  validação de schema completo da SEFAZ. **Hardening contra XXE obrigatório**
+  (`disallow-doctype-decl`, entidades externas gerais/parametrizadas desabilitadas) — testado com
+  fixture de ataque real (`file:///etc/passwd` e SSRF via entidade parametrizada), confirmando que
+  o parser falha fechado em vez de resolver a entidade. Casamento de SKU por `cEAN` →
+  `Product.barcode` via `EstoqueUseCase.findProductByBarcode` (já existia ponta a ponta); linha
+  sem EAN volta `UNMATCHED` no preview, resolvida por override manual do operador no `confirm`
+  (chaveado por `nItem`, estável entre as duas chamadas). **Fornecedor não cadastrado bloqueia o
+  import com 404** (`SupplierNotFoundByTaxIdException`) — sem criação automática, diferente do
+  precedente de Categoria: `Supplier.taxId` alimenta conta a pagar/compliance no futuro, dado
+  demais para criar sem revisão humana; cadastro de fornecedor (COM-F001) segue como limitação
+  conhecida, fora desta entrega. Novo agregado `NfeImport`/`NfeImportLine`
+  (`core/domain/model/compras`) persiste o resultado do parsing **entre** as duas requisições
+  HTTP — inclusive quando o fornecedor não é encontrado, como `REJECTED` (trilha de auditoria de
+  toda tentativa de import, não só das bem-sucedidas). `matchStatus` é **derivado** de
+  `matchedSku`, nunca um campo independente. XML bruto persistido via `FileStoragePort`
+  (`NfeImportStoragePort`, `keyPrefix`/diretório próprio) para auditoria/disputa com fornecedor —
+  **sem** endpoint de leitura pública, diferente de imagem de produto. Endpoints novos
+  `POST /compras/goods-receipts/nfe-preview` e `.../nfe-confirm`, reaproveitando
+  `COMPRAS_RECEIPT_MANAGE` (mesma autoridade de registrar recebimento manual, sem permissão nova).
+  Migration V106 (`nfe_import`/`nfe_import_line`, com `CHECK` de coexistência status↔campos
+  espelhando o compact constructor de `NfeImport`). Cobertura:
+  `JdkDomNfeXmlImportAdapterTest` (EAN batido, "SEM GTIN", multi-lote, XML malformado, dois
+  fixtures de XXE), `NfeImportServiceTest` (Mockito), `NfeImportRepositoryIT` (round-trip, incl.
+  `REJECTED` sem fornecedor), `NfeImportIT` (ciclo completo preview→confirm→`GoodsReceipt` contra
+  banco real, com produto/fornecedor reais e baixa de estoque conferida),
+  `NfeImportControllerTest`/`NfeImportControllerSecurityTest`. Backend-only: feature que o
+  `mahal-admin` nunca pediu — anunciada em `Docs/BACKEND_TODO.md` daquele repo.
 
 ## Próximos passos
 
@@ -713,12 +776,16 @@ fechou o bloco da §P1-Estoque do `BACKEND_TODO.md` do `mahal-admin`: upload de 
 filtro server-side, atributos no produto pai, preço por variação (F020) e categoria como
 entidade.
 
+Em 2026-08-18 fecharam também **EST-C014** (teste do `ProductImageController`) e **EST-F005**
+(importação de NF-e por XML) — ver Histórico acima.
+
 O roteiro completo para o que resta — ordem de execução, dependências entre os itens e os dois
 que não cabem em estoque — está em [`proximos-passos.md`](proximos-passos.md). Resumo da
 prioridade imediata (nenhuma bloqueia outro módulo):
 
-1. **EST-F016** (unidade de medida) e **EST-F005** (entrada por XML de NF-e). **EST-F007** (custo
-   médio) fechou em 2026-08-16 e destrava o DRE do `financeiro`.
+1. **EST-F016** (unidade de medida) é o único item de código que resta na fila imediata.
+   **EST-F007** (custo médio) fechou em 2026-08-16 e destrava o DRE do `financeiro`; **EST-F005**
+   fechou em 2026-08-18.
 2. **EST-F012** (transferência entre depósitos) segue despriorizado por decisão — ver `proximos-passos.md`. **EST-F020** (preço por variação) saiu do backlog: foi implementado em 2026-08-10 a pedido do dono, com herança do pai como padrão, o que preserva o argumento do §8.5 em vez de contrariá-lo.
 
 Fora do roteiro de código, EST-C011 deixou uma **pendência operacional**: rodar

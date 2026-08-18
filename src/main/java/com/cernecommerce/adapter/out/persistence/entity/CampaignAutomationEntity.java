@@ -45,4 +45,11 @@ public class CampaignAutomationEntity {
 
     @Column(name = "criado_em", nullable = false)
     private Instant criadoEm;
+
+    @Column(name = "webhook_url", length = 500)
+    private String webhookUrl;
+
+    /** JSON serializado de {@code Map<String,String>} — mesmo padrão de {@code AuditLogRepositoryImpl}. */
+    @Column(name = "webhook_headers", columnDefinition = "TEXT")
+    private String webhookHeaders;
 }

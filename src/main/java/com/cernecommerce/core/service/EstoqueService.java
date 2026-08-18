@@ -7,6 +7,7 @@ import com.cernecommerce.core.domain.exception.estoque.DefaultWarehouseNotConfig
 import com.cernecommerce.core.domain.exception.estoque.DuplicateBarcodeException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateCategoryNameException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateKitComponentException;
+import com.cernecommerce.core.domain.exception.estoque.DraftLimitReachedException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateSkuException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateWarehouseCodeException;
 import com.cernecommerce.core.domain.exception.estoque.EmptyKitRecipeException;
@@ -53,6 +54,7 @@ import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
 import com.cernecommerce.core.domain.model.estoque.ProductFilter;
 import com.cernecommerce.core.domain.model.estoque.ProductSortField;
+import com.cernecommerce.core.domain.model.estoque.ProductStatus;
 import com.cernecommerce.core.domain.model.estoque.ProductType;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.ReorderAlert;
@@ -158,9 +160,15 @@ public class EstoqueService implements EstoqueUseCase {
             String videoUrl, List<String> images, List<ProductAttribute> attributes, Long categoryId,
             String barcode, MeasurementUnit unit, boolean sampleProduct, boolean kitComponentEligible,
             Boolean visibleInPos, Boolean visibleInMarketplace, ProductType type, InitialStockCommand initialStock,
-            String actorUsername, List<KitComponentCommand> kitComponents) {
+            String actorUsername, List<KitComponentCommand> kitComponents, ProductStatus status) {
         List<ProductVariant> safeVariants = variants == null ? List.of() : variants;
         ProductType resolvedType = type == null ? ProductType.SIMPLES : type;
+        ProductStatus resolvedStatus = status == null ? ProductStatus.ATIVO : status;
+        // EST-F023: teto de 5 rascunhos, validado no servidor — o frontend também valida, mas em
+        // memória, e duas abas do mesmo operador furariam o limite sem esta checagem aqui.
+        if (resolvedStatus == ProductStatus.RASCUNHO && productRepository.countByStatus(ProductStatus.RASCUNHO) >= 5) {
+            throw new DraftLimitReachedException();
+        }
         // Kit não tem grade nem saldo próprio (EST-F015) — checado ANTES de qualquer escrita, na
         // mesma ordem tanto faça o kit nascer assim ou ser promovido depois via defineKitRecipe,
         // que já lança esta mesma exceção para variants não vazio.
@@ -220,7 +228,8 @@ public class EstoqueService implements EstoqueUseCase {
                 .withSampleProduct(sampleProduct)
                 .withKitComponentEligible(kitComponentEligible)
                 .withVisibleInPos(visibleInPos == null || visibleInPos)
-                .withVisibleInMarketplace(visibleInMarketplace == null || visibleInMarketplace);
+                .withVisibleInMarketplace(visibleInMarketplace == null || visibleInMarketplace)
+                .withStatus(resolvedStatus);
         Product saved = productRepository.save(product);
         // Mesma transação da criação — se a receita falhar validação em algum item, o rollback
         // desfaz o produto também, fechando a janela de "kit órfão sem receita" do fluxo antigo
@@ -258,10 +267,19 @@ public class EstoqueService implements EstoqueUseCase {
             String imageUrl, Boolean onSale, Boolean superPromo, String description, String videoUrl,
             List<String> images, List<ProductAttribute> attributes, Long categoryId, String barcode,
             MeasurementUnit unit, Boolean sampleProduct, Boolean kitComponentEligible, Boolean visibleInPos,
-            Boolean visibleInMarketplace) {
+            Boolean visibleInMarketplace, ProductStatus status) {
         Product current = productRepository.findBySku(sku)
                 .orElseThrow(() -> new ProductNotFoundException(sku));
+        // EST-F023: só conta contra o teto quem está ENTRANDO em RASCUNHO agora — editar um
+        // rascunho que já era rascunho não pode contar duas vezes contra o próprio teto.
+        if (status == ProductStatus.RASCUNHO && current.status() != ProductStatus.RASCUNHO
+                && productRepository.countByStatus(ProductStatus.RASCUNHO) >= 5) {
+            throw new DraftLimitReachedException();
+        }
         Product updated = current.withDetails(name, category, brand, imageUrl, description, videoUrl);
+        if (status != null) {
+            updated = updated.withStatus(status);
+        }
         // Categoria muda em par (id + nome denormalizado) ou não muda — nulos nos dois campos
         // mantêm o que já estava, seguindo a semântica de PATCH do resto do método.
         Category resolvedCategory = resolveCategory(categoryId, category);
@@ -514,6 +532,17 @@ public class EstoqueService implements EstoqueUseCase {
                 .orElseThrow(() -> new ProductNotFoundException(sku));
         // Kit nunca tem variação (KitHasVariantsException), então a precedência não se aplica.
         return product.isKit() ? derivedKitPricing(product) : product.effectivePricingFor(sku);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public CatalogSaleInfo resolveSaleInfo(String sku) {
+        // Mesma resolução de findPricingBySku, numa consulta só — nome não precisa de derivação
+        // (mora sempre no pai, kit ou não), só a precificação precisa.
+        Product product = productRepository.findByAnySku(sku)
+                .orElseThrow(() -> new ProductNotFoundException(sku));
+        Pricing pricing = product.isKit() ? derivedKitPricing(product) : product.effectivePricingFor(sku);
+        return new CatalogSaleInfo(product.name(), pricing);
     }
 
 

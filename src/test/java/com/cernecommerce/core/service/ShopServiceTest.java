@@ -398,10 +398,10 @@ class ShopServiceTest {
                 new CartItem("CARV-001", new BigDecimal("1"))), Instant.now());
         when(cartRepository.findByCustomerId(CUSTOMER_ID)).thenReturn(Optional.of(cart));
         when(estoqueUseCase.getDefaultWarehouse()).thenReturn(WAREHOUSE);
-        when(estoqueUseCase.findPricingBySku("ESS-001"))
-                .thenReturn(Pricing.of(new BigDecimal("15.00"), null, new BigDecimal("30.00")));
-        when(estoqueUseCase.findPricingBySku("CARV-001"))
-                .thenReturn(Pricing.of(new BigDecimal("10.00"), null, new BigDecimal("20.00")));
+        when(estoqueUseCase.resolveSaleInfo("ESS-001")).thenReturn(new EstoqueUseCase.CatalogSaleInfo(
+                "Essência", Pricing.of(new BigDecimal("15.00"), null, new BigDecimal("30.00"))));
+        when(estoqueUseCase.resolveSaleInfo("CARV-001")).thenReturn(new EstoqueUseCase.CatalogSaleInfo(
+                "Carvão", Pricing.of(new BigDecimal("10.00"), null, new BigDecimal("20.00"))));
         when(cashbackUseCase.resolveApplicableRate(anyString())).thenReturn(
                 new CashbackRate(1L, CashbackScope.GLOBAL, null, new BigDecimal("3.00"), true,
                         Instant.now(), null, Instant.now()));
@@ -440,8 +440,8 @@ class ShopServiceTest {
         Cart cart = Cart.of(1L, CUSTOMER_ID, List.of(new CartItem("ESS-001", new BigDecimal("2"))), Instant.now());
         when(cartRepository.findByCustomerId(CUSTOMER_ID)).thenReturn(Optional.of(cart));
         when(estoqueUseCase.getDefaultWarehouse()).thenReturn(WAREHOUSE);
-        when(estoqueUseCase.findPricingBySku("ESS-001"))
-                .thenReturn(Pricing.of(new BigDecimal("15.00"), null, new BigDecimal("30.00")));
+        when(estoqueUseCase.resolveSaleInfo("ESS-001")).thenReturn(new EstoqueUseCase.CatalogSaleInfo(
+                "Essência", Pricing.of(new BigDecimal("15.00"), null, new BigDecimal("30.00"))));
         when(cashbackUseCase.resolveApplicableRate(anyString())).thenReturn(null);
         when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> withId(invocation.getArgument(0), 99L));
         when(estoqueUseCase.reserveStock(eq("ESS-001"), any(), any(), any(), any(), any()))
@@ -461,8 +461,8 @@ class ShopServiceTest {
         Cart cart = Cart.of(1L, CUSTOMER_ID, List.of(new CartItem("ESS-001", new BigDecimal("2"))), Instant.now());
         when(cartRepository.findByCustomerId(CUSTOMER_ID)).thenReturn(Optional.of(cart));
         when(estoqueUseCase.getDefaultWarehouse()).thenReturn(WAREHOUSE);
-        when(estoqueUseCase.findPricingBySku("ESS-001"))
-                .thenReturn(Pricing.of(new BigDecimal("15.00"), null, new BigDecimal("30.00")));
+        when(estoqueUseCase.resolveSaleInfo("ESS-001")).thenReturn(new EstoqueUseCase.CatalogSaleInfo(
+                "Essência", Pricing.of(new BigDecimal("15.00"), null, new BigDecimal("30.00"))));
         when(cashbackUseCase.resolveApplicableRate(anyString())).thenReturn(null);
         when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> withId(invocation.getArgument(0), 99L));
         when(paymentGatewayPort.createCheckoutLink(any(), any(), any(), any(), any()))

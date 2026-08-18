@@ -10,7 +10,9 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 import com.cernecommerce.core.ports.in.AuditLogsUseCase;
 import com.cernecommerce.core.ports.in.AuthUseCase;
 import com.cernecommerce.core.ports.in.AvatarUseCase;
+import com.cernecommerce.core.ports.in.ComandaUseCase;
 import com.cernecommerce.core.ports.in.ProductImageUseCase;
+import com.cernecommerce.core.ports.in.BugReportUseCase;
 import com.cernecommerce.core.ports.in.NotificationPreferenceUseCase;
 import com.cernecommerce.core.ports.in.NotificationUseCase;
 import com.cernecommerce.core.ports.in.OAuthLoginUseCase;
@@ -48,6 +50,7 @@ import com.cernecommerce.core.ports.out.user.UserRepository;
 import com.cernecommerce.core.ports.out.audit.AuditLogRepository;
 import com.cernecommerce.core.ports.out.notification.NotificationPreferenceRepository;
 import com.cernecommerce.core.ports.out.notification.NotificationRepository;
+import com.cernecommerce.core.ports.out.support.BugReportRepository;
 import com.cernecommerce.adapter.out.storage.LocalAvatarStorageAdapter;
 import com.cernecommerce.adapter.out.storage.LocalProductImageStorageAdapter;
 import com.cernecommerce.core.ports.out.storage.AvatarStoragePort;
@@ -57,6 +60,7 @@ import com.cernecommerce.core.service.AuditLogsService;
 import com.cernecommerce.core.service.AuthService;
 import com.cernecommerce.core.service.AvatarService;
 import com.cernecommerce.core.service.ProductImageService;
+import com.cernecommerce.core.service.BugReportService;
 import com.cernecommerce.core.service.NotificationPreferenceService;
 import com.cernecommerce.core.service.NotificationService;
 import com.cernecommerce.core.service.OAuthLoginService;
@@ -86,15 +90,23 @@ import com.cernecommerce.core.ports.out.estoque.WarehouseRepository;
 import com.cernecommerce.core.ports.out.pagamento.OrderPaymentRepository;
 import com.cernecommerce.core.ports.out.pdv.CashMovementRepository;
 import com.cernecommerce.core.ports.out.pdv.CashRegisterRepository;
+import com.cernecommerce.core.ports.out.pdv.ComandaRepository;
 import com.cernecommerce.core.ports.out.pedido.OrderReportRepository;
 import com.cernecommerce.core.ports.out.pedido.OrderRepository;
 import com.cernecommerce.core.ports.in.ComprasUseCase;
+import com.cernecommerce.core.ports.in.NfeImportUseCase;
 import com.cernecommerce.core.ports.out.compras.GoodsReceiptRepository;
+import com.cernecommerce.core.ports.out.compras.NfeImportRepository;
 import com.cernecommerce.core.ports.out.compras.SupplierRepository;
+import com.cernecommerce.core.ports.out.estoque.NfeXmlImportPort;
+import com.cernecommerce.core.ports.out.storage.NfeImportStoragePort;
+import com.cernecommerce.adapter.out.nfe.JdkDomNfeXmlImportAdapter;
+import com.cernecommerce.adapter.out.storage.LocalNfeImportStorageAdapter;
 import com.cernecommerce.core.ports.in.FinanceiroUseCase;
 import com.cernecommerce.core.ports.in.EcommerceUseCase;
 import com.cernecommerce.core.ports.out.ecommerce.CartRepository;
 import com.cernecommerce.core.ports.out.ecommerce.PaymentGatewayPort;
+import com.cernecommerce.core.ports.out.financeiro.LedgerRepository;
 import com.cernecommerce.core.ports.in.LogisticaUseCase;
 import com.cernecommerce.core.ports.in.CrmUseCase;
 import com.cernecommerce.core.ports.in.CashbackUseCase;
@@ -102,21 +114,25 @@ import com.cernecommerce.core.ports.out.cashback.CashbackEntryRepository;
 import com.cernecommerce.core.ports.out.cashback.CashbackRateRepository;
 import com.cernecommerce.core.ports.out.crm.CampaignAutomationRepository;
 import com.cernecommerce.core.ports.out.crm.CampaignLogRepository;
+import com.cernecommerce.core.ports.out.crm.CampaignWebhookPort;
 import com.cernecommerce.core.ports.out.crm.CustomerNoteRepository;
 import com.cernecommerce.core.ports.out.crm.CustomerRepository;
 import com.cernecommerce.core.ports.out.crm.CustomerTagRepository;
 import com.cernecommerce.core.ports.out.crm.StageTransitionRepository;
 import com.cernecommerce.core.ports.out.crm.TagRepository;
+import com.cernecommerce.core.service.ComandaService;
 import com.cernecommerce.core.service.OrderReportService;
 import com.cernecommerce.core.service.OrderService;
 import com.cernecommerce.core.service.PdvService;
 import com.cernecommerce.core.service.EstoqueService;
 import com.cernecommerce.core.service.ComprasService;
+import com.cernecommerce.core.service.NfeImportService;
 import com.cernecommerce.core.service.FinanceiroService;
 import com.cernecommerce.core.service.EcommerceService;
 import com.cernecommerce.core.service.ShopService;
 import com.cernecommerce.core.service.PaymentWebhookService;
 import com.cernecommerce.core.service.LogisticaService;
+import com.cernecommerce.core.service.CampaignTemplateRenderer;
 import com.cernecommerce.core.service.CrmService;
 import com.cernecommerce.core.service.CashbackService;
 
@@ -217,7 +233,7 @@ class CoreBeanConfig {
     }
 
     // ── Domínios de negócio ─────────────────────────────────────────────────────
-    // Estoque, compras e vendas-balcao já têm adapters de saída próprios. Ecommerce, financeiro
+    // Estoque, compras, vendas-balcao e financeiro já têm adapters de saída próprios. Ecommerce
     // e logistica seguem como esqueletos, com wiring sem dependências até que os ports/out
     // correspondentes ganhem implementação.
 
@@ -232,8 +248,13 @@ class CoreBeanConfig {
         return new OrderReportService(orderReportRepository);
     }
 
+    // PdvService é exposto como bean CONCRETO (não só via a interface PdvUseCase) porque
+    // ComandaService (PDV-F009) precisa chamar os métodos package-private de posse de sessão e
+    // validação de pagamento sem duplicá-los — ver o javadoc de ComandaService. pdvUseCase() só
+    // devolve a mesma instância sob a interface, para o resto do wiring continuar programando
+    // contra o port como sempre.
     @Bean
-    PdvUseCase pdvUseCase(CashRegisterRepository cashRegisterRepository,
+    PdvService pdvService(CashRegisterRepository cashRegisterRepository,
             CashMovementRepository cashMovementRepository, OrderRepository orderRepository,
             OrderPaymentRepository orderPaymentRepository, EstoqueUseCase estoqueUseCase,
             CashbackUseCase cashbackUseCase,
@@ -243,6 +264,19 @@ class CoreBeanConfig {
             @Value("${pdv.sale.max-discount-percent:10}") BigDecimal maxDiscountPercent) {
         return new PdvService(cashRegisterRepository, cashMovementRepository, orderRepository,
                 orderPaymentRepository, estoqueUseCase, cashbackUseCase, maxDiscountPercent);
+    }
+
+    @Bean
+    PdvUseCase pdvUseCase(PdvService pdvService) {
+        return pdvService;
+    }
+
+    @Bean
+    ComandaUseCase comandaUseCase(ComandaRepository comandaRepository, EstoqueUseCase estoqueUseCase,
+            OrderRepository orderRepository, OrderPaymentRepository orderPaymentRepository,
+            CashbackUseCase cashbackUseCase, PdvService pdvService) {
+        return new ComandaService(comandaRepository, estoqueUseCase, orderRepository,
+                orderPaymentRepository, cashbackUseCase, pdvService);
     }
 
     @Bean
@@ -270,9 +304,32 @@ class CoreBeanConfig {
         return new ComprasService(supplierRepository, goodsReceiptRepository, estoqueUseCase);
     }
 
+    // EST-F005 — importação de NF-e. Sem toggle S3 nesta primeira entrega (diferente de avatar/
+    // imagem de produto): o XML não é ativo de vitrine, só precisa sobreviver em disco/volume
+    // compartilhado para auditoria; o mesmo padrão de ProductImageS3StorageConfig pode ser
+    // replicado aqui se algum dia isso importar.
     @Bean
-    FinanceiroUseCase financeiroUseCase() {
-        return new FinanceiroService();
+    NfeImportStoragePort nfeImportStoragePort(
+            @Value("${nfe-import.storage.dir:./data/nfe-imports}") String storageDir) {
+        return new LocalNfeImportStorageAdapter(Path.of(storageDir));
+    }
+
+    @Bean
+    NfeXmlImportPort nfeXmlImportPort(EstoqueUseCase estoqueUseCase) {
+        return new JdkDomNfeXmlImportAdapter(estoqueUseCase);
+    }
+
+    @Bean
+    NfeImportUseCase nfeImportUseCase(NfeXmlImportPort nfeXmlImportPort, SupplierRepository supplierRepository,
+            NfeImportStoragePort nfeImportStoragePort, NfeImportRepository nfeImportRepository,
+            ComprasUseCase comprasUseCase) {
+        return new NfeImportService(nfeXmlImportPort, supplierRepository, nfeImportStoragePort,
+                nfeImportRepository, comprasUseCase);
+    }
+
+    @Bean
+    FinanceiroUseCase financeiroUseCase(LedgerRepository ledgerRepository) {
+        return new FinanceiroService(ledgerRepository);
     }
 
     @Bean
@@ -314,9 +371,11 @@ class CoreBeanConfig {
     CrmUseCase crmUseCase(CustomerRepository customerRepository, CustomerNoteRepository customerNoteRepository,
             StageTransitionRepository stageTransitionRepository, TagRepository tagRepository,
             CustomerTagRepository customerTagRepository, CampaignAutomationRepository campaignAutomationRepository,
-            CampaignLogRepository campaignLogRepository, EmailPort emailPort) {
+            CampaignLogRepository campaignLogRepository, EmailPort emailPort, CashbackUseCase cashbackUseCase,
+            CampaignWebhookPort campaignWebhookPort) {
         return new CrmService(customerRepository, customerNoteRepository, stageTransitionRepository, tagRepository,
-                customerTagRepository, campaignAutomationRepository, campaignLogRepository, emailPort);
+                customerTagRepository, campaignAutomationRepository, campaignLogRepository, emailPort,
+                cashbackUseCase, campaignWebhookPort, new CampaignTemplateRenderer());
     }
 
     @Bean
@@ -344,6 +403,11 @@ class CoreBeanConfig {
     @Bean
     NotificationPreferenceUseCase notificationPreferenceUseCase(NotificationPreferenceRepository preferenceRepository) {
         return new NotificationPreferenceService(preferenceRepository);
+    }
+
+    @Bean
+    BugReportUseCase bugReportUseCase(BugReportRepository bugReportRepository) {
+        return new BugReportService(bugReportRepository);
     }
 
     @Bean

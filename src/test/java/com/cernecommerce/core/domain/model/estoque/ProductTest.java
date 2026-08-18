@@ -136,6 +136,32 @@ class ProductTest {
         assertThat(product().isKit()).isFalse();
     }
 
+    // EST-F023 — rascunho de produto/kit
+
+    @Test
+    void status_defaultsToAtivoWhenOmitted() {
+        assertThat(Product.create("NARG-001", "Narguile", "cat", List.of()).status())
+                .isEqualTo(ProductStatus.ATIVO);
+        assertThat(product().status()).isEqualTo(ProductStatus.ATIVO);
+    }
+
+    @Test
+    void withStatus_promotesPreservingTheRest() {
+        Product rascunho = product().withStatus(ProductStatus.RASCUNHO);
+
+        assertThat(rascunho.status()).isEqualTo(ProductStatus.RASCUNHO);
+        assertThat(rascunho.isDraft()).isTrue();
+        assertThat(rascunho.id()).isEqualTo(1L);
+        assertThat(rascunho.sku()).isEqualTo("NARG-001");
+        assertThat(rascunho.active()).as("status é ortogonal a active").isTrue();
+        assertThat(rascunho.withStatus(ProductStatus.ATIVO).status()).isEqualTo(ProductStatus.ATIVO);
+    }
+
+    @Test
+    void isDraft_falseForAtivo() {
+        assertThat(product().isDraft()).isFalse();
+    }
+
     // EST-F008 — lote e validade
 
     @Test

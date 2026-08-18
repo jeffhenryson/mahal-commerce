@@ -7,6 +7,7 @@ import com.cernecommerce.core.domain.model.pdv.CashMovement;
 import com.cernecommerce.core.domain.model.pdv.CashMovementType;
 import com.cernecommerce.core.domain.model.pdv.CashRegisterSession;
 import com.cernecommerce.core.domain.model.pedido.Order;
+import com.cernecommerce.core.domain.model.pedido.OrderStatus;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -118,8 +119,20 @@ public interface PdvUseCase {
      * @throws com.cernecommerce.core.domain.exception.estoque.InsufficientStockException
      *         se o saldo de algum item for insuficiente
      */
+    default Order registerSale(Long sessionId, Long customerId, List<SaleItemCommand> items,
+            List<PaymentCommand> payments, String username) {
+        return registerSale(sessionId, customerId, items, payments, username, false);
+    }
+
+    /**
+     * Registra a venda já decidindo o destino: {@code reserveForPickup=false} conclui na hora
+     * (comportamento de sempre); {@code true} grava {@link OrderStatus#RESERVADO} em vez de
+     * {@link OrderStatus#CONCLUIDO} (PDV-F008) — mercadoria já baixada do estoque e pagamento já
+     * capturado, exatamente como uma venda concluída, só que o cliente ainda não levou. Único
+     * método abstrato — a sobrecarga acima delega até aqui.
+     */
     Order registerSale(Long sessionId, Long customerId, List<SaleItemCommand> items,
-            List<PaymentCommand> payments, String username);
+            List<PaymentCommand> payments, String username, boolean reserveForPickup);
 
     /** Pagamentos de um pedido, na ordem em que foram lançados (PDV-F006). */
     List<OrderPayment> getOrderPayments(Long orderId);

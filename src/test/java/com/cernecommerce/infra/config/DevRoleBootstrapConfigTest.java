@@ -48,6 +48,21 @@ class DevRoleBootstrapConfigTest {
         verify(roleUseCase).assignPermission("ROLE_DEV", "PDV_READ");
     }
 
+    /**
+     * PDV-F009: sem esta no seed, comanda de mesa responde 403 em dev, mesmo sintoma que
+     * PDV_SALE_MANAGE já causou em EST-C001.
+     */
+    @Test
+    void bootstrapDevRole_grantsPdvComandaManageToRoleDev() throws Exception {
+        PermissionUseCase permissionUseCase = mock(PermissionUseCase.class);
+        RoleUseCase roleUseCase = mock(RoleUseCase.class);
+
+        runnerWith(permissionUseCase, roleUseCase).run();
+
+        verify(permissionUseCase).createPermission("PDV_COMANDA_MANAGE");
+        verify(roleUseCase).assignPermission("ROLE_DEV", "PDV_COMANDA_MANAGE");
+    }
+
     @Test
     void bootstrapDevRole_grantsDevOnlyPermissionsToRoleDev() throws Exception {
         PermissionUseCase permissionUseCase = mock(PermissionUseCase.class);

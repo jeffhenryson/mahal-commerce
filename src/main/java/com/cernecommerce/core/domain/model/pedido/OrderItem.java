@@ -41,7 +41,8 @@ public record OrderItem(
         BigDecimal unitPrice,
         BigDecimal costPrice,
         BigDecimal discountAmount,
-        BigDecimal cashbackPercent) {
+        BigDecimal cashbackPercent,
+        String productName) {
 
     public OrderItem {
         if (sku == null || sku.isBlank()) {
@@ -82,30 +83,53 @@ public record OrderItem(
      * @throws ProductNotPricedException se o produto não tem preço a cobrar. Preço zero e preço
      *         desconhecido não são a mesma coisa: um default zero faria o PDV vender de graça em
      *         vez de recusar a venda de item sem preço.
+     * @deprecated sem {@code productName} (dado legado lê como {@code null}, e o operador vê só o
+     *             SKU no histórico). Prefira a sobrecarga de 5 argumentos.
      */
+    @Deprecated
     public static OrderItem fromCatalog(String sku, BigDecimal quantity, Pricing pricing,
             BigDecimal discountAmount) {
+        return fromCatalog(sku, quantity, pricing, discountAmount, null);
+    }
+
+    /**
+     * Igual a {@link #fromCatalog(String, BigDecimal, Pricing, BigDecimal)}, também congelando o
+     * nome do produto no instante da venda — mesma razão de {@link #costPrice}: se o produto for
+     * renomeado depois, o histórico não pode mudar junto.
+     */
+    public static OrderItem fromCatalog(String sku, BigDecimal quantity, Pricing pricing,
+            BigDecimal discountAmount, String productName) {
         if (pricing == null || !pricing.isPriced()) {
             throw new ProductNotPricedException(sku);
         }
         return new OrderItem(null, sku, quantity, pricing.effectivePrice(), pricing.costPrice(),
-                discountAmount, null);
+                discountAmount, null, productName);
     }
 
-    /** Reconstitui um item a partir de persistência. */
+    /**
+     * Reconstitui um item a partir de persistência.
+     * @deprecated sem {@code productName}. Prefira a sobrecarga de 8 argumentos.
+     */
+    @Deprecated
     public static OrderItem of(Long id, String sku, BigDecimal quantity, BigDecimal unitPrice,
             BigDecimal costPrice, BigDecimal discountAmount, BigDecimal cashbackPercent) {
-        return new OrderItem(id, sku, quantity, unitPrice, costPrice, discountAmount, cashbackPercent);
+        return of(id, sku, quantity, unitPrice, costPrice, discountAmount, cashbackPercent, null);
+    }
+
+    /** Reconstitui um item a partir de persistência, com o nome do produto congelado (dado legado: {@code null}). */
+    public static OrderItem of(Long id, String sku, BigDecimal quantity, BigDecimal unitPrice,
+            BigDecimal costPrice, BigDecimal discountAmount, BigDecimal cashbackPercent, String productName) {
+        return new OrderItem(id, sku, quantity, unitPrice, costPrice, discountAmount, cashbackPercent, productName);
     }
 
     /** Carimba a taxa de cashback vigente. Cópia — o item permanece imutável. */
     public OrderItem withCashbackPercent(BigDecimal newCashbackPercent) {
-        return new OrderItem(id, sku, quantity, unitPrice, costPrice, discountAmount, newCashbackPercent);
+        return new OrderItem(id, sku, quantity, unitPrice, costPrice, discountAmount, newCashbackPercent, productName);
     }
 
     /** Concede desconto neste item. Cópia — o item permanece imutável. */
     public OrderItem withDiscount(BigDecimal newDiscountAmount) {
-        return new OrderItem(id, sku, quantity, unitPrice, costPrice, newDiscountAmount, cashbackPercent);
+        return new OrderItem(id, sku, quantity, unitPrice, costPrice, newDiscountAmount, cashbackPercent, productName);
     }
 
     /**

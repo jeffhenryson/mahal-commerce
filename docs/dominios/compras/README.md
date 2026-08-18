@@ -3,7 +3,7 @@
 **Status:** 🟡 Parcial — recebimento de mercadoria operacional; fornecedores e pedidos de compra ainda em esqueleto
 **Pacote Java:** `com.cernecommerce...compras`
 **Rota HTTP base:** `/compras`
-**Última atualização deste doc:** 2026-07-27 (seção de Segurança e Infraestrutura)
+**Última atualização deste doc:** 2026-08-18 (EST-F005 — importação de NF-e via XML, endpoints novos neste módulo; COM-F003, COM-C004 — auditoria `/1-analise ambas` + `Docs/BACKEND_TODO.md` do `mahal-admin`)
 
 > ⚠️ **Auditoria de código pendente.** Este README foi atualizado em 2026-07-26 apenas para
 > refletir a entrega de `EST-F009` e receber o backlog do módulo. As seções de Regras de
@@ -19,17 +19,20 @@ Reposição de estoque via fornecedores e entradas de mercadorias.
 - **Fornecedores:** cadastro (`Supplier`). 🟡 Modelo e listagem existem; falta o cadastro (`registerSupplier`).
 - **Recebimento de mercadoria:** `GoodsReceipt` integrando com o domínio `estoque` para
   movimentar saldo. ✅ Implementado (EST-F009).
+- **Importação de NF-e:** entrada de mercadoria automática lendo o XML da nota fiscal do
+  fornecedor, em duas fases (preview com casamento por CNPJ/EAN → confirm com override manual e
+  `GoodsReceipt` real). ✅ Implementado (EST-F005, 2026-08-18).
 - **Pedidos de compra:** `PurchaseOrder`. 🟡 Pendente.
 
 ## Estrutura hexagonal
 
 | Camada | Artefato |
 |---|---|
-| domain/model | `core/domain/model/compras/Supplier`, `GoodsReceipt`, `GoodsReceiptItem` |
-| ports/in | `core/ports/in/ComprasUseCase` |
-| ports/out | `core/ports/out/compras/SupplierRepository`, `GoodsReceiptRepository` |
+| domain/model | `core/domain/model/compras/Supplier`, `GoodsReceipt`, `GoodsReceiptItem`, `NfeImport`, `NfeImportLine` (EST-F005) |
+| ports/in | `core/ports/in/ComprasUseCase`, `core/ports/in/NfeImportUseCase` (EST-F005) |
+| ports/out | `core/ports/out/compras/SupplierRepository`, `GoodsReceiptRepository`, `NfeImportRepository`; `core/ports/out/estoque/NfeXmlImportPort` (implementado em `adapter/out/nfe/JdkDomNfeXmlImportAdapter`); `core/ports/out/storage/NfeImportStoragePort` |
 | service | `core/service/ComprasService` (wired em `CoreBeanConfig`, recebe `EstoqueUseCase`) |
-| adapter/in | `adapter/in/controller/ComprasController` → `GET /compras/suppliers?page&size` (`COMPRAS_READ`), `POST /compras/goods-receipts` (`COMPRAS_RECEIPT_MANAGE`) |
+| adapter/in | `adapter/in/controller/ComprasController` → `GET /compras/suppliers?page&size` (`COMPRAS_READ`), `POST /compras/goods-receipts` (`COMPRAS_RECEIPT_MANAGE`); `adapter/in/controller/NfeImportController` (EST-F005) → `POST /compras/goods-receipts/nfe-preview`/`.../nfe-confirm` (`COMPRAS_RECEIPT_MANAGE`) |
 
 ## API — Endpoints
 
@@ -37,6 +40,8 @@ Reposição de estoque via fornecedores e entradas de mercadorias.
 |---|---|---|---|
 | `GET` | `/compras/suppliers` | `COMPRAS_READ` | Lista fornecedores paginados (`page` ≥ 0, `size` 1–100) |
 | `POST` | `/compras/goods-receipts` | `COMPRAS_RECEIPT_MANAGE` | Registra recebimento e **dá entrada no estoque** item a item. `404 SUPPLIER_NOT_FOUND` |
+| `POST` | `/compras/goods-receipts/nfe-preview` | `COMPRAS_RECEIPT_MANAGE` | EST-F005 — parseia XML de NF-e (multipart), casa fornecedor por CNPJ e itens por EAN, sem persistir recebimento. `400 MALFORMED_NFE_XML`; `404 SUPPLIER_NOT_FOUND_BY_TAX_ID` |
+| `POST` | `/compras/goods-receipts/nfe-confirm` | `COMPRAS_RECEIPT_MANAGE` | EST-F005 — confirma um preview (com override manual de SKU para linhas `UNMATCHED`) e delega para o mesmo caminho de `POST /compras/goods-receipts`. `400 UNMATCHED_NFE_LINE`; `404 NFE_IMPORT_NOT_FOUND`; `409 NFE_IMPORT_ALREADY_PROCESSED` |
 
 ## Segurança e Infraestrutura
 
@@ -141,13 +146,23 @@ Convenções, variáveis e o environment compartilhado estão em
 
 | ID | Prioridade | Tipo | Item | Descrição | Status |
 |---|---|---|---|---|---|
-| COM-F001 | 🟡 Média | Feature | cadastro-fornecedor | `registerSupplier` — hoje `Supplier` é um record stub sem validação e só existe listagem. TODO em `core/ports/in/ComprasUseCase.java:13`. | Pendente |
-| COM-F002 | 🟡 Média | Feature | pedido-de-compra | `PurchaseOrder` e `createPurchaseOrder`, fechando o ciclo pedido → recebimento. TODO em `core/domain/model/compras/package-info.java:7`. | Pendente |
+| COM-F001 | 🔴 Alta | Feature | cadastro-fornecedor | `registerSupplier` — hoje `Supplier` é um record stub sem validação e só existe listagem (`GET /compras/suppliers`). TODO em `core/ports/in/ComprasUseCase.java:13`. Faltam `POST` (criar) e `PATCH` (editar/ativar-desativar) — confirmado como bloqueio real pelo front (`mahal-admin`, `Docs/BACKEND_TODO.md`, seção "P2 — Compras", 2026-08-18): sem isso não há como testar o resto da tela de Compras. **Segundo bloqueio real, achado em EST-F005 (2026-08-18):** a importação de NF-e rejeita com 404 qualquer nota de fornecedor não cadastrado (decisão deliberada — sem criação automática, diferente de Categoria), então hoje o único jeito de cadastrar o fornecedor antes de importar é inserção direta no banco. | Pendente |
+| COM-F002 | 🟡 Média | Feature | pedido-de-compra | `PurchaseOrder` e `createPurchaseOrder`, fechando o ciclo pedido → recebimento. TODO em `core/domain/model/compras/package-info.java:7`. Workflow de status esperado pelo front: rascunho → enviado → parcialmente recebido → recebido → cancelado, linkado ao `POST /compras/goods-receipts` já existente (hoje o recebimento é "solto", sem referenciar um pedido formal). Também é a extensão natural do alerta de ponto de reposição do estoque (EST-F004): hoje o alerta não gera nenhuma ação, o gestor decide comprar de cabeça — o pedido de compra pode sugerir itens a partir do relatório de reposição já existente. | Pendente |
+| COM-F003 | 🟢 Baixa | Feature | cotacoes-rfq | Solicitar cotação a um ou mais fornecedores, registrar respostas (preço, prazo, condições de pagamento), comparar e converter a vencedora em Pedido de Compra (`COM-F002`). Depende de `COM-F001`/`COM-F002` existirem primeiro. Ver `Docs/MODULO_COMPRAS.md` no `mahal-admin` para a especificação de tela original. Pedido confirmado pelo front em `Docs/BACKEND_TODO.md`, seção "P2 — Compras", 2026-08-18. | Pendente |
 | COM-C001 | 🟡 Importante | Correção | auditar-e-documentar-o-modulo | Preencher Regras de Negócio, Schema (V58/V59/V60) e Cobertura de Testes no padrão de `estoque`. | Pendente |
 | COM-C002 | 🟢 Melhoria | Correção | expor-dto-em-vez-de-record-de-dominio | `GET /compras/suppliers` retorna `PageResult<Supplier>` — o record de domínio vaza direto na API, sem DTO de resposta. | Pendente |
+| COM-C004 | 🟡 Importante | Correção | recebimento-sem-teste-de-concorrencia | Nenhum IT de concorrência cobre `SupplierRepositoryImpl`/`GoodsReceiptRepositoryImpl` (dois recebimentos concorrentes incrementando o mesmo lote/saldo) — comparado ao rigor já aplicado em `StockBalanceConcurrencyIT`/`StockCountConcurrencyIT` em `estoque`, essa lacuna destoa do padrão do projeto. Achado em auditoria `analyze-domain`/testes de 2026-08-18. | Pendente |
 
 ## Histórico de Implementações
 
+- **2026-08-18** — `importacao-nfe-xml` (EST-F005): entrada de mercadoria automática lendo o XML
+  de NF-e do fornecedor. Detalhamento completo (design, hardening contra XXE, casamento por
+  EAN/CNPJ, migration V106) está em `docs/dominios/estoque/README.md` — o ID é `EST-*` porque a
+  feature nasceu do backlog de estoque, mas os dois endpoints novos
+  (`POST /compras/goods-receipts/nfe-preview`/`.../nfe-confirm`) vivem neste módulo, sob a mesma
+  permissão `COMPRAS_RECEIPT_MANAGE` de `POST /compras/goods-receipts`. Achado de passagem: expôs
+  **COM-F001** como bloqueio de verdade também para este fluxo (fornecedor não cadastrado não tem
+  como ser criado antes de importar a primeira NF-e dele).
 - **2026-07-27** — `size-fora-da-faixa-retornava-500` (efeito colateral do EST-C005): os `@Min(1) @Max(100)` de `GET /compras/suppliers` existiam desde COM-F001, mas nunca tinham sido exercitados por teste — e devolviam 500. Desde o Spring Framework 6.1 a validação de parâmetro de handler é aplicada pelo `RequestMappingHandlerAdapter` e lança `HandlerMethodValidationException`, não `ConstraintViolationException`; sem handler para ela, o catch-all de `Exception` do `GlobalExceptionHandler` transformava a violação em 500 `INTERNAL_ERROR`. Novo handler → 400 `VALIDATION_ERROR`, que é o que a coleção Postman deste módulo já documentava. Descoberto ao anotar o `EstoqueController` no EST-C005.
 - **2026-07-23** — `recebimento-movimenta-saldo` (EST-F009): `Supplier`, `GoodsReceipt`/`GoodsReceiptItem`, `POST /compras/goods-receipts` chamando `EstoqueUseCase.adjustStock` com `MovementType.ENTRADA` por item; RBAC `COMPRAS_RECEIPT_MANAGE`; migrations V58/V59/V60. Coberto por `ComprasServiceTest` e `ComprasControllerSecurityTest`.
 

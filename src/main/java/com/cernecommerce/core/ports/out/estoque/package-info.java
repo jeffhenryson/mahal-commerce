@@ -6,7 +6,7 @@
  * {@code ReorderPointRepository} têm adapter JPA correspondente em
  * {@code adapter/out/persistence/repository}.</p>
  *
- * <p>Port ainda previsto: {@code NfeXmlImportPort}, para entrada de mercadoria por XML de NF-e
- * (EST-F005).</p>
+ * <p>{@code NfeXmlImportPort} (EST-F005, entrada de mercadoria por XML de NF-e) implementado por
+ * {@code adapter/out/nfe/JdkDomNfeXmlImportAdapter} — nenhum port previsto continua pendente.</p>
  */
 package com.cernecommerce.core.ports.out.estoque;

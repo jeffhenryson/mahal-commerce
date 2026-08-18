@@ -191,7 +191,9 @@ public class OrdersController {
     }
 
     @Operation(summary = "Avança o pedido na esteira de fulfillment",
-            description = "SEPARADO → ENVIADO → ENTREGUE. Pular etapas é recusado com 409.")
+            description = "SEPARADO → ENVIADO → ENTREGUE. Pular etapas é recusado com 409. Também cobre "
+                    + "a retirada de venda de balcão reservada (PDV-F008): RESERVADO → CONCLUIDO, "
+                    + "disparada pelo operador quando o cliente volta para levar a mercadoria.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = OrderAdminResponseDTO.class))),
             @ApiResponse(responseCode = "404", description = "Pedido não encontrado", content = @Content),

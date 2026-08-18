@@ -17,4 +17,7 @@ public class CampaignAutomationResponseDTO {
     private String template;
     private boolean ativa;
     private Instant criadoEm;
+
+    /** {@code webhookHeaders} não é exposto aqui — pode conter segredos (ex.: Authorization). */
+    private String webhookUrl;
 }

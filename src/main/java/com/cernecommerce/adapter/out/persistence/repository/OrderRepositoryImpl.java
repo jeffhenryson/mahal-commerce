@@ -56,6 +56,10 @@ public class OrderRepositoryImpl implements OrderRepository {
         entity.setConcludedAt(order.concludedAt());
         entity.setCancelledAt(order.cancelledAt());
         entity.setRefundedAt(order.refundedAt());
+        entity.setReservedAt(order.reservedAt());
+        entity.setSeparatedAt(order.separatedAt());
+        entity.setShippedAt(order.shippedAt());
+        entity.setDeliveredAt(order.deliveredAt());
 
         // Os itens são reescritos por inteiro: o pedido é imutável depois de concluído, então este
         // caminho só é exercitado antes da conclusão. orphanRemoval limpa os antigos.
@@ -69,6 +73,7 @@ public class OrderRepositoryImpl implements OrderRepository {
             itemEntity.setCostPrice(item.costPrice());
             itemEntity.setDiscountAmount(item.discountAmount());
             itemEntity.setCashbackPercent(item.cashbackPercent());
+            itemEntity.setProductName(item.productName());
             entity.getItems().add(itemEntity);
         }
         return toDomain(orderJpaRepository.save(entity));
@@ -137,12 +142,13 @@ public class OrderRepositoryImpl implements OrderRepository {
                 e.getWarehouseCode(), e.getItems().stream().map(this::toDomain).toList(),
                 e.getTotalAmount(), e.getDiscountAmount(), e.getCashbackRedeemed(), e.getNetAmount(),
                 e.getChangeAmount(), e.getCancelReason(), e.getCreatedAt(), e.getPaidAt(),
-                e.getConcludedAt(), e.getCancelledAt(), e.getRefundedAt(),
+                e.getConcludedAt(), e.getCancelledAt(), e.getRefundedAt(), e.getReservedAt(),
+                e.getSeparatedAt(), e.getShippedAt(), e.getDeliveredAt(),
                 e.getVersion() == null ? 0L : e.getVersion());
     }
 
     private OrderItem toDomain(OrderItemEntity e) {
         return OrderItem.of(e.getId(), e.getSku(), e.getQuantity(), e.getUnitPrice(), e.getCostPrice(),
-                e.getDiscountAmount(), e.getCashbackPercent());
+                e.getDiscountAmount(), e.getCashbackPercent(), e.getProductName());
     }
 }

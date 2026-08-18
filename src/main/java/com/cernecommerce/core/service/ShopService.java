@@ -184,8 +184,9 @@ public class ShopService implements ShopUseCase {
         // pedido mais tarde) não resolvem taxa nenhuma, só leem o que já foi carimbado.
         List<OrderItem> orderItems = new ArrayList<>(cart.items().size());
         for (CartItem cartItem : cart.items()) {
+            EstoqueUseCase.CatalogSaleInfo saleInfo = estoqueUseCase.resolveSaleInfo(cartItem.sku());
             OrderItem item = OrderItem.fromCatalog(cartItem.sku(), cartItem.quantity(),
-                    estoqueUseCase.findPricingBySku(cartItem.sku()), BigDecimal.ZERO);
+                    saleInfo.pricing(), BigDecimal.ZERO, saleInfo.productName());
             CashbackRate resolvedRate = cashbackUseCase.resolveApplicableRate(cartItem.sku());
             if (resolvedRate != null) {
                 item = item.withCashbackPercent(resolvedRate.percent());
@@ -280,7 +281,7 @@ public class ShopService implements ShopUseCase {
 
     /** Mesma validação que {@link OrderItem#fromCatalog} faria no checkout — só descarta o resultado. */
     private void requirePriced(String sku) {
-        OrderItem.fromCatalog(sku, BigDecimal.ONE, estoqueUseCase.findPricingBySku(sku), BigDecimal.ZERO);
+        OrderItem.fromCatalog(sku, BigDecimal.ONE, estoqueUseCase.findPricingBySku(sku), BigDecimal.ZERO, null);
     }
 
     private Long requireCustomerId(String username) {

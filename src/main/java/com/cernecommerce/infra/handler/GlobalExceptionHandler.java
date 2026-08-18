@@ -37,6 +37,7 @@ import com.cernecommerce.core.domain.exception.cashback.CashbackRateNotFoundExce
 import com.cernecommerce.core.domain.exception.compras.SupplierNotFoundException;
 import com.cernecommerce.core.domain.exception.ecommerce.CartEmptyException;
 import com.cernecommerce.core.domain.exception.ecommerce.CartItemNotFoundException;
+import com.cernecommerce.core.domain.exception.financeiro.CashFlowEntryNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.BarcodeNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.DefaultWarehouseNotConfiguredException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateBarcodeException;
@@ -44,6 +45,7 @@ import com.cernecommerce.core.domain.exception.estoque.DuplicateKitComponentExce
 import com.cernecommerce.core.domain.exception.estoque.CategoryNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateCategoryNameException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateSkuException;
+import com.cernecommerce.core.domain.exception.estoque.DraftLimitReachedException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateWarehouseCodeException;
 import com.cernecommerce.core.domain.exception.estoque.EmptyKitRecipeException;
 import com.cernecommerce.core.domain.exception.estoque.InactiveProductException;
@@ -71,6 +73,7 @@ import com.cernecommerce.core.domain.exception.estoque.StockReservationNotFoundE
 import com.cernecommerce.core.domain.exception.estoque.UnexpectedLotInfoException;
 import com.cernecommerce.core.domain.exception.estoque.UnexpectedUnitCostException;
 import com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException;
+import com.cernecommerce.core.domain.exception.crm.AutomationWebhookNotConfiguredException;
 import com.cernecommerce.core.domain.exception.crm.CampaignAutomationNotFoundException;
 import com.cernecommerce.core.domain.exception.crm.CustomerNotFoundException;
 import com.cernecommerce.core.domain.exception.crm.DuplicateCustomerCpfException;
@@ -84,6 +87,14 @@ import com.cernecommerce.core.domain.exception.pagamento.PaymentExceedsOrderTota
 import com.cernecommerce.core.domain.exception.pagamento.PaymentGatewayException;
 import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionNotFoundException;
 import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionNotOwnedException;
+import com.cernecommerce.core.domain.exception.compras.MalformedNfeXmlException;
+import com.cernecommerce.core.domain.exception.compras.NfeImportAlreadyProcessedException;
+import com.cernecommerce.core.domain.exception.compras.NfeImportNotFoundException;
+import com.cernecommerce.core.domain.exception.compras.SupplierNotFoundByTaxIdException;
+import com.cernecommerce.core.domain.exception.compras.UnmatchedNfeLineException;
+import com.cernecommerce.core.domain.exception.pdv.ComandaEmptyException;
+import com.cernecommerce.core.domain.exception.pdv.ComandaNotFoundException;
+import com.cernecommerce.core.domain.exception.pdv.ComandaNotOpenException;
 import com.cernecommerce.core.domain.exception.pdv.NoOpenCashRegisterSessionException;
 import com.cernecommerce.core.domain.exception.pedido.DiscountLimitExceededException;
 import com.cernecommerce.core.domain.exception.pedido.InvalidOrderStatusTransitionException;
@@ -278,6 +289,11 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.CONFLICT, ex.getMessage(), "KIT_INITIAL_STOCK_NOT_ALLOWED", req);
     }
 
+    @ExceptionHandler(DraftLimitReachedException.class)
+    public ResponseEntity<ApiError> handleDraftLimitReached(DraftLimitReachedException ex, HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "DRAFT_LIMIT_REACHED", req);
+    }
+
     @ExceptionHandler(KitDirectAdjustmentException.class)
     public ResponseEntity<ApiError> handleKitDirectAdjustment(KitDirectAdjustmentException ex,
             HttpServletRequest req) {
@@ -379,6 +395,33 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.CONFLICT, ex.getMessage(), "CASHBACK_RATE_ALREADY_EXISTS", req);
     }
 
+    @ExceptionHandler(MalformedNfeXmlException.class)
+    public ResponseEntity<ApiError> handleMalformedNfeXml(MalformedNfeXmlException ex, HttpServletRequest req) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "MALFORMED_NFE_XML", req);
+    }
+
+    @ExceptionHandler(SupplierNotFoundByTaxIdException.class)
+    public ResponseEntity<ApiError> handleSupplierNotFoundByTaxId(SupplierNotFoundByTaxIdException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.NOT_FOUND, ex.getMessage(), "SUPPLIER_NOT_FOUND_BY_TAX_ID", req);
+    }
+
+    @ExceptionHandler(NfeImportNotFoundException.class)
+    public ResponseEntity<ApiError> handleNfeImportNotFound(NfeImportNotFoundException ex, HttpServletRequest req) {
+        return error(HttpStatus.NOT_FOUND, ex.getMessage(), "NFE_IMPORT_NOT_FOUND", req);
+    }
+
+    @ExceptionHandler(NfeImportAlreadyProcessedException.class)
+    public ResponseEntity<ApiError> handleNfeImportAlreadyProcessed(NfeImportAlreadyProcessedException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "NFE_IMPORT_ALREADY_PROCESSED", req);
+    }
+
+    @ExceptionHandler(UnmatchedNfeLineException.class)
+    public ResponseEntity<ApiError> handleUnmatchedNfeLine(UnmatchedNfeLineException ex, HttpServletRequest req) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "UNMATCHED_NFE_LINE", req);
+    }
+
     @ExceptionHandler(SupplierNotFoundException.class)
     public ResponseEntity<ApiError> handleSupplierNotFound(SupplierNotFoundException ex, HttpServletRequest req) {
         return error(HttpStatus.NOT_FOUND, ex.getMessage(), "SUPPLIER_NOT_FOUND", req);
@@ -418,6 +461,12 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(CampaignAutomationNotFoundException.class)
     public ResponseEntity<ApiError> handleCampaignAutomationNotFound(CampaignAutomationNotFoundException ex, HttpServletRequest req) {
         return error(HttpStatus.NOT_FOUND, ex.getMessage(), "CAMPAIGN_AUTOMATION_NOT_FOUND", req);
+    }
+
+    @ExceptionHandler(AutomationWebhookNotConfiguredException.class)
+    public ResponseEntity<ApiError> handleAutomationWebhookNotConfigured(AutomationWebhookNotConfiguredException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "AUTOMATION_WEBHOOK_NOT_CONFIGURED", req);
     }
 
     @ExceptionHandler(UsernameAlreadyExistsException.class)
@@ -728,6 +777,22 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.NOT_FOUND, ex.getMessage(), "ORDER_NOT_FOUND", req);
     }
 
+    @ExceptionHandler(ComandaNotFoundException.class)
+    public ResponseEntity<ApiError> handleComandaNotFound(ComandaNotFoundException ex, HttpServletRequest req) {
+        return error(HttpStatus.NOT_FOUND, ex.getMessage(), "COMANDA_NOT_FOUND", req);
+    }
+
+    /** PDV-F009: mesma família de CASH_REGISTER_SESSION_CLOSED — o request está bem formado, o estado da comanda que não permite. */
+    @ExceptionHandler(ComandaNotOpenException.class)
+    public ResponseEntity<ApiError> handleComandaNotOpen(ComandaNotOpenException ex, HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "COMANDA_NOT_OPEN", req);
+    }
+
+    @ExceptionHandler(ComandaEmptyException.class)
+    public ResponseEntity<ApiError> handleComandaEmpty(ComandaEmptyException ex, HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "COMANDA_EMPTY", req);
+    }
+
     /**
      * PDV-F004: 409 e não 400 — a requisição está bem formada, o que impede a venda é o estado do
      * cadastro. Mesma família de {@code PRODUCT_INACTIVE}.
@@ -773,6 +838,21 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(InvalidReportPeriodException.class)
     public ResponseEntity<ApiError> handleInvalidReportPeriod(InvalidReportPeriodException ex, HttpServletRequest req) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "INVALID_REPORT_PERIOD", req);
+    }
+
+    @ExceptionHandler(CashFlowEntryNotFoundException.class)
+    public ResponseEntity<ApiError> handleCashFlowEntryNotFound(CashFlowEntryNotFoundException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.NOT_FOUND, ex.getMessage(), "CASH_FLOW_ENTRY_NOT_FOUND", req);
+    }
+
+    // Nome igual ao de pedido.InvalidReportPeriodException (já importado acima) — qualificado
+    // por extenso para evitar colisão, mesmo padrão de NoResourceFoundException logo abaixo.
+    @ExceptionHandler(com.cernecommerce.core.domain.exception.financeiro.InvalidReportPeriodException.class)
+    public ResponseEntity<ApiError> handleInvalidFinanceiroReportPeriod(
+            com.cernecommerce.core.domain.exception.financeiro.InvalidReportPeriodException ex,
+            HttpServletRequest req) {
         return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "INVALID_REPORT_PERIOD", req);
     }
 

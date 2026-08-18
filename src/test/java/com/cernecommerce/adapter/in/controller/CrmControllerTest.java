@@ -79,7 +79,7 @@ public class CrmControllerTest {
 
     private CampaignAutomation automation(Long id, boolean ativa) {
         return CampaignAutomation.of(id, "Boas-vindas", CampaignTrigger.MANUAL, CustomerStage.NOVO_LEAD,
-                CampaignChannel.EMAIL, "Ola {nome}", ativa, Instant.now());
+                CampaignChannel.EMAIL, "Ola {nome}", ativa, Instant.now(), null, Map.of());
     }
 
     private CustomerNote note(Long id, Long customerId) {
@@ -600,7 +600,7 @@ public class CrmControllerTest {
     @Test
     void createAutomation_returns_201() throws Exception {
         when(crmUseCase.createAutomation("Boas-vindas", CampaignTrigger.MANUAL, CustomerStage.NOVO_LEAD,
-                CampaignChannel.EMAIL, "Ola {nome}")).thenReturn(automation(1L, true));
+                CampaignChannel.EMAIL, "Ola {nome}", null, null)).thenReturn(automation(1L, true));
 
         mockMvc.perform(post("/crm/automacoes")
                         .principal(AUTH)

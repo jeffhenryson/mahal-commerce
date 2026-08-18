@@ -33,7 +33,7 @@ public interface OrderItemJpaRepository extends JpaRepository<OrderItemEntity, L
               AND (:customerId IS NULL OR o.customerId = :customerId)
               AND o.createdAt >= :from
               AND o.createdAt <= :to
-              AND o.status IN ('PAGO','SEPARADO','ENVIADO','ENTREGUE','CONCLUIDO')
+              AND o.status IN ('PAGO','SEPARADO','ENVIADO','ENTREGUE','CONCLUIDO','RESERVADO')
             GROUP BY oi.sku, p.name
             ORDER BY revenue DESC
             """)
@@ -57,7 +57,7 @@ public interface OrderItemJpaRepository extends JpaRepository<OrderItemEntity, L
               AND (:customerId IS NULL OR o.customerId = :customerId)
               AND o.createdAt >= :from
               AND o.createdAt <= :to
-              AND o.status IN ('PAGO','SEPARADO','ENVIADO','ENTREGUE','CONCLUIDO')
+              AND o.status IN ('PAGO','SEPARADO','ENVIADO','ENTREGUE','CONCLUIDO','RESERVADO')
             GROUP BY oi.sku, p.name
             ORDER BY quantitySold DESC
             """)

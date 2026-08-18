@@ -67,6 +67,7 @@ public class OrderDTOConverter {
         dto.setPaidAt(order.paidAt());
         dto.setConcludedAt(order.concludedAt());
         dto.setCancelledAt(order.cancelledAt());
+        dto.setReservedAt(order.reservedAt());
         dto.setItems(order.items().stream().map(this::toResponse).toList());
         return dto;
     }
@@ -135,6 +136,7 @@ public class OrderDTOConverter {
     private SaleReceiptItemResponseDTO toReceiptItem(OrderItem item) {
         SaleReceiptItemResponseDTO dto = new SaleReceiptItemResponseDTO();
         dto.setSku(item.sku());
+        dto.setProductName(item.productName());
         dto.setQuantity(item.quantity());
         dto.setUnitPrice(item.unitPrice());
         dto.setDiscountAmount(item.discountAmount());
@@ -164,6 +166,10 @@ public class OrderDTOConverter {
         dto.setPaidAt(order.paidAt());
         dto.setConcludedAt(order.concludedAt());
         dto.setCancelledAt(order.cancelledAt());
+        dto.setReservedAt(order.reservedAt());
+        dto.setSeparatedAt(order.separatedAt());
+        dto.setShippedAt(order.shippedAt());
+        dto.setDeliveredAt(order.deliveredAt());
         dto.setAllowedTransitions(order.status().allowedTransitions().stream()
                 .map(Enum::name).sorted().toList());
         dto.setItems(order.items().stream().map(this::toAdminResponse).toList());
@@ -179,6 +185,7 @@ public class OrderDTOConverter {
         OrderItemAdminResponseDTO dto = new OrderItemAdminResponseDTO();
         dto.setId(item.id());
         dto.setSku(item.sku());
+        dto.setProductName(item.productName());
         dto.setQuantity(item.quantity());
         dto.setUnitPrice(item.unitPrice());
         dto.setDiscountAmount(item.discountAmount());
@@ -212,6 +219,7 @@ public class OrderDTOConverter {
         OrderItemResponseDTO dto = new OrderItemResponseDTO();
         dto.setId(item.id());
         dto.setSku(item.sku());
+        dto.setProductName(item.productName());
         dto.setQuantity(item.quantity());
         dto.setUnitPrice(item.unitPrice());
         dto.setDiscountAmount(item.discountAmount());

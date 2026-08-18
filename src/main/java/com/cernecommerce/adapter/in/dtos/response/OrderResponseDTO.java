@@ -49,6 +49,10 @@ public class OrderResponseDTO {
     private Instant concludedAt;
     private Instant cancelledAt;
 
+    @Schema(description = "Instante da reserva para retirada depois (PDV-F008), quando status é ou "
+            + "já foi RESERVADO. Permanece preenchido após a retirada (RESERVADO -> CONCLUIDO).")
+    private Instant reservedAt;
+
     private List<OrderItemResponseDTO> items;
 
     @Schema(description = "Pagamentos do pedido (PDV-F006). Ausente/nulo em listagens — só vem "

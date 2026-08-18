@@ -20,9 +20,15 @@ import com.cernecommerce.core.domain.model.crm.CustomerStage;
 import com.cernecommerce.core.domain.model.crm.StageTransition;
 import com.cernecommerce.core.domain.model.crm.Tag;
 import com.cernecommerce.core.domain.model.crm.TagSummary;
+import com.cernecommerce.core.domain.model.cashback.CashbackBalance;
+import com.cernecommerce.core.domain.model.crm.WebhookDispatchResult;
+import com.cernecommerce.core.domain.model.crm.WebhookTestResult;
+import com.cernecommerce.core.domain.exception.crm.AutomationWebhookNotConfiguredException;
 import com.cernecommerce.core.domain.model.notification.EmailChannelStatus;
+import com.cernecommerce.core.ports.in.CashbackUseCase;
 import com.cernecommerce.core.ports.out.crm.CampaignAutomationRepository;
 import com.cernecommerce.core.ports.out.crm.CampaignLogRepository;
+import com.cernecommerce.core.ports.out.crm.CampaignWebhookPort;
 import com.cernecommerce.core.ports.out.crm.CustomerNoteRepository;
 import com.cernecommerce.core.ports.out.crm.CustomerRepository;
 import com.cernecommerce.core.ports.out.crm.CustomerTagRepository;
@@ -57,6 +63,8 @@ class CrmServiceTest {
     @Mock CampaignAutomationRepository campaignAutomationRepository;
     @Mock CampaignLogRepository campaignLogRepository;
     @Mock EmailPort emailPort;
+    @Mock CashbackUseCase cashbackUseCase;
+    @Mock CampaignWebhookPort campaignWebhookPort;
 
     CrmService crmService;
 
@@ -64,7 +72,7 @@ class CrmServiceTest {
     void setUp() {
         crmService = new CrmService(customerRepository, customerNoteRepository, stageTransitionRepository,
                 tagRepository, customerTagRepository, campaignAutomationRepository, campaignLogRepository,
-                emailPort);
+                emailPort, cashbackUseCase, campaignWebhookPort, new CampaignTemplateRenderer());
     }
 
     private Customer customer(Long id, String email) {
@@ -444,7 +452,12 @@ class CrmServiceTest {
 
     private CampaignAutomation automation(Long id, boolean ativa) {
         return CampaignAutomation.of(id, "Boas-vindas", CampaignTrigger.MANUAL, CustomerStage.NOVO_LEAD,
-                CampaignChannel.EMAIL, "Ola {nome}", ativa, Instant.now());
+                CampaignChannel.EMAIL, "Ola {nome}", ativa, Instant.now(), null, Map.of());
+    }
+
+    private CampaignAutomation automationWithWebhook(Long id, String webhookUrl) {
+        return CampaignAutomation.of(id, "Boas-vindas", CampaignTrigger.MANUAL, CustomerStage.NOVO_LEAD,
+                CampaignChannel.EMAIL, "Ola {{cliente.nome}}", true, Instant.now(), webhookUrl, Map.of());
     }
 
     @Test
@@ -453,10 +466,33 @@ class CrmServiceTest {
         when(campaignAutomationRepository.save(any())).thenReturn(saved);
 
         CampaignAutomation result = crmService.createAutomation("Boas-vindas", CampaignTrigger.MANUAL,
-                CustomerStage.NOVO_LEAD, CampaignChannel.EMAIL, "Ola {nome}");
+                CustomerStage.NOVO_LEAD, CampaignChannel.EMAIL, "Ola {nome}", null, null);
 
         assertThat(result.id()).isEqualTo(1L);
         verify(campaignAutomationRepository).save(any());
+    }
+
+    @Test
+    void updateAutomation_savesUpdatedFieldsWhenExists() {
+        when(campaignAutomationRepository.findById(1L)).thenReturn(Optional.of(automation(1L, true)));
+        when(campaignAutomationRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        CampaignAutomation result = crmService.updateAutomation(1L, "Novo nome", CampaignTrigger.MANUAL,
+                CustomerStage.QUALIFICADO, CampaignChannel.WHATSAPP, "Novo template",
+                "https://n8n.example.com/webhook/abc", Map.of("Authorization", "Bearer token"));
+
+        assertThat(result.nome()).isEqualTo("Novo nome");
+        assertThat(result.segmentoAlvo()).isEqualTo(CustomerStage.QUALIFICADO);
+        assertThat(result.webhookUrl()).isEqualTo("https://n8n.example.com/webhook/abc");
+    }
+
+    @Test
+    void updateAutomation_throwsWhenNotFound() {
+        when(campaignAutomationRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> crmService.updateAutomation(99L, "Nome", CampaignTrigger.MANUAL,
+                CustomerStage.NOVO_LEAD, CampaignChannel.EMAIL, "Template", null, null))
+                .isInstanceOf(CampaignAutomationNotFoundException.class);
     }
 
     @Test
@@ -528,6 +564,55 @@ class CrmServiceTest {
 
         assertThatThrownBy(() -> crmService.dispatchAutomation(99L))
                 .isInstanceOf(CampaignAutomationNotFoundException.class);
+    }
+
+    @Test
+    void dispatchAutomation_withWebhook_sendsRealRequestAndRecordsPartialFailure() {
+        CampaignAutomation automation = automationWithWebhook(1L, "https://n8n.example.com/webhook/abc");
+        Customer maria = customer(1L, "maria@example.com");
+        Customer joao = customer(2L, "joao@example.com");
+        when(campaignAutomationRepository.findById(1L)).thenReturn(Optional.of(automation));
+        when(customerRepository.findByEstagio(CustomerStage.NOVO_LEAD)).thenReturn(List.of(maria, joao));
+        when(campaignLogRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(cashbackUseCase.getCustomerBalance(any())).thenReturn(new CashbackBalance(BigDecimal.ZERO,
+                BigDecimal.ZERO, BigDecimal.ZERO));
+        when(customerTagRepository.findTagsByCustomerId(any())).thenReturn(List.of());
+        when(campaignWebhookPort.send(eq("https://n8n.example.com/webhook/abc"), any(), any()))
+                .thenReturn(WebhookDispatchResult.ok(200))
+                .thenReturn(WebhookDispatchResult.failure("timeout ao conectar"));
+
+        List<CampaignLogEntry> result = crmService.dispatchAutomation(1L);
+
+        assertThat(result).hasSize(2);
+        assertThat(result.get(0).status()).isEqualTo(CampaignDispatchStatus.ENVIADO);
+        assertThat(result.get(1).status()).isEqualTo(CampaignDispatchStatus.FALHA);
+        assertThat(result.get(1).erroDetalhe()).isEqualTo("timeout ao conectar");
+        verify(campaignLogRepository, times(2)).save(any());
+    }
+
+    @Test
+    void testAutomation_sendsSyntheticPayloadWithoutPersistingLog() {
+        CampaignAutomation automation = automationWithWebhook(1L, "https://n8n.example.com/webhook/abc");
+        when(campaignAutomationRepository.findById(1L)).thenReturn(Optional.of(automation));
+        when(campaignWebhookPort.send(eq("https://n8n.example.com/webhook/abc"), any(), any()))
+                .thenReturn(WebhookDispatchResult.ok(200));
+
+        WebhookTestResult result = crmService.testAutomation(1L);
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.statusCode()).isEqualTo(200);
+        assertThat(result.payloadEnviado()).containsKey("cliente");
+        verify(campaignLogRepository, never()).save(any());
+        verify(cashbackUseCase, never()).getCustomerBalance(any());
+    }
+
+    @Test
+    void testAutomation_throwsWhenWebhookNotConfigured() {
+        when(campaignAutomationRepository.findById(1L)).thenReturn(Optional.of(automation(1L, true)));
+
+        assertThatThrownBy(() -> crmService.testAutomation(1L))
+                .isInstanceOf(AutomationWebhookNotConfiguredException.class);
+        verify(campaignWebhookPort, never()).send(any(), any(), any());
     }
 
     @Test

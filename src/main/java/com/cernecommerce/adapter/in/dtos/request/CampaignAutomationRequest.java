@@ -8,6 +8,8 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
+import java.util.Map;
+
 @Data
 public class CampaignAutomationRequest {
     @NotBlank
@@ -26,4 +28,11 @@ public class CampaignAutomationRequest {
     @NotBlank
     @Size(max = 2000)
     private String template;
+
+    /** Opcional — quando preenchida, o disparo passa a enviar de verdade um POST a esta URL. */
+    @Size(max = 500)
+    private String webhookUrl;
+
+    /** Opcional — headers HTTP adicionais enviados no disparo do webhook (ex.: Authorization). */
+    private Map<String, String> webhookHeaders;
 }

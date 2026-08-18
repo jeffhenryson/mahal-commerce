@@ -103,7 +103,7 @@ class PdvServiceTest {
                     arg.customerId(), arg.sessionId(), arg.warehouseCode(), arg.items(), arg.grossAmount(),
                     arg.discountAmount(), arg.cashbackRedeemed(), arg.netAmount(), arg.changeAmount(),
                     arg.cancelReason(), arg.createdAt(), arg.paidAt(), arg.concludedAt(), arg.cancelledAt(),
-                    arg.refundedAt(), arg.version());
+                    arg.refundedAt(), arg.reservedAt(), arg.version());
         });
     }
 
@@ -262,7 +262,7 @@ class PdvServiceTest {
     @Test
     void registerSale_takesTheWarehouseFromTheSessionNotFromTheCaller() {
         givenOpenSessionAndPersistence();
-        when(estoqueUseCase.findPricingBySku("CARV-001")).thenReturn(CARVAO);
+        when(estoqueUseCase.resolveSaleInfo("CARV-001")).thenReturn(new EstoqueUseCase.CatalogSaleInfo("Carvao Coco", CARVAO));
         when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any())).thenReturn(null);
 
         Order order = pdvService.registerSale(1L, null, List.of(twoCharcoals(null)), cash("44.00"), "caixa1");
@@ -370,7 +370,7 @@ class PdvServiceTest {
     @Test
     void registerSale_resolvesPriceAndCostFromTheCatalog() {
         givenOpenSessionAndPersistence();
-        when(estoqueUseCase.findPricingBySku("CARV-001")).thenReturn(CARVAO);
+        when(estoqueUseCase.resolveSaleInfo("CARV-001")).thenReturn(new EstoqueUseCase.CatalogSaleInfo("Carvao Coco", CARVAO));
         StockBalance balance = StockBalance.of(1L, "CARV-001", 2L, new BigDecimal("18.000"), 1L);
         when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any())).thenReturn(balance);
 
@@ -381,6 +381,7 @@ class PdvServiceTest {
         assertThat(order.items()).singleElement().satisfies(item -> {
             assertThat(item.unitPrice()).isEqualByComparingTo("22.00");
             assertThat(item.costPrice()).isEqualByComparingTo("18.00");
+            assertThat(item.productName()).isEqualTo("Carvao Coco");
         });
     }
 
@@ -389,7 +390,7 @@ class PdvServiceTest {
     @Test
     void registerSale_stampsCashbackPercentWhenARateApplies() {
         givenOpenSessionAndPersistence();
-        when(estoqueUseCase.findPricingBySku("CARV-001")).thenReturn(CARVAO);
+        when(estoqueUseCase.resolveSaleInfo("CARV-001")).thenReturn(new EstoqueUseCase.CatalogSaleInfo("Carvao Coco", CARVAO));
         when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any())).thenReturn(null);
         when(cashbackUseCase.resolveApplicableRate("CARV-001"))
                 .thenReturn(CashbackRate.global(new BigDecimal("3.0")));
@@ -403,7 +404,7 @@ class PdvServiceTest {
     @Test
     void registerSale_leavesCashbackPercentNullWhenNoRateApplies() {
         givenOpenSessionAndPersistence();
-        when(estoqueUseCase.findPricingBySku("CARV-001")).thenReturn(CARVAO);
+        when(estoqueUseCase.resolveSaleInfo("CARV-001")).thenReturn(new EstoqueUseCase.CatalogSaleInfo("Carvao Coco", CARVAO));
         when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any())).thenReturn(null);
         when(cashbackUseCase.resolveApplicableRate("CARV-001")).thenReturn(null);
 
@@ -415,7 +416,7 @@ class PdvServiceTest {
     @Test
     void registerSale_recordsEarnedCashbackAfterSavingTheConcludedOrder() {
         givenOpenSessionAndPersistence();
-        when(estoqueUseCase.findPricingBySku("CARV-001")).thenReturn(CARVAO);
+        when(estoqueUseCase.resolveSaleInfo("CARV-001")).thenReturn(new EstoqueUseCase.CatalogSaleInfo("Carvao Coco", CARVAO));
         when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any())).thenReturn(null);
 
         Order order = pdvService.registerSale(1L, 42L, List.of(twoCharcoals(null)), cash("44.00"), "caixa1");
@@ -426,7 +427,7 @@ class PdvServiceTest {
     @Test
     void registerSale_refusesProductWithoutPriceBeforeTouchingStock() {
         when(cashRegisterRepository.findById(1L)).thenReturn(Optional.of(openSession()));
-        when(estoqueUseCase.findPricingBySku("SEM-PRECO")).thenReturn(Pricing.empty());
+        when(estoqueUseCase.resolveSaleInfo("SEM-PRECO")).thenReturn(new EstoqueUseCase.CatalogSaleInfo("Carvao Coco", Pricing.empty()));
 
         assertThatThrownBy(() -> pdvService.registerSale(1L, null,
                 List.of(new SaleItemCommand("SEM-PRECO", BigDecimal.ONE, null)), cash("1.00"), "caixa1"))
@@ -441,7 +442,7 @@ class PdvServiceTest {
     @Test
     void registerSale_appliesDiscountWithinTheLimit() {
         givenOpenSessionAndPersistence();
-        when(estoqueUseCase.findPricingBySku("CARV-001")).thenReturn(CARVAO);
+        when(estoqueUseCase.resolveSaleInfo("CARV-001")).thenReturn(new EstoqueUseCase.CatalogSaleInfo("Carvao Coco", CARVAO));
         when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any())).thenReturn(null);
 
         // 4,00 sobre 44,00 = 9,09% — abaixo do teto de 10%.
@@ -455,7 +456,7 @@ class PdvServiceTest {
     @Test
     void registerSale_refusesDiscountAboveTheLimitBeforeTouchingStock() {
         when(cashRegisterRepository.findById(1L)).thenReturn(Optional.of(openSession()));
-        when(estoqueUseCase.findPricingBySku("CARV-001")).thenReturn(CARVAO);
+        when(estoqueUseCase.resolveSaleInfo("CARV-001")).thenReturn(new EstoqueUseCase.CatalogSaleInfo("Carvao Coco", CARVAO));
 
         // 5,00 sobre 44,00 = 11,36% — acima do teto de 10%.
         assertThatThrownBy(() -> pdvService.registerSale(1L, null,
@@ -471,7 +472,7 @@ class PdvServiceTest {
     @Test
     void registerSale_concludesInTheSameTransactionAndStampsTheOrderNumber() {
         givenOpenSessionAndPersistence();
-        when(estoqueUseCase.findPricingBySku("CARV-001")).thenReturn(CARVAO);
+        when(estoqueUseCase.resolveSaleInfo("CARV-001")).thenReturn(new EstoqueUseCase.CatalogSaleInfo("Carvao Coco", CARVAO));
         when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any())).thenReturn(null);
 
         Order order = pdvService.registerSale(1L, null, List.of(twoCharcoals(null)), cash("44.00"), "caixa1");
@@ -483,10 +484,50 @@ class PdvServiceTest {
         assertThat(order.paidAt()).isNotNull();
     }
 
+    // PDV-F008 — reserva para retirada
+
+    @Test
+    void registerSale_reserveForPickupTrue_savesReservadoInsteadOfConcluido() {
+        givenOpenSessionAndPersistence();
+        when(estoqueUseCase.resolveSaleInfo("CARV-001")).thenReturn(new EstoqueUseCase.CatalogSaleInfo("Carvao Coco", CARVAO));
+        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any())).thenReturn(null);
+
+        Order order = pdvService.registerSale(1L, null, List.of(twoCharcoals(null)), cash("44.00"), "caixa1", true);
+
+        assertThat(order.status()).isEqualTo(OrderStatus.RESERVADO);
+        assertThat(order.orderNumber()).as("numeração é consumida na reserva, igual na conclusão").isNotNull();
+        assertThat(order.reservedAt()).isNotNull();
+        assertThat(order.concludedAt()).isNull();
+    }
+
+    @Test
+    void registerSale_reserveForPickupTrue_aindaBaixaEstoqueECapturaPagamento() {
+        givenOpenSessionAndPersistence();
+        when(estoqueUseCase.resolveSaleInfo("CARV-001")).thenReturn(new EstoqueUseCase.CatalogSaleInfo("Carvao Coco", CARVAO));
+        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any())).thenReturn(null);
+
+        pdvService.registerSale(1L, null, List.of(twoCharcoals(null)), cash("44.00"), "caixa1", true);
+
+        verify(estoqueUseCase).adjustStock(eq("CARV-001"), eq("LOJA-01"), eq(MovementType.SAIDA),
+                eq(new BigDecimal("2.000")), eq("Venda balcão sessão #1"), eq("caixa1"));
+        verify(orderPaymentRepository).save(any());
+    }
+
+    @Test
+    void registerSale_reserveForPickupFalse_comportamentoInalterado() {
+        givenOpenSessionAndPersistence();
+        when(estoqueUseCase.resolveSaleInfo("CARV-001")).thenReturn(new EstoqueUseCase.CatalogSaleInfo("Carvao Coco", CARVAO));
+        when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any())).thenReturn(null);
+
+        Order order = pdvService.registerSale(1L, null, List.of(twoCharcoals(null)), cash("44.00"), "caixa1", false);
+
+        assertThat(order.status()).isEqualTo(OrderStatus.CONCLUIDO);
+    }
+
     @Test
     void registerSale_keepsTheCustomerWhenIdentified() {
         givenOpenSessionAndPersistence();
-        when(estoqueUseCase.findPricingBySku("CARV-001")).thenReturn(CARVAO);
+        when(estoqueUseCase.resolveSaleInfo("CARV-001")).thenReturn(new EstoqueUseCase.CatalogSaleInfo("Carvao Coco", CARVAO));
         when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any())).thenReturn(null);
 
         Order order = pdvService.registerSale(1L, 42L, List.of(twoCharcoals(null)), cash("44.00"), "caixa1");
@@ -497,7 +538,7 @@ class PdvServiceTest {
     @Test
     void registerSale_allowsAnonymousSale() {
         givenOpenSessionAndPersistence();
-        when(estoqueUseCase.findPricingBySku("CARV-001")).thenReturn(CARVAO);
+        when(estoqueUseCase.resolveSaleInfo("CARV-001")).thenReturn(new EstoqueUseCase.CatalogSaleInfo("Carvao Coco", CARVAO));
         when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any())).thenReturn(null);
 
         assertThat(pdvService.registerSale(1L, null, List.of(twoCharcoals(null)), cash("44.00"), "caixa1")
@@ -509,7 +550,7 @@ class PdvServiceTest {
     @Test
     void registerSale_adjustsStockPerItemWithTheSessionInTheReason() {
         givenOpenSessionAndPersistence();
-        when(estoqueUseCase.findPricingBySku("CARV-001")).thenReturn(CARVAO);
+        when(estoqueUseCase.resolveSaleInfo("CARV-001")).thenReturn(new EstoqueUseCase.CatalogSaleInfo("Carvao Coco", CARVAO));
         when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any())).thenReturn(null);
 
         pdvService.registerSale(1L, null, List.of(twoCharcoals(null)), cash("44.00"), "caixa1");
@@ -550,7 +591,7 @@ class PdvServiceTest {
         // EST-C002: antes, um SKU digitado errado criava saldo e ledger órfãos e a venda era
         // gravada normalmente. Agora a resolução de preço já barra, antes de tocar o estoque.
         when(cashRegisterRepository.findById(1L)).thenReturn(Optional.of(openSession()));
-        when(estoqueUseCase.findPricingBySku("SKU-FANTASMA"))
+        when(estoqueUseCase.resolveSaleInfo("SKU-FANTASMA"))
                 .thenThrow(new ProductNotFoundException("SKU-FANTASMA"));
 
         assertThatThrownBy(() -> pdvService.registerSale(1L, null,
@@ -564,7 +605,7 @@ class PdvServiceTest {
     @Test
     void registerSale_propagatesInsufficientStockAndDoesNotSaveOrder() {
         when(cashRegisterRepository.findById(1L)).thenReturn(Optional.of(openSession()));
-        when(estoqueUseCase.findPricingBySku("CARV-001")).thenReturn(CARVAO);
+        when(estoqueUseCase.resolveSaleInfo("CARV-001")).thenReturn(new EstoqueUseCase.CatalogSaleInfo("Carvao Coco", CARVAO));
         when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any()))
                 .thenThrow(new InsufficientStockException("CARV-001", 2L, new BigDecimal("1.000"),
                         new BigDecimal("2.000")));
@@ -581,7 +622,7 @@ class PdvServiceTest {
     @Test
     void registerSale_capturesPaymentAndPersistsIt() {
         givenOpenSessionAndPersistence();
-        when(estoqueUseCase.findPricingBySku("CARV-001")).thenReturn(CARVAO);
+        when(estoqueUseCase.resolveSaleInfo("CARV-001")).thenReturn(new EstoqueUseCase.CatalogSaleInfo("Carvao Coco", CARVAO));
         when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any())).thenReturn(null);
         when(orderPaymentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
@@ -599,7 +640,7 @@ class PdvServiceTest {
     @Test
     void registerSale_computesChangeFromCashOverpayment() {
         givenOpenSessionAndPersistence();
-        when(estoqueUseCase.findPricingBySku("CARV-001")).thenReturn(CARVAO);
+        when(estoqueUseCase.resolveSaleInfo("CARV-001")).thenReturn(new EstoqueUseCase.CatalogSaleInfo("Carvao Coco", CARVAO));
         when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any())).thenReturn(null);
 
         // Pedido de 44,00, cliente entrega 50,00 em dinheiro.
@@ -611,7 +652,7 @@ class PdvServiceTest {
     @Test
     void registerSale_noChangeWhenPaymentMatchesExactly() {
         givenOpenSessionAndPersistence();
-        when(estoqueUseCase.findPricingBySku("CARV-001")).thenReturn(CARVAO);
+        when(estoqueUseCase.resolveSaleInfo("CARV-001")).thenReturn(new EstoqueUseCase.CatalogSaleInfo("Carvao Coco", CARVAO));
         when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any())).thenReturn(null);
 
         Order order = pdvService.registerSale(1L, null, List.of(twoCharcoals(null)), cash("44.00"), "caixa1");
@@ -626,7 +667,7 @@ class PdvServiceTest {
     @Test
     void registerSale_computesChangeFromCashPortionOnlyInASplitPayment() {
         givenOpenSessionAndPersistence();
-        when(estoqueUseCase.findPricingBySku("CARV-001")).thenReturn(CARVAO);
+        when(estoqueUseCase.resolveSaleInfo("CARV-001")).thenReturn(new EstoqueUseCase.CatalogSaleInfo("Carvao Coco", CARVAO));
         when(estoqueUseCase.adjustStock(any(), any(), any(), any(), any(), any())).thenReturn(null);
 
         List<PaymentCommand> split = List.of(
@@ -641,7 +682,7 @@ class PdvServiceTest {
     @Test
     void registerSale_throwsInsufficientPaymentBeforeTouchingStock() {
         when(cashRegisterRepository.findById(1L)).thenReturn(Optional.of(openSession()));
-        when(estoqueUseCase.findPricingBySku("CARV-001")).thenReturn(CARVAO);
+        when(estoqueUseCase.resolveSaleInfo("CARV-001")).thenReturn(new EstoqueUseCase.CatalogSaleInfo("Carvao Coco", CARVAO));
 
         assertThatThrownBy(() -> pdvService.registerSale(1L, null, List.of(twoCharcoals(null)),
                 cash("40.00"), "caixa1"))
@@ -655,7 +696,7 @@ class PdvServiceTest {
     @Test
     void registerSale_throwsWhenNonCashPaymentAloneExceedsTheOrderTotal() {
         when(cashRegisterRepository.findById(1L)).thenReturn(Optional.of(openSession()));
-        when(estoqueUseCase.findPricingBySku("CARV-001")).thenReturn(CARVAO);
+        when(estoqueUseCase.resolveSaleInfo("CARV-001")).thenReturn(new EstoqueUseCase.CatalogSaleInfo("Carvao Coco", CARVAO));
 
         List<PaymentCommand> debitoAcimaDoTotal = List.of(
                 new PaymentCommand(PaymentMethod.DEBITO, new BigDecimal("50.00"), null));

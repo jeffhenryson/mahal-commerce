@@ -27,6 +27,25 @@ class OrderItemTest {
         assertThat(item.costPrice()).isEqualByComparingTo("18.00");
         assertThat(item.discountAmount()).isEqualByComparingTo("0");
         assertThat(item.cashbackPercent()).isNull();
+        assertThat(item.productName()).as("sobrecarga de 4 argumentos não carimba nome").isNull();
+    }
+
+    /** productName congelado no instante da venda — BACKEND_TODO.md do mahal-admin. */
+    @Test
+    void fromCatalog_5Argumentos_freezesProductName() {
+        OrderItem item = OrderItem.fromCatalog("CARV-001", TWO, carvao(), null, "Carvão em Barra");
+
+        assertThat(item.productName()).isEqualTo("Carvão em Barra");
+        assertThat(item.unitPrice()).isEqualByComparingTo("22.00");
+    }
+
+    @Test
+    void withDiscountAndWithCashbackPercent_preserveProductName() {
+        OrderItem item = OrderItem.fromCatalog("CARV-001", TWO, carvao(), null, "Carvão em Barra")
+                .withDiscount(new BigDecimal("2.00"))
+                .withCashbackPercent(new BigDecimal("3.00"));
+
+        assertThat(item.productName()).isEqualTo("Carvão em Barra");
     }
 
     @Test

@@ -15,8 +15,10 @@ import com.cernecommerce.adapter.in.dtos.request.CustomerNoteRequest;
 import com.cernecommerce.adapter.in.dtos.request.CustomerRequest;
 import com.cernecommerce.adapter.in.dtos.request.CustomerStageRequest;
 import com.cernecommerce.adapter.in.dtos.request.TagRequest;
+import com.cernecommerce.adapter.in.dtos.request.UpdateCampaignAutomationRequest;
 import com.cernecommerce.adapter.in.dtos.response.CampaignAutomationResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.CampaignLogResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.WebhookTestResultResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.ChannelStatusResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.CrmDashboardResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.CashbackEntryResponseDTO;
@@ -31,6 +33,7 @@ import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.crm.CampaignAutomation;
 import com.cernecommerce.core.domain.model.crm.CampaignLogEntry;
 import com.cernecommerce.core.domain.model.crm.CrmDashboardOverview;
+import com.cernecommerce.core.domain.model.crm.WebhookTestResult;
 import com.cernecommerce.core.domain.model.crm.Customer;
 import com.cernecommerce.core.domain.model.crm.CustomerNote;
 import com.cernecommerce.core.ports.in.CashbackUseCase;
@@ -425,11 +428,30 @@ public class CrmController {
     public ResponseEntity<CampaignAutomationResponseDTO> createAutomation(
             @Valid @RequestBody CampaignAutomationRequest request, Authentication authentication) {
         CampaignAutomation created = crmUseCase.createAutomation(request.getNome(), request.getGatilho(),
-                request.getSegmentoAlvo(), request.getCanal(), request.getTemplate());
+                request.getSegmentoAlvo(), request.getCanal(), request.getTemplate(), request.getWebhookUrl(),
+                request.getWebhookHeaders());
         publisher.publishEvent(AuditEvent.of(EventType.CAMPAIGN_AUTOMATION_CREATED,
                 authentication.getName(), Map.of("automationId", String.valueOf(created.id()))));
         return ResponseEntity.created(URI.create("/crm/automacoes/" + created.id()))
                 .body(campaignConverter.toResponse(created));
+    }
+
+    @Operation(summary = "Atualiza todos os campos editáveis de uma automação existente")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = CampaignAutomationResponseDTO.class))),
+            @ApiResponse(responseCode = "404", description = "Automação não encontrada", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PutMapping("/automacoes/{id}")
+    @PreAuthorize("hasAuthority('CRM_CUSTOMER_MANAGE')")
+    public ResponseEntity<CampaignAutomationResponseDTO> updateAutomation(@PathVariable Long id,
+            @Valid @RequestBody UpdateCampaignAutomationRequest request, Authentication authentication) {
+        CampaignAutomation updated = crmUseCase.updateAutomation(id, request.getNome(), request.getGatilho(),
+                request.getSegmentoAlvo(), request.getCanal(), request.getTemplate(), request.getWebhookUrl(),
+                request.getWebhookHeaders());
+        publisher.publishEvent(AuditEvent.of(EventType.CAMPAIGN_AUTOMATION_UPDATED,
+                authentication.getName(), Map.of("automationId", String.valueOf(id))));
+        return ResponseEntity.ok(campaignConverter.toResponse(updated));
     }
 
     @Operation(summary = "Lista todas as automações de campanha")
@@ -477,7 +499,8 @@ public class CrmController {
         return ResponseEntity.noContent().build();
     }
 
-    @Operation(summary = "Dispara uma automação manualmente — cria log por cliente-alvo, não envia mensagem real (ver F008)")
+    @Operation(summary = "Dispara uma automação manualmente — cria log por cliente-alvo; envia de verdade um "
+            + "POST ao webhook quando configurado, senão mantém o log em PENDENTE_INTEGRACAO (ver F008)")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "OK"),
             @ApiResponse(responseCode = "404", description = "Automação não encontrada", content = @Content),
@@ -493,6 +516,24 @@ public class CrmController {
                 Map.of("automationId", String.valueOf(id), "clientesAlvo", String.valueOf(entries.size()))));
         List<CampaignLogResponseDTO> response = entries.stream().map(campaignConverter::toResponse).toList();
         return ResponseEntity.ok(response);
+    }
+
+    @Operation(summary = "Dispara um payload de teste para o webhook configurado, com um cliente fictício — não "
+            + "persiste log")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "400", description = "Automação sem webhookUrl configurado", content = @Content),
+            @ApiResponse(responseCode = "404", description = "Automação não encontrada", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PostMapping("/automacoes/{id}/testar")
+    @PreAuthorize("hasAuthority('CRM_CUSTOMER_MANAGE')")
+    public ResponseEntity<WebhookTestResultResponseDTO> testAutomation(@PathVariable Long id,
+            Authentication authentication) {
+        WebhookTestResult result = crmUseCase.testAutomation(id);
+        publisher.publishEvent(AuditEvent.of(EventType.CAMPAIGN_AUTOMATION_TESTED,
+                authentication.getName(), Map.of("automationId", String.valueOf(id))));
+        return ResponseEntity.ok(campaignConverter.toResponse(result));
     }
 
     @Operation(summary = "Lista o log de disparos de uma automação, mais recentes primeiro")

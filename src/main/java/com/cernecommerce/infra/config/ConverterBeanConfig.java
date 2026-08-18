@@ -11,6 +11,7 @@ import com.cernecommerce.adapter.in.converter.CustomerCsvConverter;
 import com.cernecommerce.adapter.in.converter.CustomerDTOConverter;
 import com.cernecommerce.adapter.in.converter.CustomerNoteDTOConverter;
 import com.cernecommerce.adapter.in.converter.GoodsReceiptDTOConverter;
+import com.cernecommerce.adapter.in.converter.NfeImportDTOConverter;
 import com.cernecommerce.adapter.in.converter.PermissionDTOConverter;
 import com.cernecommerce.adapter.in.converter.ShopCartDTOConverter;
 import com.cernecommerce.adapter.in.converter.ShopCatalogDTOConverter;
@@ -20,6 +21,7 @@ import com.cernecommerce.adapter.in.converter.CategoryDTOConverter;
 import com.cernecommerce.adapter.in.converter.ProductDTOConverter;
 import com.cernecommerce.adapter.in.converter.RoleDTOConverter;
 import com.cernecommerce.adapter.in.converter.CashRegisterDTOConverter;
+import com.cernecommerce.adapter.in.converter.ComandaDTOConverter;
 import com.cernecommerce.adapter.in.converter.OrderDTOConverter;
 import com.cernecommerce.adapter.in.converter.StockCountDTOConverter;
 import com.cernecommerce.adapter.in.converter.StockReservationDTOConverter;
@@ -87,6 +89,11 @@ class ConverterBeanConfig {
     }
 
     @Bean
+    NfeImportDTOConverter nfeImportDTOConverter() {
+        return new NfeImportDTOConverter();
+    }
+
+    @Bean
     CustomerDTOConverter customerDTOConverter() {
         return new CustomerDTOConverter();
     }
@@ -129,6 +136,11 @@ class ConverterBeanConfig {
     @Bean
     CashRegisterDTOConverter cashRegisterDTOConverter() {
         return new CashRegisterDTOConverter();
+    }
+
+    @Bean
+    ComandaDTOConverter comandaDTOConverter() {
+        return new ComandaDTOConverter();
     }
 
     @Bean

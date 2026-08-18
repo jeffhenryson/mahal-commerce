@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "e0f28b29-1b58-5d30-b4c4-1d7698bf930e",
     "name": "Mahal — Financeiro",
-    "description": "Coleção de testes do módulo **Financeiro** (`/financeiro`) do mahal-backend.\n\n> **Status do módulo: esqueleto.** Hoje existe apenas `GET /financeiro/cash-flow` (listagem paginada de\n> lançamentos de fluxo de caixa), que responde 200 com página vazia enquanto não houver escrita no domínio.\n> Esta coleção valida o contrato de paginação, a validação dos parâmetros e a proteção por\n> permissão — e é o lugar para acrescentar as requisições conforme o módulo for implementado.\n\nDocumentação do módulo: `docs/dominios/financeiro/README.md`.",
+    "description": "Coleção de testes do módulo **Financeiro** (`/financeiro`) do mahal-backend.\n\n> **FIN-F004 implementado.** `GET`/`POST`/`PATCH`/`DELETE /financeiro/cash-flow` e\n> `GET /financeiro/cash-flow/summary` já têm persistência real. Esta coleção valida o contrato de\n> paginação, o fluxo de escrita completo (criar → marcar pago → agregar → remover), a validação\n> dos parâmetros e a proteção por permissão (`FINANCEIRO_READ` / `FINANCEIRO_CASH_FLOW_MANAGE`).\n> DRE e conciliação de gateway seguem sem endpoint.\n\nDocumentação do módulo: `docs/dominios/financeiro/README.md`.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -54,6 +54,11 @@
     {
       "key": "permissions",
       "value": "[]",
+      "type": "string"
+    },
+    {
+      "key": "cashFlowEntryId",
+      "value": "",
       "type": "string"
     }
   ],
@@ -229,7 +234,7 @@
                   "const perms = json.permissions || [];",
                   "pm.collectionVariables.set('permissions', JSON.stringify(perms));",
                   "",
-                  "const required = [\"FINANCEIRO_READ\"];",
+                  "const required = [\"FINANCEIRO_READ\", \"FINANCEIRO_CASH_FLOW_MANAGE\"];",
                   "pm.test('Usuário tem as permissões do módulo', () => {",
                   "    const missing = required.filter(p => !perms.includes(p));",
                   "    pm.expect(missing, 'permissões faltando: ' + missing.join(', ')).to.be.an('array').that.is.empty;",
@@ -349,6 +354,207 @@
           ]
         }
       ]
+    },
+    {
+      "name": "01a — Escrita (FIN-F004)",
+      "item": [
+        {
+          "name": "Criar lançamento",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/financeiro/cash-flow",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "financeiro",
+                "cash-flow"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description\": \"Aluguel Loja Julho/2026\",\n  \"entityName\": \"Imobiliária Central RJ\",\n  \"category\": \"ALUGUEL\",\n  \"direction\": \"OUTFLOW\",\n  \"amount\": 8500.0,\n  \"dueDate\": \"2026-07-10\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "`FINANCEIRO_CASH_FLOW_MANAGE`. Nasce com `status: PREVISTO`. Guarda o id criado em `{{cashFlowEntryId}}` para as próximas requisições da pasta."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const json = pm.response.json();",
+                  "pm.test('Nasce PREVISTO', () => pm.expect(json.status).to.eql('PREVISTO'));",
+                  "pm.collectionVariables.set('cashFlowEntryId', String(json.id));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Marcar como pago (PATCH)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/financeiro/cash-flow/{{cashFlowEntryId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "financeiro",
+                "cash-flow",
+                "{{cashFlowEntryId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"PAGO\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "`FINANCEIRO_CASH_FLOW_MANAGE`. Roda depois de \"Criar lançamento\". `status: PAGO` sem `paymentDate` grava a data corrente no servidor."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('status = PAGO e paymentDate preenchido', () => {",
+                  "    pm.expect(json.status).to.eql('PAGO');",
+                  "    pm.expect(json.paymentDate).to.be.a('string').and.not.empty;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Saldo agregado do período",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/financeiro/cash-flow/summary?from=2026-01-01&to=2026-12-31",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "financeiro",
+                "cash-flow",
+                "summary"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-01-01"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-12-31"
+                }
+              ]
+            },
+            "description": "`FINANCEIRO_READ`. Agregado no backend — inclui o lançamento criado acima (`dueDate` dentro do período)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const json = pm.response.json();",
+                  "pm.test('Estrutura do resumo', () => {",
+                  "    pm.expect(json.totalInflow).to.be.a('number');",
+                  "    pm.expect(json.totalOutflow).to.be.a('number');",
+                  "    pm.expect(json.balance).to.be.a('number');",
+                  "    pm.expect(json.entryCount).to.be.a('number').and.least(1);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Remover lançamento",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/financeiro/cash-flow/{{cashFlowEntryId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "financeiro",
+                "cash-flow",
+                "{{cashFlowEntryId}}"
+              ]
+            },
+            "description": "`FINANCEIRO_CASH_FLOW_MANAGE`. Sem `linkedEntityId` neste lançamento, então é remoção definitiva."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 204', () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set('cashFlowEntryId', '');"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Fluxo completo do contrato de escrita: criar → marcar pago → conferir no resumo agregado → remover. Rode as quatro requisições em ordem."
     },
     {
       "name": "02 — Validação e segurança",

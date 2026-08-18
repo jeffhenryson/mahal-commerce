@@ -152,4 +152,9 @@ public class ProductEntity {
     // campos de precificação.
     @Column(name = "cause_amount", precision = 14, scale = 2)
     private BigDecimal causeAmount;
+
+    // EST-F023 — RASCUNHO ou ATIVO. Sem @Enumerated: mesma convenção enum-como-string de "type"/
+    // "unit". DEFAULT 'ATIVO' na migration cobre o backfill do catálogo existente.
+    @Column(nullable = false, length = 20)
+    private String status;
 }

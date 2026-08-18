@@ -1,6 +1,7 @@
 package com.cernecommerce.adapter.in.dtos.request;
 
 import com.cernecommerce.core.domain.model.estoque.MeasurementUnit;
+import com.cernecommerce.core.domain.model.estoque.ProductStatus;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Pattern;
@@ -100,6 +101,14 @@ public class ProductPatchRequest {
 
     /** Aparece no marketplace/app. Nulo mantém; {@code true}/{@code false} troca. */
     private Boolean visibleInMarketplace;
+
+    /**
+     * Status de publicação (EST-F023). Nulo mantém o atual. Promover {@code RASCUNHO → ATIVO} não
+     * exige nenhum campo adicional — a validação de {@code ATIVO} é a mesma de hoje (só
+     * {@code sku}/{@code name}). Rebaixar para {@code RASCUNHO} conta contra o teto de 5, exceto
+     * quando o produto já era rascunho (editar um rascunho não conta duas vezes).
+     */
+    private ProductStatus status;
 
     /**
      * Contraparte de {@code ProductRequest.touchesPricing()}, usada pelo mesmo

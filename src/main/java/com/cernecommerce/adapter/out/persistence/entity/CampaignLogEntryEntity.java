@@ -35,4 +35,7 @@ public class CampaignLogEntryEntity {
 
     @Column(name = "convertido_em")
     private Instant convertidoEm;
+
+    @Column(name = "erro_detalhe", length = 500)
+    private String erroDetalhe;
 }

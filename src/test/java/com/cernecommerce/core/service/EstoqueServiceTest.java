@@ -1,5 +1,6 @@
 package com.cernecommerce.core.service;
 
+import com.cernecommerce.core.domain.exception.estoque.DraftLimitReachedException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateSkuException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateWarehouseCodeException;
 import com.cernecommerce.core.domain.exception.estoque.InactiveProductException;
@@ -46,6 +47,7 @@ import com.cernecommerce.core.domain.exception.estoque.CategoryHasProductsExcept
 import com.cernecommerce.core.domain.exception.estoque.CategoryNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateCategoryNameException;
 import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
+import com.cernecommerce.core.domain.model.estoque.ProductStatus;
 import com.cernecommerce.core.domain.model.estoque.ProductType;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.ReorderAlertCounts;
@@ -62,6 +64,7 @@ import com.cernecommerce.core.domain.model.estoque.Warehouse;
 import com.cernecommerce.core.domain.model.estoque.WarehouseType;
 import com.cernecommerce.core.domain.model.notification.NotificationType;
 import com.cernecommerce.core.ports.in.NotificationUseCase;
+import com.cernecommerce.core.ports.in.EstoqueUseCase.CatalogSaleInfo;
 import com.cernecommerce.core.ports.in.EstoqueUseCase.InitialStockCommand;
 import com.cernecommerce.core.ports.in.EstoqueUseCase.KitComponentCommand;
 import com.cernecommerce.core.ports.out.AfterCommitExecutor;
@@ -273,6 +276,101 @@ class EstoqueServiceTest {
                 null, null, false, false, null, null, null, null, null);
 
         assertThat(result.type()).isEqualTo(ProductType.SIMPLES);
+    }
+
+    // ── Rascunho de produto/kit (EST-F023) ────────────────────────────────────
+
+    @Test
+    void createProduct_statusAusente_nasceAtivo() {
+        when(productRepository.existsBySku(any())).thenReturn(false);
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Product result = estoqueService.createProduct("EST23-001", "Produto", "categoria", List.of(), Pricing.empty(),
+                null, null, false, false, null, null, List.of(), List.of(), null,
+                null, null, false, false, null, null, null, null, null, null, null);
+
+        assertThat(result.status()).isEqualTo(ProductStatus.ATIVO);
+        verify(productRepository, never()).countByStatus(any());
+    }
+
+    @Test
+    void createProduct_statusRascunho_persisteRascunho_semExigirCategoriaOuPreco() {
+        when(productRepository.existsBySku(any())).thenReturn(false);
+        when(productRepository.countByStatus(ProductStatus.RASCUNHO)).thenReturn(0L);
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        // Só sku + name — nenhum outro campo obrigatório, mesma validação mínima de ATIVO.
+        Product result = estoqueService.createProduct("EST23-002", "Rascunho", null, List.of(), null,
+                null, null, false, false, null, null, List.of(), List.of(), null,
+                null, null, false, false, null, null, null, null, null, null, ProductStatus.RASCUNHO);
+
+        assertThat(result.status()).isEqualTo(ProductStatus.RASCUNHO);
+        assertThat(result.isDraft()).isTrue();
+    }
+
+    @Test
+    void createProduct_rascunhoNoLimiteDeCinco_lancaDraftLimitReachedException() {
+        when(productRepository.countByStatus(ProductStatus.RASCUNHO)).thenReturn(5L);
+
+        assertThatThrownBy(() -> estoqueService.createProduct("EST23-003", "Rascunho", null, List.of(), null,
+                null, null, false, false, null, null, List.of(), List.of(), null,
+                null, null, false, false, null, null, null, null, null, null, ProductStatus.RASCUNHO))
+                .isInstanceOf(DraftLimitReachedException.class);
+        verify(productRepository, never()).save(any());
+    }
+
+    @Test
+    void createProduct_rascunhoAbaixoDoLimite_permiteCriar() {
+        when(productRepository.existsBySku(any())).thenReturn(false);
+        when(productRepository.countByStatus(ProductStatus.RASCUNHO)).thenReturn(4L);
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        assertThatCode(() -> estoqueService.createProduct("EST23-004", "Rascunho", null, List.of(), null,
+                null, null, false, false, null, null, List.of(), List.of(), null,
+                null, null, false, false, null, null, null, null, null, null, ProductStatus.RASCUNHO))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void updateProduct_promoveRascunhoParaAtivo_semValidacaoAdicional() {
+        Product rascunho = Product.of(1L, "EST23-005", "Rascunho", null, true, List.of())
+                .withStatus(ProductStatus.RASCUNHO);
+        when(productRepository.findBySku("EST23-005")).thenReturn(Optional.of(rascunho));
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Product result = estoqueService.updateProduct("EST23-005", null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null, ProductStatus.ATIVO);
+
+        assertThat(result.status()).isEqualTo(ProductStatus.ATIVO);
+        verify(productRepository, never()).countByStatus(any());
+    }
+
+    @Test
+    void updateProduct_transicaoParaRascunhoNoLimite_lancaDraftLimitReachedException() {
+        Product ativo = Product.of(1L, "EST23-006", "Produto", "cat", true, List.of());
+        when(productRepository.findBySku("EST23-006")).thenReturn(Optional.of(ativo));
+        when(productRepository.countByStatus(ProductStatus.RASCUNHO)).thenReturn(5L);
+
+        assertThatThrownBy(() -> estoqueService.updateProduct("EST23-006", null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null, null, ProductStatus.RASCUNHO))
+                .isInstanceOf(DraftLimitReachedException.class);
+        verify(productRepository, never()).save(any());
+    }
+
+    @Test
+    void updateProduct_editarRascunhoJaRascunho_naoContaContraOProprioLimite() {
+        Product rascunho = Product.of(1L, "EST23-007", "Rascunho", null, true, List.of())
+                .withStatus(ProductStatus.RASCUNHO);
+        when(productRepository.findBySku("EST23-007")).thenReturn(Optional.of(rascunho));
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Product result = estoqueService.updateProduct("EST23-007", "Novo Nome", null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null, null, ProductStatus.RASCUNHO);
+
+        assertThat(result.status()).isEqualTo(ProductStatus.RASCUNHO);
+        // A ausência de stub para countByStatus prova que o limite não é sequer consultado quando
+        // o produto já era rascunho — ver o "&&" curto-circuitado em EstoqueService.updateProduct.
+        verify(productRepository, never()).countByStatus(any());
     }
 
     @Test
@@ -1725,6 +1823,41 @@ class EstoqueServiceTest {
 
         assertThat(estoqueService.findPricingBySku("NARG-001").effectivePrice())
                 .isEqualByComparingTo("79.90");
+    }
+
+    // ── resolveSaleInfo (productName no item do pedido, BACKEND_TODO.md do mahal-admin) ──────
+
+    @Test
+    void resolveSaleInfo_devolveNomeEPrecoNumaConsultaSo() {
+        when(productRepository.findByAnySku("NARG-001")).thenReturn(Optional.of(pricedProduct()));
+
+        CatalogSaleInfo info = estoqueService.resolveSaleInfo("NARG-001");
+
+        assertThat(info.productName()).isEqualTo("Narguile Aladin");
+        assertThat(info.pricing().effectivePrice()).isEqualByComparingTo("79.90");
+        verify(productRepository, times(1)).findByAnySku("NARG-001");
+    }
+
+    @Test
+    void resolveSaleInfo_kit_derivaPrecoMasUsaOProprioNome() {
+        when(productRepository.findByAnySku("KIT-001")).thenReturn(Optional.of(kitProduct("KIT-001", "80.00")));
+        when(kitComponentRepository.findByKitSku("KIT-001")).thenReturn(List.of(
+                KitComponent.create("KIT-001", "CARV-001", new BigDecimal("2"))));
+        when(productRepository.findByAnySku("CARV-001")).thenReturn(Optional.of(simpleProduct("CARV-001", "20.00")));
+
+        CatalogSaleInfo info = estoqueService.resolveSaleInfo("KIT-001");
+
+        assertThat(info.productName()).isEqualTo("Kit KIT-001");
+        assertThat(info.pricing().costPrice()).isEqualByComparingTo("40.00");
+        assertThat(info.pricing().salePrice()).isEqualByComparingTo("80.00");
+    }
+
+    @Test
+    void resolveSaleInfo_throwsWhenSkuNotInCatalog() {
+        when(productRepository.findByAnySku("GHOST")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.resolveSaleInfo("GHOST"))
+                .isInstanceOf(ProductNotFoundException.class);
     }
 
     // ---------- Campos de marketing: superPromo, description, videoUrl, images ----------

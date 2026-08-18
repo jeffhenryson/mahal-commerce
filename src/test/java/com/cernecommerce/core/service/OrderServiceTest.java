@@ -75,6 +75,12 @@ class OrderServiceTest {
         return Order.openMarketplace(42L, "LOJA-01", twoCharcoals());
     }
 
+    /** Venda de balcão reservada para retirada depois (PDV-F008). */
+    private static Order reservedBalcao() {
+        return Order.openBalcao(1L, "LOJA-01", null, twoCharcoals())
+                .reserved("000001000", null, NOW);
+    }
+
     // ── Leitura ──────────────────────────────────────────────────────────────────────────────
 
     @Test
@@ -123,6 +129,33 @@ class OrderServiceTest {
                 .isInstanceOf(InvalidOrderStatusTransitionException.class);
 
         verify(orderRepository, never()).save(any());
+    }
+
+    // ── Retirada de venda reservada (PDV-F008) ──────────────────────────────────────────────
+
+    @Test
+    void changeStatus_reservadoParaConcluido_usaPickedUpEStampaConcludedAt() {
+        when(orderRepository.findById(1L)).thenReturn(Optional.of(reservedBalcao()));
+        when(orderRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Order order = orderService.changeStatus(1L, OrderStatus.CONCLUIDO, "operador");
+
+        assertThat(order.status()).isEqualTo(OrderStatus.CONCLUIDO);
+        assertThat(order.concludedAt()).as("pickedUp() carimba concludedAt, diferente do withStatus genérico")
+                .isNotNull();
+        assertThat(order.reservedAt()).as("histórico preservado").isEqualTo(NOW);
+    }
+
+    @Test
+    void changeStatus_advancesGenericStatus_doesNotUsePickedUpWhenNotComingFromReservado() {
+        // Confirma que o caminho pickedUp() só é usado a partir de RESERVADO — a esteira normal
+        // (PAGO -> SEPARADO, já coberta acima) continua passando por withStatus.
+        when(orderRepository.findById(1L)).thenReturn(Optional.of(paidMarketplace()));
+        when(orderRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Order order = orderService.changeStatus(1L, OrderStatus.SEPARADO, "operador");
+
+        assertThat(order.concludedAt()).isNull();
     }
 
     // ── Cancelamento pré-pagamento (libera reserva, nunca toca estoque real) ─────────────────

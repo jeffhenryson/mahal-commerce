@@ -107,6 +107,48 @@ public class OrdersControllerTest {
         verify(publisher).publishEvent(any(Object.class));
     }
 
+    /** PDV-F008 — o novo valor de enum precisa desserializar e passar pelo controller normalmente. */
+    @Test
+    void changeStatus_paraReservado_returns_200() throws Exception {
+        Order before = mock(Order.class);
+        when(before.status()).thenReturn(OrderStatus.CRIADO);
+        when(orderUseCase.getOrder(1L)).thenReturn(before);
+
+        Order after = mock(Order.class);
+        when(after.status()).thenReturn(OrderStatus.RESERVADO);
+        when(orderUseCase.changeStatus(1L, OrderStatus.RESERVADO, "admin")).thenReturn(after);
+
+        OrderAdminResponseDTO mockResponse = mock(OrderAdminResponseDTO.class);
+        when(orderConverter.toAdminResponse(after)).thenReturn(mockResponse);
+
+        mockMvc.perform(post("/orders/1/status")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"RESERVADO\"}"))
+                .andExpect(status().isOk());
+    }
+
+    /** Retirada de venda reservada: RESERVADO -> CONCLUIDO pelo mesmo endpoint genérico. */
+    @Test
+    void changeStatus_deReservadoParaConcluido_returns_200() throws Exception {
+        Order before = mock(Order.class);
+        when(before.status()).thenReturn(OrderStatus.RESERVADO);
+        when(orderUseCase.getOrder(1L)).thenReturn(before);
+
+        Order after = mock(Order.class);
+        when(after.status()).thenReturn(OrderStatus.CONCLUIDO);
+        when(orderUseCase.changeStatus(1L, OrderStatus.CONCLUIDO, "admin")).thenReturn(after);
+
+        OrderAdminResponseDTO mockResponse = mock(OrderAdminResponseDTO.class);
+        when(orderConverter.toAdminResponse(after)).thenReturn(mockResponse);
+
+        mockMvc.perform(post("/orders/1/status")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"CONCLUIDO\"}"))
+                .andExpect(status().isOk());
+    }
+
     @Test
     void cancelOrder_returns_200() throws Exception {
         Order before = mock(Order.class);

@@ -1,6 +1,7 @@
 package com.cernecommerce.adapter.in.dtos.request;
 
 import com.cernecommerce.core.domain.model.estoque.MeasurementUnit;
+import com.cernecommerce.core.domain.model.estoque.ProductStatus;
 import com.cernecommerce.core.domain.model.estoque.ProductType;
 
 import jakarta.validation.Valid;
@@ -125,6 +126,15 @@ public class ProductRequest {
     @Valid
     @Size(max = 100)
     private List<KitComponentRequest> components;
+
+    /**
+     * Status de publicação (EST-F023). Omitido, nasce {@code ATIVO} — comportamento anterior a
+     * esta feature preservado. {@code RASCUNHO} deixa o produto/kit fora das vitrines e listagens
+     * que filtram por publicado, sem exigir nenhum campo além de {@code sku}/{@code name}, e
+     * conta contra o teto de 5 rascunhos (validado no servidor, 409 {@code DRAFT_LIMIT_REACHED}
+     * no 6º).
+     */
+    private ProductStatus status;
 
     /**
      * Indica se este request mexe em preço em <b>qualquer</b> nível — na raiz ou dentro de alguma

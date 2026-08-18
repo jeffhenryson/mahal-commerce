@@ -196,7 +196,10 @@ public class PdvController {
                     + "catálogo, e o depósito vem da sessão de caixa — o request informa apenas SKU, "
                     + "quantidade e, opcionalmente, desconto e cliente. Desconto maior que zero exige "
                     + "a permissão PDV_SALE_DISCOUNT. `payments` exige pelo menos uma linha; a soma "
-                    + "tem que cobrir o líquido, e só DINHEIRO pode ser tendido a mais para gerar troco.")
+                    + "tem que cobrir o líquido, e só DINHEIRO pode ser tendido a mais para gerar troco. "
+                    + "`reserveForPickup=true` (PDV-F008) grava RESERVADO em vez de CONCLUIDO — mercadoria "
+                    + "já baixada e pagamento já capturado, só a retirada fica pendente; marcar como "
+                    + "retirado depois é `POST /orders/{id}/status` com `CONCLUIDO`.")
     @ApiResponses({
             @ApiResponse(responseCode = "201", description = "Criada", content = @Content(schema = @Schema(implementation = OrderResponseDTO.class))),
             @ApiResponse(responseCode = "400", description = "Saldo ou pagamento insuficiente para a venda", content = @Content),
@@ -213,7 +216,7 @@ public class PdvController {
         requireDiscountAuthority(items, authentication);
 
         Order order = pdvUseCase.registerSale(sessionId, request.getCustomerId(), items, payments,
-                authentication.getName());
+                authentication.getName(), request.isReserveForPickup());
 
         // EST-C004: a venda é o caminho de maior volume de movimentação de estoque. É um evento por
         // operação (não por item) para não inundar a trilha numa venda com muitos itens.

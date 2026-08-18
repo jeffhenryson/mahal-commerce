@@ -17,6 +17,11 @@ public class OrderItemAdminResponseDTO {
 
     private Long id;
     private String sku;
+
+    @Schema(description = "Nome do produto, congelado no instante da venda — não muda se o produto "
+            + "for renomeado depois. Nulo em pedidos anteriores a esta coluna.")
+    private String productName;
+
     private BigDecimal quantity;
     private BigDecimal unitPrice;
     private BigDecimal discountAmount;

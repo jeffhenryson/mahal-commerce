@@ -25,7 +25,7 @@ class CampaignLogEntryTest {
     void of_reconstitutesFromPersistence() {
         Instant disparadoEm = Instant.parse("2026-01-01T00:00:00Z");
         CampaignLogEntry entry = CampaignLogEntry.of(5L, 1L, 10L, CampaignDispatchStatus.PENDENTE_INTEGRACAO,
-                disparadoEm, null);
+                disparadoEm, null, null);
 
         assertThat(entry.id()).isEqualTo(5L);
         assertThat(entry.disparadoEm()).isEqualTo(disparadoEm);
@@ -37,5 +37,21 @@ class CampaignLogEntryTest {
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> CampaignLogEntry.create(1L, null))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void enviado_buildsEntryWithEnviadoStatusAndNoErro() {
+        CampaignLogEntry entry = CampaignLogEntry.enviado(1L, 10L);
+
+        assertThat(entry.status()).isEqualTo(CampaignDispatchStatus.ENVIADO);
+        assertThat(entry.erroDetalhe()).isNull();
+    }
+
+    @Test
+    void falha_buildsEntryWithFalhaStatusAndErroDetalhe() {
+        CampaignLogEntry entry = CampaignLogEntry.falha(1L, 10L, "timeout ao conectar");
+
+        assertThat(entry.status()).isEqualTo(CampaignDispatchStatus.FALHA);
+        assertThat(entry.erroDetalhe()).isEqualTo("timeout ao conectar");
     }
 }

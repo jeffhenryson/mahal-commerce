@@ -13,4 +13,5 @@ public class CampaignLogResponseDTO {
     private CampaignDispatchStatus status;
     private Instant disparadoEm;
     private Instant convertidoEm;
+    private String erroDetalhe;
 }

@@ -69,4 +69,21 @@ class SeedConfigTest {
         verify(permissionUseCase).createPermission("PDV_SALE_MANAGE");
         verify(roleUseCase).assignPermission("ROLE_ADMIN", "PDV_SALE_MANAGE");
     }
+
+    /** PDV-F009: mesmo sintoma de EST-C001 — sem esta no seed, comanda de mesa responde 403 em dev. */
+    @Test
+    void seedAll_grantsPdvComandaManageToRoleAdmin() throws Exception {
+        UserUseCase userUseCase = mock(UserUseCase.class);
+        RoleUseCase roleUseCase = mock(RoleUseCase.class);
+        PermissionUseCase permissionUseCase = mock(PermissionUseCase.class);
+        CashbackUseCase cashbackUseCase = mock(CashbackUseCase.class);
+        when(userUseCase.findByUsername(anyString())).thenReturn(Optional.empty());
+
+        CommandLineRunner runner = seedConfig.seedAll(userUseCase, roleUseCase, permissionUseCase,
+                cashbackUseCase, "Admin@dev1", "User@dev1", "Atendente@dev1");
+        runner.run();
+
+        verify(permissionUseCase).createPermission("PDV_COMANDA_MANAGE");
+        verify(roleUseCase).assignPermission("ROLE_ADMIN", "PDV_COMANDA_MANAGE");
+    }
 }

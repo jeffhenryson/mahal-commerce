@@ -64,6 +64,7 @@ class OrderReportRepositoryIT {
         product.setName(name);
         product.setType("SIMPLES");
         product.setUnit("UN");
+        product.setStatus("ATIVO");
         product.setActive(true);
         productJpaRepository.save(product);
     }

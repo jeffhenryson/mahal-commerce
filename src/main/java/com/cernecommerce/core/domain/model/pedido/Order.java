@@ -33,8 +33,9 @@ import java.util.List;
  * marketplace parecer não vender nada.</p>
  *
  * <h2>Numeração</h2>
- * <p>{@link #orderNumber} vem de sequência própria e é emitido na <b>conclusão</b>, não na criação:
- * o {@code BIGSERIAL} do id deixa buracos quando uma transação faz rollback, e buraco em numeração
+ * <p>{@link #orderNumber} vem de sequência própria e é emitido na <b>conclusão</b> (ou na reserva
+ * para retirada — PDV-F008, o outro ponto em que o balcão fixa a venda), não na criação: o
+ * {@code BIGSERIAL} do id deixa buracos quando uma transação faz rollback, e buraco em numeração
  * de documento fiscal é problema com o fisco.</p>
  */
 public record Order(
@@ -57,6 +58,10 @@ public record Order(
         Instant concludedAt,
         Instant cancelledAt,
         Instant refundedAt,
+        Instant reservedAt,
+        Instant separatedAt,
+        Instant shippedAt,
+        Instant deliveredAt,
         long version) {
 
     public Order {
@@ -117,6 +122,10 @@ public record Order(
             throw new IllegalArgumentException(
                     "status REEMBOLSADO e refundedAt têm que coexistir: status=" + status + ", refundedAt=" + refundedAt);
         }
+        // reservedAt/separatedAt/shippedAt/deliveredAt NÃO têm CHECK de coexistência com o status
+        // atual (diferente de cancelledAt/refundedAt acima) — são histórico, como paidAt: um
+        // pedido que já passou por SEPARADO continua com separatedAt preenchido mesmo depois de
+        // avançar para ENTREGUE ou ser reembolsado.
     }
 
     private static BigDecimal requireNonNegative(BigDecimal value, String field) {
@@ -131,7 +140,7 @@ public record Order(
 
     /**
      * Abre uma venda de balcão em {@link OrderStatus#CRIADO}. Estado efêmero: quem chama conclui na
-     * mesma transação, via {@link #concluded}.
+     * mesma transação, via {@link #concluded} ou {@link #reserved} (PDV-F008).
      *
      * <p>O {@code warehouseCode} vem da <b>sessão</b>, não do chamador — é o que restringe a venda
      * ao depósito do caixa aberto e fecha o buraco de isolamento do módulo.</p>
@@ -140,7 +149,7 @@ public record Order(
         Totals totals = Totals.from(items);
         return new Order(null, null, SalesChannel.BALCAO, OrderStatus.CRIADO, customerId, sessionId,
                 warehouseCode, items, totals.gross(), totals.discount(), BigDecimal.ZERO, totals.net(),
-                null, null, Instant.now(), null, null, null, null, 0L);
+                null, null, Instant.now(), null, null, null, null, null, null, null, null, 0L);
     }
 
     /**
@@ -151,18 +160,54 @@ public record Order(
         Totals totals = Totals.from(items);
         return new Order(null, null, SalesChannel.MARKETPLACE, OrderStatus.AGUARDANDO_PAGAMENTO, customerId,
                 null, warehouseCode, items, totals.gross(), totals.discount(), BigDecimal.ZERO, totals.net(),
-                null, null, Instant.now(), null, null, null, null, 0L);
+                null, null, Instant.now(), null, null, null, null, null, null, null, null, 0L);
     }
 
-    /** Reconstitui um pedido a partir de persistência. */
+    /**
+     * Reconstitui um pedido a partir de persistência — forma anterior a PDV-F008, sem
+     * {@code reservedAt} (dado legado, lê como {@code null}: pedido nunca passou por
+     * {@code RESERVADO}).
+     */
     public static Order of(Long id, String orderNumber, SalesChannel channel, OrderStatus status,
             Long customerId, Long sessionId, String warehouseCode, List<OrderItem> items,
             BigDecimal grossAmount, BigDecimal discountAmount, BigDecimal cashbackRedeemed,
             BigDecimal netAmount, BigDecimal changeAmount, String cancelReason, Instant createdAt,
             Instant paidAt, Instant concludedAt, Instant cancelledAt, Instant refundedAt, long version) {
+        return of(id, orderNumber, channel, status, customerId, sessionId, warehouseCode, items,
+                grossAmount, discountAmount, cashbackRedeemed, netAmount, changeAmount, cancelReason,
+                createdAt, paidAt, concludedAt, cancelledAt, refundedAt, null, version);
+    }
+
+    /**
+     * Reconstitui um pedido a partir de persistência — forma anterior aos timestamps por etapa,
+     * com {@code reservedAt} (PDV-F008) mas sem {@code separatedAt}/{@code shippedAt}/
+     * {@code deliveredAt} (dado legado, lêem como {@code null}).
+     */
+    public static Order of(Long id, String orderNumber, SalesChannel channel, OrderStatus status,
+            Long customerId, Long sessionId, String warehouseCode, List<OrderItem> items,
+            BigDecimal grossAmount, BigDecimal discountAmount, BigDecimal cashbackRedeemed,
+            BigDecimal netAmount, BigDecimal changeAmount, String cancelReason, Instant createdAt,
+            Instant paidAt, Instant concludedAt, Instant cancelledAt, Instant refundedAt, Instant reservedAt,
+            long version) {
+        return of(id, orderNumber, channel, status, customerId, sessionId, warehouseCode, items,
+                grossAmount, discountAmount, cashbackRedeemed, netAmount, changeAmount, cancelReason,
+                createdAt, paidAt, concludedAt, cancelledAt, refundedAt, reservedAt, null, null, null, version);
+    }
+
+    /**
+     * Reconstitui um pedido a partir de persistência — forma canônica, com os timestamps por etapa
+     * da esteira de fulfillment.
+     */
+    public static Order of(Long id, String orderNumber, SalesChannel channel, OrderStatus status,
+            Long customerId, Long sessionId, String warehouseCode, List<OrderItem> items,
+            BigDecimal grossAmount, BigDecimal discountAmount, BigDecimal cashbackRedeemed,
+            BigDecimal netAmount, BigDecimal changeAmount, String cancelReason, Instant createdAt,
+            Instant paidAt, Instant concludedAt, Instant cancelledAt, Instant refundedAt, Instant reservedAt,
+            Instant separatedAt, Instant shippedAt, Instant deliveredAt, long version) {
         return new Order(id, orderNumber, channel, status, customerId, sessionId, warehouseCode, items,
                 grossAmount, discountAmount, cashbackRedeemed, netAmount, changeAmount, cancelReason,
-                createdAt, paidAt, concludedAt, cancelledAt, refundedAt, version);
+                createdAt, paidAt, concludedAt, cancelledAt, refundedAt, reservedAt, separatedAt, shippedAt,
+                deliveredAt, version);
     }
 
     /**
@@ -180,7 +225,46 @@ public record Order(
         return new Order(id, orderNumber, channel, OrderStatus.CONCLUIDO, customerId, sessionId,
                 warehouseCode, items, grossAmount, discountAmount, cashbackRedeemed, netAmount,
                 changeAmount, cancelReason, createdAt, paidAt == null ? concludedAt : paidAt,
-                concludedAt, null, null, version);
+                concludedAt, null, null, reservedAt, separatedAt, shippedAt, deliveredAt, version);
+    }
+
+    /**
+     * Marca a venda de balcão como reservada para retirada posterior (PDV-F008): pagamento
+     * capturado e mercadoria já baixada do estoque — exatamente como {@link #concluded} — mas o
+     * cliente ainda não levou a mercadoria. Só alcançável a partir de {@link OrderStatus#CRIADO},
+     * o que restringe esta transição ao balcão por construção: pedido de marketplace nasce em
+     * {@link OrderStatus#AGUARDANDO_PAGAMENTO} e nunca passa por {@code CRIADO}.
+     *
+     * <p>A numeração fiscal é consumida aqui, igual em {@link #concluded} — é o mesmo ponto de
+     * "venda fixada", só o destino final (retirada na hora ou depois) que muda.</p>
+     *
+     * @param orderNumber numeração emitida <b>agora</b>, mesma regra de {@link #concluded}
+     * @param changeAmount troco devolvido, ou {@code null} quando não houve dinheiro em espécie
+     */
+    public Order reserved(String orderNumber, BigDecimal changeAmount, Instant reservedAt) {
+        requireTransition(OrderStatus.RESERVADO);
+        if (orderNumber == null || orderNumber.isBlank()) {
+            throw new IllegalArgumentException("orderNumber é obrigatório ao reservar o pedido");
+        }
+        return new Order(id, orderNumber, channel, OrderStatus.RESERVADO, customerId, sessionId,
+                warehouseCode, items, grossAmount, discountAmount, cashbackRedeemed, netAmount,
+                changeAmount, cancelReason, createdAt, paidAt == null ? reservedAt : paidAt,
+                null, null, null, reservedAt, separatedAt, shippedAt, deliveredAt, version);
+    }
+
+    /**
+     * Marca a retirada de um pedido reservado (PDV-F008): carimba {@code concludedAt}, distinto do
+     * {@code withStatus} genérico usado pela esteira de fulfillment, que não carimba {@code concludedAt}
+     * nenhum. Sem este método dedicado, {@code RESERVADO → CONCLUIDO} deixaria {@code concludedAt}
+     * nulo para sempre, quebrando a garantia que {@link #concluded} estabelece em todo outro
+     * caminho para {@code CONCLUIDO}.
+     */
+    public Order pickedUp(Instant concludedAt) {
+        requireTransition(OrderStatus.CONCLUIDO);
+        return new Order(id, orderNumber, channel, OrderStatus.CONCLUIDO, customerId, sessionId,
+                warehouseCode, items, grossAmount, discountAmount, cashbackRedeemed, netAmount,
+                changeAmount, cancelReason, createdAt, paidAt, concludedAt, null, null, reservedAt,
+                separatedAt, shippedAt, deliveredAt, version);
     }
 
     /** Marca o pagamento como confirmado — caminho do marketplace, disparado pelo webhook. */
@@ -188,15 +272,25 @@ public record Order(
         requireTransition(OrderStatus.PAGO);
         return new Order(id, orderNumber, channel, OrderStatus.PAGO, customerId, sessionId, warehouseCode,
                 items, grossAmount, discountAmount, cashbackRedeemed, netAmount, changeAmount, cancelReason,
-                createdAt, paidAt, concludedAt, null, null, version);
+                createdAt, paidAt, concludedAt, null, null, reservedAt, separatedAt, shippedAt, deliveredAt,
+                version);
     }
 
-    /** Avança o pedido na esteira de fulfillment ({@code SEPARADO → ENVIADO → ENTREGUE}). */
+    /**
+     * Avança o pedido na esteira de fulfillment ({@code SEPARADO → ENVIADO → ENTREGUE}), carimbando
+     * o timestamp da etapa alcançada — {@code separatedAt}/{@code shippedAt}/{@code deliveredAt}.
+     * Outros destinos (ex.: {@code REEMBOLSADO}) não carimbam nenhum desses três, só mudam o status.
+     */
     public Order withStatus(OrderStatus newStatus) {
         requireTransition(newStatus);
+        Instant now = Instant.now();
+        Instant newSeparatedAt = newStatus == OrderStatus.SEPARADO ? now : separatedAt;
+        Instant newShippedAt = newStatus == OrderStatus.ENVIADO ? now : shippedAt;
+        Instant newDeliveredAt = newStatus == OrderStatus.ENTREGUE ? now : deliveredAt;
         return new Order(id, orderNumber, channel, newStatus, customerId, sessionId, warehouseCode, items,
                 grossAmount, discountAmount, cashbackRedeemed, netAmount, changeAmount, cancelReason,
-                createdAt, paidAt, concludedAt, null, null, version);
+                createdAt, paidAt, concludedAt, null, null, reservedAt, newSeparatedAt, newShippedAt,
+                newDeliveredAt, version);
     }
 
     /**
@@ -212,7 +306,8 @@ public record Order(
         }
         return new Order(id, orderNumber, channel, OrderStatus.CANCELADO, customerId, sessionId,
                 warehouseCode, items, grossAmount, discountAmount, cashbackRedeemed, netAmount,
-                changeAmount, reason, createdAt, paidAt, concludedAt, cancelledAt, null, version);
+                changeAmount, reason, createdAt, paidAt, concludedAt, cancelledAt, null, reservedAt,
+                separatedAt, shippedAt, deliveredAt, version);
     }
 
     /**
@@ -227,7 +322,8 @@ public record Order(
         }
         return new Order(id, orderNumber, channel, OrderStatus.REEMBOLSADO, customerId, sessionId,
                 warehouseCode, items, grossAmount, discountAmount, cashbackRedeemed, netAmount,
-                changeAmount, reason, createdAt, paidAt, concludedAt, null, refundedAt, version);
+                changeAmount, reason, createdAt, paidAt, concludedAt, null, refundedAt, reservedAt,
+                separatedAt, shippedAt, deliveredAt, version);
     }
 
     /**
@@ -241,7 +337,8 @@ public record Order(
         BigDecimal newNet = grossAmount.subtract(discountAmount).subtract(value);
         return new Order(id, orderNumber, channel, status, customerId, sessionId, warehouseCode, items,
                 grossAmount, discountAmount, value, newNet, changeAmount, cancelReason, createdAt,
-                paidAt, concludedAt, cancelledAt, refundedAt, version);
+                paidAt, concludedAt, cancelledAt, refundedAt, reservedAt, separatedAt, shippedAt,
+                deliveredAt, version);
     }
 
     /**
@@ -263,14 +360,16 @@ public record Order(
     public Order withSession(Long newSessionId) {
         return new Order(id, orderNumber, channel, status, customerId, newSessionId, warehouseCode,
                 items, grossAmount, discountAmount, cashbackRedeemed, netAmount, changeAmount,
-                cancelReason, createdAt, paidAt, concludedAt, cancelledAt, refundedAt, version);
+                cancelReason, createdAt, paidAt, concludedAt, cancelledAt, refundedAt, reservedAt,
+                separatedAt, shippedAt, deliveredAt, version);
     }
 
     /** Vincula o pedido a um cliente identificado depois da montagem — o "CPF na nota?" do balcão. */
     public Order withCustomer(Long newCustomerId) {
         return new Order(id, orderNumber, channel, status, newCustomerId, sessionId, warehouseCode, items,
                 grossAmount, discountAmount, cashbackRedeemed, netAmount, changeAmount, cancelReason,
-                createdAt, paidAt, concludedAt, cancelledAt, refundedAt, version);
+                createdAt, paidAt, concludedAt, cancelledAt, refundedAt, reservedAt, separatedAt, shippedAt,
+                deliveredAt, version);
     }
 
     /** Soma do cashback gerado por todos os itens; ignora itens sem taxa carimbada. */

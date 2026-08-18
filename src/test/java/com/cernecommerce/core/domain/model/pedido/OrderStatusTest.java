@@ -48,7 +48,7 @@ class OrderStatusTest {
     @Test
     void postPaymentStatesCanBeRefundedButNotCancelled() {
         OrderStatus[] postPayment = {OrderStatus.PAGO, OrderStatus.SEPARADO, OrderStatus.ENVIADO,
-                OrderStatus.ENTREGUE, OrderStatus.CONCLUIDO};
+                OrderStatus.ENTREGUE, OrderStatus.CONCLUIDO, OrderStatus.RESERVADO};
         for (OrderStatus status : postPayment) {
             assertThat(status.canTransitionTo(OrderStatus.REEMBOLSADO))
                     .as("%s deve poder ser reembolsado", status).isTrue();
@@ -87,5 +87,32 @@ class OrderStatusTest {
     @Test
     void nullTargetIsNeverAllowed() {
         assertThat(OrderStatus.CRIADO.canTransitionTo(null)).isFalse();
+    }
+
+    // PDV-F008 — reserva para retirada
+
+    @Test
+    void counterPathCanAlsoBeReservedForLaterPickup() {
+        assertThat(OrderStatus.CRIADO.canTransitionTo(OrderStatus.RESERVADO)).isTrue();
+    }
+
+    @Test
+    void reservedOrderIsPickedUpOrRefunded() {
+        assertThat(OrderStatus.RESERVADO.canTransitionTo(OrderStatus.CONCLUIDO)).isTrue();
+        assertThat(OrderStatus.RESERVADO.canTransitionTo(OrderStatus.REEMBOLSADO)).isTrue();
+        assertThat(OrderStatus.RESERVADO.canTransitionTo(OrderStatus.CANCELADO)).isFalse();
+        assertThat(OrderStatus.RESERVADO.isTerminal()).isFalse();
+    }
+
+    /**
+     * RESERVADO só é alcançável a partir de CRIADO, que só existe no caminho de balcão — um
+     * pedido de marketplace nunca fica persistido em CRIADO (nasce em AGUARDANDO_PAGAMENTO), então
+     * nunca alcança RESERVADO. A restrição "só BALCAO" vem de graça da máquina de estados, sem
+     * checagem de canal em código nenhum.
+     */
+    @Test
+    void reservadoIsUnreachableFromTheMarketplacePath() {
+        assertThat(OrderStatus.AGUARDANDO_PAGAMENTO.canTransitionTo(OrderStatus.RESERVADO)).isFalse();
+        assertThat(OrderStatus.PAGO.canTransitionTo(OrderStatus.RESERVADO)).isFalse();
     }
 }

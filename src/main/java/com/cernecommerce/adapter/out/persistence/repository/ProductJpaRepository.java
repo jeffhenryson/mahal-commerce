@@ -77,6 +77,7 @@ public interface ProductJpaRepository extends JpaRepository<ProductEntity, Long>
               AND (:active   IS NULL OR p.active = :active)
               AND (:type     IS NULL OR p.type = :type)
               AND (:kitComponentEligible IS NULL OR p.kitComponentEligible = :kitComponentEligible)
+              AND (:status   IS NULL OR p.status = :status)
             """)
     Page<Long> findFilteredIds(@Param("search") String search,
             @Param("category") String category,
@@ -84,7 +85,11 @@ public interface ProductJpaRepository extends JpaRepository<ProductEntity, Long>
             @Param("active") Boolean active,
             @Param("type") String type,
             @Param("kitComponentEligible") Boolean kitComponentEligible,
+            @Param("status") String status,
             Pageable pageable);
+
+    /** EST-F023 — conta rascunhos para aplicar o teto de 5 no servidor. */
+    long countByStatus(String status);
 
     /** Bloco 1.1 — todos os kits do catálogo, sem paginação (subconjunto pequeno do catálogo geral). */
     List<ProductEntity> findByType(String type);

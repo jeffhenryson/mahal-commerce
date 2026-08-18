@@ -52,6 +52,7 @@ import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductFilter;
 import com.cernecommerce.core.domain.model.estoque.ProductSortField;
+import com.cernecommerce.core.domain.model.estoque.ProductStatus;
 import com.cernecommerce.core.domain.model.estoque.ProductType;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.ReorderPoint;
@@ -152,9 +153,10 @@ public class EstoqueController {
             @RequestParam(required = false) Boolean active,
             @RequestParam(required = false) ProductType type,
             @RequestParam(required = false) Boolean kitComponentEligible,
+            @RequestParam(required = false) ProductStatus status,
             @RequestParam(defaultValue = "ID") ProductSortField sort,
             @RequestParam(defaultValue = "ASC") SortDirection direction) {
-        ProductFilter filter = new ProductFilter(search, category, brand, active, type, kitComponentEligible);
+        ProductFilter filter = new ProductFilter(search, category, brand, active, type, kitComponentEligible, status);
         PageResult<Product> result = estoqueUseCase.listProducts(page, size, filter, sort, direction);
         PageResult<ProductResponseDTO> response = new PageResult<>(
                 result.content().stream().map(converter::toResponse).toList(),
@@ -385,7 +387,8 @@ public class EstoqueController {
                 request.getVisibleInPos(), request.getVisibleInMarketplace(), request.getType(),
                 initialStock == null ? null : new EstoqueUseCase.InitialStockCommand(initialStock.getWarehouseCode(),
                         initialStock.getQuantity(), initialStock.getLotCode(), initialStock.getExpiryDate()),
-                authentication.getName(), converter.toKitComponentCommands(request.getComponents()));
+                authentication.getName(), converter.toKitComponentCommands(request.getComponents()),
+                request.getStatus());
         publisher.publishEvent(AuditEvent.of(EventType.PRODUCT_CREATED,
                 authentication.getName(), Map.of("sku", created.sku())));
         return ResponseEntity.created(URI.create("/estoque/products/" + created.sku()))
@@ -419,7 +422,8 @@ public class EstoqueController {
                 request.getImages(),
                 request.getAttributes() == null ? null : converter.toAttributes(request.getAttributes()),
                 request.getCategoryId(), request.getBarcode(), request.getUnit(), request.getSampleProduct(),
-                request.getKitComponentEligible(), request.getVisibleInPos(), request.getVisibleInMarketplace());
+                request.getKitComponentEligible(), request.getVisibleInPos(), request.getVisibleInMarketplace(),
+                request.getStatus());
         publisher.publishEvent(AuditEvent.of(EventType.PRODUCT_UPDATED,
                 authentication.getName(), Map.of("sku", updated.sku())));
         // Evento próprio para mudança de preço: quem baixou o preço de quê e quando é a pergunta

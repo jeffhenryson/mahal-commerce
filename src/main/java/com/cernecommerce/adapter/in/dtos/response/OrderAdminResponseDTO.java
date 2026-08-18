@@ -45,6 +45,19 @@ public class OrderAdminResponseDTO {
     private Instant concludedAt;
     private Instant cancelledAt;
 
+    @Schema(description = "Instante da reserva para retirada depois (PDV-F008), quando status é ou "
+            + "já foi RESERVADO. Permanece preenchido após a retirada (RESERVADO -> CONCLUIDO).")
+    private Instant reservedAt;
+
+    @Schema(description = "Instante em que o pedido foi separado (status SEPARADO), quando aplicável.")
+    private Instant separatedAt;
+
+    @Schema(description = "Instante em que o pedido saiu para entrega (status ENVIADO), quando aplicável.")
+    private Instant shippedAt;
+
+    @Schema(description = "Instante em que o pedido foi entregue (status ENTREGUE), quando aplicável.")
+    private Instant deliveredAt;
+
     @Schema(description = "Estados para os quais este pedido pode transitar agora.")
     private List<String> allowedTransitions;
 

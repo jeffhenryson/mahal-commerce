@@ -82,7 +82,7 @@ public interface OrderJpaRepository extends JpaRepository<OrderEntity, Long>,
               AND (:customerId IS NULL OR o.customerId = :customerId)
               AND o.createdAt >= :from
               AND o.createdAt <= :to
-              AND o.status IN ('PAGO','SEPARADO','ENVIADO','ENTREGUE','CONCLUIDO')
+              AND o.status IN ('PAGO','SEPARADO','ENVIADO','ENTREGUE','CONCLUIDO','RESERVADO')
             """)
     HeaderTotalsProjection findRevenueTotals(@Param("channel") String channel,
             @Param("status") String status, @Param("customerId") Long customerId,
@@ -96,7 +96,7 @@ public interface OrderJpaRepository extends JpaRepository<OrderEntity, Long>,
               AND (:customerId IS NULL OR o.customerId = :customerId)
               AND o.createdAt >= :from
               AND o.createdAt <= :to
-              AND o.status IN ('PAGO','SEPARADO','ENVIADO','ENTREGUE','CONCLUIDO')
+              AND o.status IN ('PAGO','SEPARADO','ENVIADO','ENTREGUE','CONCLUIDO','RESERVADO')
             GROUP BY o.channel
             """)
     List<ChannelRevenueProjection> findRevenueByChannel(@Param("channel") String channel,
@@ -112,7 +112,7 @@ public interface OrderJpaRepository extends JpaRepository<OrderEntity, Long>,
               AND (:customerId IS NULL OR o.customerId = :customerId)
               AND o.createdAt >= :from
               AND o.createdAt <= :to
-              AND o.status IN ('PAGO','SEPARADO','ENVIADO','ENTREGUE','CONCLUIDO')
+              AND o.status IN ('PAGO','SEPARADO','ENVIADO','ENTREGUE','CONCLUIDO','RESERVADO')
             GROUP BY CAST(o.createdAt AS date)
             ORDER BY CAST(o.createdAt AS date) ASC
             """)
