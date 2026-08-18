@@ -1,11 +1,13 @@
 package com.cernecommerce.core.domain.model.crm;
 
 /**
- * Status de uma entrada do log de disparo de campanha. {@link #PENDENTE_INTEGRACAO} é o único
- * valor possível hoje — não existe canal de envio real conectado (ver crm/integracao-canal-envio,
- * F008). Modelado como enum para permitir novos status (ex.: ENVIADO, FALHOU) sem quebrar o
- * contrato de API quando a integração existir.
+ * Status de uma entrada do log de disparo de campanha. {@link #PENDENTE_INTEGRACAO} é usado quando
+ * a automação não tem {@code webhookUrl} configurado (comportamento legado, sem envio real).
+ * {@link #ENVIADO}/{@link #FALHA} refletem o resultado real da chamada ao webhook (ver
+ * crm/webhook-disparo-real, F008).
  */
 public enum CampaignDispatchStatus {
-    PENDENTE_INTEGRACAO
+    PENDENTE_INTEGRACAO,
+    ENVIADO,
+    FALHA
 }
