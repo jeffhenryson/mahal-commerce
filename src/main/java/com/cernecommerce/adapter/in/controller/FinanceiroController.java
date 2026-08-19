@@ -1,15 +1,19 @@
 package com.cernecommerce.adapter.in.controller;
 
 import com.cernecommerce.adapter.in.converter.FinanceiroDTOConverter;
+import com.cernecommerce.adapter.in.converter.OrderDTOConverter;
 import com.cernecommerce.adapter.in.dtos.request.CashFlowEntryPatchRequest;
 import com.cernecommerce.adapter.in.dtos.request.CashFlowEntryRequest;
 import com.cernecommerce.adapter.in.dtos.response.CashFlowEntryResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.CashFlowSummaryResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.MarginReportResponseDTO;
 import com.cernecommerce.core.domain.event.AuditEvent;
 import com.cernecommerce.core.domain.event.AuditEvent.EventType;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.financeiro.CashFlowEntry;
+import com.cernecommerce.core.domain.model.pedido.SalesChannel;
 import com.cernecommerce.core.ports.in.FinanceiroUseCase;
+import com.cernecommerce.core.ports.in.OrderReportUseCase;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -36,13 +40,16 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.net.URI;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Map;
 
 /**
  * Controller do domínio <b>financeiro</b> — contrato de escrita fechado em FIN-F004 (fluxo de
- * caixa manual, com vínculo opcional a pedido/compra de origem). DRE simplificado e conciliação
- * de taxas de gateway seguem como TODO. Leitura requer {@code FINANCEIRO_READ}; escrita requer
+ * caixa manual, com vínculo opcional a pedido/compra de origem) e relatório de margem em FIN-F003
+ * (agregação de {@code OrderItem.marginAmount()}, delegada a {@link OrderReportUseCase} — o dado
+ * nasce em {@code order_item}, não em {@code cash_flow_entry}). DRE simplificado e conciliação de
+ * taxas de gateway seguem como TODO. Leitura requer {@code FINANCEIRO_READ}; escrita requer
  * {@code FINANCEIRO_CASH_FLOW_MANAGE}.
  */
 @RestController
@@ -53,13 +60,18 @@ import java.util.Map;
 public class FinanceiroController {
 
     private final FinanceiroUseCase financeiroUseCase;
+    private final OrderReportUseCase orderReportUseCase;
     private final FinanceiroDTOConverter converter;
+    private final OrderDTOConverter orderConverter;
     private final ApplicationEventPublisher publisher;
 
-    public FinanceiroController(FinanceiroUseCase financeiroUseCase, FinanceiroDTOConverter converter,
+    public FinanceiroController(FinanceiroUseCase financeiroUseCase, OrderReportUseCase orderReportUseCase,
+            FinanceiroDTOConverter converter, OrderDTOConverter orderConverter,
             ApplicationEventPublisher publisher) {
         this.financeiroUseCase = financeiroUseCase;
+        this.orderReportUseCase = orderReportUseCase;
         this.converter = converter;
+        this.orderConverter = orderConverter;
         this.publisher = publisher;
     }
 
@@ -90,6 +102,27 @@ public class FinanceiroController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
         return ResponseEntity.ok(converter.toResponse(financeiroUseCase.getCashFlowSummary(from, to)));
+    }
+
+    @Operation(summary = "Relatório de margem agregado do período (FIN-F003)",
+            description = "Agrega OrderItem.marginAmount() (netAmount - costPrice*quantity) dos "
+                    + "pedidos com pagamento confirmado (PAGO em diante, exceto REEMBOLSADO). "
+                    + "from/to são obrigatórios (máx. 366 dias). Itens sem costPrice congelado "
+                    + "(pedidos legados) são excluídos do agregado, nunca contados como margem "
+                    + "zero — ver itemsConsidered.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "400", description = "from/to ausentes, from depois de to, ou intervalo maior que o teto permitido", content = @Content)
+    })
+    @GetMapping("/margem")
+    @PreAuthorize("hasAuthority('FINANCEIRO_READ')")
+    public ResponseEntity<MarginReportResponseDTO> getMarginReport(
+            @RequestParam(required = false) SalesChannel channel,
+            @RequestParam(required = false) String warehouseCode,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to) {
+        return ResponseEntity.ok(orderConverter.toMarginResponse(
+                orderReportUseCase.getMarginReport(channel, warehouseCode, from, to)));
     }
 
     @Operation(summary = "Cria um lançamento de fluxo de caixa",

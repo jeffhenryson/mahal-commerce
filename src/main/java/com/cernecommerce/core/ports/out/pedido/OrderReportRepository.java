@@ -1,5 +1,6 @@
 package com.cernecommerce.core.ports.out.pedido;
 
+import com.cernecommerce.core.domain.model.pedido.MarginSummary;
 import com.cernecommerce.core.domain.model.pedido.OrderStatus;
 import com.cernecommerce.core.domain.model.pedido.OrderSummary;
 import com.cernecommerce.core.domain.model.pedido.SalesChannel;
@@ -15,6 +16,16 @@ public interface OrderReportRepository {
      */
     OrderSummary summarize(SalesChannel channel, OrderStatus status, Long customerId,
             Instant from, Instant to, int topProductsLimit);
+
+    /**
+     * Agrega a margem ({@code OrderItem.marginAmount()}) dos itens do período em um
+     * {@link MarginSummary} (FIN-F003, {@code GET /financeiro/margem}). {@code warehouseCode} é
+     * opcional (filtro de depósito/loja, vem de {@code Order.warehouseCode}). Mesma restrição de
+     * status de {@link #summarize} (pagamento confirmado, exceto reembolsado) e mesma exclusão de
+     * itens sem {@code costPrice} congelado.
+     */
+    MarginSummary summarizeMargin(SalesChannel channel, String warehouseCode, Instant from, Instant to,
+            int topProductsLimit);
 
     /**
      * Top N produtos do período, por receita ou por quantidade vendida

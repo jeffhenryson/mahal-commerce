@@ -14,7 +14,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.cernecommerce.adapter.in.converter.FinanceiroDTOConverter;
+import com.cernecommerce.adapter.in.converter.OrderDTOConverter;
 import com.cernecommerce.core.domain.event.AuditEvent;
+import com.cernecommerce.core.domain.exception.pedido.InvalidReportPeriodException;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.financeiro.CashFlowCategory;
 import com.cernecommerce.core.domain.model.financeiro.CashFlowEntry;
@@ -22,7 +24,9 @@ import com.cernecommerce.core.domain.model.financeiro.CashFlowEntry.Direction;
 import com.cernecommerce.core.domain.model.financeiro.CashFlowStatus;
 import com.cernecommerce.core.domain.model.financeiro.CashFlowSummary;
 import com.cernecommerce.core.domain.model.financeiro.LinkedEntityType;
+import com.cernecommerce.core.domain.model.pedido.MarginSummary;
 import com.cernecommerce.core.ports.in.FinanceiroUseCase;
+import com.cernecommerce.core.ports.in.OrderReportUseCase;
 import com.cernecommerce.infra.handler.GlobalExceptionHandler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -33,6 +37,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -40,6 +45,7 @@ public class FinanceiroControllerTest {
 
     private MockMvc mockMvc;
     private FinanceiroUseCase financeiroUseCase;
+    private OrderReportUseCase orderReportUseCase;
     private ApplicationEventPublisher publisher;
 
     private static final UsernamePasswordAuthenticationToken AUTH =
@@ -48,9 +54,11 @@ public class FinanceiroControllerTest {
     @BeforeEach
     void setup() {
         financeiroUseCase = mock(FinanceiroUseCase.class);
+        orderReportUseCase = mock(OrderReportUseCase.class);
         publisher = mock(ApplicationEventPublisher.class);
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new FinanceiroController(financeiroUseCase, new FinanceiroDTOConverter(), publisher))
+                .standaloneSetup(new FinanceiroController(financeiroUseCase, orderReportUseCase,
+                        new FinanceiroDTOConverter(), new OrderDTOConverter(), publisher))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }
@@ -177,5 +185,37 @@ public class FinanceiroControllerTest {
                         .param("page", "1")
                         .param("size", "10"))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void getMarginReport_returns_200() throws Exception {
+        Instant from = Instant.parse("2026-07-01T00:00:00Z");
+        Instant to = Instant.parse("2026-07-31T23:59:59Z");
+        when(orderReportUseCase.getMarginReport(null, null, from, to))
+                .thenReturn(new MarginSummary(3, new BigDecimal("100.00"), new BigDecimal("60.00"),
+                        new BigDecimal("40.00"), new BigDecimal("40.00"), List.of()));
+
+        mockMvc.perform(get("/financeiro/margem")
+                        .principal(AUTH)
+                        .param("from", "2026-07-01T00:00:00Z")
+                        .param("to", "2026-07-31T23:59:59Z"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.itemsConsidered").value(3))
+                .andExpect(jsonPath("$.totalMargin").value(40.00))
+                .andExpect(jsonPath("$.marginPercent").value(40.00));
+    }
+
+    @Test
+    void getMarginReport_invalidPeriod_returns_400() throws Exception {
+        Instant from = Instant.parse("2026-07-31T00:00:00Z");
+        Instant to = Instant.parse("2026-07-01T00:00:00Z");
+        when(orderReportUseCase.getMarginReport(null, null, from, to))
+                .thenThrow(new InvalidReportPeriodException("'from' não pode ser depois de 'to'"));
+
+        mockMvc.perform(get("/financeiro/margem")
+                        .principal(AUTH)
+                        .param("from", "2026-07-31T00:00:00Z")
+                        .param("to", "2026-07-01T00:00:00Z"))
+                .andExpect(status().isBadRequest());
     }
 }

@@ -1,9 +1,9 @@
 # Domínio: financeiro
 
-**Status:** 🟡 Fluxo de caixa implementado (`FIN-F004`) — DRE e conciliação de gateway pendentes
+**Status:** 🟡 Fluxo de caixa (`FIN-F004`) e relatório de margem (`FIN-F003`) implementados — DRE e conciliação de gateway pendentes
 **Pacote Java:** `com.cernecommerce...financeiro`
 **Rota HTTP base:** `/financeiro`
-**Última atualização deste doc:** 2026-08-18 (`FIN-F004` implementado: persistência real de `cash_flow_entry`, `POST`/`PATCH`/`DELETE` e `GET /financeiro/cash-flow/summary`)
+**Última atualização deste doc:** 2026-08-18 (`FIN-F003` implementado: `GET /financeiro/margem`, relatório de margem agregado do período)
 
 ## Objetivo
 
@@ -18,18 +18,20 @@ Gestão financeira integrada do lounge físico e do e-commerce.
 
 ## Modelo de Domínio
 
-`FIN-F004` deu persistência real ao fluxo de caixa; DRE e conciliação de gateway seguem esqueleto:
+`FIN-F004` deu persistência real ao fluxo de caixa e `FIN-F003` trouxe o relatório de margem; DRE
+e conciliação de gateway seguem esqueleto:
 
 | Camada | Artefato |
 |---|---|
 | domain/model | `core/domain/model/financeiro/CashFlowEntry` — record imutável com `id`, `date` (lançamento, atribuída pelo servidor), `description`, `entityName`, `category` (`CashFlowCategory`, 10 valores), `direction`, `amount`, `status` (`CashFlowStatus`), `dueDate`, `paymentDate`, `linkedEntityType`/`linkedEntityId` (`LinkedEntityType`), `deletedAt` |
-| ports/in | `core/ports/in/FinanceiroUseCase` — `listCashFlow`, `createCashFlowEntry`, `updateCashFlowEntry` (patch), `deleteCashFlowEntry`, `getCashFlowSummary` |
-| ports/out | `core/ports/out/financeiro/LedgerRepository` — `findAll`, `findByPeriod`, `findById`, `save`, `softDelete`, `hardDelete`, `summarize` |
-| service | `core/service/FinanceiroService` — injeta `LedgerRepository`; regra de "PAGO sem paymentDate grava hoje" e validação de período do summary (mesmo teto de `OrderReportService`) |
-| adapter/in | `adapter/in/controller/FinanceiroController` → `GET`/`POST /financeiro/cash-flow`, `PATCH`/`DELETE /financeiro/cash-flow/{id}`, `GET /financeiro/cash-flow/summary` |
-| DI | `CoreBeanConfig.java` — `financeiroUseCase(LedgerRepository)` injeta o adapter real |
-| persistência | `LedgerEntity` (tabela `cash_flow_entry`, V103) + `LedgerJpaRepository` + `LedgerRepositoryImpl` — enums gravados como `String` (convenção do projeto, sem `@Enumerated`) |
-| testes | `FinanceiroServiceTest` (unit, Mockito), `FinanceiroControllerTest` (MockMvc standalone), `FinanceiroControllerSecurityTest` (RBAC, banco real), `FinanceiroFlowIT` (create→patch→summary→delete, banco real) |
+| domain/model (margem) | `core/domain/model/pedido/MarginSummary` — record com `itemsConsidered`, `totalRevenueNet`, `totalCost`, `totalMargin`, `marginPercent`, `topProductsByMargin` (`MarginByProduct`); vive no pacote `pedido` (mesma base de `OrderSummary`), não em `financeiro` |
+| ports/in | `core/ports/in/FinanceiroUseCase` — `listCashFlow`, `createCashFlowEntry`, `updateCashFlowEntry` (patch), `deleteCashFlowEntry`, `getCashFlowSummary`. Margem fica em `core/ports/in/OrderReportUseCase#getMarginReport`, reaproveitado por `FinanceiroController` |
+| ports/out | `core/ports/out/financeiro/LedgerRepository` — `findAll`, `findByPeriod`, `findById`, `save`, `softDelete`, `hardDelete`, `summarize`. Margem: `core/ports/out/pedido/OrderReportRepository#summarizeMargin` |
+| service | `core/service/FinanceiroService` — injeta `LedgerRepository`; regra de "PAGO sem paymentDate grava hoje" e validação de período do summary (mesmo teto de `OrderReportService`). `OrderReportService#getMarginReport` reusa `validatePeriod`/`MAX_RANGE_DAYS` já existentes |
+| adapter/in | `adapter/in/controller/FinanceiroController` → `GET`/`POST /financeiro/cash-flow`, `PATCH`/`DELETE /financeiro/cash-flow/{id}`, `GET /financeiro/cash-flow/summary`, `GET /financeiro/margem` (injeta `OrderReportUseCase` além de `FinanceiroUseCase`) |
+| DI | `CoreBeanConfig.java` — `financeiroUseCase(LedgerRepository)` injeta o adapter real; margem não precisou de bean novo (`OrderReportUseCase`/`OrderReportRepository` já existiam) |
+| persistência | `LedgerEntity` (tabela `cash_flow_entry`, V103) + `LedgerJpaRepository` + `LedgerRepositoryImpl` — enums gravados como `String` (convenção do projeto, sem `@Enumerated`). Margem: `OrderItemJpaRepository#findMarginTotals`/`findTopProductsByMargin` (JPQL, sem tabela nova) + `OrderReportRepositoryImpl#summarizeMargin` |
+| testes | `FinanceiroServiceTest` (unit, Mockito), `FinanceiroControllerTest` (MockMvc standalone, inclui `GET /financeiro/margem`), `FinanceiroControllerSecurityTest` (RBAC, banco real), `FinanceiroFlowIT` (create→patch→summary→delete, banco real). Margem: `OrderReportServiceTest` (unit), `OrderReportRepositoryIT` (banco real, exclusão de itens sem custo e ranking por margem) |
 
 ## Regras de Negócio Implementadas
 
@@ -69,6 +71,7 @@ Gestão financeira integrada do lounge físico e do e-commerce.
 | POST | `/financeiro/cash-flow` | `FINANCEIRO_CASH_FLOW_MANAGE` | Cria lançamento, nasce `PREVISTO` |
 | PATCH | `/financeiro/cash-flow/{id}` | `FINANCEIRO_CASH_FLOW_MANAGE` | Edita parcialmente e/ou marca como pago |
 | DELETE | `/financeiro/cash-flow/{id}` | `FINANCEIRO_CASH_FLOW_MANAGE` | Remove (soft-delete se houver vínculo) |
+| GET | `/financeiro/margem?channel&warehouseCode&from&to` | `FINANCEIRO_READ` | Relatório de margem agregado do período (`FIN-F003`) — `from`/`to` obrigatórios (máx. 366 dias) |
 
 Duas permissões no domínio: `FINANCEIRO_READ` (V53) e `FINANCEIRO_CASH_FLOW_MANAGE` (V103,
 concedida a `ROLE_ADMIN`) — separa leitura de escrita, mas ainda não separa DRE/conciliação
@@ -201,7 +204,7 @@ Convenções, variáveis e o environment compartilhado estão em
 
 | ID | Prioridade | Tipo | Item | Descrição | Status |
 |---|---|---|---|---|---|
-| FIN-F003 | 🔴 Alta | Feature | relatorio-margem-por-periodo | Relatório de margem agregando `OrderItem.marginAmount()` (`netAmount - costPrice*quantity`) por período/depósito — os dados já existem congelados em `order_item` desde `PDV-F004`, é query agregada + endpoint novo, sem migration. Maior valor imediato pelo menor esforço do módulo. | Pendente |
+| FIN-F003 | 🔴 Alta | Feature | relatorio-margem-por-periodo | `GET /financeiro/margem?channel&warehouseCode&from&to` — agrega `OrderItem.marginAmount()` (`netAmount - costPrice*quantity`) dos pedidos com pagamento confirmado, filtrável por canal e depósito (`Order.warehouseCode`). Itens sem `costPrice` congelado (pedidos legados) são excluídos do agregado inteiro (`itemsConsidered` expõe quantos entraram), não contados como margem zero. Sem migration — reusa `OrderReportUseCase`/`OrderReportRepository` (mesmo teto de 366 dias) e a permissão `FINANCEIRO_READ` já existente. | **Concluído em 2026-08-18** |
 | FIN-F004 | 🔴 Alta | Feature | fluxo-de-caixa-com-escrita | Persistência real de `CashFlowEntry` (V103, `cash_flow_entry`) + `POST`/`PATCH`/`DELETE /financeiro/cash-flow` + `GET /financeiro/cash-flow/summary` (agregação no backend). Contrato de escrita do front (`Docs/BACKEND_TODO.md` do `mahal-admin`, recebido em 2026-08-18) implementado conforme especificado, com uma ressalva de nomenclatura em `linkedEntityType` — ver **Contrato de escrita — `FIN-F004`** abaixo. Geração automática de lançamento a partir de venda (`VENDA_PDV`/`VENDA_ECOMMERCE`) e imutabilidade ledger-style ficaram fora desta fatia. | **Concluído em 2026-08-18** |
 | FIN-F001 | 🟡 Média | Feature | cashback-como-provisao-no-dre | Cashback reconhecido como **provisão de passivo no ganho**, não como despesa no resgate — o crédito já existe contra a empresa no momento em que é gerado, e reconhecê-lo só no resgate infla o resultado dos meses em que os clientes acumulam. Consome o ledger `cashback_entry` (CRM-F003). Depende de um DRE mínimo existir (`FIN-F004` primeiro). Ver [`plano-pdv-marketplace.md`](../../plano-pdv-marketplace.md) §2.4. | Pendente |
 | FIN-F002 | 🟡 Média | Feature | nfce-via-emissor-terceiro | Port fiscal + adapter para Focus NFe ou PlugNotas, campos fiscais (NCM/CEST/CFOP) no produto, emissão na conclusão do pedido e cancelamento dentro da janela legal. **Nunca construir emissão própria** (§2.8/§8.1): schemas XML por UF, certificado A1/A3, contingência, homologação SEFAZ e manutenção perpétua, contra ~R$100–300/mês de prateleira. Para tabacaria o argumento é mais forte ainda — fumo tem ICMS-ST e IPI, e errar CST 60/NCM/CEST não gera bug, gera autuação. **Não é bloqueante para o PDV rodar**; é o portão para desligar o processo fiscal atual. Fatia 11 — calendário (certificado, cadastro fiscal, homologação) maior que o esforço. | Pendente |
@@ -225,6 +228,17 @@ Convenções, variáveis e o environment compartilhado estão em
 
 ## Histórico de Implementações
 
+- **2026-08-18** — `FIN-F003` (relatório de margem por período): `GET /financeiro/margem`
+  agrega `OrderItem.marginAmount()` dos pedidos com pagamento confirmado, filtrável por
+  `channel`/`warehouseCode`, mesmo teto de 366 dias de `GET /financeiro/cash-flow/summary`/
+  `GET /orders/summary`. Sem migration — nova query em `OrderItemJpaRepository`
+  (`findMarginTotals`/`findTopProductsByMargin`) e novo método `summarizeMargin` em
+  `OrderReportRepository`/`OrderReportUseCase` (não em `FinanceiroUseCase`: o dado nasce em
+  `order_item`, então `FinanceiroController` reaproveita `OrderReportUseCase` diretamente, mesmo
+  padrão de composição cross-domain de `OrdersController`/`CrmUseCase`). Itens sem `costPrice`
+  congelado (pedidos legados pré-migração) são excluídos do agregado inteiro, não só do custo —
+  `itemsConsidered` deixa a exclusão visível. Reusa a permissão `FINANCEIRO_READ` já existente,
+  sem RBAC novo.
 - **2026-08-18** — `FIN-F004` (contrato de escrita do fluxo de caixa): persistência real de
   `CashFlowEntry` (`LedgerEntity`/`cash_flow_entry`, V103), `POST`/`PATCH`/`DELETE
   /financeiro/cash-flow` e `GET /financeiro/cash-flow/summary` (agregação no backend, fechando a
@@ -247,8 +261,8 @@ Roteiro completo em [`proximos-passos.md`](proximos-passos.md) — inclui **as t
 outros módulos que precisam ser cobradas agora** para o financeiro não nascer sem margem
 histórica nem numeração fiscal confiável (já confirmadas entregues, ver Histórico acima).
 
-- [ ] **FIN-F003** — relatório de margem por período, usando dados já congelados em `order_item`.
-      Quick win: sem migration, sem depender de outro item deste backlog.
+- [x] **FIN-F003** — relatório de margem por período: **concluído em 2026-08-18**, ver
+      "Histórico de Implementações" acima.
 - [x] **FIN-F004** — fluxo de caixa com escrita: **concluído em 2026-08-18**, ver "Contrato de
       escrita" e "Histórico de Implementações" acima.
 - [ ] **FIN-F001** — cashback como provisão de passivo, reconhecida no ganho. Depende de um DRE

@@ -2,6 +2,7 @@ package com.cernecommerce.adapter.out.persistence.repository;
 
 import com.cernecommerce.adapter.out.persistence.entity.ProductEntity;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
+import com.cernecommerce.core.domain.model.pedido.MarginSummary;
 import com.cernecommerce.core.domain.model.pedido.Order;
 import com.cernecommerce.core.domain.model.pedido.OrderItem;
 import com.cernecommerce.core.domain.model.pedido.OrderStatus;
@@ -56,6 +57,12 @@ class OrderReportRepositoryIT {
     private static List<OrderItem> orphanSkuItem() {
         return List.of(OrderItem.fromCatalog("SKU-EXCLUIDO", new BigDecimal("1.000"),
                 Pricing.of(new BigDecimal("5.00"), null, new BigDecimal("10.00")), null));
+    }
+
+    /** Item sem costPrice congelado — simula pedido legado pré-migração (FIN-F003). */
+    private static OrderItem legacyItemWithoutCost(String sku, BigDecimal quantity, BigDecimal unitPrice,
+            String productName) {
+        return OrderItem.of(null, sku, quantity, unitPrice, null, null, null, productName);
     }
 
     private void saveProduct(String sku, String name) {
@@ -195,5 +202,62 @@ class OrderReportRepositoryIT {
         assertThat(summary.cancelledOrRefundedRate()).isEqualByComparingTo(BigDecimal.ZERO);
         assertThat(summary.topProducts()).isEmpty();
         assertThat(summary.dailyRevenue()).isEmpty();
+    }
+
+    @Test
+    void summarizeMargin_excludesItemsWithoutCostPrice_andComputesMarginPercent() {
+        saveProduct("CARV-001", "Carvão em Barra");
+
+        List<OrderItem> items = new java.util.ArrayList<>(oneCharcoal(new BigDecimal("2.000")));
+        items.add(legacyItemWithoutCost("LEGADO-001", new BigDecimal("1.000"), new BigDecimal("10.00"), "Item Legado"));
+
+        orderRepository.save(Order.openBalcao(1L, "LOJA-01", null, items)
+                .concluded(orderRepository.nextOrderNumber(), null, Instant.now()));
+
+        flushAndClear();
+
+        Instant from = Instant.now().minusSeconds(3600);
+        Instant to = Instant.now().plusSeconds(3600);
+        MarginSummary summary = orderReportRepository.summarizeMargin(null, null, from, to, 10);
+
+        // Só CARV-001 (costPrice congelado) entra: net 44.00, custo 36.00, margem 8.00 — o item
+        // legado (LEGADO-001, sem costPrice) fica de fora do agregado inteiro, não só do custo.
+        assertThat(summary.itemsConsidered()).isEqualTo(1);
+        assertThat(summary.totalRevenueNet()).isEqualByComparingTo("44.00");
+        assertThat(summary.totalCost()).isEqualByComparingTo("36.00");
+        assertThat(summary.totalMargin()).isEqualByComparingTo("8.00");
+        assertThat(summary.marginPercent()).isEqualByComparingTo("18.18");
+        assertThat(summary.topProductsByMargin()).extracting(MarginSummary.MarginByProduct::sku)
+                .containsExactly("CARV-001");
+    }
+
+    @Test
+    void summarizeMargin_filtersByWarehouseCodeAndRanksTopProductsByMargin() {
+        saveProduct("CARV-001", "Carvão em Barra");
+        saveProduct("ESSE-001", "Essência Premium");
+
+        // CARV-001 em LOJA-01: 2 un a 22.00, custo 18.00 → margem 8.00.
+        orderRepository.save(Order.openBalcao(1L, "LOJA-01", null, oneCharcoal(new BigDecimal("2.000")))
+                .concluded(orderRepository.nextOrderNumber(), null, Instant.now()));
+
+        // ESSE-001 em LOJA-02: 10 un a 5.00, custo 3.00 → margem 20.00, maior que CARV-001.
+        Pricing essencia = Pricing.of(new BigDecimal("3.00"), null, new BigDecimal("5.00"));
+        orderRepository.save(Order.openBalcao(1L, "LOJA-02", null,
+                        List.of(OrderItem.fromCatalog("ESSE-001", new BigDecimal("10.000"), essencia, null)))
+                .concluded(orderRepository.nextOrderNumber(), null, Instant.now()));
+
+        flushAndClear();
+
+        Instant from = Instant.now().minusSeconds(3600);
+        Instant to = Instant.now().plusSeconds(3600);
+
+        MarginSummary onlyLoja01 = orderReportRepository.summarizeMargin(null, "LOJA-01", from, to, 10);
+        assertThat(onlyLoja01.itemsConsidered()).isEqualTo(1);
+        assertThat(onlyLoja01.totalMargin()).isEqualByComparingTo("8.00");
+
+        MarginSummary allWarehouses = orderReportRepository.summarizeMargin(null, null, from, to, 10);
+        assertThat(allWarehouses.itemsConsidered()).isEqualTo(2);
+        assertThat(allWarehouses.topProductsByMargin()).extracting(MarginSummary.MarginByProduct::sku)
+                .containsExactly("ESSE-001", "CARV-001");
     }
 }

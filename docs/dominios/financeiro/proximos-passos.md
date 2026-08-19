@@ -105,6 +105,7 @@ calendário pode ser de semanas. Comece a parte burocrática cedo, mesmo com a F
 
 Fechar `FIN-F001` (provisão de cashback), `FIN-F002` (NFC-e via emissor) e `FIN-C001` (documentar),
 mais o DRE propriamente dito — `EST-F007` (custo médio) já fechou (2026-08-16) e não bloqueia mais
-nada, mas o DRE em si ainda não tem item de backlog próprio. Quando as Fatias 0 a 4 estiverem
-prontas, vale rodar `/1-analise financeiro` para levantar o backlog real do módulo, que hoje é só
-o esqueleto herdado.
+nada, mas o DRE em si ainda não tem item de backlog próprio. `FIN-F003` (relatório de margem) e
+`FIN-F004` (fluxo de caixa com escrita) já fecharam em 2026-08-18. Quando as Fatias 0 a 4
+estiverem prontas, vale rodar `/1-analise financeiro` para levantar o backlog real do módulo, que
+hoje é só o esqueleto herdado.

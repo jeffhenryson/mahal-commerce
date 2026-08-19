@@ -1,6 +1,7 @@
 package com.cernecommerce.core.service;
 
 import com.cernecommerce.core.domain.exception.pedido.InvalidReportPeriodException;
+import com.cernecommerce.core.domain.model.pedido.MarginSummary;
 import com.cernecommerce.core.domain.model.pedido.OrderSummary;
 import com.cernecommerce.core.ports.out.pedido.OrderReportRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -128,5 +129,35 @@ class OrderReportServiceTest {
         verify(orderReportRepository).findTopProducts(eq(null), eq(null), eq(null), eq(NOW),
                 toCaptor.capture(), eq(10), eq(false));
         assertThat(toCaptor.getValue()).isCloseTo(Instant.now(), within(5, ChronoUnit.SECONDS));
+    }
+
+    @Test
+    void getMarginReport_throwsWhenFromIsAfterTo() {
+        Instant from = NOW;
+        Instant to = NOW.minusSeconds(3600);
+
+        assertThatThrownBy(() -> orderReportService.getMarginReport(null, null, from, to))
+                .isInstanceOf(InvalidReportPeriodException.class);
+    }
+
+    @Test
+    void getMarginReport_throwsWhenRangeExceedsMax() {
+        Instant from = NOW.minus(400, ChronoUnit.DAYS);
+
+        assertThatThrownBy(() -> orderReportService.getMarginReport(null, null, from, NOW))
+                .isInstanceOf(InvalidReportPeriodException.class);
+    }
+
+    @Test
+    void getMarginReport_delegatesToRepositoryWithTopProductsLimit() {
+        Instant from = NOW.minusSeconds(3600);
+        MarginSummary summary = new MarginSummary(0, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
+                BigDecimal.ZERO, List.of());
+        when(orderReportRepository.summarizeMargin(null, "LOJA-01", from, NOW, 10)).thenReturn(summary);
+
+        MarginSummary result = orderReportService.getMarginReport(null, "LOJA-01", from, NOW);
+
+        assertThat(result.itemsConsidered()).isZero();
+        verify(orderReportRepository).summarizeMargin(eq(null), eq("LOJA-01"), eq(from), eq(NOW), eq(10));
     }
 }

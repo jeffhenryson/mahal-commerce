@@ -1,5 +1,6 @@
 package com.cernecommerce.core.ports.in;
 
+import com.cernecommerce.core.domain.model.pedido.MarginSummary;
 import com.cernecommerce.core.domain.model.pedido.OrderStatus;
 import com.cernecommerce.core.domain.model.pedido.OrderSummary;
 import com.cernecommerce.core.domain.model.pedido.SalesChannel;
@@ -35,4 +36,13 @@ public interface OrderReportUseCase {
      */
     List<OrderSummary.TopProduct> getTopProducts(SalesChannel channel, OrderStatus status,
             Long customerId, Instant from, Instant to, int limit, boolean byQuantity);
+
+    /**
+     * Relatório de margem agregado do período (FIN-F003, {@code GET /financeiro/margem}).
+     * {@code from}/{@code to} são obrigatórios, mesma regra de teto de {@link #getSummary}.
+     *
+     * @throws com.cernecommerce.core.domain.exception.pedido.InvalidReportPeriodException se
+     *         {@code from} for depois de {@code to}, ou o intervalo exceder o teto permitido
+     */
+    MarginSummary getMarginReport(SalesChannel channel, String warehouseCode, Instant from, Instant to);
 }

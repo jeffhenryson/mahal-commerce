@@ -1,6 +1,7 @@
 package com.cernecommerce.adapter.out.persistence.repository;
 
 import com.cernecommerce.core.domain.model.Money;
+import com.cernecommerce.core.domain.model.pedido.MarginSummary;
 import com.cernecommerce.core.domain.model.pedido.OrderStatus;
 import com.cernecommerce.core.domain.model.pedido.OrderSummary;
 import com.cernecommerce.core.domain.model.pedido.SalesChannel;
@@ -94,5 +95,28 @@ public class OrderReportRepositoryImpl implements OrderReportRepository {
                 .map(p -> new OrderSummary.TopProduct(p.getSku(), p.getProductName(), p.getQuantitySold(),
                         p.getRevenue()))
                 .toList();
+    }
+
+    @Override
+    public MarginSummary summarizeMargin(SalesChannel channel, String warehouseCode, Instant from, Instant to,
+            int topProductsLimit) {
+        String channelName = channel == null ? null : channel.name();
+
+        OrderItemJpaRepository.MarginTotalsProjection totals = orderItemJpaRepository
+                .findMarginTotals(channelName, warehouseCode, from, to);
+        BigDecimal marginPercent = totals.getRevenue().signum() == 0 ? BigDecimal.ZERO
+                : totals.getMargin().divide(totals.getRevenue(), Money.INTERMEDIATE_SCALE, Money.ROUNDING)
+                        .multiply(Money.HUNDRED)
+                        .setScale(Money.PERCENT_SCALE, Money.ROUNDING);
+
+        List<MarginSummary.MarginByProduct> topProductsByMargin = orderItemJpaRepository
+                .findTopProductsByMargin(channelName, warehouseCode, from, to, PageRequest.of(0, topProductsLimit))
+                .stream()
+                .map(p -> new MarginSummary.MarginByProduct(p.getSku(), p.getProductName(), p.getQuantitySold(),
+                        p.getMargin()))
+                .toList();
+
+        return new MarginSummary(totals.getItemsConsidered(), totals.getRevenue(), totals.getCost(),
+                totals.getMargin(), marginPercent, topProductsByMargin);
     }
 }

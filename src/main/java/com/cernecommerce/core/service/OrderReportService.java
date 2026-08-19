@@ -1,6 +1,7 @@
 package com.cernecommerce.core.service;
 
 import com.cernecommerce.core.domain.exception.pedido.InvalidReportPeriodException;
+import com.cernecommerce.core.domain.model.pedido.MarginSummary;
 import com.cernecommerce.core.domain.model.pedido.OrderStatus;
 import com.cernecommerce.core.domain.model.pedido.OrderSummary;
 import com.cernecommerce.core.domain.model.pedido.SalesChannel;
@@ -53,6 +54,13 @@ public class OrderReportService implements OrderReportUseCase {
         }
         return orderReportRepository.findTopProducts(channel, status, customerId, effectiveFrom,
                 effectiveTo, limit, byQuantity);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public MarginSummary getMarginReport(SalesChannel channel, String warehouseCode, Instant from, Instant to) {
+        validatePeriod(from, to);
+        return orderReportRepository.summarizeMargin(channel, warehouseCode, from, to, TOP_PRODUCTS_LIMIT);
     }
 
     private void validatePeriod(Instant from, Instant to) {

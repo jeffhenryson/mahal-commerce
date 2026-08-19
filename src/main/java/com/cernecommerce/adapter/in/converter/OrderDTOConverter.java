@@ -3,6 +3,8 @@ package com.cernecommerce.adapter.in.converter;
 import com.cernecommerce.adapter.in.dtos.request.SaleItemRequest;
 import com.cernecommerce.adapter.in.dtos.request.SalePaymentRequest;
 import com.cernecommerce.adapter.in.dtos.response.DailyRevenueResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.MarginByProductResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.MarginReportResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.OrderAdminResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.OrderItemAdminResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.OrderItemResponseDTO;
@@ -16,6 +18,7 @@ import com.cernecommerce.adapter.in.dtos.response.TopProductResponseDTO;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.pagamento.OrderPayment;
 import com.cernecommerce.core.domain.model.pagamento.PaymentMethod;
+import com.cernecommerce.core.domain.model.pedido.MarginSummary;
 import com.cernecommerce.core.domain.model.pedido.Order;
 import com.cernecommerce.core.domain.model.pedido.OrderItem;
 import com.cernecommerce.core.domain.model.pedido.OrderSummary;
@@ -268,6 +271,28 @@ public class OrderDTOConverter {
         dto.setProductName(product.productName());
         dto.setQuantitySold(product.quantitySold());
         dto.setRevenue(product.revenue());
+        return dto;
+    }
+
+    // ── Relatório de margem (FIN-F003, GET /financeiro/margem) ──────────────────────────────
+
+    public MarginReportResponseDTO toMarginResponse(MarginSummary summary) {
+        MarginReportResponseDTO dto = new MarginReportResponseDTO();
+        dto.setItemsConsidered(summary.itemsConsidered());
+        dto.setTotalRevenueNet(summary.totalRevenueNet());
+        dto.setTotalCost(summary.totalCost());
+        dto.setTotalMargin(summary.totalMargin());
+        dto.setMarginPercent(summary.marginPercent());
+        dto.setTopProductsByMargin(summary.topProductsByMargin().stream().map(this::toResponse).toList());
+        return dto;
+    }
+
+    private MarginByProductResponseDTO toResponse(MarginSummary.MarginByProduct product) {
+        MarginByProductResponseDTO dto = new MarginByProductResponseDTO();
+        dto.setSku(product.sku());
+        dto.setProductName(product.productName());
+        dto.setQuantitySold(product.quantitySold());
+        dto.setMargin(product.margin());
         return dto;
     }
 }

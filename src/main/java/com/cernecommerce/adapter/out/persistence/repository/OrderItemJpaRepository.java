@@ -71,4 +71,68 @@ public interface OrderItemJpaRepository extends JpaRepository<OrderItemEntity, L
         BigDecimal getQuantitySold();
         BigDecimal getRevenue();
     }
+
+    /**
+     * Totais de margem do período (FIN-F003, {@code GET /financeiro/margem}). Mesmo filtro de
+     * status pago de {@link #findTopProducts} e mesmo {@code warehouseCode} de {@code Order}
+     * (não existe em {@code OrderItem}, daí o {@code JOIN oi.order o}).
+     *
+     * <p>{@code AND oi.costPrice IS NOT NULL} exclui itens legados sem custo congelado do
+     * agregado — somá-los como zero inflaria a margem, e é a mesma regra de
+     * {@code OrderItem.marginAmount()} (retorna {@code null} quando falta custo).</p>
+     */
+    @Query("""
+            SELECT COUNT(oi) AS itemsConsidered,
+                   COALESCE(SUM(oi.quantity * oi.unitPrice - oi.discountAmount), 0) AS revenue,
+                   COALESCE(SUM(oi.quantity * oi.costPrice), 0) AS cost,
+                   COALESCE(SUM(oi.quantity * oi.unitPrice - oi.discountAmount - oi.quantity * oi.costPrice), 0) AS margin
+            FROM OrderItemEntity oi
+            JOIN oi.order o
+            WHERE (:channel       IS NULL OR o.channel       = :channel)
+              AND (:warehouseCode IS NULL OR o.warehouseCode = :warehouseCode)
+              AND o.createdAt >= :from
+              AND o.createdAt <= :to
+              AND o.status IN ('PAGO','SEPARADO','ENVIADO','ENTREGUE','CONCLUIDO','RESERVADO')
+              AND oi.costPrice IS NOT NULL
+            """)
+    MarginTotalsProjection findMarginTotals(@Param("channel") String channel,
+            @Param("warehouseCode") String warehouseCode, @Param("from") Instant from, @Param("to") Instant to);
+
+    /**
+     * Top N produtos por margem no período, mesmo molde e mesma exclusão de itens sem custo de
+     * {@link #findMarginTotals}.
+     */
+    @Query("""
+            SELECT oi.sku AS sku, COALESCE(p.name, oi.sku) AS productName,
+                   SUM(oi.quantity) AS quantitySold,
+                   COALESCE(SUM(oi.quantity * oi.unitPrice - oi.discountAmount - oi.quantity * oi.costPrice), 0) AS margin
+            FROM OrderItemEntity oi
+            JOIN oi.order o
+            LEFT JOIN ProductEntity p ON p.sku = oi.sku
+            WHERE (:channel       IS NULL OR o.channel       = :channel)
+              AND (:warehouseCode IS NULL OR o.warehouseCode = :warehouseCode)
+              AND o.createdAt >= :from
+              AND o.createdAt <= :to
+              AND o.status IN ('PAGO','SEPARADO','ENVIADO','ENTREGUE','CONCLUIDO','RESERVADO')
+              AND oi.costPrice IS NOT NULL
+            GROUP BY oi.sku, p.name
+            ORDER BY margin DESC
+            """)
+    List<TopProductByMarginProjection> findTopProductsByMargin(@Param("channel") String channel,
+            @Param("warehouseCode") String warehouseCode, @Param("from") Instant from, @Param("to") Instant to,
+            Pageable pageable);
+
+    interface MarginTotalsProjection {
+        long getItemsConsidered();
+        BigDecimal getRevenue();
+        BigDecimal getCost();
+        BigDecimal getMargin();
+    }
+
+    interface TopProductByMarginProjection {
+        String getSku();
+        String getProductName();
+        BigDecimal getQuantitySold();
+        BigDecimal getMargin();
+    }
 }
