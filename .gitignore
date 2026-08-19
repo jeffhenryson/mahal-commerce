@@ -63,6 +63,7 @@ terraform-lite/terraform.tfstate.backup
 .claude
 # Uploads
 uploads/
+data/
 
 
 # Test logs

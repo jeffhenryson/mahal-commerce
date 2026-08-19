@@ -15,9 +15,16 @@ import java.time.Instant;
  *        toda entrada tem custo conhecido no momento (ex.: balanço de inventário). Alimenta o
  *        recálculo de {@link StockBalance#averageCost()} e fica gravado aqui para auditoria.
  *        {@code null} em toda {@code SAIDA}/{@code AJUSTE}.
+ * @param goodsReceiptId vínculo opcional com o recebimento de mercadoria
+ *        ({@code core.domain.model.compras.GoodsReceipt}) que originou esta {@code ENTRADA}.
+ *        {@code null} em toda movimentação manual e em toda entrada anterior à migration que
+ *        introduziu o vínculo — limitação conhecida, sem backfill retroativo (o dado não existia
+ *        antes). Alimenta o histórico de compras por SKU (item 2 do pedido do frontend), que
+ *        precisa saber de qual fornecedor veio a entrada.
  */
 public record StockMovement(Long id, String sku, Long warehouseId, MovementType type, BigDecimal quantity,
-        String reason, String username, Instant createdAt, String lotCode, BigDecimal unitCost) {
+        String reason, String username, Instant createdAt, String lotCode, BigDecimal unitCost,
+        Long goodsReceiptId) {
 
     public StockMovement {
         if (sku == null || sku.isBlank()) {
@@ -58,11 +65,20 @@ public record StockMovement(Long id, String sku, Long warehouseId, MovementType 
         return create(sku, warehouseId, type, quantity, reason, username, lotCode, null);
     }
 
-    /** Cria uma nova movimentação com lote e custo unitário de entrada (EST-F007/EST-F008). */
+    /** Cria uma nova movimentação com lote e custo unitário de entrada (EST-F007/EST-F008), sem vínculo de recebimento. */
     public static StockMovement create(String sku, Long warehouseId, MovementType type, BigDecimal quantity,
             String reason, String username, String lotCode, BigDecimal unitCost) {
+        return create(sku, warehouseId, type, quantity, reason, username, lotCode, unitCost, null);
+    }
+
+    /**
+     * Cria uma nova movimentação — forma canônica, com o vínculo opcional de recebimento (item 2).
+     * Único ponto de criação usado por {@code EstoqueService.adjustStock}.
+     */
+    public static StockMovement create(String sku, Long warehouseId, MovementType type, BigDecimal quantity,
+            String reason, String username, String lotCode, BigDecimal unitCost, Long goodsReceiptId) {
         return new StockMovement(null, sku, warehouseId, type, quantity, reason, username, Instant.now(), lotCode,
-                unitCost);
+                unitCost, goodsReceiptId);
     }
 
     /** Reconstitui uma movimentação sem lote nem custo a partir de persistência. */
@@ -77,10 +93,21 @@ public record StockMovement(Long id, String sku, Long warehouseId, MovementType 
         return of(id, sku, warehouseId, type, quantity, reason, username, createdAt, lotCode, null);
     }
 
-    /** Reconstitui uma movimentação a partir de persistência — forma canônica, com lote e custo. */
+    /** Reconstitui uma movimentação a partir de persistência, com lote e custo, sem vínculo de recebimento. */
     public static StockMovement of(Long id, String sku, Long warehouseId, MovementType type, BigDecimal quantity,
             String reason, String username, Instant createdAt, String lotCode, BigDecimal unitCost) {
+        return of(id, sku, warehouseId, type, quantity, reason, username, createdAt, lotCode, unitCost, null);
+    }
+
+    /**
+     * Reconstitui uma movimentação a partir de persistência — forma canônica completa, com lote,
+     * custo e vínculo de recebimento. Único ponto de reconstituição usado por
+     * {@code StockMovementRepositoryImpl}.
+     */
+    public static StockMovement of(Long id, String sku, Long warehouseId, MovementType type, BigDecimal quantity,
+            String reason, String username, Instant createdAt, String lotCode, BigDecimal unitCost,
+            Long goodsReceiptId) {
         return new StockMovement(id, sku, warehouseId, type, quantity, reason, username, createdAt, lotCode,
-                unitCost);
+                unitCost, goodsReceiptId);
     }
 }

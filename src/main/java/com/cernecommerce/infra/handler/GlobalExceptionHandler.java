@@ -40,10 +40,17 @@ import com.cernecommerce.core.domain.exception.ecommerce.CartItemNotFoundExcepti
 import com.cernecommerce.core.domain.exception.financeiro.CashFlowEntryNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.BarcodeNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.DefaultWarehouseNotConfiguredException;
+import com.cernecommerce.core.domain.exception.estoque.BrandHasProductsException;
+import com.cernecommerce.core.domain.exception.estoque.BrandNotFoundException;
+import com.cernecommerce.core.domain.exception.estoque.CategoryHasProductsException;
+import com.cernecommerce.core.domain.exception.estoque.DuplicateAttributeTypeNameException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateBarcodeException;
+import com.cernecommerce.core.domain.exception.estoque.DuplicateBrandNameException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateKitComponentException;
 import com.cernecommerce.core.domain.exception.estoque.CategoryNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateCategoryNameException;
+import com.cernecommerce.core.domain.exception.estoque.ReplenishmentItemNotFoundException;
+import com.cernecommerce.core.domain.exception.estoque.VariantHasStockHistoryException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateSkuException;
 import com.cernecommerce.core.domain.exception.estoque.DraftLimitReachedException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateWarehouseCodeException;
@@ -196,6 +203,44 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiError> handleDuplicateCategoryName(DuplicateCategoryNameException ex,
             HttpServletRequest req) {
         return error(HttpStatus.CONFLICT, ex.getMessage(), "CATEGORY_NAME_ALREADY_EXISTS", req);
+    }
+
+    @ExceptionHandler(CategoryHasProductsException.class)
+    public ResponseEntity<ApiError> handleCategoryHasProducts(CategoryHasProductsException ex, HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "CATEGORY_HAS_PRODUCTS", req);
+    }
+
+    @ExceptionHandler(BrandNotFoundException.class)
+    public ResponseEntity<ApiError> handleBrandNotFound(BrandNotFoundException ex, HttpServletRequest req) {
+        return error(HttpStatus.NOT_FOUND, ex.getMessage(), "BRAND_NOT_FOUND", req);
+    }
+
+    @ExceptionHandler(DuplicateBrandNameException.class)
+    public ResponseEntity<ApiError> handleDuplicateBrandName(DuplicateBrandNameException ex, HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "BRAND_NAME_ALREADY_EXISTS", req);
+    }
+
+    @ExceptionHandler(BrandHasProductsException.class)
+    public ResponseEntity<ApiError> handleBrandHasProducts(BrandHasProductsException ex, HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "BRAND_HAS_PRODUCTS", req);
+    }
+
+    @ExceptionHandler(DuplicateAttributeTypeNameException.class)
+    public ResponseEntity<ApiError> handleDuplicateAttributeTypeName(DuplicateAttributeTypeNameException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "ATTRIBUTE_TYPE_NAME_ALREADY_EXISTS", req);
+    }
+
+    @ExceptionHandler(VariantHasStockHistoryException.class)
+    public ResponseEntity<ApiError> handleVariantHasStockHistory(VariantHasStockHistoryException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "VARIANT_HAS_STOCK_HISTORY", req);
+    }
+
+    @ExceptionHandler(ReplenishmentItemNotFoundException.class)
+    public ResponseEntity<ApiError> handleReplenishmentItemNotFound(ReplenishmentItemNotFoundException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.NOT_FOUND, ex.getMessage(), "REPLENISHMENT_ITEM_NOT_FOUND", req);
     }
 
     @ExceptionHandler(DuplicateWarehouseCodeException.class)

@@ -7,6 +7,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
+
 public interface StockMovementJpaRepository extends JpaRepository<StockMovementEntity, Long> {
 
     /**
@@ -22,7 +24,23 @@ public interface StockMovementJpaRepository extends JpaRepository<StockMovementE
     @Query("SELECT m FROM StockMovementEntity m "
             + "WHERE (:sku IS NULL OR m.sku = :sku) "
             + "AND (:warehouseId IS NULL OR m.warehouseId = :warehouseId) "
+            + "AND (:type IS NULL OR m.type = :type) "
+            + "AND (:from IS NULL OR m.createdAt >= :from) "
+            + "AND (:to IS NULL OR m.createdAt <= :to) "
             + "ORDER BY m.createdAt DESC, m.id DESC")
     Page<StockMovementEntity> search(@Param("sku") String sku, @Param("warehouseId") Long warehouseId,
+            @Param("type") String type, @Param("from") Instant from, @Param("to") Instant to, Pageable pageable);
+
+    /**
+     * Últimas ENTRADAs de um SKU num depósito (item 2 — histórico de compras). Mesmo desempate
+     * por {@code id} de {@link #search} — várias entradas do mesmo recebimento podem gravar
+     * {@code createdAt} idêntico.
+     */
+    @Query("SELECT m FROM StockMovementEntity m "
+            + "WHERE m.sku = :sku AND m.warehouseId = :warehouseId AND m.type = 'ENTRADA' "
+            + "ORDER BY m.createdAt DESC, m.id DESC")
+    Page<StockMovementEntity> searchEntradas(@Param("sku") String sku, @Param("warehouseId") Long warehouseId,
             Pageable pageable);
+
+    boolean existsBySku(String sku);
 }

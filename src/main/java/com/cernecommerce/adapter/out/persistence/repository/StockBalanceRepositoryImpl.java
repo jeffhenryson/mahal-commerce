@@ -56,6 +56,12 @@ public class StockBalanceRepositoryImpl implements StockBalanceRepository {
         return stockBalanceJpaRepository.sumInventoryValueAtCost();
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public boolean existsBySku(String sku) {
+        return stockBalanceJpaRepository.existsBySku(sku);
+    }
+
     private StockBalance toDomain(StockBalanceEntity e) {
         return StockBalance.of(e.getId(), e.getSku(), e.getWarehouseId(), e.getQuantity(),
                 e.getReservedQuantity(), e.getAverageCost(), e.getVersion());

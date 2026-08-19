@@ -49,6 +49,11 @@ public class ReorderPointRepositoryImpl implements ReorderPointRepository {
     }
 
     @Override
+    public void deleteBySkuAndWarehouseId(String sku, Long warehouseId) {
+        reorderPointJpaRepository.deleteBySkuAndWarehouseId(sku, warehouseId);
+    }
+
+    @Override
     @Transactional(readOnly = true)
     public ReorderAlertCounts countAlerts() {
         List<Object[]> rows = reorderPointJpaRepository.countAlertsRaw();

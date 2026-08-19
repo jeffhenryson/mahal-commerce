@@ -5,7 +5,6 @@ import com.cernecommerce.adapter.in.dtos.request.KitRecipeRequest;
 import com.cernecommerce.adapter.in.dtos.request.PricingRequest;
 import com.cernecommerce.adapter.in.dtos.request.ProductAttributeRequest;
 import com.cernecommerce.adapter.in.dtos.request.ProductVariantRequest;
-import com.cernecommerce.adapter.in.dtos.response.BrandResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.EstoqueSummaryResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.KitAvailabilityResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.KitComponentAvailabilityResponseDTO;
@@ -16,7 +15,6 @@ import com.cernecommerce.adapter.in.dtos.response.ProductAttributeResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.ProductResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.ProductVariantResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.StockLotResponseDTO;
-import com.cernecommerce.core.domain.model.estoque.BrandSummary;
 import com.cernecommerce.core.domain.model.estoque.EstoqueSummary;
 import com.cernecommerce.core.domain.model.estoque.KitAvailability;
 import com.cernecommerce.core.domain.model.estoque.KitComponent;
@@ -82,6 +80,7 @@ public class ProductDTOConverter {
         dto.setCategory(product.category());
         dto.setCategoryId(product.categoryId());
         dto.setBrand(product.brand());
+        dto.setBrandId(product.brandId());
         dto.setImageUrl(product.imageUrl());
         dto.setOnSale(product.onSale());
         dto.setSuperPromo(product.superPromo());
@@ -159,14 +158,6 @@ public class ProductDTOConverter {
         dto.setQuantity(availability.recipeQuantity());
         dto.setAvailableQuantity(availability.availableQuantity());
         dto.setBuildableQuantity(availability.buildableQuantity());
-        return dto;
-    }
-
-    /** Bloco 2.2 — marca agregada do catálogo. */
-    public BrandResponseDTO toResponse(BrandSummary brand) {
-        BrandResponseDTO dto = new BrandResponseDTO();
-        dto.setName(brand.name());
-        dto.setProductCount(brand.productCount());
         return dto;
     }
 

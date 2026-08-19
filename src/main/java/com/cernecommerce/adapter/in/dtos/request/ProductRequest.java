@@ -36,8 +36,19 @@ public class ProductRequest {
      */
     private Long categoryId;
 
+    /**
+     * Nome da marca, como texto livre. Continua sendo o caminho aceito: um nome desconhecido
+     * <b>cria</b> a marca correspondente. Quem já souber o id prefira {@code brandId}, que
+     * dispensa a busca por nome.
+     */
     @Size(max = 100)
     private String brand;
+
+    /**
+     * Vínculo direto com uma marca existente. Quando informado, vence sobre {@code brand} e o
+     * nome é resolvido a partir dele. Id inexistente é 404.
+     */
+    private Long brandId;
 
     /** Estágio 01 do admin — link de imagem cadastrado manualmente, não upload de arquivo. */
     @Size(max = 2048)

@@ -19,6 +19,13 @@ public interface ReorderPointRepository {
     ReorderPoint save(ReorderPoint reorderPoint);
 
     /**
+     * Remove o ponto de reposição de um SKU num depósito, se existir. Idempotente — não lança se
+     * não havia nenhum configurado (item 4 do pedido do frontend: desmarcar "estoque mínimo
+     * próprio" precisa apagar de verdade, não só parar de enviar o valor).
+     */
+    void deleteBySkuAndWarehouseId(String sku, Long warehouseId);
+
+    /**
      * Contagem de pares SKU/depósito em alerta, por severidade ({@link ReorderPoint#severityFor}),
      * em todos os depósitos — ver {@link com.cernecommerce.core.domain.model.estoque.EstoqueSummary}.
      */

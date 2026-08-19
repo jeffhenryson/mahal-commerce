@@ -13,6 +13,7 @@ import com.cernecommerce.core.ports.out.compras.SupplierRepository;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Optional;
 
 public class ComprasService implements ComprasUseCase {
 
@@ -40,16 +41,34 @@ public class ComprasService implements ComprasUseCase {
         supplierRepository.findById(supplierId)
                 .orElseThrow(() -> new SupplierNotFoundException(supplierId));
 
+        // Salva o recebimento ANTES do loop de itens, para ter o id disponível e linkar cada
+        // ENTRADA de volta a ele (item 2 do pedido do frontend — histórico de compras por SKU
+        // precisa saber de qual fornecedor/recebimento veio a entrada). Mesma transação, então um
+        // adjustStock que falhar no meio do loop desfaz o recebimento junto.
+        GoodsReceipt receipt = goodsReceiptRepository.save(GoodsReceipt.create(supplierId, warehouseCode, items,
+                username));
+
         for (GoodsReceiptItem item : items) {
-            // Sempre a sobrecarga de 9 argumentos (EST-F007/EST-F008): para SKU não lote-rastreado
-            // ou sem custo conhecido, lotCode/expiryDate/unitCost chegam nulos e o comportamento é
-            // idêntico ao overload antigo.
+            // Sempre a sobrecarga de 10 argumentos (EST-F007/EST-F008 + vínculo de recebimento):
+            // para SKU não lote-rastreado ou sem custo conhecido, lotCode/expiryDate/unitCost
+            // chegam nulos e o comportamento é idêntico ao overload antigo.
             estoqueUseCase.adjustStock(item.sku(), warehouseCode, MovementType.ENTRADA, item.quantity(),
                     "Recebimento de mercadoria - fornecedor #" + supplierId, username,
-                    item.lotCode(), item.expiryDate(), item.unitCost());
+                    item.lotCode(), item.expiryDate(), item.unitCost(), receipt.id());
         }
 
-        GoodsReceipt receipt = GoodsReceipt.create(supplierId, warehouseCode, items, username);
-        return goodsReceiptRepository.save(receipt);
+        return receipt;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<GoodsReceipt> findGoodsReceiptById(Long id) {
+        return goodsReceiptRepository.findById(id);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<Supplier> findSupplierById(Long id) {
+        return supplierRepository.findById(id);
     }
 }

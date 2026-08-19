@@ -2,8 +2,11 @@ package com.cernecommerce.adapter.out.persistence.repository;
 
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.SortDirection;
+import com.cernecommerce.core.domain.model.estoque.AttributeType;
+import com.cernecommerce.core.domain.model.estoque.Brand;
 import com.cernecommerce.core.domain.model.estoque.Category;
 import com.cernecommerce.core.domain.model.estoque.CategoryProductCount;
+import com.cernecommerce.core.domain.model.estoque.ReplenishmentListItem;
 import com.cernecommerce.core.domain.model.estoque.KitComponent;
 import com.cernecommerce.core.domain.model.estoque.LotIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.MeasurementUnit;
@@ -457,10 +460,10 @@ class EstoqueRepositoryIT {
         Category categoria = categoryRepository.save(Category.create("Ren Antiga"));
         productRepository.save(Product.create("REN-001", "Produto 1", "Ren Antiga", List.of(), Pricing.empty(),
                 ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(), List.of(),
-                categoria.id()));
+                categoria.id(), null));
         productRepository.save(Product.create("REN-002", "Produto 2", "Ren Antiga", List.of(), Pricing.empty(),
                 ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(), List.of(),
-                categoria.id()));
+                categoria.id(), null));
         // Produto de outra categoria não pode ser arrastado pelo rename.
         productRepository.save(Product.create("REN-003", "Produto 3", "Outra", List.of()));
         flushAndClear();
@@ -479,7 +482,7 @@ class EstoqueRepositoryIT {
         Category categoria = categoryRepository.save(Category.create("Vinc Narguilé"));
         productRepository.save(Product.create("VINC-001", "Produto", "Vinc Narguilé", List.of(), Pricing.empty(),
                 ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(), List.of(),
-                categoria.id()));
+                categoria.id(), null));
         flushAndClear();
 
         Product reloaded = productRepository.findBySku("VINC-001").orElseThrow();
@@ -506,9 +509,11 @@ class EstoqueRepositoryIT {
         Pricing precificado = new Pricing(null, null, new BigDecimal("10.00"), null, null);
         // Gravado na ordem inversa da esperada, para a ordenação ter o que provar.
         productRepository.save(Product.create("VIT-001", "Comum", "Cat Vitrine Comum", List.of(), precificado,
-                ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(), List.of(), comum.id()));
+                ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(), List.of(), comum.id(),
+                null));
         productRepository.save(Product.create("VIT-002", "Destacado", "Cat Vitrine Destaque", List.of(), precificado,
-                ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(), List.of(), destaque.id()));
+                ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(), List.of(), destaque.id(),
+                null));
         flushAndClear();
 
         List<String> skus = productRepository.findAllActiveAndPriced(0, 100, null, null).content().stream()
@@ -528,7 +533,7 @@ class EstoqueRepositoryIT {
         productRepository.save(Product.create("ORF-001", "Sem categoria", null, List.of(), precificado));
         productRepository.save(Product.create("ORF-002", "Destacado", "Cat Orfa Destaque", List.of(), precificado,
                 ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(), List.of(),
-                destaque.id()));
+                destaque.id(), null));
         flushAndClear();
 
         List<String> skus = productRepository.findAllActiveAndPriced(0, 100, null, null).content().stream()
@@ -545,9 +550,11 @@ class EstoqueRepositoryIT {
         Category outra = categoryRepository.save(Category.create("Cat Filtro Outra"));
         Pricing precificado = new Pricing(null, null, new BigDecimal("10.00"), null, null);
         productRepository.save(Product.create("FIL-001", "Alvo", "Cat Filtro Alvo", List.of(), precificado,
-                ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(), List.of(), alvo.id()));
+                ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(), List.of(), alvo.id(),
+                null));
         productRepository.save(Product.create("FIL-002", "Outra", "Cat Filtro Outra", List.of(), precificado,
-                ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(), List.of(), outra.id()));
+                ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(), List.of(), outra.id(),
+                null));
         flushAndClear();
 
         PageResult<Product> page = productRepository.findAllActiveAndPriced(0, 100, null, alvo.id());
@@ -1703,10 +1710,10 @@ class EstoqueRepositoryIT {
         Category categoria = categoryRepository.save(Category.create("Cat Resumo " + System.nanoTime()));
         productRepository.save(Product.create("SUM-CAT-001", "P1", null, List.of(), Pricing.empty(),
                 ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(), List.of(),
-                categoria.id()));
+                categoria.id(), null));
         productRepository.save(Product.create("SUM-CAT-002", "P2", null, List.of(), Pricing.empty(),
                 ProductType.SIMPLES, false, null, null, false, false, null, null, List.of(), List.of(),
-                categoria.id()));
+                categoria.id(), null));
         flushAndClear();
 
         // Não afirma que ESTA categoria vence globalmente (o banco é compartilhado e outra
@@ -1839,5 +1846,266 @@ class EstoqueRepositoryIT {
         ReorderAlertCounts depois = reorderPointRepository.countAlerts();
         assertThat(depois.criticos()).isEqualTo(antes.criticos() + 1);
         assertThat(depois.atencao()).isEqualTo(antes.atencao() + 1);
+    }
+
+    // ── Marcas do catálogo (item 3) ───────────────────────────────────────────
+
+    @Autowired BrandRepositoryImpl brandRepository;
+
+    @Test
+    void brand_roundTrip() {
+        Brand saved = brandRepository.save(Brand.create("BrandRT Zomo"));
+        flushAndClear();
+
+        Brand reloaded = brandRepository.findById(saved.id()).orElseThrow();
+
+        assertThat(reloaded.name()).isEqualTo("BrandRT Zomo");
+        assertThat(reloaded.active()).isTrue();
+    }
+
+    @Test
+    void brand_findByName_ignoraCaixa() {
+        brandRepository.save(Brand.create("BrandCase Alfaraby"));
+        flushAndClear();
+
+        assertThat(brandRepository.findByName("brandcase alfaraby")).isPresent();
+        assertThat(brandRepository.findByName("BRANDCASE ALFARABY")).isPresent();
+    }
+
+    @Test
+    void renameBrand_atualizaAColunaDenormalizadaDosProdutosVinculados() {
+        Brand marca = brandRepository.save(Brand.create("BrandRen Antiga"));
+        productRepository.save(Product.of(null, "BRANDREN-001", "Produto 1", "cat", true, List.of(),
+                Pricing.empty(), ProductType.SIMPLES, false, "BrandRen Antiga", null, false, false, null, null,
+                List.of(), List.of(), null, null, null, false, false, true, true, ProductStatus.ATIVO,
+                marca.id()));
+        flushAndClear();
+
+        int atualizados = productRepository.renameBrand(marca.id(), "BrandRen Nova");
+        flushAndClear();
+
+        assertThat(atualizados).isEqualTo(1);
+        assertThat(productRepository.findBySku("BRANDREN-001").orElseThrow().brand()).isEqualTo("BrandRen Nova");
+    }
+
+    @Test
+    void product_roundTripDoVinculoDeMarca() {
+        Brand marca = brandRepository.save(Brand.create("BrandVinc Zomo"));
+        productRepository.save(Product.of(null, "BRANDVINC-001", "Produto", "cat", true, List.of(), Pricing.empty(),
+                ProductType.SIMPLES, false, "BrandVinc Zomo", null, false, false, null, null, List.of(), List.of(),
+                null, null, null, false, false, true, true, ProductStatus.ATIVO, marca.id()));
+        flushAndClear();
+
+        Product reloaded = productRepository.findBySku("BRANDVINC-001").orElseThrow();
+
+        assertThat(reloaded.brandId()).isEqualTo(marca.id());
+        assertThat(reloaded.brand()).isEqualTo("BrandVinc Zomo");
+    }
+
+    // ── Vocabulário de atributos (item 5) ─────────────────────────────────────
+
+    @Autowired AttributeTypeRepositoryImpl attributeTypeRepository;
+
+    @Test
+    void attributeType_roundTrip() {
+        AttributeType saved = attributeTypeRepository.save(AttributeType.create("AttrRT Intensidade"));
+        flushAndClear();
+
+        List<AttributeType> all = attributeTypeRepository.findAllOrderByName();
+
+        assertThat(all).extracting(AttributeType::id).contains(saved.id());
+    }
+
+    @Test
+    void attributeType_findByName_ignoraCaixa() {
+        attributeTypeRepository.save(AttributeType.create("AttrCase Potência"));
+        flushAndClear();
+
+        assertThat(attributeTypeRepository.findByName("attrcase potência")).isPresent();
+    }
+
+    // ── Histórico de compras — vínculo StockMovement→GoodsReceipt (item 2) ───
+
+    @Test
+    void stockMovement_goodsReceiptId_roundTrip() {
+        Warehouse deposito = givenWarehouse("PURCH-WH-" + System.nanoTime());
+        productRepository.save(Product.create("PURCH-001", "Essência", "essencias", List.of()));
+        stockMovementRepository.save(StockMovement.create("PURCH-001", deposito.id(), MovementType.ENTRADA,
+                new BigDecimal("24"), "Recebimento de mercadoria - fornecedor #3", "gerente", null,
+                new BigDecimal("42.50"), 87L));
+        flushAndClear();
+
+        PageResult<StockMovement> result = stockMovementRepository
+                .findEntradasBySkuAndWarehouseId("PURCH-001", deposito.id(), 0, 20);
+
+        assertThat(result.content()).hasSize(1);
+        assertThat(result.content().get(0).goodsReceiptId()).isEqualTo(87L);
+        assertThat(result.content().get(0).unitCost()).isEqualByComparingTo("42.50");
+    }
+
+    @Test
+    void stockMovement_semGoodsReceiptId_ficaNulo() {
+        // Movimentação manual (registerMovement), sem vínculo de recebimento — limitação conhecida
+        // de dado histórico e do caminho manual, não erro.
+        Warehouse deposito = givenWarehouse("PURCH-WH2-" + System.nanoTime());
+        productRepository.save(Product.create("PURCH-002", "Essência", "essencias", List.of()));
+        stockMovementRepository.save(StockMovement.create("PURCH-002", deposito.id(), MovementType.ENTRADA,
+                new BigDecimal("10"), "Ajuste manual", "gerente"));
+        flushAndClear();
+
+        PageResult<StockMovement> result = stockMovementRepository
+                .findEntradasBySkuAndWarehouseId("PURCH-002", deposito.id(), 0, 20);
+
+        assertThat(result.content().get(0).goodsReceiptId()).isNull();
+    }
+
+    @Test
+    void listMovements_filtraPorTipoEIntervaloDeData() {
+        // item 6 — o paginador e a tabela precisam bater: filtro no banco, não no cliente.
+        Warehouse deposito = givenWarehouse("MOVFILT-WH-" + System.nanoTime());
+        productRepository.save(Product.create("MOVFILT-001", "Produto", "cat", List.of()));
+        stockMovementRepository.save(StockMovement.create("MOVFILT-001", deposito.id(), MovementType.ENTRADA,
+                new BigDecimal("10"), "Entrada", "gerente"));
+        stockMovementRepository.save(StockMovement.create("MOVFILT-001", deposito.id(), MovementType.SAIDA,
+                new BigDecimal("3"), "Saída", "gerente"));
+        flushAndClear();
+
+        PageResult<StockMovement> apenasEntradas = stockMovementRepository.findBySkuAndWarehouseId("MOVFILT-001",
+                deposito.id(), MovementType.ENTRADA, null, null, 0, 20);
+        PageResult<StockMovement> forDoIntervalo = stockMovementRepository.findBySkuAndWarehouseId("MOVFILT-001",
+                deposito.id(), null, Instant.now().plusSeconds(3600), null, 0, 20);
+
+        assertThat(apenasEntradas.content()).extracting(StockMovement::type).containsExactly(MovementType.ENTRADA);
+        assertThat(forDoIntervalo.content()).isEmpty();
+    }
+
+    // ── DELETE reorder-point (item 4) ─────────────────────────────────────────
+
+    @Test
+    void deleteReorderPoint_removeQuandoExiste() {
+        Warehouse deposito = givenWarehouse("DELRP-WH-" + System.nanoTime());
+        reorderPointRepository.save(ReorderPoint.create("DELRP-001", deposito.id(), new BigDecimal("10")));
+        flushAndClear();
+
+        reorderPointRepository.deleteBySkuAndWarehouseId("DELRP-001", deposito.id());
+        flushAndClear();
+
+        assertThat(reorderPointRepository.findBySkuAndWarehouseId("DELRP-001", deposito.id())).isEmpty();
+    }
+
+    @Test
+    void deleteReorderPoint_idempotenteQuandoNaoExiste() {
+        Warehouse deposito = givenWarehouse("DELRP-WH2-" + System.nanoTime());
+
+        // Não lança e não afeta nenhuma outra linha — mesma régua do endpoint (204 sempre).
+        reorderPointRepository.deleteBySkuAndWarehouseId("SEM-MINIMO", deposito.id());
+    }
+
+    // ── existsBySku para bloquear DELETE de variante (item 8) ─────────────────
+
+    @Test
+    void stockBalance_existsBySku_refleteSaldoGravado() {
+        Warehouse deposito = givenWarehouse("EXVAR-WH-" + System.nanoTime());
+        String sku = "EXVAR-BAL-" + System.nanoTime();
+
+        assertThat(stockBalanceRepository.existsBySku(sku)).isFalse();
+
+        stockBalanceRepository.save(StockBalance.of(null, sku, deposito.id(), new BigDecimal("5"), 0L));
+        flushAndClear();
+
+        assertThat(stockBalanceRepository.existsBySku(sku)).isTrue();
+    }
+
+    @Test
+    void stockMovement_existsBySku_refleteMovimentacaoGravada() {
+        Warehouse deposito = givenWarehouse("EXVAR-WH2-" + System.nanoTime());
+        String sku = "EXVAR-MOV-" + System.nanoTime();
+
+        assertThat(stockMovementRepository.existsBySku(sku)).isFalse();
+
+        stockMovementRepository.save(StockMovement.create(sku, deposito.id(), MovementType.ENTRADA,
+                new BigDecimal("5"), "Entrada", "gerente"));
+        flushAndClear();
+
+        assertThat(stockMovementRepository.existsBySku(sku)).isTrue();
+    }
+
+    // ── Lista de Reposição (item 1) ────────────────────────────────────────────
+
+    @Autowired ReplenishmentListRepositoryImpl replenishmentListRepository;
+
+    private ReplenishmentListItem sampleReplenishmentItem(String sku, Long warehouseId) {
+        return ReplenishmentListItem.create(sku, warehouseId, "Essência Babylon 50g", "Essências", "Zomo",
+                MeasurementUnit.UN, new BigDecimal("2.000"), new BigDecimal("10.000"), new BigDecimal("8.000"),
+                new BigDecimal("12"), new BigDecimal("45.00"), new BigDecimal("24.000"), new BigDecimal("42.50"),
+                Instant.parse("2026-07-01T10:00:00Z"), "pedir junto com o pedido da Zomo", "jeff");
+    }
+
+    @Test
+    void replenishmentListItem_roundTrip() {
+        Warehouse deposito = givenWarehouse("REPL-WH-" + System.nanoTime());
+        String sku = "REPL-001-" + System.nanoTime();
+
+        replenishmentListRepository.save(sampleReplenishmentItem(sku, deposito.id()));
+        flushAndClear();
+
+        ReplenishmentListItem reloaded = replenishmentListRepository
+                .findBySkuAndWarehouseId(sku, deposito.id()).orElseThrow();
+
+        assertThat(reloaded.productNameSnapshot()).isEqualTo("Essência Babylon 50g");
+        assertThat(reloaded.unitSnapshot()).isEqualTo(MeasurementUnit.UN);
+        assertThat(reloaded.currentStockSnapshot()).isEqualByComparingTo("2.000");
+        assertThat(reloaded.minStockSnapshot()).isEqualByComparingTo("10.000");
+        assertThat(reloaded.suggestedQuantitySnapshot()).isEqualByComparingTo("8.000");
+        assertThat(reloaded.quantity()).isEqualByComparingTo("12");
+        assertThat(reloaded.previousPurchaseQuantitySnapshot()).isEqualByComparingTo("24.000");
+        assertThat(reloaded.note()).isEqualTo("pedir junto com o pedido da Zomo");
+        assertThat(reloaded.createdBy()).isEqualTo("jeff");
+    }
+
+    @Test
+    void replenishmentListItem_upsertPorSkuEDeposito_substituiNaoDuplica() {
+        Warehouse deposito = givenWarehouse("REPL-WH2-" + System.nanoTime());
+        String sku = "REPL-002-" + System.nanoTime();
+
+        replenishmentListRepository.save(sampleReplenishmentItem(sku, deposito.id()));
+        flushAndClear();
+        replenishmentListRepository.save(sampleReplenishmentItem(sku, deposito.id())
+                .withQuantityAndNote(new BigDecimal("99"), "atualizado"));
+        flushAndClear();
+
+        List<ReplenishmentListItem> items = replenishmentListRepository.findByWarehouseId(deposito.id()).stream()
+                .filter(i -> i.sku().equals(sku))
+                .toList();
+
+        assertThat(items).hasSize(1);
+        assertThat(items.get(0).quantity()).isEqualByComparingTo("99");
+        assertThat(items.get(0).note()).isEqualTo("atualizado");
+    }
+
+    @Test
+    void replenishmentListItem_deleteBySkuAndWarehouseId() {
+        Warehouse deposito = givenWarehouse("REPL-WH3-" + System.nanoTime());
+        String sku = "REPL-003-" + System.nanoTime();
+        replenishmentListRepository.save(sampleReplenishmentItem(sku, deposito.id()));
+        flushAndClear();
+
+        replenishmentListRepository.deleteBySkuAndWarehouseId(sku, deposito.id());
+        flushAndClear();
+
+        assertThat(replenishmentListRepository.findBySkuAndWarehouseId(sku, deposito.id())).isEmpty();
+    }
+
+    @Test
+    void replenishmentListItem_deleteByWarehouseId_limpaAListaInteira() {
+        Warehouse deposito = givenWarehouse("REPL-WH4-" + System.nanoTime());
+        replenishmentListRepository.save(sampleReplenishmentItem("REPL-004A-" + System.nanoTime(), deposito.id()));
+        replenishmentListRepository.save(sampleReplenishmentItem("REPL-004B-" + System.nanoTime(), deposito.id()));
+        flushAndClear();
+
+        replenishmentListRepository.deleteByWarehouseId(deposito.id());
+        flushAndClear();
+
+        assertThat(replenishmentListRepository.findByWarehouseId(deposito.id())).isEmpty();
     }
 }

@@ -47,4 +47,8 @@ public class StockMovementEntity {
     /** Custo unitário da entrada (EST-F007), opcional. {@code null} em SAIDA/AJUSTE. */
     @Column(name = "unit_cost", precision = 14, scale = 2)
     private BigDecimal unitCost;
+
+    /** Vínculo opcional com o recebimento que originou a ENTRADA. NULL em movimentação manual. */
+    @Column(name = "goods_receipt_id")
+    private Long goodsReceiptId;
 }

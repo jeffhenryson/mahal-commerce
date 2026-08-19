@@ -1,14 +1,21 @@
 package com.cernecommerce.adapter.in.controller;
 
+import com.cernecommerce.adapter.in.converter.BrandDTOConverter;
 import com.cernecommerce.adapter.in.converter.CategoryDTOConverter;
 import com.cernecommerce.adapter.in.converter.ProductDTOConverter;
+import com.cernecommerce.adapter.in.converter.ReplenishmentListDTOConverter;
 import com.cernecommerce.adapter.in.converter.StockCountDTOConverter;
 import com.cernecommerce.adapter.in.converter.StockMovementDTOConverter;
 import com.cernecommerce.adapter.in.converter.StockReservationDTOConverter;
 import com.cernecommerce.adapter.in.converter.WarehouseDTOConverter;
 import com.cernecommerce.adapter.in.dtos.request.ActiveRequest;
 import com.cernecommerce.adapter.in.dtos.request.AddVariantsRequest;
+import com.cernecommerce.adapter.in.dtos.request.AttributeTypeRequest;
+import com.cernecommerce.adapter.in.dtos.request.BrandPatchRequest;
+import com.cernecommerce.adapter.in.dtos.request.BrandRequest;
 import com.cernecommerce.adapter.in.dtos.request.CategoryPatchRequest;
+import com.cernecommerce.adapter.in.dtos.request.ReplenishmentItemPatchRequest;
+import com.cernecommerce.adapter.in.dtos.request.ReplenishmentItemRequest;
 import com.cernecommerce.adapter.in.dtos.request.CategoryRequest;
 import com.cernecommerce.adapter.in.dtos.request.LotTrackedRequest;
 import com.cernecommerce.adapter.in.dtos.request.InitialStockRequest;
@@ -31,6 +38,8 @@ import com.cernecommerce.adapter.in.dtos.response.LotIntegrityMismatchResponseDT
 import com.cernecommerce.adapter.in.dtos.response.OrphanSkuResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.PricingResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.ProductResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.PurchaseHistoryResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.ReplenishmentListItemResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.ReorderPointResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.ReservationIntegrityMismatchResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.StockBalanceResponseDTO;
@@ -43,11 +52,13 @@ import com.cernecommerce.core.domain.event.AuditEvent;
 import com.cernecommerce.core.domain.event.AuditEvent.EventType;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.SortDirection;
-import com.cernecommerce.core.domain.model.estoque.BrandSummary;
+import com.cernecommerce.core.domain.model.estoque.AttributeType;
+import com.cernecommerce.core.domain.model.estoque.Brand;
 import com.cernecommerce.core.domain.model.estoque.Category;
 import com.cernecommerce.core.domain.model.estoque.KitAvailability;
 import com.cernecommerce.core.domain.model.estoque.LotIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.MeasurementUnit;
+import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductFilter;
@@ -56,6 +67,7 @@ import com.cernecommerce.core.domain.model.estoque.ProductStatus;
 import com.cernecommerce.core.domain.model.estoque.ProductType;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.ReorderPoint;
+import com.cernecommerce.core.domain.model.estoque.ReplenishmentListItem;
 import com.cernecommerce.core.domain.model.estoque.ReservationIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
 import com.cernecommerce.core.domain.model.estoque.StockCount;
@@ -64,6 +76,8 @@ import com.cernecommerce.core.domain.model.estoque.StockMovement;
 import com.cernecommerce.core.domain.model.estoque.StockReservation;
 import com.cernecommerce.core.domain.model.estoque.Warehouse;
 import com.cernecommerce.core.domain.exception.storage.InvalidImageFormatException;
+import com.cernecommerce.core.domain.model.compras.Supplier;
+import com.cernecommerce.core.ports.in.ComprasUseCase;
 import com.cernecommerce.core.ports.in.EstoqueUseCase;
 import com.cernecommerce.core.ports.in.ProductImageUseCase;
 import io.swagger.v3.oas.annotations.Operation;
@@ -88,7 +102,9 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.net.URI;
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -112,14 +128,18 @@ public class EstoqueController {
     private final StockCountDTOConverter stockCountConverter;
     private final StockReservationDTOConverter reservationConverter;
     private final CategoryDTOConverter categoryConverter;
+    private final BrandDTOConverter brandConverter;
     private final ProductImageUseCase productImageUseCase;
     private final ApplicationEventPublisher publisher;
+    private final ComprasUseCase comprasUseCase;
+    private final ReplenishmentListDTOConverter replenishmentListConverter;
 
     public EstoqueController(EstoqueUseCase estoqueUseCase, ProductDTOConverter converter,
             WarehouseDTOConverter warehouseConverter, StockMovementDTOConverter movementConverter,
             StockCountDTOConverter stockCountConverter, StockReservationDTOConverter reservationConverter,
-            CategoryDTOConverter categoryConverter, ProductImageUseCase productImageUseCase,
-            ApplicationEventPublisher publisher) {
+            CategoryDTOConverter categoryConverter, BrandDTOConverter brandConverter,
+            ProductImageUseCase productImageUseCase, ApplicationEventPublisher publisher,
+            ComprasUseCase comprasUseCase, ReplenishmentListDTOConverter replenishmentListConverter) {
         this.estoqueUseCase = estoqueUseCase;
         this.converter = converter;
         this.warehouseConverter = warehouseConverter;
@@ -127,8 +147,11 @@ public class EstoqueController {
         this.stockCountConverter = stockCountConverter;
         this.reservationConverter = reservationConverter;
         this.categoryConverter = categoryConverter;
+        this.brandConverter = brandConverter;
         this.productImageUseCase = productImageUseCase;
         this.publisher = publisher;
+        this.comprasUseCase = comprasUseCase;
+        this.replenishmentListConverter = replenishmentListConverter;
     }
 
     @Operation(summary = "Lista produtos paginados, com busca, filtros e ordenação",
@@ -226,9 +249,11 @@ public class EstoqueController {
         PageResult<Category> result = estoqueUseCase.listCategories(page, size);
         List<Long> categoryIds = result.content().stream().map(Category::id).toList();
         Map<Long, Long> productCounts = estoqueUseCase.countProductsByCategoryIds(categoryIds);
+        Map<Long, BigDecimal> averageMargins = estoqueUseCase.averageMarginPercentByCategoryIds(categoryIds);
         return ResponseEntity.ok(new PageResult<>(
                 result.content().stream()
-                        .map(c -> categoryConverter.toResponse(c, productCounts.getOrDefault(c.id(), 0L)))
+                        .map(c -> categoryConverter.toResponse(c, productCounts.getOrDefault(c.id(), 0L),
+                                averageMargins.get(c.id())))
                         .toList(),
                 result.page(), result.size(), result.totalElements(), result.totalPages()));
     }
@@ -250,10 +275,8 @@ public class EstoqueController {
         return ResponseEntity.noContent().build();
     }
 
-    @Operation(summary = "Marcas em uso no catálogo",
-            description = "Agregadas do campo texto livre `brand` de cada produto — não existe "
-                    + "entidade de marca própria. `search` filtra por trecho no nome da marca, sem "
-                    + "diferenciar maiúsculas.")
+    @Operation(summary = "Lista marcas do catálogo, incluindo as inativas",
+            description = "`search` filtra por trecho no nome, sem diferenciar maiúsculas.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "OK"),
             @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
@@ -264,10 +287,121 @@ public class EstoqueController {
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size,
             @RequestParam(required = false) @Size(max = 100) String search) {
-        PageResult<BrandSummary> result = estoqueUseCase.listBrands(search, page, size);
+        PageResult<Brand> result = estoqueUseCase.listBrands(search, page, size);
+        List<Long> brandIds = result.content().stream().map(Brand::id).toList();
+        Map<Long, Long> productCounts = estoqueUseCase.countProductsByBrandIds(brandIds);
+        Map<Long, BigDecimal> averageMargins = estoqueUseCase.averageMarginPercentByBrandIds(brandIds);
         return ResponseEntity.ok(new PageResult<>(
-                result.content().stream().map(converter::toResponse).toList(),
+                result.content().stream()
+                        .map(b -> brandConverter.toResponse(b, productCounts.getOrDefault(b.id(), 0L),
+                                averageMargins.get(b.id())))
+                        .toList(),
                 result.page(), result.size(), result.totalElements(), result.totalPages()));
+    }
+
+    @Operation(summary = "Remove uma marca do catálogo",
+            description = "Bloqueado com 409 se houver produto vinculado — a FK denormalizada não "
+                    + "tem ON DELETE, então apagar deixaria o vínculo órfão. Para remover, primeiro "
+                    + "reatribua os produtos a outra marca.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "204", description = "Removida"),
+            @ApiResponse(responseCode = "404", description = "Marca não encontrada", content = @Content),
+            @ApiResponse(responseCode = "409", description = "Marca com produto vinculado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @DeleteMapping("/brands/{id}")
+    @PreAuthorize("hasAuthority('ESTOQUE_BRAND_MANAGE')")
+    public ResponseEntity<Void> deleteBrand(@PathVariable Long id) {
+        estoqueUseCase.deleteBrand(id);
+        return ResponseEntity.noContent().build();
+    }
+
+    @Operation(summary = "Cria uma marca do catálogo")
+    @ApiResponses({
+            @ApiResponse(responseCode = "201", description = "Criada"),
+            @ApiResponse(responseCode = "409", description = "Já existe marca com esse nome", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PostMapping("/brands")
+    @PreAuthorize("hasAuthority('ESTOQUE_BRAND_MANAGE')")
+    public ResponseEntity<BrandResponseDTO> createBrand(@Valid @RequestBody BrandRequest request,
+            Authentication authentication) {
+        Brand created = estoqueUseCase.createBrand(request.getName());
+        publisher.publishEvent(AuditEvent.of(EventType.BRAND_CREATED,
+                authentication.getName(), Map.of("brandId", String.valueOf(created.id()),
+                        "name", created.name())));
+        return ResponseEntity.created(URI.create("/estoque/brands/" + created.id()))
+                .body(brandConverter.toResponse(created));
+    }
+
+    @Operation(summary = "Renomeia uma marca",
+            description = "Propaga o novo nome para todos os produtos vinculados.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "404", description = "Marca não encontrada", content = @Content),
+            @ApiResponse(responseCode = "409", description = "Já existe marca com esse nome", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PatchMapping("/brands/{id}")
+    @PreAuthorize("hasAuthority('ESTOQUE_BRAND_MANAGE')")
+    public ResponseEntity<BrandResponseDTO> updateBrand(@PathVariable Long id,
+            @Valid @RequestBody BrandPatchRequest request, Authentication authentication) {
+        Brand updated = estoqueUseCase.updateBrand(id, request.getName());
+        publisher.publishEvent(AuditEvent.of(EventType.BRAND_UPDATED,
+                authentication.getName(), Map.of("brandId", String.valueOf(id))));
+        return ResponseEntity.ok(brandConverter.toResponse(updated));
+    }
+
+    @Operation(summary = "Ativa ou desativa uma marca",
+            description = "Marca inativa some da listagem ativa, mas os produtos vinculados continuam "
+                    + "à venda — mesma régua de categoria.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "404", description = "Marca não encontrada", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PatchMapping("/brands/{id}/active")
+    @PreAuthorize("hasAuthority('ESTOQUE_BRAND_MANAGE')")
+    public ResponseEntity<BrandResponseDTO> setBrandActive(@PathVariable Long id,
+            @Valid @RequestBody ActiveRequest request, Authentication authentication) {
+        Brand updated = estoqueUseCase.setBrandActive(id, request.getActive());
+        publisher.publishEvent(AuditEvent.of(
+                Boolean.TRUE.equals(request.getActive()) ? EventType.BRAND_ACTIVATED : EventType.BRAND_DEACTIVATED,
+                authentication.getName(), Map.of("brandId", String.valueOf(id))));
+        return ResponseEntity.ok(brandConverter.toResponse(updated));
+    }
+
+    // ── Vocabulário de atributos ─────────────────────────────────────────────
+
+    @Operation(summary = "Lista os tipos de atributo cadastrados",
+            description = "Vocabulário de nomes usado por `ProductAttribute.type` no cadastro de "
+                    + "produto/variação — sugestão/consistência, não restrição: um atributo pode "
+                    + "usar um tipo não cadastrado aqui.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/attribute-types")
+    @PreAuthorize("hasAuthority('ESTOQUE_PRODUCT_READ')")
+    public ResponseEntity<List<String>> listAttributeTypes() {
+        return ResponseEntity.ok(estoqueUseCase.listAttributeTypes().stream().map(AttributeType::name).toList());
+    }
+
+    @Operation(summary = "Cadastra um novo tipo de atributo")
+    @ApiResponses({
+            @ApiResponse(responseCode = "201", description = "Criado"),
+            @ApiResponse(responseCode = "409", description = "Já existe tipo de atributo com esse nome", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PostMapping("/attribute-types")
+    @PreAuthorize("hasAuthority('ESTOQUE_ATTRIBUTE_MANAGE')")
+    public ResponseEntity<Void> createAttributeType(@Valid @RequestBody AttributeTypeRequest request,
+            Authentication authentication) {
+        AttributeType created = estoqueUseCase.createAttributeType(request.getName());
+        publisher.publishEvent(AuditEvent.of(EventType.ATTRIBUTE_TYPE_CREATED,
+                authentication.getName(), Map.of("attributeTypeId", String.valueOf(created.id()),
+                        "name", created.name())));
+        return ResponseEntity.created(URI.create("/estoque/attribute-types/" + created.id())).build();
     }
 
     @Operation(summary = "Cria uma categoria do catálogo")
@@ -388,7 +522,7 @@ public class EstoqueController {
                 initialStock == null ? null : new EstoqueUseCase.InitialStockCommand(initialStock.getWarehouseCode(),
                         initialStock.getQuantity(), initialStock.getLotCode(), initialStock.getExpiryDate()),
                 authentication.getName(), converter.toKitComponentCommands(request.getComponents()),
-                request.getStatus());
+                request.getStatus(), request.getBrandId());
         publisher.publishEvent(AuditEvent.of(EventType.PRODUCT_CREATED,
                 authentication.getName(), Map.of("sku", created.sku())));
         return ResponseEntity.created(URI.create("/estoque/products/" + created.sku()))
@@ -423,7 +557,7 @@ public class EstoqueController {
                 request.getAttributes() == null ? null : converter.toAttributes(request.getAttributes()),
                 request.getCategoryId(), request.getBarcode(), request.getUnit(), request.getSampleProduct(),
                 request.getKitComponentEligible(), request.getVisibleInPos(), request.getVisibleInMarketplace(),
-                request.getStatus());
+                request.getStatus(), request.getBrandId());
         publisher.publishEvent(AuditEvent.of(EventType.PRODUCT_UPDATED,
                 authentication.getName(), Map.of("sku", updated.sku())));
         // Evento próprio para mudança de preço: quem baixou o preço de quê e quando é a pergunta
@@ -440,10 +574,10 @@ public class EstoqueController {
 
     @Operation(summary = "Acrescenta uma ou mais variações novas à grade de um produto já existente",
             description = "Puramente aditivo — nenhuma variação já cadastrada é alterada ou "
-                    + "removida. Não existe caminho de substituição em massa da grade nem de "
-                    + "exclusão: excluir de fato deixaria órfão o histórico de estoque que "
-                    + "referencia o SKU da variação como texto livre. Mandar `pricing` em alguma "
-                    + "variação nova exige `ESTOQUE_PRODUCT_PRICE_MANAGE` além de "
+                    + "removida. Não existe caminho de substituição em massa da grade; para "
+                    + "excluir uma variação isolada veja "
+                    + "`DELETE /estoque/products/{sku}/variants/{variantSku}`. Mandar `pricing` em "
+                    + "alguma variação nova exige `ESTOQUE_PRODUCT_PRICE_MANAGE` além de "
                     + "`ESTOQUE_PRODUCT_MANAGE`.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = ProductResponseDTO.class))),
@@ -468,7 +602,7 @@ public class EstoqueController {
     @Operation(summary = "Altera parcialmente uma variação já existente (não altera o SKU dela)",
             description = "Campo ausente ou nulo é mantido, inclusive dentro de `pricing`. Para "
                     + "tirar a variação de circulação sem apagar histórico, use `active: false` — "
-                    + "não há endpoint de exclusão. Mandar `pricing` exige "
+                    + "é o caminho recomendado. Mandar `pricing` exige "
                     + "`ESTOQUE_PRODUCT_PRICE_MANAGE` além de `ESTOQUE_PRODUCT_MANAGE`.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = ProductResponseDTO.class))),
@@ -488,6 +622,32 @@ public class EstoqueController {
                 converter.toPricing(request.getPricing()), request.getBarcode());
         publisher.publishEvent(AuditEvent.of(EventType.PRODUCT_UPDATED,
                 authentication.getName(), Map.of("sku", sku, "variantSku", variantSku)));
+        return ResponseEntity.ok(converter.toResponse(updated));
+    }
+
+    @Operation(summary = "Remove de fato uma variação da grade",
+            description = "Bloqueado com 409 se houver saldo ou movimentação de estoque gravados "
+                    + "para o SKU da variante, mesmo com saldo zerado hoje — "
+                    + "`stock_balance`/`stock_movement` referenciam o SKU como texto livre, sem FK, "
+                    + "e apagar deixaria esse histórico órfão. Para retirar uma variante de "
+                    + "circulação preservando histórico, use "
+                    + "`PATCH .../variants/{variantSku} {\"active\": false}` — é o caminho "
+                    + "recomendado; este endpoint é para o caso concreto de variante criada por "
+                    + "engano, sem nenhuma movimentação ainda.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = ProductResponseDTO.class))),
+            @ApiResponse(responseCode = "404", description = "Produto ou variação não encontrados", content = @Content),
+            @ApiResponse(responseCode = "409", description = "Há saldo ou movimentação de estoque gravados para este SKU", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @DeleteMapping("/products/{sku}/variants/{variantSku}")
+    @PreAuthorize("hasAuthority('ESTOQUE_PRODUCT_MANAGE')")
+    public ResponseEntity<ProductResponseDTO> deleteVariant(
+            @PathVariable @NotBlank @Size(min = 3, max = 50) String sku,
+            @PathVariable @NotBlank @Size(min = 3, max = 50) String variantSku, Authentication authentication) {
+        Product updated = estoqueUseCase.deleteVariant(sku, variantSku);
+        publisher.publishEvent(AuditEvent.of(EventType.PRODUCT_UPDATED,
+                authentication.getName(), Map.of("sku", sku, "variantSku", variantSku, "variantDeleted", true)));
         return ResponseEntity.ok(converter.toResponse(updated));
     }
 
@@ -718,7 +878,9 @@ public class EstoqueController {
 
     @Operation(summary = "Lista o histórico paginado de movimentações de estoque",
             description = "`sku` e `warehouseCode` são opcionais. Omitidos, devolve o feed geral de "
-                    + "movimentações (mais recentes primeiro); informados, filtram por esse SKU e/ou depósito.")
+                    + "movimentações (mais recentes primeiro); informados, filtram por esse SKU e/ou "
+                    + "depósito. `type` e o intervalo `from`/`to` (data-hora ISO) também são "
+                    + "opcionais e combináveis com os demais.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "OK"),
             @ApiResponse(responseCode = "404", description = "Depósito não encontrado", content = @Content),
@@ -729,9 +891,13 @@ public class EstoqueController {
     public ResponseEntity<PageResult<StockMovementResponseDTO>> listMovements(
             @RequestParam(required = false) @Size(min = 3, max = 50) String sku,
             @RequestParam(required = false) @Size(min = 2, max = 50) String warehouseCode,
+            @RequestParam(required = false) MovementType type,
+            @RequestParam(required = false) Instant from,
+            @RequestParam(required = false) Instant to,
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
-        PageResult<StockMovement> result = estoqueUseCase.listMovements(sku, warehouseCode, page, size);
+        PageResult<StockMovement> result = estoqueUseCase.listMovements(sku, warehouseCode, type, from, to, page,
+                size);
         Map<Long, String> warehouseCodesById = warehouseCode != null ? Map.of() : resolveWarehouseCodes(result);
         Map<String, MeasurementUnit> unitsBySku = new HashMap<>();
         PageResult<StockMovementResponseDTO> response = new PageResult<>(
@@ -757,6 +923,143 @@ public class EstoqueController {
         return codesById;
     }
 
+    @Operation(summary = "Histórico de compras (últimas entradas) de um SKU num depósito",
+            description = "Mais recentes primeiro. Substitui a varredura de "
+                    + "`GET /estoque/movements?sku=...&size=20` procurando a primeira ENTRADA, que "
+                    + "perde a referência em SKUs de giro rápido com mais de 20 movimentações desde "
+                    + "a última entrada. `supplierId`/`supplierName`/`goodsReceiptId` ficam nulos em "
+                    + "entradas manuais e em toda entrada anterior à introdução do vínculo com "
+                    + "recebimento — limitação conhecida de dado histórico, não erro.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "404", description = "Depósito não encontrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/products/{sku}/purchase-history")
+    @PreAuthorize("hasAuthority('ESTOQUE_PRODUCT_READ')")
+    public ResponseEntity<PageResult<PurchaseHistoryResponseDTO>> listPurchaseHistory(
+            @PathVariable @NotBlank @Size(min = 3, max = 50) String sku,
+            @RequestParam @NotBlank @Size(min = 2, max = 50) String warehouseCode,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+        PageResult<StockMovement> result = estoqueUseCase.listPurchaseHistory(sku, warehouseCode, page, size);
+        Map<Long, Supplier> suppliersByReceiptId = new HashMap<>();
+        PageResult<PurchaseHistoryResponseDTO> response = new PageResult<>(
+                result.content().stream()
+                        .map(m -> {
+                            Supplier supplier = m.goodsReceiptId() == null
+                                    ? null
+                                    : suppliersByReceiptId.computeIfAbsent(m.goodsReceiptId(), this::resolveSupplier);
+                            return movementConverter.toPurchaseHistoryResponse(m,
+                                    supplier == null ? null : supplier.id(),
+                                    supplier == null ? null : supplier.legalName());
+                        })
+                        .toList(),
+                result.page(), result.size(), result.totalElements(), result.totalPages());
+        return ResponseEntity.ok(response);
+    }
+
+    /** {@code null} quando o recebimento ou o fornecedor não resolvem mais (dado histórico). */
+    private Supplier resolveSupplier(Long goodsReceiptId) {
+        return comprasUseCase.findGoodsReceiptById(goodsReceiptId)
+                .flatMap(receipt -> comprasUseCase.findSupplierById(receipt.supplierId()))
+                .orElse(null);
+    }
+
+    // ── Lista de Reposição ───────────────────────────────────────────────────
+
+    @Operation(summary = "Lista os itens anotados na lista de reposição de um depósito",
+            description = "Mais recentemente anotados primeiro. Os campos de estoque são um "
+                    + "snapshot tirado no momento do POST — nunca recalculados aqui.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "404", description = "Depósito não encontrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/replenishment-list")
+    @PreAuthorize("hasAuthority('ESTOQUE_PRODUCT_READ')")
+    public ResponseEntity<List<ReplenishmentListItemResponseDTO>> listReplenishmentItems(
+            @RequestParam @NotBlank @Size(min = 2, max = 50) String warehouseCode) {
+        List<ReplenishmentListItem> items = estoqueUseCase.listReplenishmentItems(warehouseCode);
+        return ResponseEntity.ok(items.stream().map(replenishmentListConverter::toResponse).toList());
+    }
+
+    @Operation(summary = "Anota (ou reanota) um item na lista de reposição",
+            description = "Se o SKU já estiver na lista deste depósito, substitui o item — não "
+                    + "duplica. Tira um snapshot de produto/saldo/ponto de reposição/custo/última "
+                    + "compra no momento da chamada; se o saldo mudar depois, a intenção de compra "
+                    + "já anotada continua valendo.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "201", description = "Anotado"),
+            @ApiResponse(responseCode = "404", description = "SKU ou depósito não encontrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PostMapping("/replenishment-list/items")
+    @PreAuthorize("hasAuthority('ESTOQUE_REPLENISHMENT_MANAGE')")
+    public ResponseEntity<ReplenishmentListItemResponseDTO> upsertReplenishmentItem(
+            @Valid @RequestBody ReplenishmentItemRequest request, Authentication authentication) {
+        ReplenishmentListItem created = estoqueUseCase.upsertReplenishmentItem(request.getSku(),
+                request.getWarehouseCode(), request.getQuantity(), request.getNote(), authentication.getName());
+        publisher.publishEvent(AuditEvent.of(EventType.REPLENISHMENT_ITEM_ADDED, authentication.getName(),
+                Map.of("sku", request.getSku(), "warehouseCode", request.getWarehouseCode())));
+        return ResponseEntity.status(201).body(replenishmentListConverter.toResponse(created));
+    }
+
+    @Operation(summary = "Altera quantity e/ou note de um item já anotado",
+            description = "Os dois únicos campos editáveis depois do POST — os demais são snapshot, "
+                    + "congelados no momento da anotação.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "404", description = "Item não encontrado para este SKU/depósito", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PatchMapping("/replenishment-list/items/{sku}")
+    @PreAuthorize("hasAuthority('ESTOQUE_REPLENISHMENT_MANAGE')")
+    public ResponseEntity<ReplenishmentListItemResponseDTO> updateReplenishmentItem(
+            @PathVariable @NotBlank @Size(min = 3, max = 50) String sku,
+            @RequestParam @NotBlank @Size(min = 2, max = 50) String warehouseCode,
+            @Valid @RequestBody ReplenishmentItemPatchRequest request, Authentication authentication) {
+        ReplenishmentListItem updated = estoqueUseCase.updateReplenishmentItem(sku, warehouseCode,
+                request.getQuantity(), request.getNote());
+        publisher.publishEvent(AuditEvent.of(EventType.REPLENISHMENT_ITEM_UPDATED, authentication.getName(),
+                Map.of("sku", sku, "warehouseCode", warehouseCode)));
+        return ResponseEntity.ok(replenishmentListConverter.toResponse(updated));
+    }
+
+    @Operation(summary = "Remove um item da lista de reposição",
+            description = "Idempotente: 204 mesmo quando o item já não existia.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "204", description = "Removido (ou já não existia)"),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @DeleteMapping("/replenishment-list/items/{sku}")
+    @PreAuthorize("hasAuthority('ESTOQUE_REPLENISHMENT_MANAGE')")
+    public ResponseEntity<Void> deleteReplenishmentItem(
+            @PathVariable @NotBlank @Size(min = 3, max = 50) String sku,
+            @RequestParam @NotBlank @Size(min = 2, max = 50) String warehouseCode,
+            Authentication authentication) {
+        estoqueUseCase.deleteReplenishmentItem(sku, warehouseCode);
+        publisher.publishEvent(AuditEvent.of(EventType.REPLENISHMENT_ITEM_REMOVED, authentication.getName(),
+                Map.of("sku", sku, "warehouseCode", warehouseCode)));
+        return ResponseEntity.noContent().build();
+    }
+
+    @Operation(summary = "Limpa a lista de reposição inteira de um depósito")
+    @ApiResponses({
+            @ApiResponse(responseCode = "204", description = "Lista limpa"),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @DeleteMapping("/replenishment-list")
+    @PreAuthorize("hasAuthority('ESTOQUE_REPLENISHMENT_MANAGE')")
+    public ResponseEntity<Void> clearReplenishmentList(
+            @RequestParam @NotBlank @Size(min = 2, max = 50) String warehouseCode,
+            Authentication authentication) {
+        estoqueUseCase.clearReplenishmentList(warehouseCode);
+        publisher.publishEvent(AuditEvent.of(EventType.REPLENISHMENT_LIST_CLEARED, authentication.getName(),
+                Map.of("warehouseCode", warehouseCode)));
+        return ResponseEntity.noContent().build();
+    }
+
     @Operation(summary = "Define o ponto de reposição (quantidade mínima) de um SKU em um depósito")
     @ApiResponses({
             @ApiResponse(responseCode = "204", description = "Definido"),
@@ -772,6 +1075,28 @@ public class EstoqueController {
         publisher.publishEvent(AuditEvent.of(EventType.REORDER_POINT_SET, authentication.getName(),
                 Map.of("sku", sku, "warehouseCode", request.getWarehouseCode(),
                         "minQuantity", request.getMinQuantity())));
+        return ResponseEntity.noContent().build();
+    }
+
+    @Operation(summary = "Remove o ponto de reposição de um SKU em um depósito",
+            description = "Idempotente: 204 mesmo quando não havia ponto cadastrado — não é erro "
+                    + "remover o que não existe. Use para desmarcar de fato o \"estoque mínimo "
+                    + "próprio\" de uma variação; um PUT que para de enviar o valor não apaga o "
+                    + "mínimo antigo.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "204", description = "Removido (ou já não existia)"),
+            @ApiResponse(responseCode = "404", description = "Depósito não encontrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @DeleteMapping("/products/{sku}/reorder-point")
+    @PreAuthorize("hasAuthority('ESTOQUE_STOCK_MANAGE')")
+    public ResponseEntity<Void> deleteReorderPoint(
+            @PathVariable @NotBlank @Size(min = 3, max = 50) String sku,
+            @RequestParam @NotBlank @Size(min = 2, max = 50) String warehouseCode,
+            Authentication authentication) {
+        estoqueUseCase.deleteReorderPoint(sku, warehouseCode);
+        publisher.publishEvent(AuditEvent.of(EventType.REORDER_POINT_DELETED, authentication.getName(),
+                Map.of("sku", sku, "warehouseCode", warehouseCode)));
         return ResponseEntity.noContent().build();
     }
 

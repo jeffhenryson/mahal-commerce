@@ -17,8 +17,10 @@ import com.cernecommerce.adapter.in.converter.ShopCartDTOConverter;
 import com.cernecommerce.adapter.in.converter.ShopCatalogDTOConverter;
 import com.cernecommerce.adapter.in.converter.StageTransitionDTOConverter;
 import com.cernecommerce.adapter.in.converter.TagDTOConverter;
+import com.cernecommerce.adapter.in.converter.BrandDTOConverter;
 import com.cernecommerce.adapter.in.converter.CategoryDTOConverter;
 import com.cernecommerce.adapter.in.converter.ProductDTOConverter;
+import com.cernecommerce.adapter.in.converter.ReplenishmentListDTOConverter;
 import com.cernecommerce.adapter.in.converter.RoleDTOConverter;
 import com.cernecommerce.adapter.in.converter.CashRegisterDTOConverter;
 import com.cernecommerce.adapter.in.converter.ComandaDTOConverter;
@@ -61,6 +63,16 @@ class ConverterBeanConfig {
     @Bean
     CategoryDTOConverter categoryDTOConverter() {
         return new CategoryDTOConverter();
+    }
+
+    @Bean
+    BrandDTOConverter brandDTOConverter() {
+        return new BrandDTOConverter();
+    }
+
+    @Bean
+    ReplenishmentListDTOConverter replenishmentListDTOConverter() {
+        return new ReplenishmentListDTOConverter();
     }
 
     @Bean

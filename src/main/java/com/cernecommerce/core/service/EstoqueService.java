@@ -1,11 +1,16 @@
 package com.cernecommerce.core.service;
 
 import com.cernecommerce.core.domain.exception.estoque.BarcodeNotFoundException;
+import com.cernecommerce.core.domain.exception.estoque.BrandHasProductsException;
+import com.cernecommerce.core.domain.exception.estoque.BrandNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.CategoryHasProductsException;
 import com.cernecommerce.core.domain.exception.estoque.CategoryNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.DefaultWarehouseNotConfiguredException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateBarcodeException;
+import com.cernecommerce.core.domain.exception.estoque.DuplicateAttributeTypeNameException;
+import com.cernecommerce.core.domain.exception.estoque.DuplicateBrandNameException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateCategoryNameException;
+import com.cernecommerce.core.domain.exception.estoque.ReplenishmentItemNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateKitComponentException;
 import com.cernecommerce.core.domain.exception.estoque.DraftLimitReachedException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateSkuException;
@@ -34,9 +39,11 @@ import com.cernecommerce.core.domain.exception.estoque.StockReservationNotActive
 import com.cernecommerce.core.domain.exception.estoque.StockReservationNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.UnexpectedLotInfoException;
 import com.cernecommerce.core.domain.exception.estoque.UnexpectedUnitCostException;
+import com.cernecommerce.core.domain.exception.estoque.VariantHasStockHistoryException;
 import com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException;
 import com.cernecommerce.core.domain.model.PageResult;
-import com.cernecommerce.core.domain.model.estoque.BrandSummary;
+import com.cernecommerce.core.domain.model.estoque.AttributeType;
+import com.cernecommerce.core.domain.model.estoque.Brand;
 import com.cernecommerce.core.domain.model.estoque.Category;
 import com.cernecommerce.core.domain.model.estoque.EstoqueSummary;
 import com.cernecommerce.core.domain.model.estoque.KitAvailability;
@@ -60,6 +67,7 @@ import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.ReorderAlert;
 import com.cernecommerce.core.domain.model.estoque.ReorderAlertCounts;
 import com.cernecommerce.core.domain.model.estoque.ReorderPoint;
+import com.cernecommerce.core.domain.model.estoque.ReplenishmentListItem;
 import com.cernecommerce.core.domain.model.estoque.ReservationIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.ReservationStatus;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
@@ -76,10 +84,13 @@ import com.cernecommerce.core.ports.in.EstoqueUseCase;
 import com.cernecommerce.core.ports.in.NotificationUseCase;
 import com.cernecommerce.core.ports.out.AfterCommitExecutor;
 import com.cernecommerce.core.ports.out.SystemConfigPort;
+import com.cernecommerce.core.ports.out.estoque.AttributeTypeRepository;
+import com.cernecommerce.core.ports.out.estoque.BrandRepository;
 import com.cernecommerce.core.ports.out.estoque.CategoryRepository;
 import com.cernecommerce.core.ports.out.estoque.KitComponentRepository;
 import com.cernecommerce.core.ports.out.estoque.ProductRepository;
 import com.cernecommerce.core.ports.out.estoque.ReorderPointRepository;
+import com.cernecommerce.core.ports.out.estoque.ReplenishmentListRepository;
 import com.cernecommerce.core.ports.out.estoque.StockBalanceRepository;
 import com.cernecommerce.core.ports.out.estoque.StockCountRepository;
 import com.cernecommerce.core.ports.out.estoque.StockIntegrityRepository;
@@ -100,6 +111,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -126,6 +138,9 @@ public class EstoqueService implements EstoqueUseCase {
     private final StockLotRepository stockLotRepository;
     private final SystemConfigPort systemConfigPort;
     private final CategoryRepository categoryRepository;
+    private final BrandRepository brandRepository;
+    private final AttributeTypeRepository attributeTypeRepository;
+    private final ReplenishmentListRepository replenishmentListRepository;
 
     public EstoqueService(ProductRepository productRepository, WarehouseRepository warehouseRepository,
             StockBalanceRepository stockBalanceRepository, StockMovementRepository stockMovementRepository,
@@ -134,7 +149,9 @@ public class EstoqueService implements EstoqueUseCase {
             NotificationUseCase notificationUseCase, UserRepository userRepository,
             AfterCommitExecutor afterCommitExecutor, Duration defaultReservationTtl,
             KitComponentRepository kitComponentRepository, StockLotRepository stockLotRepository,
-            SystemConfigPort systemConfigPort, CategoryRepository categoryRepository) {
+            SystemConfigPort systemConfigPort, CategoryRepository categoryRepository,
+            BrandRepository brandRepository, AttributeTypeRepository attributeTypeRepository,
+            ReplenishmentListRepository replenishmentListRepository) {
         this.stockReservationRepository = stockReservationRepository;
         this.defaultReservationTtl = defaultReservationTtl;
         this.productRepository = productRepository;
@@ -151,6 +168,9 @@ public class EstoqueService implements EstoqueUseCase {
         this.stockLotRepository = stockLotRepository;
         this.systemConfigPort = systemConfigPort;
         this.categoryRepository = categoryRepository;
+        this.brandRepository = brandRepository;
+        this.attributeTypeRepository = attributeTypeRepository;
+        this.replenishmentListRepository = replenishmentListRepository;
     }
 
     @Override
@@ -160,7 +180,7 @@ public class EstoqueService implements EstoqueUseCase {
             String videoUrl, List<String> images, List<ProductAttribute> attributes, Long categoryId,
             String barcode, MeasurementUnit unit, boolean sampleProduct, boolean kitComponentEligible,
             Boolean visibleInPos, Boolean visibleInMarketplace, ProductType type, InitialStockCommand initialStock,
-            String actorUsername, List<KitComponentCommand> kitComponents, ProductStatus status) {
+            String actorUsername, List<KitComponentCommand> kitComponents, ProductStatus status, Long brandId) {
         List<ProductVariant> safeVariants = variants == null ? List.of() : variants;
         ProductType resolvedType = type == null ? ProductType.SIMPLES : type;
         ProductStatus resolvedStatus = status == null ? ProductStatus.ATIVO : status;
@@ -217,12 +237,15 @@ public class EstoqueService implements EstoqueUseCase {
                 throw new DuplicateBarcodeException(barcodeCandidate);
             }
         }
-        Category resolved = resolveCategory(categoryId, category);
+        Category resolvedCategory = resolveCategory(categoryId, category);
+        Brand resolvedBrand = resolveBrand(brandId, brand);
         Product product = Product.create(sku, name,
-                resolved == null ? category : resolved.name(), safeVariants,
-                pricing == null ? Pricing.empty() : pricing, resolvedType, false, brand, imageUrl, onSale,
+                resolvedCategory == null ? category : resolvedCategory.name(), safeVariants,
+                pricing == null ? Pricing.empty() : pricing, resolvedType, false,
+                resolvedBrand == null ? brand : resolvedBrand.name(), imageUrl, onSale,
                 superPromo, description, videoUrl, images, attributes,
-                resolved == null ? null : resolved.id())
+                resolvedCategory == null ? null : resolvedCategory.id(),
+                resolvedBrand == null ? null : resolvedBrand.id())
                 .withBarcode(barcode)
                 .withUnit(unit)
                 .withSampleProduct(sampleProduct)
@@ -267,7 +290,7 @@ public class EstoqueService implements EstoqueUseCase {
             String imageUrl, Boolean onSale, Boolean superPromo, String description, String videoUrl,
             List<String> images, List<ProductAttribute> attributes, Long categoryId, String barcode,
             MeasurementUnit unit, Boolean sampleProduct, Boolean kitComponentEligible, Boolean visibleInPos,
-            Boolean visibleInMarketplace, ProductStatus status) {
+            Boolean visibleInMarketplace, ProductStatus status, Long brandId) {
         Product current = productRepository.findBySku(sku)
                 .orElseThrow(() -> new ProductNotFoundException(sku));
         // EST-F023: só conta contra o teto quem está ENTRANDO em RASCUNHO agora — editar um
@@ -285,6 +308,11 @@ public class EstoqueService implements EstoqueUseCase {
         Category resolvedCategory = resolveCategory(categoryId, category);
         if (resolvedCategory != null) {
             updated = updated.withCategory(resolvedCategory.id(), resolvedCategory.name());
+        }
+        // Marca muda em par (id + nome denormalizado) ou não muda — mesmo raciocínio de categoria.
+        Brand resolvedBrand = resolveBrand(brandId, brand);
+        if (resolvedBrand != null) {
+            updated = updated.withBrand(resolvedBrand.id(), resolvedBrand.name());
         }
         if (onSale != null) {
             updated = updated.withOnSale(onSale);
@@ -415,6 +443,26 @@ public class EstoqueService implements EstoqueUseCase {
         return productRepository.save(current.withVariants(merged));
     }
 
+    @Override
+    @Transactional
+    public Product deleteVariant(String productSku, String variantSku) {
+        Product current = productRepository.findBySku(productSku)
+                .orElseThrow(() -> new ProductNotFoundException(productSku));
+        current.variants().stream()
+                .filter(v -> v.sku().equals(variantSku))
+                .findFirst()
+                .orElseThrow(() -> new ProductVariantNotFoundException(productSku, variantSku));
+        // stock_balance/stock_movement referenciam o SKU como texto livre, sem FK (EST-C011) —
+        // apagar a variante deixaria esse histórico órfão. active:false preserva o histórico.
+        if (stockBalanceRepository.existsBySku(variantSku) || stockMovementRepository.existsBySku(variantSku)) {
+            throw new VariantHasStockHistoryException(productSku, variantSku);
+        }
+        List<ProductVariant> remaining = current.variants().stream()
+                .filter(v -> !v.sku().equals(variantSku))
+                .toList();
+        return productRepository.save(current.withVariants(remaining));
+    }
+
     // ── Categorias do catálogo ───────────────────────────────────────────────
 
     @Override
@@ -488,12 +536,6 @@ public class EstoqueService implements EstoqueUseCase {
         categoryRepository.deleteById(id);
     }
 
-    @Override
-    @Transactional(readOnly = true)
-    public PageResult<BrandSummary> listBrands(String search, int page, int size) {
-        return productRepository.findBrands(search, page, size);
-    }
-
     /**
      * Resolve o par (id, nome) de categoria de um produto, aceitando os <b>dois</b> caminhos.
      *
@@ -521,6 +563,220 @@ public class EstoqueService implements EstoqueUseCase {
         }
         return categoryRepository.findByName(categoryName)
                 .orElseGet(() -> categoryRepository.save(Category.create(categoryName)));
+    }
+
+    // ── Marcas do catálogo ────────────────────────────────────────────────────
+
+    @Override
+    @Transactional
+    public Brand createBrand(String name) {
+        brandRepository.findByName(name).ifPresent(existing -> {
+            throw new DuplicateBrandNameException(name);
+        });
+        return brandRepository.save(Brand.create(name));
+    }
+
+    @Override
+    @Transactional
+    public Brand updateBrand(Long id, String name) {
+        Brand current = brandRepository.findById(id)
+                .orElseThrow(() -> new BrandNotFoundException(id));
+        if (name != null) {
+            brandRepository.findByName(name)
+                    .filter(other -> !other.id().equals(id))
+                    .ifPresent(other -> {
+                        throw new DuplicateBrandNameException(name);
+                    });
+        }
+        Brand updated = brandRepository.save(current.withDetails(name));
+        if (name != null && !name.equals(current.name())) {
+            productRepository.renameBrand(id, updated.name());
+        }
+        return updated;
+    }
+
+    @Override
+    @Transactional
+    public Brand setBrandActive(Long id, boolean active) {
+        Brand current = brandRepository.findById(id)
+                .orElseThrow(() -> new BrandNotFoundException(id));
+        return brandRepository.save(current.withActive(active));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResult<Brand> listBrands(String search, int page, int size) {
+        return search == null || search.isBlank()
+                ? brandRepository.findAll(page, size)
+                : brandRepository.findByNameContaining(search, page, size);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<Brand> listActiveBrands() {
+        return brandRepository.findActiveOrdered();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Map<Long, Long> countProductsByBrandIds(List<Long> brandIds) {
+        return productRepository.countProductsByBrandIds(brandIds);
+    }
+
+    @Override
+    @Transactional
+    public void deleteBrand(Long id) {
+        brandRepository.findById(id).orElseThrow(() -> new BrandNotFoundException(id));
+        long productCount = productRepository.countByBrandId(id);
+        if (productCount > 0) {
+            throw new BrandHasProductsException(id, productCount);
+        }
+        brandRepository.deleteById(id);
+    }
+
+    /**
+     * Resolve o par (id, nome) de marca de um produto — mesmo raciocínio de
+     * {@link #resolveCategory}, com a mesma leniência de criar a marca quando o texto não bate com
+     * nenhuma existente.
+     *
+     * @return {@code null} quando não há marca nenhuma a resolver (produto sem marca segue sendo
+     *         estado válido).
+     */
+    private Brand resolveBrand(Long brandId, String brandName) {
+        if (brandId != null) {
+            return brandRepository.findById(brandId)
+                    .orElseThrow(() -> new BrandNotFoundException(brandId));
+        }
+        if (brandName == null || brandName.isBlank()) {
+            return null;
+        }
+        return brandRepository.findByName(brandName)
+                .orElseGet(() -> brandRepository.save(Brand.create(brandName)));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Map<Long, BigDecimal> averageMarginPercentByCategoryIds(List<Long> categoryIds) {
+        Map<Long, BigDecimal> result = new LinkedHashMap<>();
+        for (Long id : categoryIds) {
+            result.put(id, averageMarginPercent(productRepository.findAllByCategoryId(id)));
+        }
+        return result;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Map<Long, BigDecimal> averageMarginPercentByBrandIds(List<Long> brandIds) {
+        Map<Long, BigDecimal> result = new LinkedHashMap<>();
+        for (Long id : brandIds) {
+            result.put(id, averageMarginPercent(productRepository.findAllByBrandId(id)));
+        }
+        return result;
+    }
+
+    /**
+     * Média simples de {@code Pricing#marginPercent()} entre os produtos informados, ignorando os
+     * que não têm margem calculável (sem custo, sem preço efetivo, ou preço efetivo zero — mesmas
+     * condições de {@code marginPercent()}). Mesma fórmula do relatório de margem do financeiro
+     * ({@code OrderReportRepositoryImpl.summarizeMargin}), aqui promediada por produto do catálogo
+     * em vez de agregada sobre histórico de vendas.
+     *
+     * @return {@code null} se nenhum produto contribui com margem calculável.
+     */
+    private BigDecimal averageMarginPercent(List<Product> products) {
+        List<BigDecimal> margins = products.stream()
+                .map(p -> p.pricing().marginPercent())
+                .filter(Objects::nonNull)
+                .toList();
+        if (margins.isEmpty()) {
+            return null;
+        }
+        BigDecimal sum = margins.stream().reduce(BigDecimal.ZERO, BigDecimal::add);
+        return sum.divide(BigDecimal.valueOf(margins.size()), 2, RoundingMode.HALF_UP);
+    }
+
+    // ── Vocabulário de atributos ─────────────────────────────────────────────
+
+    @Override
+    @Transactional
+    public AttributeType createAttributeType(String name) {
+        attributeTypeRepository.findByName(name).ifPresent(existing -> {
+            throw new DuplicateAttributeTypeNameException(name);
+        });
+        return attributeTypeRepository.save(AttributeType.create(name));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<AttributeType> listAttributeTypes() {
+        return attributeTypeRepository.findAllOrderByName();
+    }
+
+    // ── Lista de Reposição ────────────────────────────────────────────────────
+
+    @Override
+    @Transactional
+    public ReplenishmentListItem upsertReplenishmentItem(String sku, String warehouseCode, BigDecimal quantity,
+            String note, String actorUsername) {
+        Warehouse warehouse = requireWarehouse(warehouseCode);
+        Product product = productRepository.findByAnySku(sku)
+                .orElseThrow(() -> new ProductNotFoundException(sku));
+        BigDecimal currentStock = stockBalanceRepository.findBySkuAndWarehouseId(sku, warehouse.id())
+                .map(StockBalance::quantity)
+                .orElse(BigDecimal.ZERO);
+        BigDecimal minStock = reorderPointRepository.findBySkuAndWarehouseId(sku, warehouse.id())
+                .map(ReorderPoint::minQuantity)
+                .orElse(null);
+        BigDecimal suggestedQuantity = minStock == null ? null
+                : minStock.subtract(currentStock).max(BigDecimal.ZERO);
+        // Custo efetivo do SKU específico (EST-F020: variação pode ter custo próprio), não sempre
+        // o do pai — mesma resolução que o PDV e a vitrine já usam.
+        BigDecimal unitCost = product.effectivePricingFor(sku).costPrice();
+        // Última ENTRADA deste SKU/depósito — mesma consulta usada pelo histórico de compras
+        // (item 2), reaproveitada para não duplicar a lógica de "última compra".
+        PageResult<StockMovement> lastPurchase = stockMovementRepository
+                .findEntradasBySkuAndWarehouseId(sku, warehouse.id(), 0, 1);
+        StockMovement previous = lastPurchase.content().isEmpty() ? null : lastPurchase.content().get(0);
+
+        ReplenishmentListItem item = ReplenishmentListItem.create(sku, warehouse.id(), product.name(),
+                product.category(), product.brand(), product.unit(), currentStock, minStock, suggestedQuantity,
+                quantity, unitCost,
+                previous == null ? null : previous.quantity(),
+                previous == null ? null : previous.unitCost(),
+                previous == null ? null : previous.createdAt(),
+                note, actorUsername);
+        return replenishmentListRepository.save(item);
+    }
+
+    @Override
+    @Transactional
+    public ReplenishmentListItem updateReplenishmentItem(String sku, String warehouseCode, BigDecimal quantity,
+            String note) {
+        Warehouse warehouse = requireWarehouse(warehouseCode);
+        ReplenishmentListItem current = replenishmentListRepository.findBySkuAndWarehouseId(sku, warehouse.id())
+                .orElseThrow(() -> new ReplenishmentItemNotFoundException(sku, warehouseCode));
+        return replenishmentListRepository.save(current.withQuantityAndNote(quantity, note));
+    }
+
+    @Override
+    @Transactional
+    public void deleteReplenishmentItem(String sku, String warehouseCode) {
+        Warehouse warehouse = requireWarehouse(warehouseCode);
+        replenishmentListRepository.deleteBySkuAndWarehouseId(sku, warehouse.id());
+    }
+
+    @Override
+    @Transactional
+    public void clearReplenishmentList(String warehouseCode) {
+        Warehouse warehouse = requireWarehouse(warehouseCode);
+        replenishmentListRepository.deleteByWarehouseId(warehouse.id());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ReplenishmentListItem> listReplenishmentItems(String warehouseCode) {
+        Warehouse warehouse = requireWarehouse(warehouseCode);
+        return replenishmentListRepository.findByWarehouseId(warehouse.id());
     }
 
     @Override
@@ -752,7 +1008,8 @@ public class EstoqueService implements EstoqueUseCase {
     @Override
     @Transactional
     public StockBalance adjustStock(String sku, String warehouseCode, MovementType type, BigDecimal quantity,
-            String reason, String username, String lotCode, LocalDate expiryDate, BigDecimal unitCost) {
+            String reason, String username, String lotCode, LocalDate expiryDate, BigDecimal unitCost,
+            Long goodsReceiptId) {
         requireKnownSku(sku);
         Warehouse warehouse = warehouseRepository.findByCode(warehouseCode)
                 .orElseThrow(() -> new WarehouseNotFoundException(warehouseCode));
@@ -791,7 +1048,7 @@ public class EstoqueService implements EstoqueUseCase {
         }
 
         stockMovementRepository.save(StockMovement.create(sku, warehouse.id(), type, quantity, reason, username,
-                movementLotCode, unitCost));
+                movementLotCode, unitCost, goodsReceiptId));
         StockBalance saved = stockBalanceRepository.save(updated);
 
         if (lotTracked && type == MovementType.SAIDA) {
@@ -905,9 +1162,17 @@ public class EstoqueService implements EstoqueUseCase {
 
     @Override
     @Transactional(readOnly = true)
-    public PageResult<StockMovement> listMovements(String sku, String warehouseCode, int page, int size) {
+    public PageResult<StockMovement> listMovements(String sku, String warehouseCode, MovementType type,
+            Instant from, Instant to, int page, int size) {
         Long warehouseId = warehouseCode == null ? null : requireWarehouse(warehouseCode).id();
-        return stockMovementRepository.findBySkuAndWarehouseId(sku, warehouseId, page, size);
+        return stockMovementRepository.findBySkuAndWarehouseId(sku, warehouseId, type, from, to, page, size);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResult<StockMovement> listPurchaseHistory(String sku, String warehouseCode, int page, int size) {
+        Warehouse warehouse = requireWarehouse(warehouseCode);
+        return stockMovementRepository.findEntradasBySkuAndWarehouseId(sku, warehouse.id(), page, size);
     }
 
     @Override
@@ -920,6 +1185,13 @@ public class EstoqueService implements EstoqueUseCase {
                 .map(ReorderPoint::id)
                 .orElse(null);
         reorderPointRepository.save(new ReorderPoint(existingId, sku, warehouse.id(), minQuantity));
+    }
+
+    @Override
+    @Transactional
+    public void deleteReorderPoint(String sku, String warehouseCode) {
+        Warehouse warehouse = requireWarehouse(warehouseCode);
+        reorderPointRepository.deleteBySkuAndWarehouseId(sku, warehouse.id());
     }
 
     @Override

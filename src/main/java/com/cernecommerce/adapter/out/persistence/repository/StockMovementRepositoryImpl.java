@@ -10,6 +10,8 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
+
 @Repository
 @Transactional
 public class StockMovementRepositoryImpl implements StockMovementRepository {
@@ -33,21 +35,39 @@ public class StockMovementRepositoryImpl implements StockMovementRepository {
         entity.setCreatedAt(movement.createdAt());
         entity.setLotCode(movement.lotCode());
         entity.setUnitCost(movement.unitCost());
+        entity.setGoodsReceiptId(movement.goodsReceiptId());
         return toDomain(stockMovementJpaRepository.save(entity));
     }
 
     @Override
     @Transactional(readOnly = true)
-    public PageResult<StockMovement> findBySkuAndWarehouseId(String sku, Long warehouseId, int page, int size) {
+    public PageResult<StockMovement> findBySkuAndWarehouseId(String sku, Long warehouseId, MovementType type,
+            Instant from, Instant to, int page, int size) {
         Page<StockMovementEntity> result = stockMovementJpaRepository
-                .search(sku, warehouseId, PageRequest.of(page, size));
+                .search(sku, warehouseId, type == null ? null : type.name(), from, to, PageRequest.of(page, size));
         return new PageResult<>(result.getContent().stream().map(this::toDomain).toList(),
                 page, size, result.getTotalElements(), result.getTotalPages());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResult<StockMovement> findEntradasBySkuAndWarehouseId(String sku, Long warehouseId, int page,
+            int size) {
+        Page<StockMovementEntity> result = stockMovementJpaRepository
+                .searchEntradas(sku, warehouseId, PageRequest.of(page, size));
+        return new PageResult<>(result.getContent().stream().map(this::toDomain).toList(),
+                page, size, result.getTotalElements(), result.getTotalPages());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public boolean existsBySku(String sku) {
+        return stockMovementJpaRepository.existsBySku(sku);
     }
 
     private StockMovement toDomain(StockMovementEntity e) {
         return StockMovement.of(e.getId(), e.getSku(), e.getWarehouseId(), MovementType.valueOf(e.getType()),
                 e.getQuantity(), e.getReason(), e.getUsername(), e.getCreatedAt(), e.getLotCode(),
-                e.getUnitCost());
+                e.getUnitCost(), e.getGoodsReceiptId());
     }
 }

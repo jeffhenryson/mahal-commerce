@@ -1,7 +1,8 @@
 package com.cernecommerce.core.ports.in;
 
 import com.cernecommerce.core.domain.model.PageResult;
-import com.cernecommerce.core.domain.model.estoque.BrandSummary;
+import com.cernecommerce.core.domain.model.estoque.AttributeType;
+import com.cernecommerce.core.domain.model.estoque.Brand;
 import com.cernecommerce.core.domain.model.estoque.Category;
 import com.cernecommerce.core.domain.model.estoque.EstoqueSummary;
 import com.cernecommerce.core.domain.model.estoque.KitAvailability;
@@ -21,6 +22,7 @@ import com.cernecommerce.core.domain.model.estoque.ProductStatus;
 import com.cernecommerce.core.domain.model.estoque.ProductType;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.ReorderPoint;
+import com.cernecommerce.core.domain.model.estoque.ReplenishmentListItem;
 import com.cernecommerce.core.domain.model.estoque.ReservationIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.ReservationStatus;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
@@ -33,6 +35,7 @@ import com.cernecommerce.core.domain.model.estoque.WarehouseType;
 
 import java.math.BigDecimal;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
@@ -191,24 +194,27 @@ public interface EstoqueUseCase {
             List<KitComponentCommand> kitComponents) {
         return createProduct(sku, name, category, variants, pricing, brand, imageUrl, onSale, superPromo, description,
                 videoUrl, images, attributes, categoryId, barcode, unit, sampleProduct, kitComponentEligible,
-                visibleInPos, visibleInMarketplace, type, initialStock, actorUsername, kitComponents, null);
+                visibleInPos, visibleInMarketplace, type, initialStock, actorUsername, kitComponents, null, null);
     }
 
     /**
      * Cria um produto (forma canônica completa, EST-F023), incluindo o {@code status} de
-     * publicação. Único método abstrato de criação — todas as sobrecargas acima delegam até aqui.
+     * publicação e o vínculo com a entidade {@link com.cernecommerce.core.domain.model.estoque.Brand}.
+     * Único método abstrato de criação — todas as sobrecargas acima delegam até aqui.
      *
      * @param status {@code null} resolve para {@link ProductStatus#ATIVO}. {@code RASCUNHO} é
      *        validado contra o teto de 5 rascunhos por {@code EstoqueService}, sem exigir nenhum
      *        campo além de {@code sku}/{@code name} — a mesma validação mínima que produto
      *        {@code ATIVO} já tem hoje.
+     * @param brandId vínculo direto com uma marca existente (mesmo par de {@code categoryId}).
+     *        Quando informado, vence sobre {@code brand} e o nome é resolvido a partir dele.
      */
     Product createProduct(String sku, String name, String category, List<ProductVariant> variants, Pricing pricing,
             String brand, String imageUrl, boolean onSale, boolean superPromo, String description, String videoUrl,
             List<String> images, List<ProductAttribute> attributes, Long categoryId, String barcode,
             MeasurementUnit unit, boolean sampleProduct, boolean kitComponentEligible, Boolean visibleInPos,
             Boolean visibleInMarketplace, ProductType type, InitialStockCommand initialStock, String actorUsername,
-            List<KitComponentCommand> kitComponents, ProductStatus status);
+            List<KitComponentCommand> kitComponents, ProductStatus status, Long brandId);
 
     /**
      * Estoque inicial informado na criação do produto (EST-F023). {@code quantity} estritamente
@@ -349,25 +355,29 @@ public interface EstoqueUseCase {
             Boolean visibleInMarketplace) {
         return updateProduct(sku, name, category, pricing, brand, imageUrl, onSale, superPromo, description, videoUrl,
                 images, attributes, categoryId, barcode, unit, sampleProduct, kitComponentEligible, visibleInPos,
-                visibleInMarketplace, null);
+                visibleInMarketplace, null, null);
     }
 
     /**
-     * Alteração parcial (forma canônica completa, EST-F023), incluindo {@code status}.
-     * {@code null} mantém o status atual — mesma semântica de PATCH do resto do método. Único
-     * método abstrato de alteração — todas as sobrecargas acima delegam até aqui.
+     * Alteração parcial (forma canônica completa, EST-F023), incluindo {@code status} e o vínculo
+     * com {@link com.cernecommerce.core.domain.model.estoque.Brand}. {@code null} mantém o status
+     * atual — mesma semântica de PATCH do resto do método. Único método abstrato de alteração —
+     * todas as sobrecargas acima delegam até aqui.
      *
      * @throws com.cernecommerce.core.domain.exception.estoque.DuplicateBarcodeException se
      *         {@code barcode} já existir em outro produto do catálogo.
      * @throws com.cernecommerce.core.domain.exception.estoque.DraftLimitReachedException se a
      *         transição for para {@code RASCUNHO} e o produto já não for um rascunho, com 5
      *         rascunhos já cadastrados.
+     * @param brandId vínculo direto com uma marca existente. Nulos em {@code brandId}/
+     *        {@code brand} mantêm a marca atual — mesma semântica de {@code categoryId}/
+     *        {@code category}.
      */
     Product updateProduct(String sku, String name, String category, Pricing pricing, String brand, String imageUrl,
             Boolean onSale, Boolean superPromo, String description, String videoUrl, List<String> images,
             List<ProductAttribute> attributes, Long categoryId, String barcode, MeasurementUnit unit,
             Boolean sampleProduct, Boolean kitComponentEligible, Boolean visibleInPos, Boolean visibleInMarketplace,
-            ProductStatus status);
+            ProductStatus status, Long brandId);
 
     /**
      * Acrescenta uma ou mais variações novas à grade de um produto já existente (EST-F024).
@@ -405,6 +415,22 @@ public interface EstoqueUseCase {
      */
     Product updateVariant(String productSku, String variantSku, Boolean active, List<ProductAttribute> attributes,
             Pricing pricing, String barcode);
+
+    /**
+     * Remove de fato uma variação da grade (item 8 do pedido do frontend) — para o caso concreto
+     * de variante criada por engano; {@code active:false} via {@link #updateVariant} continua
+     * sendo o caminho recomendado para retirar uma variante de circulação preservando histórico.
+     *
+     * @throws com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException se
+     *         {@code productSku} não for um SKU pai existente.
+     * @throws com.cernecommerce.core.domain.exception.estoque.ProductVariantNotFoundException se
+     *         {@code variantSku} não existir na grade de {@code productSku}.
+     * @throws com.cernecommerce.core.domain.exception.estoque.VariantHasStockHistoryException se
+     *         houver saldo ou movimentação de estoque gravados para o SKU da variante — apagar
+     *         deixaria esse histórico órfão, já que {@code stock_balance}/{@code stock_movement}
+     *         referenciam o SKU como texto livre, sem FK.
+     */
+    Product deleteVariant(String productSku, String variantSku);
 
     // ── Categorias do catálogo ───────────────────────────────────────────────
     //
@@ -463,12 +489,120 @@ public interface EstoqueUseCase {
      */
     void deleteCategory(Long id);
 
+    // ── Marcas do catálogo ────────────────────────────────────────────────────
+    //
+    // Mesmo raciocínio aditivo de Category (ver bloco acima): product.brand (texto) continua
+    // existindo e continua sendo devolvido, com o nome denormalizado mantido em sincronia por
+    // estas operações. Mais simples que Category: sem featured/displayOrder — marca não tem
+    // pedido de destaque de vitrine.
+
     /**
-     * Marcas em uso no catálogo, agregadas a partir do campo texto livre {@code Product.brand}
-     * (Bloco 2.2) — não existe entidade {@code Brand} própria; ver decisão registrada no plano.
-     * {@code search} filtra por prefixo/substring, sem diferenciar maiúsculas.
+     * Cria uma marca. Lança {@link com.cernecommerce.core.domain.exception.estoque
+     * .DuplicateBrandNameException} se já existir uma com o mesmo nome — comparação sem
+     * diferenciar maiúsculas, para "Zomo" e "zomo" não virarem duas.
      */
-    PageResult<BrandSummary> listBrands(String search, int page, int size);
+    Brand createBrand(String name);
+
+    /**
+     * Renomeia uma marca — <b>propaga</b> o novo nome para a coluna denormalizada de todos os
+     * produtos vinculados.
+     *
+     * @throws com.cernecommerce.core.domain.exception.estoque.BrandNotFoundException se o id
+     *         não existir.
+     */
+    Brand updateBrand(Long id, String name);
+
+    /**
+     * Ativa ou desativa uma marca. Desativada, ela some de {@link #listActiveBrands()}, mas os
+     * produtos vinculados continuam à venda — mesma régua de {@link #setCategoryActive}.
+     */
+    Brand setBrandActive(Long id, boolean active);
+
+    /**
+     * Listagem do admin, com as inativas, ordenada por nome. {@code search} filtra por substring
+     * no nome, sem diferenciar maiúsculas; {@code null}/vazio não filtra.
+     */
+    PageResult<Brand> listBrands(String search, int page, int size);
+
+    /** Marcas ativas, ordenadas por nome. */
+    List<Brand> listActiveBrands();
+
+    /**
+     * Quantos produtos estão vinculados a cada marca da lista, numa única consulta agregada —
+     * mesmo padrão de {@link #countProductsByCategoryIds}.
+     */
+    Map<Long, Long> countProductsByBrandIds(List<Long> brandIds);
+
+    /**
+     * Remove uma marca. Bloqueada com
+     * {@link com.cernecommerce.core.domain.exception.estoque.BrandHasProductsException} se houver
+     * produto vinculado.
+     *
+     * @throws com.cernecommerce.core.domain.exception.estoque.BrandNotFoundException se o id não
+     *         existir.
+     */
+    void deleteBrand(Long id);
+
+    /**
+     * Margem média (sobre a venda) dos produtos vinculados a cada categoria da lista, numa
+     * consulta por categoria — mesma fórmula de {@code Pricing#marginPercent()}, promediada.
+     * Categoria sem produto com margem calculável mapeia para {@code null} (contagem zero,
+     * implícita, mesmo padrão de {@link #countProductsByCategoryIds}).
+     */
+    Map<Long, BigDecimal> averageMarginPercentByCategoryIds(List<Long> categoryIds);
+
+    /** Mesmo que {@link #averageMarginPercentByCategoryIds}, por marca. */
+    Map<Long, BigDecimal> averageMarginPercentByBrandIds(List<Long> brandIds);
+
+    // ── Vocabulário de atributos ─────────────────────────────────────────────
+
+    /**
+     * Cadastra um novo tipo de atributo. Lança {@link com.cernecommerce.core.domain.exception
+     * .estoque.DuplicateAttributeTypeNameException} se já existir um com o mesmo nome —
+     * comparação sem diferenciar maiúsculas.
+     */
+    AttributeType createAttributeType(String name);
+
+    /** Lista todos os tipos de atributo cadastrados, ordenados por nome. */
+    List<AttributeType> listAttributeTypes();
+
+    // ── Lista de Reposição ────────────────────────────────────────────────────
+    //
+    // Rascunho de compra por depósito (item 1 do pedido do frontend). Os campos de estoque
+    // (currentStock, minStock, suggestedQuantity, unitCost, previousPurchase) são um SNAPSHOT
+    // tirado no momento do anotar, deliberadamente não recalculado na leitura — é a intenção de
+    // compra que importa, não o saldo ao vivo.
+
+    /**
+     * Anota (ou reanota — upsert por SKU) um item na lista de reposição de um depósito. Tira o
+     * snapshot de produto/saldo/ponto de reposição/custo/última compra na hora da chamada.
+     *
+     * @throws com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException se o SKU
+     *         não existir no catálogo.
+     * @throws com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException se o
+     *         código do depósito não existir.
+     */
+    ReplenishmentListItem upsertReplenishmentItem(String sku, String warehouseCode, BigDecimal quantity, String note,
+            String actorUsername);
+
+    /**
+     * Altera {@code quantity}/{@code note} de um item já anotado — os dois únicos campos
+     * editáveis depois do POST. Não toca nos campos de snapshot.
+     *
+     * @throws com.cernecommerce.core.domain.exception.estoque.ReplenishmentItemNotFoundException
+     *         se não houver item anotado para esse SKU/depósito.
+     */
+    ReplenishmentListItem updateReplenishmentItem(String sku, String warehouseCode, BigDecimal quantity,
+            String note);
+
+    /** Remove um item da lista. Idempotente: não é erro remover o que não existe. */
+    void deleteReplenishmentItem(String sku, String warehouseCode);
+
+    /** Limpa a lista inteira de um depósito. */
+    void clearReplenishmentList(String warehouseCode);
+
+    /** Lista os itens anotados de um depósito, mais recentemente anotados primeiro. */
+    List<ReplenishmentListItem> listReplenishmentItems(String warehouseCode);
 
     /**
      * Resolve a precificação vigente de <b>qualquer</b> SKU do catálogo — pai ou variação
@@ -662,8 +796,24 @@ public interface EstoqueUseCase {
      *         {@code unitCost} vier preenchido para um tipo diferente de {@code ENTRADA}, ou para um
      *         SKU que é kit (kit não tem saldo próprio, não acumula custo médio)
      */
+    default StockBalance adjustStock(String sku, String warehouseCode, MovementType type, BigDecimal quantity,
+            String reason, String username, String lotCode, LocalDate expiryDate, BigDecimal unitCost) {
+        return adjustStock(sku, warehouseCode, type, quantity, reason, username, lotCode, expiryDate, unitCost, null);
+    }
+
+    /**
+     * Mesmo que {@link #adjustStock(String, String, MovementType, BigDecimal, String, String, String, LocalDate, BigDecimal)},
+     * com o vínculo opcional do recebimento de mercadoria que originou a movimentação (item 2 do
+     * pedido do frontend — histórico de compras por SKU). Único método abstrato de ajuste de
+     * estoque — todas as sobrecargas acima delegam até aqui. Sobrecarga aditiva: nenhum chamador
+     * pré-existente precisa mudar, só {@code ComprasService.receiveGoods} passa a usar esta forma.
+     *
+     * @param goodsReceiptId id do {@code GoodsReceipt} que originou esta {@code ENTRADA}, ou
+     *        {@code null} para movimentação manual (sem recebimento associado).
+     */
     StockBalance adjustStock(String sku, String warehouseCode, MovementType type, BigDecimal quantity,
-            String reason, String username, String lotCode, LocalDate expiryDate, BigDecimal unitCost);
+            String reason, String username, String lotCode, LocalDate expiryDate, BigDecimal unitCost,
+            Long goodsReceiptId);
 
     /**
      * Lista os lotes de um SKU num depósito (EST-F008), do que vence primeiro em diante. Lista
@@ -683,7 +833,28 @@ public interface EstoqueUseCase {
      * {@link com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException}
      * se o código do depósito informado não existir.
      */
-    PageResult<StockMovement> listMovements(String sku, String warehouseCode, int page, int size);
+    default PageResult<StockMovement> listMovements(String sku, String warehouseCode, int page, int size) {
+        return listMovements(sku, warehouseCode, null, null, null, page, size);
+    }
+
+    /**
+     * Mesmo que {@link #listMovements(String, String, int, int)}, com filtro adicional de
+     * {@code type} e intervalo {@code [from, to]} de data (item 6 do pedido do frontend) — todos
+     * opcionais, {@code null} não filtra por esse critério.
+     */
+    PageResult<StockMovement> listMovements(String sku, String warehouseCode, MovementType type, Instant from,
+            Instant to, int page, int size);
+
+    /**
+     * Histórico paginado de {@code ENTRADA}s de um SKU num depósito, mais recentes primeiro (item
+     * 2 do pedido do frontend — referência de última compra). Substitui a varredura client-side de
+     * {@code GET /estoque/movements?sku=...&size=20} que perdia a referência em SKUs de giro
+     * rápido com mais de 20 movimentações desde a última entrada.
+     *
+     * @throws com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException se o
+     *         código do depósito não existir
+     */
+    PageResult<StockMovement> listPurchaseHistory(String sku, String warehouseCode, int page, int size);
 
     /**
      * Define (cria ou atualiza) o ponto de reposição de um SKU em um depósito. A partir dessa
@@ -695,6 +866,15 @@ public interface EstoqueUseCase {
      * código do depósito não existir.
      */
     void setReorderPoint(String sku, String warehouseCode, BigDecimal minQuantity);
+
+    /**
+     * Remove o ponto de reposição de um SKU num depósito, se existir. Idempotente: não é erro
+     * remover o que não existe — a variante de estoque pode simplesmente nunca ter tido um
+     * mínimo próprio configurado. Lança
+     * {@link com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException} se o
+     * código do depósito não existir.
+     */
+    void deleteReorderPoint(String sku, String warehouseCode);
 
     /**
      * Consulta o ponto de reposição de um SKU num depósito. Vazio se não houver nenhum

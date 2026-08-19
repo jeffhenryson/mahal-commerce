@@ -2,7 +2,6 @@ package com.cernecommerce.core.ports.out.estoque;
 
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.SortDirection;
-import com.cernecommerce.core.domain.model.estoque.BrandSummary;
 import com.cernecommerce.core.domain.model.estoque.CategoryProductCount;
 import com.cernecommerce.core.domain.model.estoque.EstoqueSummary;
 import com.cernecommerce.core.domain.model.estoque.Product;
@@ -141,10 +140,31 @@ public interface ProductRepository {
     long countByCategoryId(Long categoryId);
 
     /**
-     * Marcas em uso no catálogo, paginadas, agregadas do campo texto livre {@code brand}
-     * (Bloco 2.2). {@code search} filtra por substring, sem diferenciar maiúsculas.
+     * Atualiza em lote a coluna denormalizada {@code brand} de todos os produtos vinculados a
+     * uma marca renomeada. Mesmo raciocínio de {@link #renameCategory}.
+     *
+     * @return quantidade de produtos atualizados
      */
-    PageResult<BrandSummary> findBrands(String search, int page, int size);
+    int renameBrand(Long brandId, String newName);
+
+    /**
+     * Contagem de produtos por marca, para todos os ids informados, numa única consulta. Marca
+     * sem produto vinculado não aparece no mapa (contagem zero, implícita).
+     */
+    Map<Long, Long> countProductsByBrandIds(List<Long> brandIds);
+
+    /** Quantos produtos estão vinculados a uma marca — usado para bloquear DELETE. */
+    long countByBrandId(Long brandId);
+
+    /**
+     * Todos os produtos vinculados a uma categoria, sem paginação — usado para calcular
+     * {@code averageMarginPercent} (a lista de categorias já é pequena e paginada; carregar os
+     * produtos de cada uma por vez é mais simples que uma agregação SQL de margem por categoria).
+     */
+    List<Product> findAllByCategoryId(Long categoryId);
+
+    /** Mesmo que {@link #findAllByCategoryId}, por marca. */
+    List<Product> findAllByBrandId(Long brandId);
 
     /**
      * Quantidade de produtos/kits com o {@code status} informado (EST-F023) — usado para aplicar

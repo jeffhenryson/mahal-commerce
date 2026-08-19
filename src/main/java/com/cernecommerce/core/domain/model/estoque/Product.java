@@ -57,7 +57,8 @@ public record Product(
     boolean kitComponentEligible,
     boolean visibleInPos,
     boolean visibleInMarketplace,
-    ProductStatus status
+    ProductStatus status,
+    Long brandId
 ) {
 
     public Product {
@@ -142,12 +143,12 @@ public record Product(
             boolean superPromo, String description, String videoUrl, List<String> images,
             List<ProductAttribute> attributes) {
         return create(sku, name, category, variants, pricing, type, lotTracked, brand, imageUrl, onSale, superPromo,
-                description, videoUrl, images, attributes, null);
+                description, videoUrl, images, attributes, null, null);
     }
 
     /**
-     * Cria um novo produto (sem id, ativo por padrão) — forma canônica, incluindo o vínculo com a
-     * entidade {@link Category}. Ver {@link #categoryId()}.
+     * Cria um novo produto (sem id, ativo por padrão) — forma canônica, incluindo o vínculo com as
+     * entidades {@link Category} e {@link Brand}. Ver {@link #categoryId()}/{@link #brandId()}.
      *
      * <p>Sempre nasce {@link ProductStatus#ATIVO} — um rascunho é obtido chamando
      * {@link #withStatus(ProductStatus)} depois de criar, decisão que cabe a
@@ -156,10 +157,10 @@ public record Product(
     public static Product create(String sku, String name, String category, List<ProductVariant> variants,
             Pricing pricing, ProductType type, boolean lotTracked, String brand, String imageUrl, boolean onSale,
             boolean superPromo, String description, String videoUrl, List<String> images,
-            List<ProductAttribute> attributes, Long categoryId) {
+            List<ProductAttribute> attributes, Long categoryId, Long brandId) {
         return new Product(null, sku, name, category, true, variants, pricing, type, lotTracked, brand, imageUrl,
                 onSale, superPromo, description, videoUrl, images, attributes, categoryId,
-                null, null, false, false, true, true, ProductStatus.ATIVO);
+                null, null, false, false, true, true, ProductStatus.ATIVO, brandId);
     }
 
     /** Reconstitui um produto sem precificação a partir de persistência. */
@@ -237,7 +238,7 @@ public record Product(
             List<String> images, List<ProductAttribute> attributes, Long categoryId) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
                 onSale, superPromo, description, videoUrl, images, attributes, categoryId,
-                null, null, false, false, true, true, null);
+                null, null, false, false, true, true, null, null);
     }
 
     /**
@@ -251,10 +252,10 @@ public record Product(
             String imageUrl, boolean onSale, boolean superPromo, String description, String videoUrl,
             List<String> images, List<ProductAttribute> attributes, Long categoryId, String barcode,
             MeasurementUnit unit, boolean sampleProduct, boolean kitComponentEligible, boolean visibleInPos,
-            boolean visibleInMarketplace, ProductStatus status) {
+            boolean visibleInMarketplace, ProductStatus status, Long brandId) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
                 onSale, superPromo, description, videoUrl, images, attributes, categoryId, barcode, unit,
-                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status);
+                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId);
     }
 
     /**
@@ -301,14 +302,14 @@ public record Product(
                 newDescription == null ? description : newDescription,
                 newVideoUrl == null ? videoUrl : newVideoUrl,
                 images, attributes, categoryId, barcode, unit, sampleProduct, kitComponentEligible, visibleInPos,
-                visibleInMarketplace, status);
+                visibleInMarketplace, status, brandId);
     }
 
     /** Ativa ou desativa o produto, preservando o resto. */
     public Product withActive(boolean newActive) {
         return new Product(id, sku, name, category, newActive, variants, pricing, type, lotTracked, brand, imageUrl,
                 onSale, superPromo, description, videoUrl, images, attributes, categoryId, barcode, unit,
-                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status);
+                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId);
     }
 
     /**
@@ -319,14 +320,14 @@ public record Product(
     public Product withStatus(ProductStatus newStatus) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
                 onSale, superPromo, description, videoUrl, images, attributes, categoryId, barcode, unit,
-                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, newStatus);
+                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, newStatus, brandId);
     }
 
     /** Substitui a precificação do produto, preservando o resto. */
     public Product withPricing(Pricing newPricing) {
         return new Product(id, sku, name, category, active, variants, newPricing, type, lotTracked, brand, imageUrl,
                 onSale, superPromo, description, videoUrl, images, attributes, categoryId, barcode, unit,
-                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status);
+                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId);
     }
 
     /**
@@ -337,7 +338,7 @@ public record Product(
     public Product withType(ProductType newType) {
         return new Product(id, sku, name, category, active, variants, pricing, newType, lotTracked, brand, imageUrl,
                 onSale, superPromo, description, videoUrl, images, attributes, categoryId, barcode, unit,
-                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status);
+                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId);
     }
 
     /**
@@ -348,21 +349,21 @@ public record Product(
     public Product withLotTracked(boolean newLotTracked) {
         return new Product(id, sku, name, category, active, variants, pricing, type, newLotTracked, brand, imageUrl,
                 onSale, superPromo, description, videoUrl, images, attributes, categoryId, barcode, unit,
-                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status);
+                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId);
     }
 
     /** Marca ou desmarca o produto como em promoção (Estágio 01 do admin), preservando o resto. */
     public Product withOnSale(boolean newOnSale) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
                 newOnSale, superPromo, description, videoUrl, images, attributes, categoryId, barcode, unit,
-                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status);
+                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId);
     }
 
     /** Marca ou desmarca o produto com o selo de super promoção, preservando o resto. */
     public Product withSuperPromo(boolean newSuperPromo) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
                 onSale, newSuperPromo, description, videoUrl, images, attributes, categoryId, barcode, unit,
-                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status);
+                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId);
     }
 
     /**
@@ -372,7 +373,7 @@ public record Product(
     public Product withImages(List<String> newImages) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
                 onSale, superPromo, description, videoUrl, newImages, attributes, categoryId, barcode, unit,
-                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status);
+                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId);
     }
 
     /**
@@ -382,7 +383,7 @@ public record Product(
     public Product withAttributes(List<ProductAttribute> newAttributes) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
                 onSale, superPromo, description, videoUrl, images, newAttributes, categoryId, barcode, unit,
-                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status);
+                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId);
     }
 
     /**
@@ -397,21 +398,32 @@ public record Product(
                 newCategoryName == null ? category : newCategoryName,
                 active, variants, pricing, type, lotTracked, brand, imageUrl, onSale, superPromo, description,
                 videoUrl, images, attributes, newCategoryId, barcode, unit, sampleProduct, kitComponentEligible,
-                visibleInPos, visibleInMarketplace, status);
+                visibleInPos, visibleInMarketplace, status, brandId);
+    }
+
+    /**
+     * Vincula o produto a uma {@link Brand}, mantendo o nome denormalizado ({@code brand}) em
+     * sincronia — mesmo par aditivo de {@link #withCategory(Long, String)}.
+     */
+    public Product withBrand(Long newBrandId, String newBrandName) {
+        return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked,
+                newBrandName == null ? brand : newBrandName,
+                imageUrl, onSale, superPromo, description, videoUrl, images, attributes, categoryId, barcode, unit,
+                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, newBrandId);
     }
 
     /** Define o código de barras/EAN do produto, preservando o resto. {@code null} limpa o campo. */
     public Product withBarcode(String newBarcode) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
                 onSale, superPromo, description, videoUrl, images, attributes, categoryId, newBarcode, unit,
-                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status);
+                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId);
     }
 
     /** Define a unidade de medida do produto, preservando o resto. */
     public Product withUnit(MeasurementUnit newUnit) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
                 onSale, superPromo, description, videoUrl, images, attributes, categoryId, barcode, newUnit,
-                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status);
+                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId);
     }
 
     /**
@@ -421,7 +433,7 @@ public record Product(
     public Product withSampleProduct(boolean newSampleProduct) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
                 onSale, superPromo, description, videoUrl, images, attributes, categoryId, barcode, unit,
-                newSampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status);
+                newSampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId);
     }
 
     /**
@@ -431,21 +443,21 @@ public record Product(
     public Product withKitComponentEligible(boolean newKitComponentEligible) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
                 onSale, superPromo, description, videoUrl, images, attributes, categoryId, barcode, unit,
-                sampleProduct, newKitComponentEligible, visibleInPos, visibleInMarketplace, status);
+                sampleProduct, newKitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId);
     }
 
     /** Controla se o produto aparece no PDV, preservando o resto. */
     public Product withVisibleInPos(boolean newVisibleInPos) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
                 onSale, superPromo, description, videoUrl, images, attributes, categoryId, barcode, unit,
-                sampleProduct, kitComponentEligible, newVisibleInPos, visibleInMarketplace, status);
+                sampleProduct, kitComponentEligible, newVisibleInPos, visibleInMarketplace, status, brandId);
     }
 
     /** Controla se o produto aparece no marketplace/app, preservando o resto. */
     public Product withVisibleInMarketplace(boolean newVisibleInMarketplace) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
                 onSale, superPromo, description, videoUrl, images, attributes, categoryId, barcode, unit,
-                sampleProduct, kitComponentEligible, visibleInPos, newVisibleInMarketplace, status);
+                sampleProduct, kitComponentEligible, visibleInPos, newVisibleInMarketplace, status, brandId);
     }
 
     /**
@@ -463,7 +475,7 @@ public record Product(
     public Product withVariants(List<ProductVariant> newVariants) {
         return new Product(id, sku, name, category, active, newVariants, pricing, type, lotTracked, brand, imageUrl,
                 onSale, superPromo, description, videoUrl, images, attributes, categoryId, barcode, unit,
-                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status);
+                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId);
     }
 
     /**

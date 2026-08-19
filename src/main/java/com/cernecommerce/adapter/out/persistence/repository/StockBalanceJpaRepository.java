@@ -15,6 +15,8 @@ public interface StockBalanceJpaRepository extends JpaRepository<StockBalanceEnt
 
     Page<StockBalanceEntity> findByWarehouseIdOrderBySkuAsc(Long warehouseId, Pageable pageable);
 
+    boolean existsBySku(String sku);
+
     // EST-F022 — GET /estoque/summary. `sb.sku` é texto livre sem FK: pode casar com o SKU pai
     // (join com `p`) ou com o de uma variação (join com `v`), nunca os dois — a checagem de
     // duplicidade em EstoqueService.createProduct garante que os dois espaços de nomes não

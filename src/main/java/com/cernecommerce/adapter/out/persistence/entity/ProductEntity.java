@@ -121,6 +121,12 @@ public class ProductEntity {
     @Column(name = "category_id")
     private Long categoryId;
 
+    // Vínculo opcional com product_brand. Mesmo raciocínio de categoryId: guardado como id solto,
+    // não @ManyToOne — o nome já vem denormalizado na coluna "brand". Nulo = produto ainda não
+    // vinculado, estado válido para o legado.
+    @Column(name = "brand_id")
+    private Long brandId;
+
     // Código de barras/EAN — GTIN-8/12/14, texto para preservar zeros à esquerda. Único quando
     // informado (índice parcial em V91, não constraint de coluna, porque é opcional).
     @Column(name = "barcode", length = 14)

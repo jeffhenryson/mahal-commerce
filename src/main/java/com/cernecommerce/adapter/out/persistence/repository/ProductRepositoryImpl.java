@@ -5,7 +5,6 @@ import com.cernecommerce.adapter.out.persistence.entity.ProductEntity;
 import com.cernecommerce.adapter.out.persistence.entity.ProductVariantEntity;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.SortDirection;
-import com.cernecommerce.core.domain.model.estoque.BrandSummary;
 import com.cernecommerce.core.domain.model.estoque.CategoryProductCount;
 import com.cernecommerce.core.domain.model.estoque.MeasurementUnit;
 import com.cernecommerce.core.domain.model.estoque.Product;
@@ -49,6 +48,7 @@ public class ProductRepositoryImpl implements ProductRepository {
         entity.setCategory(product.category());
         entity.setCategoryId(product.categoryId());
         entity.setBrand(product.brand());
+        entity.setBrandId(product.brandId());
         entity.setImageUrl(product.imageUrl());
         entity.setOnSale(product.onSale());
         entity.setSuperPromo(product.superPromo());
@@ -131,22 +131,38 @@ public class ProductRepositoryImpl implements ProductRepository {
 
     @Override
     @Transactional(readOnly = true)
-    public PageResult<BrandSummary> findBrands(String search, int page, int size) {
-        Page<Object[]> result = productJpaRepository.findBrandsRaw(likePattern(normalizeSearch(search)),
-                PageRequest.of(page, size));
-        List<BrandSummary> content = result.getContent().stream()
-                .map(row -> new BrandSummary((String) row[0], (Long) row[1]))
-                .toList();
-        return new PageResult<>(content, page, size, result.getTotalElements(), result.getTotalPages());
+    public List<Product> findAllByCategoryId(Long categoryId) {
+        return productJpaRepository.findByCategoryId(categoryId).stream().map(this::toDomain).toList();
     }
 
-    /** Mesma normalização de {@link ProductFilter}: branco vira nulo, comparação sem maiúsculas. */
-    private static String normalizeSearch(String value) {
-        if (value == null) {
-            return null;
+    @Override
+    @Transactional(readOnly = true)
+    public List<Product> findAllByBrandId(Long brandId) {
+        return productJpaRepository.findByBrandId(brandId).stream().map(this::toDomain).toList();
+    }
+
+    @Override
+    public int renameBrand(Long brandId, String newName) {
+        return productJpaRepository.renameBrand(brandId, newName);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Map<Long, Long> countProductsByBrandIds(List<Long> brandIds) {
+        if (brandIds.isEmpty()) {
+            return Map.of();
         }
-        String trimmed = value.trim();
-        return trimmed.isEmpty() ? null : trimmed.toLowerCase();
+        Map<Long, Long> counts = new java.util.LinkedHashMap<>();
+        for (Object[] row : productJpaRepository.countProductsByBrandIdsRaw(brandIds)) {
+            counts.put((Long) row[0], (Long) row[1]);
+        }
+        return counts;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public long countByBrandId(Long brandId) {
+        return productJpaRepository.countByBrandId(brandId);
     }
 
     @Override
@@ -293,7 +309,7 @@ public class ProductRepositoryImpl implements ProductRepository {
                 e.isLotTracked(), e.getBrand(), e.getImageUrl(), e.isOnSale(), e.isSuperPromo(), e.getDescription(),
                 e.getVideoUrl(), List.copyOf(e.getImages()), attributes, e.getCategoryId(), e.getBarcode(), unit,
                 e.isSampleProduct(), e.isKitComponentEligible(), e.isVisibleInPos(), e.isVisibleInMarketplace(),
-                status);
+                status, e.getBrandId());
     }
 
     private ProductVariant toDomain(ProductVariantEntity e) {

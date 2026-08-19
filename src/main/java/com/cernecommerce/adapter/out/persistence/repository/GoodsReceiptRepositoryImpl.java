@@ -8,6 +8,8 @@ import com.cernecommerce.core.ports.out.compras.GoodsReceiptRepository;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Optional;
+
 @Repository
 @Transactional
 public class GoodsReceiptRepositoryImpl implements GoodsReceiptRepository {
@@ -37,6 +39,12 @@ public class GoodsReceiptRepositoryImpl implements GoodsReceiptRepository {
             entity.getItems().add(itemEntity);
         }
         return toDomain(goodsReceiptJpaRepository.save(entity));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<GoodsReceipt> findById(Long id) {
+        return goodsReceiptJpaRepository.findById(id).map(this::toDomain);
     }
 
     private GoodsReceipt toDomain(GoodsReceiptEntity e) {

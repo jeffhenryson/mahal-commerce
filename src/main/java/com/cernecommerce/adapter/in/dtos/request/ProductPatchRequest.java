@@ -41,6 +41,12 @@ public class ProductPatchRequest {
     @Size(max = 100)
     private String brand;
 
+    /**
+     * Vínculo direto com uma marca existente. Quando informado, vence sobre {@code brand}.
+     * Nulos nos dois campos mantêm a marca atual.
+     */
+    private Long brandId;
+
     /** Estágio 01 do admin — link de imagem cadastrado manualmente. Nulo mantém a atual. */
     @Size(max = 2048)
     private String imageUrl;

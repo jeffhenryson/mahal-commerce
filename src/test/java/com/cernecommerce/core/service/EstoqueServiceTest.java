@@ -1,7 +1,13 @@
 package com.cernecommerce.core.service;
 
+import com.cernecommerce.core.domain.exception.estoque.BrandHasProductsException;
+import com.cernecommerce.core.domain.exception.estoque.BrandNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.DraftLimitReachedException;
+import com.cernecommerce.core.domain.exception.estoque.DuplicateAttributeTypeNameException;
+import com.cernecommerce.core.domain.exception.estoque.DuplicateBrandNameException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateSkuException;
+import com.cernecommerce.core.domain.exception.estoque.ReplenishmentItemNotFoundException;
+import com.cernecommerce.core.domain.exception.estoque.VariantHasStockHistoryException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateWarehouseCodeException;
 import com.cernecommerce.core.domain.exception.estoque.InactiveProductException;
 import com.cernecommerce.core.domain.exception.estoque.InactiveWarehouseException;
@@ -34,6 +40,8 @@ import com.cernecommerce.core.domain.exception.estoque.LotExpiryDateMismatchExce
 import com.cernecommerce.core.domain.exception.estoque.MissingLotInfoException;
 import com.cernecommerce.core.domain.exception.estoque.UnexpectedLotInfoException;
 import com.cernecommerce.core.domain.exception.estoque.UnexpectedUnitCostException;
+import com.cernecommerce.core.domain.model.estoque.AttributeType;
+import com.cernecommerce.core.domain.model.estoque.Brand;
 import com.cernecommerce.core.domain.model.estoque.CategoryProductCount;
 import com.cernecommerce.core.domain.model.estoque.EstoqueSummary;
 import com.cernecommerce.core.domain.model.estoque.KitComponent;
@@ -52,6 +60,7 @@ import com.cernecommerce.core.domain.model.estoque.ProductType;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.ReorderAlertCounts;
 import com.cernecommerce.core.domain.model.estoque.ReorderPoint;
+import com.cernecommerce.core.domain.model.estoque.ReplenishmentListItem;
 import com.cernecommerce.core.domain.model.estoque.ReservationStatus;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
 import com.cernecommerce.core.domain.model.estoque.StockCount;
@@ -123,6 +132,9 @@ class EstoqueServiceTest {
     @Mock StockLotRepository stockLotRepository;
     @Mock com.cernecommerce.core.ports.out.SystemConfigPort systemConfigPort;
     @Mock CategoryRepository categoryRepository;
+    @Mock com.cernecommerce.core.ports.out.estoque.BrandRepository brandRepository;
+    @Mock com.cernecommerce.core.ports.out.estoque.AttributeTypeRepository attributeTypeRepository;
+    @Mock com.cernecommerce.core.ports.out.estoque.ReplenishmentListRepository replenishmentListRepository;
 
     /** Mesmo default de {@code estoque.reservation.default-ttl} em {@code CoreBeanConfig}. */
     private static final Duration RESERVATION_TTL = Duration.ofMinutes(30);
@@ -146,7 +158,8 @@ class EstoqueServiceTest {
         estoqueService = new EstoqueService(productRepository, warehouseRepository, stockBalanceRepository,
                 stockMovementRepository, reorderPointRepository, stockIntegrityRepository, stockCountRepository,
                 stockReservationRepository, notificationUseCase, userRepository, immediateExecutor,
-                RESERVATION_TTL, kitComponentRepository, stockLotRepository, systemConfigPort, categoryRepository);
+                RESERVATION_TTL, kitComponentRepository, stockLotRepository, systemConfigPort, categoryRepository,
+                brandRepository, attributeTypeRepository, replenishmentListRepository);
         lenient().when(reorderPointRepository.findBySkuAndWarehouseId(any(), any())).thenReturn(Optional.empty());
         // Padrão dos testes: o SKU existe no catálogo, que é a pré-condição das movimentações.
         // Os testes de createProduct e os de SKU desconhecido sobrescrevem este stub.
@@ -287,7 +300,7 @@ class EstoqueServiceTest {
 
         Product result = estoqueService.createProduct("EST23-001", "Produto", "categoria", List.of(), Pricing.empty(),
                 null, null, false, false, null, null, List.of(), List.of(), null,
-                null, null, false, false, null, null, null, null, null, null, null);
+                null, null, false, false, null, null, null, null, null, null, null, null);
 
         assertThat(result.status()).isEqualTo(ProductStatus.ATIVO);
         verify(productRepository, never()).countByStatus(any());
@@ -302,7 +315,7 @@ class EstoqueServiceTest {
         // Só sku + name — nenhum outro campo obrigatório, mesma validação mínima de ATIVO.
         Product result = estoqueService.createProduct("EST23-002", "Rascunho", null, List.of(), null,
                 null, null, false, false, null, null, List.of(), List.of(), null,
-                null, null, false, false, null, null, null, null, null, null, ProductStatus.RASCUNHO);
+                null, null, false, false, null, null, null, null, null, null, ProductStatus.RASCUNHO, null);
 
         assertThat(result.status()).isEqualTo(ProductStatus.RASCUNHO);
         assertThat(result.isDraft()).isTrue();
@@ -314,7 +327,7 @@ class EstoqueServiceTest {
 
         assertThatThrownBy(() -> estoqueService.createProduct("EST23-003", "Rascunho", null, List.of(), null,
                 null, null, false, false, null, null, List.of(), List.of(), null,
-                null, null, false, false, null, null, null, null, null, null, ProductStatus.RASCUNHO))
+                null, null, false, false, null, null, null, null, null, null, ProductStatus.RASCUNHO, null))
                 .isInstanceOf(DraftLimitReachedException.class);
         verify(productRepository, never()).save(any());
     }
@@ -327,7 +340,7 @@ class EstoqueServiceTest {
 
         assertThatCode(() -> estoqueService.createProduct("EST23-004", "Rascunho", null, List.of(), null,
                 null, null, false, false, null, null, List.of(), List.of(), null,
-                null, null, false, false, null, null, null, null, null, null, ProductStatus.RASCUNHO))
+                null, null, false, false, null, null, null, null, null, null, ProductStatus.RASCUNHO, null))
                 .doesNotThrowAnyException();
     }
 
@@ -339,7 +352,7 @@ class EstoqueServiceTest {
         when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         Product result = estoqueService.updateProduct("EST23-005", null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, null, ProductStatus.ATIVO);
+                null, null, null, null, null, null, null, null, null, null, ProductStatus.ATIVO, null);
 
         assertThat(result.status()).isEqualTo(ProductStatus.ATIVO);
         verify(productRepository, never()).countByStatus(any());
@@ -352,7 +365,7 @@ class EstoqueServiceTest {
         when(productRepository.countByStatus(ProductStatus.RASCUNHO)).thenReturn(5L);
 
         assertThatThrownBy(() -> estoqueService.updateProduct("EST23-006", null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, null, null, ProductStatus.RASCUNHO))
+                null, null, null, null, null, null, null, null, null, null, null, ProductStatus.RASCUNHO, null))
                 .isInstanceOf(DraftLimitReachedException.class);
         verify(productRepository, never()).save(any());
     }
@@ -365,7 +378,7 @@ class EstoqueServiceTest {
         when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         Product result = estoqueService.updateProduct("EST23-007", "Novo Nome", null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, null, null, ProductStatus.RASCUNHO);
+                null, null, null, null, null, null, null, null, null, null, null, ProductStatus.RASCUNHO, null);
 
         assertThat(result.status()).isEqualTo(ProductStatus.RASCUNHO);
         // A ausência de stub para countByStatus prova que o limite não é sequer consultado quando
@@ -1506,21 +1519,21 @@ class EstoqueServiceTest {
         StockMovement movement = StockMovement.of(9L, "NARG-001", 1L, MovementType.SAIDA, new BigDecimal("2"),
                 "Venda balcão sessão #7", "gerente", Instant.parse("2026-07-26T12:00:00Z"));
         when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
-        when(stockMovementRepository.findBySkuAndWarehouseId("NARG-001", 1L, 0, 20))
+        when(stockMovementRepository.findBySkuAndWarehouseId("NARG-001", 1L, null, null, null, 0, 20))
                 .thenReturn(new PageResult<>(List.of(movement), 0, 20, 1L, 1));
 
         PageResult<StockMovement> result = estoqueService.listMovements("NARG-001", "LOJA-01", 0, 20);
 
         assertThat(result.content()).containsExactly(movement);
         assertThat(result.totalElements()).isEqualTo(1L);
-        verify(stockMovementRepository).findBySkuAndWarehouseId("NARG-001", 1L, 0, 20);
+        verify(stockMovementRepository).findBySkuAndWarehouseId("NARG-001", 1L, null, null, null, 0, 20);
     }
 
     @Test
     void listMovements_returnsEmptyPageWhenSkuNeverMoved() {
         Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
         when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
-        when(stockMovementRepository.findBySkuAndWarehouseId("SEM-USO", 1L, 0, 20))
+        when(stockMovementRepository.findBySkuAndWarehouseId("SEM-USO", 1L, null, null, null, 0, 20))
                 .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0));
 
         PageResult<StockMovement> result = estoqueService.listMovements("SEM-USO", "LOJA-01", 0, 20);
@@ -1536,7 +1549,8 @@ class EstoqueServiceTest {
         assertThatThrownBy(() -> estoqueService.listMovements("NARG-001", "INEXISTENTE", 0, 20))
                 .isInstanceOf(WarehouseNotFoundException.class);
 
-        verify(stockMovementRepository, never()).findBySkuAndWarehouseId(any(), any(), anyInt(), anyInt());
+        verify(stockMovementRepository, never()).findBySkuAndWarehouseId(any(), any(), any(), any(), any(),
+                anyInt(), anyInt());
     }
 
     @Test
@@ -3424,14 +3438,493 @@ class EstoqueServiceTest {
 
     @Test
     void listBrands_delegatesToRepository() {
-        PageResult<com.cernecommerce.core.domain.model.estoque.BrandSummary> page = new PageResult<>(
-                List.of(new com.cernecommerce.core.domain.model.estoque.BrandSummary("Mahal", 24L)),
+        PageResult<com.cernecommerce.core.domain.model.estoque.Brand> page = new PageResult<>(
+                List.of(com.cernecommerce.core.domain.model.estoque.Brand.of(1L, "Mahal", true)),
                 0, 20, 1L, 1);
-        when(productRepository.findBrands("mahal", 0, 20)).thenReturn(page);
+        when(brandRepository.findByNameContaining("mahal", 0, 20)).thenReturn(page);
 
         var result = estoqueService.listBrands("mahal", 0, 20);
 
         assertThat(result.content()).extracting("name").containsExactly("Mahal");
+    }
+
+    @Test
+    void listBrands_semSearch_listaTodasPaginado() {
+        PageResult<Brand> page = new PageResult<>(List.of(Brand.of(1L, "Zomo", true)), 0, 20, 1L, 1);
+        when(brandRepository.findAll(0, 20)).thenReturn(page);
+
+        var result = estoqueService.listBrands(null, 0, 20);
+
+        assertThat(result.content()).extracting("name").containsExactly("Zomo");
+        verify(brandRepository, never()).findByNameContaining(any(), anyInt(), anyInt());
+    }
+
+    // ── Marcas do catálogo ────────────────────────────────────────────────────
+
+    @Test
+    void createBrand_recusaNomeJaExistente() {
+        when(brandRepository.findByName("Zomo")).thenReturn(Optional.of(Brand.of(1L, "Zomo", true)));
+
+        assertThatThrownBy(() -> estoqueService.createBrand("Zomo"))
+                .isInstanceOf(DuplicateBrandNameException.class);
+        verify(brandRepository, never()).save(any());
+    }
+
+    @Test
+    void updateBrand_renomear_propagaONomeParaOsProdutosVinculados() {
+        Brand atual = Brand.of(1L, "Zomo", true);
+        when(brandRepository.findById(1L)).thenReturn(Optional.of(atual));
+        when(brandRepository.findByName("Zomo Distribuidora")).thenReturn(Optional.empty());
+        when(brandRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        estoqueService.updateBrand(1L, "Zomo Distribuidora");
+
+        verify(productRepository).renameBrand(1L, "Zomo Distribuidora");
+    }
+
+    @Test
+    void updateBrand_renomearParaNomeDeOutraMarca_e409() {
+        when(brandRepository.findById(1L)).thenReturn(Optional.of(Brand.of(1L, "Zomo", true)));
+        when(brandRepository.findByName("Alfaraby")).thenReturn(Optional.of(Brand.of(2L, "Alfaraby", true)));
+
+        assertThatThrownBy(() -> estoqueService.updateBrand(1L, "Alfaraby"))
+                .isInstanceOf(DuplicateBrandNameException.class);
+        verify(brandRepository, never()).save(any());
+    }
+
+    @Test
+    void updateBrand_idInexistente_e404() {
+        when(brandRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.updateBrand(99L, "X"))
+                .isInstanceOf(BrandNotFoundException.class);
+    }
+
+    @Test
+    void setBrandActive_naoMexeNosProdutos() {
+        when(brandRepository.findById(1L)).thenReturn(Optional.of(Brand.of(1L, "Zomo", true)));
+        when(brandRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Brand desativada = estoqueService.setBrandActive(1L, false);
+
+        assertThat(desativada.active()).isFalse();
+        verifyNoInteractions(productRepository);
+    }
+
+    @Test
+    void deleteBrand_throwsWhenProductsLinked() {
+        when(brandRepository.findById(1L)).thenReturn(Optional.of(Brand.of(1L, "Zomo", true)));
+        when(productRepository.countByBrandId(1L)).thenReturn(3L);
+
+        assertThatThrownBy(() -> estoqueService.deleteBrand(1L))
+                .isInstanceOf(BrandHasProductsException.class);
+        verify(brandRepository, never()).deleteById(any());
+    }
+
+    @Test
+    void deleteBrand_succeedsWhenEmpty() {
+        when(brandRepository.findById(1L)).thenReturn(Optional.of(Brand.of(1L, "Zomo", true)));
+        when(productRepository.countByBrandId(1L)).thenReturn(0L);
+
+        estoqueService.deleteBrand(1L);
+
+        verify(brandRepository).deleteById(1L);
+    }
+
+    @Test
+    void deleteBrand_throwsWhenIdNotFound() {
+        when(brandRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.deleteBrand(99L))
+                .isInstanceOf(BrandNotFoundException.class);
+        verify(brandRepository, never()).deleteById(any());
+    }
+
+    @Test
+    void createProduct_comTextoDeMarcaConhecido_reencontraAExistente() {
+        when(productRepository.existsBySku(anyString())).thenReturn(false);
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(brandRepository.findByName("Zomo")).thenReturn(Optional.of(Brand.of(7L, "Zomo", true)));
+
+        Product created = estoqueService.createProduct("ESS-001", "Essência", "essencia", List.of(), Pricing.empty(),
+                "Zomo", null, false, false, null, null, List.of(), List.of(), null,
+                null, null, false, false, null, null, null, null, null, null, null, null);
+
+        assertThat(created.brandId()).isEqualTo(7L);
+        verify(brandRepository, never()).save(any());
+    }
+
+    @Test
+    void createProduct_comTextoDeMarcaDesconhecido_criaNova() {
+        when(productRepository.existsBySku(anyString())).thenReturn(false);
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(brandRepository.findByName("Nova Marca")).thenReturn(Optional.empty());
+        when(brandRepository.save(any())).thenAnswer(inv -> Brand.of(10L, "Nova Marca", true));
+
+        Product created = estoqueService.createProduct("ESS-002", "Essência", "essencia", List.of(), Pricing.empty(),
+                "Nova Marca", null, false, false, null, null, List.of(), List.of(), null,
+                null, null, false, false, null, null, null, null, null, null, null, null);
+
+        assertThat(created.brandId()).isEqualTo(10L);
+        verify(brandRepository).save(argThat(b -> b.name().equals("Nova Marca")));
+    }
+
+    @Test
+    void createProduct_comBrandIdInexistente_e404() {
+        when(productRepository.existsBySku(anyString())).thenReturn(false);
+        when(brandRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.createProduct("ESS-003", "Essência", "essencia", List.of(),
+                Pricing.empty(), null, null, false, false, null, null, List.of(), List.of(), null,
+                null, null, false, false, null, null, null, null, null, null, null, 99L))
+                .isInstanceOf(BrandNotFoundException.class);
+    }
+
+    @Test
+    void updateProduct_comBrandId_vinculaEPropagaONomeDenormalizado() {
+        Product current = Product.of(1L, "ESS-001", "Essência", "essencia", true, List.of());
+        when(productRepository.findBySku("ESS-001")).thenReturn(Optional.of(current));
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(brandRepository.findById(7L)).thenReturn(Optional.of(Brand.of(7L, "Zomo", true)));
+
+        Product updated = estoqueService.updateProduct("ESS-001", null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null, null, 7L);
+
+        assertThat(updated.brandId()).isEqualTo(7L);
+        assertThat(updated.brand()).isEqualTo("Zomo");
+    }
+
+    // ── Margem média por categoria/marca (item 7) ─────────────────────────────
+
+    @Test
+    void averageMarginPercentByCategoryIds_calculaMediaSimplesIgnorandoSemMargem() {
+        Product comMargem60 = Product.of(1L, "P1", "Prod 1", "cat", true, List.of(),
+                Pricing.of(new BigDecimal("40.00"), null, new BigDecimal("100.00")));
+        Product comMargem20 = Product.of(2L, "P2", "Prod 2", "cat", true, List.of(),
+                Pricing.of(new BigDecimal("80.00"), null, new BigDecimal("100.00")));
+        Product semPreco = Product.of(3L, "P3", "Prod 3", "cat", true, List.of());
+        when(productRepository.findAllByCategoryId(1L)).thenReturn(List.of(comMargem60, comMargem20, semPreco));
+
+        Map<Long, BigDecimal> result = estoqueService.averageMarginPercentByCategoryIds(List.of(1L));
+
+        assertThat(result.get(1L)).isEqualByComparingTo("40.00");
+    }
+
+    @Test
+    void averageMarginPercentByCategoryIds_semNenhumProdutoComMargem_retornaNulo() {
+        when(productRepository.findAllByCategoryId(1L)).thenReturn(List.of(Product.of(1L, "P1", "Prod 1", "cat",
+                true, List.of())));
+
+        Map<Long, BigDecimal> result = estoqueService.averageMarginPercentByCategoryIds(List.of(1L));
+
+        assertThat(result.get(1L)).isNull();
+    }
+
+    @Test
+    void averageMarginPercentByBrandIds_delegatesToRepository() {
+        Product comMargem = Product.of(1L, "P1", "Prod 1", "cat", true, List.of(),
+                Pricing.of(new BigDecimal("50.00"), null, new BigDecimal("100.00")));
+        when(productRepository.findAllByBrandId(7L)).thenReturn(List.of(comMargem));
+
+        Map<Long, BigDecimal> result = estoqueService.averageMarginPercentByBrandIds(List.of(7L));
+
+        assertThat(result.get(7L)).isEqualByComparingTo("50.00");
+    }
+
+    // ── Vocabulário de atributos (item 5) ──────────────────────────────────────
+
+    @Test
+    void createAttributeType_recusaNomeJaExistente() {
+        when(attributeTypeRepository.findByName("Sabor"))
+                .thenReturn(Optional.of(AttributeType.of(1L, "Sabor")));
+
+        assertThatThrownBy(() -> estoqueService.createAttributeType("Sabor"))
+                .isInstanceOf(DuplicateAttributeTypeNameException.class);
+        verify(attributeTypeRepository, never()).save(any());
+    }
+
+    @Test
+    void createAttributeType_criaQuandoNomeNovo() {
+        when(attributeTypeRepository.findByName("Intensidade")).thenReturn(Optional.empty());
+        when(attributeTypeRepository.save(any())).thenAnswer(inv -> AttributeType.of(5L, "Intensidade"));
+
+        AttributeType created = estoqueService.createAttributeType("Intensidade");
+
+        assertThat(created.name()).isEqualTo("Intensidade");
+    }
+
+    @Test
+    void listAttributeTypes_delegatesToRepository() {
+        when(attributeTypeRepository.findAllOrderByName())
+                .thenReturn(List.of(AttributeType.of(1L, "Aroma"), AttributeType.of(2L, "Sabor")));
+
+        List<AttributeType> result = estoqueService.listAttributeTypes();
+
+        assertThat(result).extracting(AttributeType::name).containsExactly("Aroma", "Sabor");
+    }
+
+    // ── DELETE reorder-point (item 4) ─────────────────────────────────────────
+
+    @Test
+    void deleteReorderPoint_delegatesToRepository() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+
+        estoqueService.deleteReorderPoint("NARG-001", "LOJA-01");
+
+        verify(reorderPointRepository).deleteBySkuAndWarehouseId("NARG-001", 1L);
+    }
+
+    @Test
+    void deleteReorderPoint_idempotente_naoChecaExistenciaAntes() {
+        // Item 4: não é erro remover o que não existe — sem checagem de existência prévia.
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+
+        assertThatCode(() -> estoqueService.deleteReorderPoint("SEM-MINIMO", "LOJA-01"))
+                .doesNotThrowAnyException();
+        verify(reorderPointRepository, never()).findBySkuAndWarehouseId(any(), any());
+    }
+
+    @Test
+    void deleteReorderPoint_throwsWhenWarehouseNotFound() {
+        when(warehouseRepository.findByCode("INEXISTENTE")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.deleteReorderPoint("NARG-001", "INEXISTENTE"))
+                .isInstanceOf(WarehouseNotFoundException.class);
+        verify(reorderPointRepository, never()).deleteBySkuAndWarehouseId(any(), any());
+    }
+
+    // ── Histórico de compras por SKU (item 2) ─────────────────────────────────
+
+    @Test
+    void listPurchaseHistory_delegatesToRepository() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        StockMovement entrada = StockMovement.of(1L, "NARG-001", 1L, MovementType.ENTRADA, new BigDecimal("24.000"),
+                "Recebimento de mercadoria - fornecedor #3", "gerente", Instant.parse("2026-07-01T10:00:00Z"),
+                null, new BigDecimal("42.50"), 87L);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(stockMovementRepository.findEntradasBySkuAndWarehouseId("NARG-001", 1L, 0, 20))
+                .thenReturn(new PageResult<>(List.of(entrada), 0, 20, 1L, 1));
+
+        PageResult<StockMovement> result = estoqueService.listPurchaseHistory("NARG-001", "LOJA-01", 0, 20);
+
+        assertThat(result.content()).containsExactly(entrada);
+        assertThat(result.content().get(0).goodsReceiptId()).isEqualTo(87L);
+    }
+
+    @Test
+    void listPurchaseHistory_throwsWhenWarehouseNotFound() {
+        when(warehouseRepository.findByCode("INEXISTENTE")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.listPurchaseHistory("NARG-001", "INEXISTENTE", 0, 20))
+                .isInstanceOf(WarehouseNotFoundException.class);
+    }
+
+    // ── DELETE de variante (item 8) ───────────────────────────────────────────
+
+    @Test
+    void deleteVariant_removeQuandoSemHistoricoDeEstoque() {
+        ProductVariant variante = ProductVariant.create("ESS-001-50G", List.of(), null, null);
+        Product current = Product.of(1L, "ESS-001", "Essência", "essencia", true, List.of(variante));
+        when(productRepository.findBySku("ESS-001")).thenReturn(Optional.of(current));
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(stockBalanceRepository.existsBySku("ESS-001-50G")).thenReturn(false);
+        when(stockMovementRepository.existsBySku("ESS-001-50G")).thenReturn(false);
+
+        Product updated = estoqueService.deleteVariant("ESS-001", "ESS-001-50G");
+
+        assertThat(updated.variants()).isEmpty();
+    }
+
+    @Test
+    void deleteVariant_recusaQuandoHaSaldoDeEstoque() {
+        ProductVariant variante = ProductVariant.create("ESS-001-50G", List.of(), null, null);
+        Product current = Product.of(1L, "ESS-001", "Essência", "essencia", true, List.of(variante));
+        when(productRepository.findBySku("ESS-001")).thenReturn(Optional.of(current));
+        when(stockBalanceRepository.existsBySku("ESS-001-50G")).thenReturn(true);
+
+        assertThatThrownBy(() -> estoqueService.deleteVariant("ESS-001", "ESS-001-50G"))
+                .isInstanceOf(VariantHasStockHistoryException.class);
+        verify(productRepository, never()).save(any());
+    }
+
+    @Test
+    void deleteVariant_recusaQuandoHaMovimentacaoDeEstoque() {
+        ProductVariant variante = ProductVariant.create("ESS-001-50G", List.of(), null, null);
+        Product current = Product.of(1L, "ESS-001", "Essência", "essencia", true, List.of(variante));
+        when(productRepository.findBySku("ESS-001")).thenReturn(Optional.of(current));
+        when(stockBalanceRepository.existsBySku("ESS-001-50G")).thenReturn(false);
+        when(stockMovementRepository.existsBySku("ESS-001-50G")).thenReturn(true);
+
+        assertThatThrownBy(() -> estoqueService.deleteVariant("ESS-001", "ESS-001-50G"))
+                .isInstanceOf(VariantHasStockHistoryException.class);
+        verify(productRepository, never()).save(any());
+    }
+
+    @Test
+    void deleteVariant_throwsWhenVariantNotFound() {
+        Product current = Product.of(1L, "ESS-001", "Essência", "essencia", true, List.of());
+        when(productRepository.findBySku("ESS-001")).thenReturn(Optional.of(current));
+
+        assertThatThrownBy(() -> estoqueService.deleteVariant("ESS-001", "ESS-001-INEXISTENTE"))
+                .isInstanceOf(ProductVariantNotFoundException.class);
+    }
+
+    // ── Filtros de GET /estoque/movements (item 6) ────────────────────────────
+
+    @Test
+    void listMovements_comFiltroDeTipoEData_repassaAoRepositorio() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        Instant from = Instant.parse("2026-07-01T00:00:00Z");
+        Instant to = Instant.parse("2026-07-31T23:59:59Z");
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(stockMovementRepository.findBySkuAndWarehouseId("NARG-001", 1L, MovementType.ENTRADA, from, to, 0, 20))
+                .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0));
+
+        estoqueService.listMovements("NARG-001", "LOJA-01", MovementType.ENTRADA, from, to, 0, 20);
+
+        verify(stockMovementRepository).findBySkuAndWarehouseId("NARG-001", 1L, MovementType.ENTRADA, from, to, 0,
+                20);
+    }
+
+    // ── Lista de Reposição (item 1) ───────────────────────────────────────────
+
+    @Test
+    void upsertReplenishmentItem_tiraSnapshotDeProdutoSaldoPontoDeReposicaoECustoEUltimaCompra() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        Product product = Product.of(1L, "ESS-001", "Essência Babylon 50g", "essencias", true, List.of(),
+                Pricing.of(new BigDecimal("45.00"), null, new BigDecimal("90.00")), ProductType.SIMPLES, false,
+                "Zomo");
+        StockBalance balance = StockBalance.of(1L, "ESS-001", 1L, new BigDecimal("2.000"), 0L);
+        ReorderPoint reorderPoint = ReorderPoint.of(1L, "ESS-001", 1L, new BigDecimal("10.000"));
+        StockMovement ultimaCompra = StockMovement.of(9L, "ESS-001", 1L, MovementType.ENTRADA,
+                new BigDecimal("24.000"), "Recebimento de mercadoria - fornecedor #3", "gerente",
+                Instant.parse("2026-07-01T10:00:00Z"), null, new BigDecimal("42.50"), 87L);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(productRepository.findByAnySku("ESS-001")).thenReturn(Optional.of(product));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("ESS-001", 1L)).thenReturn(Optional.of(balance));
+        when(reorderPointRepository.findBySkuAndWarehouseId("ESS-001", 1L)).thenReturn(Optional.of(reorderPoint));
+        when(stockMovementRepository.findEntradasBySkuAndWarehouseId("ESS-001", 1L, 0, 1))
+                .thenReturn(new PageResult<>(List.of(ultimaCompra), 0, 1, 1L, 1));
+        when(replenishmentListRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        ReplenishmentListItem result = estoqueService.upsertReplenishmentItem("ESS-001", "LOJA-01",
+                new BigDecimal("12"), "pedir junto com o pedido da Zomo", "jeff");
+
+        assertThat(result.productNameSnapshot()).isEqualTo("Essência Babylon 50g");
+        assertThat(result.categorySnapshot()).isEqualTo("essencias");
+        assertThat(result.brandSnapshot()).isEqualTo("Zomo");
+        assertThat(result.currentStockSnapshot()).isEqualByComparingTo("2.000");
+        assertThat(result.minStockSnapshot()).isEqualByComparingTo("10.000");
+        // max(0, minStock - currentStock) = max(0, 10 - 2) = 8
+        assertThat(result.suggestedQuantitySnapshot()).isEqualByComparingTo("8.000");
+        assertThat(result.quantity()).isEqualByComparingTo("12");
+        assertThat(result.unitCostSnapshot()).isEqualByComparingTo("45.00");
+        assertThat(result.previousPurchaseQuantitySnapshot()).isEqualByComparingTo("24.000");
+        assertThat(result.previousPurchaseUnitCostSnapshot()).isEqualByComparingTo("42.50");
+        assertThat(result.previousPurchasedAtSnapshot()).isEqualTo(Instant.parse("2026-07-01T10:00:00Z"));
+        assertThat(result.note()).isEqualTo("pedir junto com o pedido da Zomo");
+        assertThat(result.createdBy()).isEqualTo("jeff");
+    }
+
+    @Test
+    void upsertReplenishmentItem_semPontoDeReposicaoConfigurado_suggestedQuantityFicaNulo() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        Product product = Product.of(1L, "ESS-001", "Essência", "essencias", true, List.of());
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(productRepository.findByAnySku("ESS-001")).thenReturn(Optional.of(product));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("ESS-001", 1L)).thenReturn(Optional.empty());
+        when(reorderPointRepository.findBySkuAndWarehouseId("ESS-001", 1L)).thenReturn(Optional.empty());
+        when(stockMovementRepository.findEntradasBySkuAndWarehouseId("ESS-001", 1L, 0, 1))
+                .thenReturn(new PageResult<>(List.of(), 0, 1, 0L, 0));
+        when(replenishmentListRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        ReplenishmentListItem result = estoqueService.upsertReplenishmentItem("ESS-001", "LOJA-01",
+                new BigDecimal("5"), null, "jeff");
+
+        assertThat(result.minStockSnapshot()).isNull();
+        assertThat(result.suggestedQuantitySnapshot()).isNull();
+        assertThat(result.currentStockSnapshot()).isEqualByComparingTo(BigDecimal.ZERO);
+        assertThat(result.previousPurchasedAtSnapshot()).isNull();
+    }
+
+    @Test
+    void upsertReplenishmentItem_throwsWhenProductNotFound() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(productRepository.findByAnySku("SKU-FANTASMA")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.upsertReplenishmentItem("SKU-FANTASMA", "LOJA-01",
+                BigDecimal.ONE, null, "jeff"))
+                .isInstanceOf(ProductNotFoundException.class);
+        verify(replenishmentListRepository, never()).save(any());
+    }
+
+    @Test
+    void updateReplenishmentItem_alteraQuantityENote_semTocarSnapshot() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        ReplenishmentListItem current = ReplenishmentListItem.of(1L, "ESS-001", 1L, "Essência", "essencias", "Zomo",
+                null, new BigDecimal("2.000"), new BigDecimal("10.000"), new BigDecimal("8.000"),
+                new BigDecimal("12"), new BigDecimal("45.00"), null, null, null, "nota antiga",
+                Instant.parse("2026-08-19T14:00:00Z"), "jeff");
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(replenishmentListRepository.findBySkuAndWarehouseId("ESS-001", 1L)).thenReturn(Optional.of(current));
+        when(replenishmentListRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        ReplenishmentListItem updated = estoqueService.updateReplenishmentItem("ESS-001", "LOJA-01",
+                new BigDecimal("20"), "nota nova");
+
+        assertThat(updated.quantity()).isEqualByComparingTo("20");
+        assertThat(updated.note()).isEqualTo("nota nova");
+        assertThat(updated.productNameSnapshot()).isEqualTo("Essência");
+        assertThat(updated.minStockSnapshot()).isEqualByComparingTo("10.000");
+    }
+
+    @Test
+    void updateReplenishmentItem_throwsWhenItemNotFound() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(replenishmentListRepository.findBySkuAndWarehouseId("SEM-ITEM", 1L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.updateReplenishmentItem("SEM-ITEM", "LOJA-01",
+                BigDecimal.ONE, null))
+                .isInstanceOf(ReplenishmentItemNotFoundException.class);
+    }
+
+    @Test
+    void deleteReplenishmentItem_delegatesToRepository() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+
+        estoqueService.deleteReplenishmentItem("ESS-001", "LOJA-01");
+
+        verify(replenishmentListRepository).deleteBySkuAndWarehouseId("ESS-001", 1L);
+    }
+
+    @Test
+    void clearReplenishmentList_delegatesToRepository() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+
+        estoqueService.clearReplenishmentList("LOJA-01");
+
+        verify(replenishmentListRepository).deleteByWarehouseId(1L);
+    }
+
+    @Test
+    void listReplenishmentItems_delegatesToRepository() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        ReplenishmentListItem item = ReplenishmentListItem.of(1L, "ESS-001", 1L, "Essência", "essencias", "Zomo",
+                null, new BigDecimal("2.000"), new BigDecimal("10.000"), new BigDecimal("8.000"),
+                new BigDecimal("12"), new BigDecimal("45.00"), null, null, null, null,
+                Instant.parse("2026-08-19T14:00:00Z"), "jeff");
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(replenishmentListRepository.findByWarehouseId(1L)).thenReturn(List.of(item));
+
+        List<ReplenishmentListItem> result = estoqueService.listReplenishmentItems("LOJA-01");
+
+        assertThat(result).containsExactly(item);
     }
 
     @Test

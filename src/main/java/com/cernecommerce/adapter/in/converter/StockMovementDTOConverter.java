@@ -1,6 +1,7 @@
 package com.cernecommerce.adapter.in.converter;
 
 import com.cernecommerce.adapter.in.dtos.response.OrphanSkuResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.PurchaseHistoryResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.StockMovementResponseDTO;
 import com.cernecommerce.core.domain.model.estoque.MeasurementUnit;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
@@ -30,6 +31,24 @@ public class StockMovementDTOConverter {
         dto.setLotCode(movement.lotCode());
         dto.setUnitCost(movement.unitCost());
         dto.setUnit(unit == null ? null : unit.name());
+        return dto;
+    }
+
+    /**
+     * Histórico de compras (item 2) — {@code supplierId}/{@code supplierName} resolvidos pelo
+     * controller a partir de {@code movement.goodsReceiptId()} (a camada estoque não depende de
+     * compras).
+     */
+    public PurchaseHistoryResponseDTO toPurchaseHistoryResponse(StockMovement movement, Long supplierId,
+            String supplierName) {
+        PurchaseHistoryResponseDTO dto = new PurchaseHistoryResponseDTO();
+        dto.setQuantity(movement.quantity());
+        dto.setUnitCost(movement.unitCost());
+        dto.setPurchasedAt(movement.createdAt());
+        dto.setSupplierId(supplierId);
+        dto.setSupplierName(supplierName);
+        dto.setGoodsReceiptId(movement.goodsReceiptId());
+        dto.setLotCode(movement.lotCode());
         return dto;
     }
 

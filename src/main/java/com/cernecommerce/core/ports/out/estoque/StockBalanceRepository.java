@@ -19,6 +19,12 @@ public interface StockBalanceRepository {
     StockBalance save(StockBalance stockBalance);
 
     /**
+     * Indica se existe alguma linha de saldo para o SKU, em qualquer depósito — usado para
+     * bloquear DELETE de variante com histórico (item 8 do pedido do frontend).
+     */
+    boolean existsBySku(String sku);
+
+    /**
      * Soma {@code quantity * costPrice efetivo} de todo saldo em todos os depósitos — o
      * {@code costPrice efetivo} segue a mesma precedência variação→pai de
      * {@code Product.effectivePricingFor}. Saldo cujo SKU não resolve a nenhum custo conhecido

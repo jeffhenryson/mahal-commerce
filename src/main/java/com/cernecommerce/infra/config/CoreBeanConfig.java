@@ -76,10 +76,13 @@ import com.cernecommerce.core.ports.in.OrderReportUseCase;
 import com.cernecommerce.core.ports.in.OrderUseCase;
 import com.cernecommerce.core.ports.in.PdvUseCase;
 import com.cernecommerce.core.ports.in.EstoqueUseCase;
+import com.cernecommerce.core.ports.out.estoque.AttributeTypeRepository;
+import com.cernecommerce.core.ports.out.estoque.BrandRepository;
 import com.cernecommerce.core.ports.out.estoque.CategoryRepository;
 import com.cernecommerce.core.ports.out.estoque.KitComponentRepository;
 import com.cernecommerce.core.ports.out.estoque.ProductRepository;
 import com.cernecommerce.core.ports.out.estoque.ReorderPointRepository;
+import com.cernecommerce.core.ports.out.estoque.ReplenishmentListRepository;
 import com.cernecommerce.core.ports.out.estoque.StockBalanceRepository;
 import com.cernecommerce.core.ports.out.estoque.StockCountRepository;
 import com.cernecommerce.core.ports.out.estoque.StockIntegrityRepository;
@@ -290,12 +293,15 @@ class CoreBeanConfig {
             // travado por engano quando o cliente abandona o checkout na tela de pagamento.
             @Value("${estoque.reservation.default-ttl:PT30M}") Duration defaultReservationTtl,
             KitComponentRepository kitComponentRepository, StockLotRepository stockLotRepository,
-            SystemConfigPort systemConfigPort, CategoryRepository categoryRepository) {
+            SystemConfigPort systemConfigPort, CategoryRepository categoryRepository,
+            BrandRepository brandRepository, AttributeTypeRepository attributeTypeRepository,
+            ReplenishmentListRepository replenishmentListRepository) {
         return new EstoqueService(productRepository, warehouseRepository, stockBalanceRepository,
                 stockMovementRepository, reorderPointRepository, stockIntegrityRepository,
                 stockCountRepository, stockReservationRepository, notificationUseCase, userRepository,
                 afterCommitExecutor, defaultReservationTtl, kitComponentRepository, stockLotRepository,
-                systemConfigPort, categoryRepository);
+                systemConfigPort, categoryRepository, brandRepository, attributeTypeRepository,
+                replenishmentListRepository);
     }
 
     @Bean

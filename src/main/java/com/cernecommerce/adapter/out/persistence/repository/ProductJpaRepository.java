@@ -104,15 +104,26 @@ public interface ProductJpaRepository extends JpaRepository<ProductEntity, Long>
     /** Bloco 2.3 — usado para bloquear DELETE de categoria com produto vinculado. */
     long countByCategoryId(Long categoryId);
 
+    /** Usado para calcular {@code averageMarginPercent} de uma categoria (sem paginação). */
+    List<ProductEntity> findByCategoryId(Long categoryId);
+
+    /** Mesmo que {@link #findByCategoryId}, por marca. */
+    List<ProductEntity> findByBrandId(Long brandId);
+
     /**
-     * Marcas em uso no catálogo, agregadas do campo texto livre {@code brand} (Bloco 2.2) — não
-     * existe entidade {@code Brand} própria. Mesmo idioma de {@code search} de
-     * {@link #findFilteredIds}: já em minúsculas e com os {@code %} aplicados pelo adapter.
+     * Contagem de produtos por marca, para todos os ids informados, numa única consulta — mesmo
+     * padrão de {@link #countProductsByCategoryIdsRaw}.
      */
-    @Query("SELECT p.brand, COUNT(p) FROM ProductEntity p "
-            + "WHERE p.brand IS NOT NULL AND (:search IS NULL OR LOWER(p.brand) LIKE :search) "
-            + "GROUP BY p.brand ORDER BY p.brand ASC")
-    Page<Object[]> findBrandsRaw(@Param("search") String search, Pageable pageable);
+    @Query("SELECT p.brandId, COUNT(p) FROM ProductEntity p WHERE p.brandId IN :brandIds GROUP BY p.brandId")
+    List<Object[]> countProductsByBrandIdsRaw(@Param("brandIds") List<Long> brandIds);
+
+    /** Usado para bloquear DELETE de marca com produto vinculado. */
+    long countByBrandId(Long brandId);
+
+    /** Propaga o rename da marca para a coluna denormalizada — mesmo padrão de {@link #renameCategory}. */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("UPDATE ProductEntity p SET p.brand = :newName WHERE p.brandId = :brandId")
+    int renameBrand(@Param("brandId") Long brandId, @Param("newName") String newName);
 
     // ECM-F002: mesma condição de Pricing#isPriced() traduzida para SQL — salePrice preenchido,
     // ou custo+markup preenchidos o bastante para sugerir um preço. Kit nunca tem costPrice

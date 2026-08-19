@@ -6,6 +6,7 @@ import com.cernecommerce.core.domain.model.compras.GoodsReceiptItem;
 import com.cernecommerce.core.domain.model.compras.Supplier;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Port de entrada do domínio <b>compras</b>.
@@ -28,4 +29,14 @@ public interface ComprasUseCase {
      * código do depósito não existir — nesses casos a transação inteira é revertida.
      */
     GoodsReceipt receiveGoods(Long supplierId, String warehouseCode, List<GoodsReceiptItem> items, String username);
+
+    /**
+     * Busca um recebimento por id — usado pelo enriquecimento do histórico de compras
+     * ({@code EstoqueController.listPurchaseHistory}, item 2) para resolver o fornecedor a partir
+     * do {@code goodsReceiptId} de uma {@code StockMovement}.
+     */
+    Optional<GoodsReceipt> findGoodsReceiptById(Long id);
+
+    /** Busca um fornecedor por id — mesmo uso de {@link #findGoodsReceiptById}. */
+    Optional<Supplier> findSupplierById(Long id);
 }

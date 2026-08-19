@@ -19,6 +19,12 @@ public class ProductResponseDTO {
     private Long categoryId;
     private String brand;
 
+    /**
+     * Id da marca vinculada, ou nulo em produto ainda não vinculado. O nome acima é o desta
+     * marca, denormalizado e mantido em sincronia pelo backend.
+     */
+    private Long brandId;
+
     /** Estágio 01 do admin — link de imagem cadastrado manualmente pelo lojista. */
     private String imageUrl;
 

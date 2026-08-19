@@ -1448,4 +1448,138 @@ public class EstoqueControllerSecurityTest {
         // Sem token: é a navegação da vitrine, lida pelo app antes de qualquer login.
         mockMvc.perform(get("/shop/categories")).andExpect(status().isOk());
     }
+
+    // ===== Marcas: ESTOQUE_BRAND_MANAGE para escrita, PRODUCT_READ para leitura (item 3) =====
+
+    @Test
+    void list_brands_with_estoque_product_read_returns_200() throws Exception {
+        mockMvc.perform(get("/estoque/brands")
+                .with(user("vendedor").authorities(
+                        new SimpleGrantedAuthority("ROLE_ATENDENTE"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_READ"))))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void create_brand_with_product_manage_only_returns_403() throws Exception {
+        // Manter o cadastro de produtos não dá direito de gerir o vocabulário de marcas.
+        mockMvc.perform(post("/estoque/brands")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"Proibida\"}")
+                .with(user("cadastrador").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_MANAGE"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void create_brand_with_brand_manage_returns_201() throws Exception {
+        mockMvc.perform(post("/estoque/brands")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"Marca Sec " + System.nanoTime() + "\"}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_BRAND_MANAGE"))))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
+    void delete_brand_without_brand_manage_returns_403() throws Exception {
+        mockMvc.perform(delete("/estoque/brands/1")
+                .with(user("cadastrador").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_MANAGE"))))
+                .andExpect(status().isForbidden());
+    }
+
+    // ===== Vocabulário de atributos: ESTOQUE_ATTRIBUTE_MANAGE (item 5) =====
+
+    @Test
+    void list_attribute_types_with_estoque_product_read_returns_200() throws Exception {
+        mockMvc.perform(get("/estoque/attribute-types")
+                .with(user("vendedor").authorities(
+                        new SimpleGrantedAuthority("ROLE_ATENDENTE"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_READ"))))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void create_attribute_type_with_product_manage_only_returns_403() throws Exception {
+        mockMvc.perform(post("/estoque/attribute-types")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"Proibido\"}")
+                .with(user("cadastrador").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_MANAGE"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void create_attribute_type_with_attribute_manage_returns_201() throws Exception {
+        mockMvc.perform(post("/estoque/attribute-types")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"Tipo Sec " + System.nanoTime() + "\"}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_ATTRIBUTE_MANAGE"))))
+                .andExpect(status().isCreated());
+    }
+
+    // ===== Lista de Reposição: ESTOQUE_REPLENISHMENT_MANAGE para escrita (item 1) =====
+
+    @Test
+    void list_replenishment_items_without_auth_returns_401() throws Exception {
+        mockMvc.perform(get("/estoque/replenishment-list").param("warehouseCode", "LOJA-01"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void upsert_replenishment_item_with_product_manage_only_returns_403() throws Exception {
+        // Manter o cadastro de produtos não dá direito de escrever na lista de reposição.
+        mockMvc.perform(post("/estoque/replenishment-list/items")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"sku\":\"NARG-001\",\"warehouseCode\":\"LOJA-01\",\"quantity\":1}")
+                .with(user("cadastrador").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_MANAGE"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void upsert_replenishment_item_with_replenishment_manage_returns_201() throws Exception {
+        String sku = givenProduct();
+        String code = "LOJA_REPL_SEC_TEST_" + System.currentTimeMillis();
+        mockMvc.perform(post("/estoque/warehouses")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"code\":\"" + code + "\",\"name\":\"Loja Teste\",\"type\":\"LOJA_FISICA\"}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_WAREHOUSE_MANAGE"))))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(post("/estoque/replenishment-list/items")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"sku\":\"" + sku + "\",\"warehouseCode\":\"" + code + "\",\"quantity\":5}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_REPLENISHMENT_MANAGE"))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.sku").value(sku));
+
+        mockMvc.perform(get("/estoque/replenishment-list").param("warehouseCode", code)
+                .with(user("vendedor").authorities(
+                        new SimpleGrantedAuthority("ROLE_ATENDENTE"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_READ"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].sku").value(sku));
+    }
+
+    @Test
+    void clear_replenishment_list_without_replenishment_manage_returns_403() throws Exception {
+        mockMvc.perform(delete("/estoque/replenishment-list").param("warehouseCode", "LOJA-01")
+                .with(user("cadastrador").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_MANAGE"))))
+                .andExpect(status().isForbidden());
+    }
 }
