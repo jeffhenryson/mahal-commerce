@@ -146,11 +146,20 @@ registro de vendas no balcão.
 | `PDV_SALE_DISCOUNT` | desconto > 0 em `POST /pdv/sessions/{id}/sales` | V65 | ✅ `SeedConfig` + `DevRoleBootstrapConfig` |
 | `PDV_SESSION_MANAGE` | abertura de caixa e movimentos | V66 | ✅ `SeedConfig` + `DevRoleBootstrapConfig` |
 | `PDV_SESSION_CLOSE` | fechamento com conferência | V66 | ✅ `SeedConfig` + `DevRoleBootstrapConfig` |
-| `PDV_COMANDA_MANAGE` | `POST`/`.../items`/`.../close`/`.../cancel` de `/pdv/comandas` | V105 | ✅ `SeedConfig` + `DevRoleBootstrapConfig` |
+| `PDV_COMANDA_MANAGE` | `POST`/`.../items`/`.../close`/`.../cancel` de `/pdv/comandas` | V105 (`ROLE_ADMIN`) + **V111** (`ROLE_ATENDENTE`) | ✅ `SeedConfig` (`ROLE_ADMIN` e `ROLE_ATENDENTE`) + `DevRoleBootstrapConfig` |
 
 Comanda (PDV-F009) ganhou permissão **própria**, separada de `PDV_SALE_MANAGE` — é uma superfície
 operacional diferente (tab de horas vs. venda pontual), e granularidade de concessão separada não
 custa mais que esta linha a mais de `@PreAuthorize`. Leitura continua sob `PDV_READ`.
+
+A V105 concedeu `PDV_COMANDA_MANAGE` **apenas ao `ROLE_ADMIN`**, e quem opera comanda no balcão é o
+atendente: com `PDV_READ` da V86 ele abre `/pdv/comandas` e lista as mesas ocupadas, mas
+abrir/lançar/fechar/cancelar respondia **403**. A **V111** estende a concessão ao `ROLE_ATENDENTE`.
+Cancelar comanda ficou na mesma permissão, sem `PDV_COMANDA_CANCEL` separada — o estorno de estoque
+do abandono já é auditado (`origin=PDV_COMANDA_CANCEL`). Na mesma correção, `SeedConfig` passou a
+conceder as permissões do atendente em `dev`/`hml` (`ATENDENTE_PERMISSIONS`): a role era criada
+vazia e, com o Flyway desligado em `dev`, a V86 nunca rodava — o atendente local não passava de 403
+em nenhum endpoint do PDV.
 
 Pagamento (PDV-F006, V68) **não trouxe permissão nova**: capturar pagamento é parte do próprio
 `registerSale`, sob `PDV_SALE_MANAGE`; ler pagamento/totais/comprovante é `PDV_READ`, como o resto
