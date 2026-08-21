@@ -32,7 +32,7 @@ class SeedConfigTest {
         when(userUseCase.findByUsername(anyString())).thenReturn(Optional.empty());
 
         CommandLineRunner runner = seedConfig.seedAll(userUseCase, roleUseCase, permissionUseCase,
-                cashbackUseCase, "Admin@dev1", "User@dev1", "Atendente@dev1");
+                cashbackUseCase, "administrador", "Admin@dev1", "User@dev1", "Atendente@dev1");
         runner.run();
 
         verify(permissionUseCase).createPermission("ESTOQUE_PRODUCT_READ");
@@ -63,7 +63,7 @@ class SeedConfigTest {
         when(userUseCase.findByUsername(anyString())).thenReturn(Optional.empty());
 
         CommandLineRunner runner = seedConfig.seedAll(userUseCase, roleUseCase, permissionUseCase,
-                cashbackUseCase, "Admin@dev1", "User@dev1", "Atendente@dev1");
+                cashbackUseCase, "administrador", "Admin@dev1", "User@dev1", "Atendente@dev1");
         runner.run();
 
         verify(permissionUseCase).createPermission("PDV_SALE_MANAGE");
@@ -80,10 +80,38 @@ class SeedConfigTest {
         when(userUseCase.findByUsername(anyString())).thenReturn(Optional.empty());
 
         CommandLineRunner runner = seedConfig.seedAll(userUseCase, roleUseCase, permissionUseCase,
-                cashbackUseCase, "Admin@dev1", "User@dev1", "Atendente@dev1");
+                cashbackUseCase, "administrador", "Admin@dev1", "User@dev1", "Atendente@dev1");
         runner.run();
 
         verify(permissionUseCase).createPermission("PDV_COMANDA_MANAGE");
         verify(roleUseCase).assignPermission("ROLE_ADMIN", "PDV_COMANDA_MANAGE");
+    }
+
+    /**
+     * A V105 concedeu {@code PDV_COMANDA_MANAGE} só ao ROLE_ADMIN, e o seed nunca concedeu nada ao
+     * ROLE_ATENDENTE — que é quem opera comanda de mesa. Em {@code dev} o Flyway está desligado, então
+     * a role nascia sem permissão alguma e o atendente tomava 403 em todo o PDV, não só na comanda.
+     */
+    @Test
+    void seedAll_grantsPdvPermissionsToRoleAtendente() throws Exception {
+        UserUseCase userUseCase = mock(UserUseCase.class);
+        RoleUseCase roleUseCase = mock(RoleUseCase.class);
+        PermissionUseCase permissionUseCase = mock(PermissionUseCase.class);
+        CashbackUseCase cashbackUseCase = mock(CashbackUseCase.class);
+        when(userUseCase.findByUsername(anyString())).thenReturn(Optional.empty());
+
+        CommandLineRunner runner = seedConfig.seedAll(userUseCase, roleUseCase, permissionUseCase,
+                cashbackUseCase, "administrador", "Admin@dev1", "User@dev1", "Atendente@dev1");
+        runner.run();
+
+        verify(roleUseCase).createRole("ROLE_ATENDENTE");
+        verify(roleUseCase).assignPermission("ROLE_ATENDENTE", "PDV_COMANDA_MANAGE");
+        verify(roleUseCase).assignPermission("ROLE_ATENDENTE", "PDV_READ");
+        verify(roleUseCase).assignPermission("ROLE_ATENDENTE", "PDV_SALE_MANAGE");
+        verify(roleUseCase).assignPermission("ROLE_ATENDENTE", "PDV_SESSION_MANAGE");
+        verify(roleUseCase).assignPermission("ROLE_ATENDENTE", "PDV_SESSION_CLOSE");
+        verify(roleUseCase).assignPermission("ROLE_ATENDENTE", "ESTOQUE_PRODUCT_READ");
+        verify(roleUseCase).assignPermission("ROLE_ATENDENTE", "CRM_CUSTOMER_LOOKUP");
+        verify(roleUseCase).assignPermission("ROLE_ATENDENTE", "ORDER_READ");
     }
 }

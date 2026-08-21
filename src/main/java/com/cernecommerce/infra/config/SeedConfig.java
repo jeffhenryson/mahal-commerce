@@ -14,10 +14,12 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 
 import java.math.BigDecimal;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 @Configuration
-@Profile("dev")
+@Profile({"dev", "hml"})
 public class SeedConfig {
 
     private static final Logger log = LoggerFactory.getLogger(SeedConfig.class);
@@ -53,6 +55,19 @@ public class SeedConfig {
         "SHOP_CART_OWN", "SHOP_ORDER_OWN", "SHOP_CASHBACK_OWN"
     };
 
+    // Permissões do ROLE_ATENDENTE — espelham a V86 (o seed da role) mais PDV_COMANDA_MANAGE, que a
+    // V105 concedeu só ao ROLE_ADMIN e a V111 estendeu ao atendente. Em dev o Flyway está desligado,
+    // então sem esta lista a role nasce sem permissão nenhuma e o atendente toma 403 em todo o PDV;
+    // as duas fontes precisam andar juntas — mexeu aqui, mexe na migration (e vice-versa).
+    private static final String[] ATENDENTE_PERMISSIONS = {
+        "PDV_READ", "PDV_SALE_MANAGE", "PDV_SALE_DISCOUNT",
+        "PDV_SESSION_MANAGE", "PDV_SESSION_CLOSE", "PDV_COMANDA_MANAGE",
+        "ESTOQUE_PRODUCT_READ", "ESTOQUE_WAREHOUSE_READ", "ESTOQUE_RESERVATION_READ",
+        "CRM_CUSTOMER_READ", "CRM_CUSTOMER_LOOKUP",
+        "CASHBACK_READ",
+        "ORDER_READ"
+    };
+
     // DEV_ONLY_PERMISSIONS e ROLE_DEV são gerenciados pelo DevRoleBootstrapConfig (todos os profiles).
 
     @Bean
@@ -60,13 +75,14 @@ public class SeedConfig {
                               RoleUseCase roleUseCase,
                               PermissionUseCase permissionUseCase,
                               CashbackUseCase cashbackUseCase,
-                              @Value("${seed.admin.password:Admin@dev1}") String adminPassword,
+                              @Value("${seed.admin.username:administrador}") String adminUsername,
+                              @Value("${seed.admin.password:Administrador@2026!}") String adminPassword,
                               @Value("${seed.user.password:User@dev1}") String userPassword,
                               @Value("${seed.atendente.password:Atendente@dev1}") String atendentePassword) {
         return args -> {
             seedPermissions(permissionUseCase);
             seedRoles(roleUseCase);
-            seedUsers(userUseCase, adminPassword, userPassword, atendentePassword);
+            seedUsers(userUseCase, adminUsername, adminPassword, userPassword, atendentePassword);
             seedCashbackRate(cashbackUseCase);
         };
     }
@@ -86,6 +102,14 @@ public class SeedConfig {
             catch (Exception e) { log.debug("seed.permission.skip name={} reason={}", name, e.getMessage()); }
         }
         for (String name : SHOP_CUSTOMER_PERMISSIONS) {
+            try { permissionUseCase.createPermission(name); }
+            catch (Exception e) { log.debug("seed.permission.skip name={} reason={}", name, e.getMessage()); }
+        }
+        // Hoje toda ATENDENTE_PERMISSIONS já está em ADMIN_PERMISSIONS; o loop existe para que uma
+        // permissão exclusiva do atendente não nasça inexistente (assignPermission falharia calado).
+        Set<String> criadas = new HashSet<>(List.of(ADMIN_PERMISSIONS));
+        for (String name : ATENDENTE_PERMISSIONS) {
+            if (!criadas.add(name)) continue;
             try { permissionUseCase.createPermission(name); }
             catch (Exception e) { log.debug("seed.permission.skip name={} reason={}", name, e.getMessage()); }
         }
@@ -110,14 +134,29 @@ public class SeedConfig {
             try { roleUseCase.assignPermission("ROLE_CUSTOMER", perm); }
             catch (Exception e) { log.debug("seed.role.assignPermission.skip role=ROLE_CUSTOMER perm={} reason={}", perm, e.getMessage()); }
         }
+
+        for (String perm : ATENDENTE_PERMISSIONS) {
+            try { roleUseCase.assignPermission("ROLE_ATENDENTE", perm); }
+            catch (Exception e) { log.debug("seed.role.assignPermission.skip role=ROLE_ATENDENTE perm={} reason={}", perm, e.getMessage()); }
+        }
     }
 
-    private void seedUsers(UserUseCase userUseCase, String adminPassword, String userPassword, String atendentePassword) {
-        if (userUseCase.findByUsername("admin").isEmpty())
-            userUseCase.createUser("admin", adminPassword, List.of("ROLE_ADMIN"));
-        if (userUseCase.findByUsername("user").isEmpty())
-            userUseCase.createUser("user", userPassword, List.of("ROLE_USER"));
-        if (userUseCase.findByUsername("atendente").isEmpty())
-            userUseCase.createUser("atendente", atendentePassword, List.of("ROLE_ATENDENTE"));
+    private void seedUsers(UserUseCase userUseCase, String adminUsername, String adminPassword, String userPassword, String atendentePassword) {
+        if (userUseCase.findByUsername(adminUsername).isEmpty()) {
+            try { userUseCase.createUser(adminUsername, adminPassword, "administrador@cernedsgn.xyz", List.of("ROLE_ADMIN")); }
+            catch (Exception e) { log.debug("seed.user.skip name={} reason={}", adminUsername, e.getMessage()); }
+        }
+        if (userUseCase.findByUsername("admin").isEmpty()) {
+            try { userUseCase.createUser("admin", adminPassword, "admin@cernedsgn.xyz", List.of("ROLE_ADMIN")); }
+            catch (Exception e) { log.debug("seed.user.skip name=admin reason={}", e.getMessage()); }
+        }
+        if (userUseCase.findByUsername("user").isEmpty()) {
+            try { userUseCase.createUser("user", userPassword, List.of("ROLE_USER")); }
+            catch (Exception e) { log.debug("seed.user.skip name=user reason={}", e.getMessage()); }
+        }
+        if (userUseCase.findByUsername("atendente").isEmpty()) {
+            try { userUseCase.createUser("atendente", atendentePassword, List.of("ROLE_ATENDENTE")); }
+            catch (Exception e) { log.debug("seed.user.skip name=atendente reason={}", e.getMessage()); }
+        }
     }
 }
