@@ -3,14 +3,18 @@ package com.cernecommerce.core.service;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.estoque.WarehouseType;
+import com.cernecommerce.core.domain.model.crm.Customer;
 import com.cernecommerce.core.domain.model.pagamento.PaymentMethod;
 import com.cernecommerce.core.domain.model.pdv.Comanda;
 import com.cernecommerce.core.domain.model.pdv.ComandaStatus;
 import com.cernecommerce.core.domain.model.pdv.CashRegisterSession;
 import com.cernecommerce.core.domain.model.pedido.Order;
+import com.cernecommerce.core.domain.model.pedido.ConsumptionMode;
 import com.cernecommerce.core.domain.model.pedido.OrderStatus;
 import com.cernecommerce.core.domain.model.pedido.SalesChannel;
+import com.cernecommerce.core.ports.in.CashbackUseCase;
 import com.cernecommerce.core.ports.in.ComandaUseCase;
+import com.cernecommerce.core.ports.in.CrmUseCase;
 import com.cernecommerce.core.ports.in.EstoqueUseCase;
 import com.cernecommerce.core.ports.in.PdvUseCase;
 import com.cernecommerce.core.ports.in.PdvUseCase.PaymentCommand;
@@ -44,6 +48,8 @@ class ComandaCashCycleIT {
     @Autowired PdvUseCase pdvUseCase;
     @Autowired ComandaUseCase comandaUseCase;
     @Autowired EstoqueUseCase estoqueUseCase;
+    @Autowired CrmUseCase crmUseCase;
+    @Autowired CashbackUseCase cashbackUseCase;
 
     @PersistenceContext EntityManager em;
 
@@ -109,7 +115,10 @@ class ComandaCashCycleIT {
         flushAndClear();
 
         assertThat(order.status()).isEqualTo(OrderStatus.CONCLUIDO);
-        assertThat(order.channel()).isEqualTo(SalesChannel.BALCAO);
+        // PDV-F010: o pedido da mesa NASCE MESA — o canal é imutável, não vira MESA depois.
+        assertThat(order.channel()).isEqualTo(SalesChannel.MESA);
+        assertThat(order.comandaId()).isEqualTo(comanda.id());
+        assertThat(order.tableLabel()).isEqualTo("Mesa 4");
         assertThat(order.netAmount()).isEqualByComparingTo("50.00");
         assertThat(order.items()).hasSize(2);
         assertThat(pdvUseCase.getOrderPayments(order.id())).hasSize(2);
@@ -147,5 +156,76 @@ class ComandaCashCycleIT {
         assertThat(estoqueUseCase.getStockBalance(sku, warehouseCode).quantity())
                 .isEqualByComparingTo("50.000");
         assertThat(comandaUseCase.listOpenComandas(session.id())).isEmpty();
+    }
+
+    /**
+     * O ciclo que a PDV-F010 existe para permitir: mesa com cliente, duplo em cortesia, e o pedido
+     * nascendo no canal MESA com cashback — que a mesa anônima do PDV-F009 nunca gerava.
+     */
+    @Test
+    void fullCycle_mesaComClienteEDuploEmCortesia_geraPedidoMesaComCashback() {
+        String suffix = uniqueSuffix();
+        String operator = "caixa-" + suffix;
+        String[] setup = givenStockedWarehouse(operator).split("\\|");
+        String warehouseCode = setup[0];
+        String sku = setup[1];
+
+        // Vira produto de sessão: é o que libera SABOR_EXTRA no lançamento (NOT_A_SESSION_PRODUCT
+        // recusaria antes disso).
+        estoqueUseCase.updateProduct(sku, null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null,
+                new EstoqueUseCase.TableSessionCommand(true, true, 10, new BigDecimal("60.00")));
+        Customer cliente = crmUseCase.createCustomer("Cliente " + suffix, "1199" + suffix, null,
+                uniqueCpf(), "mesa");
+        flushAndClear();
+
+        CashRegisterSession session = pdvUseCase.openSession(operator, BigDecimal.ZERO, warehouseCode);
+        Comanda comanda = comandaUseCase.openComanda(session.id(), "Mesa 12", cliente.id(), operator);
+        flushAndClear();
+        assertThat(comanda.customerId()).isEqualTo(cliente.id());
+
+        // 1. A sessão em si, cobrada pelo preço da variação do sabor.
+        Comanda comSessao = comandaUseCase.addItem(comanda.id(), sku, BigDecimal.ONE,
+                ConsumptionMode.NORMAL, false, null, operator);
+        Long sessaoId = comSessao.items().get(0).id();
+        flushAndClear();
+
+        // 2. Segundo sabor na promo "pague 1 leve 2": não cobra, mas a essência sai do estoque.
+        Comanda comDuplo = comandaUseCase.addItem(comanda.id(), sku, BigDecimal.ONE,
+                ConsumptionMode.SABOR_EXTRA, true, sessaoId, operator);
+        flushAndClear();
+
+        assertThat(comDuplo.runningTotal()).isEqualByComparingTo("25.00");
+        assertThat(comDuplo.items().get(1).linkedItemId()).isEqualTo(sessaoId);
+        // Duas unidades saíram, mesmo com uma delas em cortesia.
+        assertThat(estoqueUseCase.getStockBalance(sku, warehouseCode).quantity())
+                .isEqualByComparingTo("48.000");
+
+        Order order = comandaUseCase.closeComanda(comanda.id(),
+                List.of(new PaymentCommand(PaymentMethod.DINHEIRO, new BigDecimal("25.00"), null)),
+                operator);
+        flushAndClear();
+
+        assertThat(order.channel()).isEqualTo(SalesChannel.MESA);
+        assertThat(order.customerId()).isEqualTo(cliente.id());
+        assertThat(order.comandaId()).isEqualTo(comanda.id());
+        assertThat(order.tableLabel()).isEqualTo("Mesa 12");
+        assertThat(order.netAmount()).isEqualByComparingTo("25.00");
+        assertThat(order.items()).hasSize(2);
+        assertThat(order.items().get(1)).satisfies(cortesia -> {
+            assertThat(cortesia.mode()).isEqualTo(ConsumptionMode.SABOR_EXTRA);
+            assertThat(cortesia.courtesy()).isTrue();
+            assertThat(cortesia.unitPrice()).isEqualByComparingTo("0.00");
+            // Custo congelado normalmente: é o que faz a margem mostrar o prejuízo real da promo.
+            assertThat(cortesia.costPrice()).isEqualByComparingTo("10.00");
+        });
+
+        // 25,00 líquido x 3% (taxa GLOBAL da V70) = 0,75, ainda em carência.
+        assertThat(cashbackUseCase.getCustomerBalance(cliente.id()).pending())
+                .isEqualByComparingTo("0.75");
+    }
+
+    private String uniqueCpf() {
+        return String.valueOf(10000000000L + (System.nanoTime() % 89999999999L));
     }
 }

@@ -27,6 +27,10 @@ class OrderTest {
         return Order.openBalcao(1L, "LOJA-01", null, twoCharcoals());
     }
 
+    private static Order mesa() {
+        return Order.openMesa(1L, "LOJA-01", null, 50L, "Mesa 4", twoCharcoals());
+    }
+
     // ── Criação ──────────────────────────────────────────────────────────────────────────────
 
     @Test
@@ -412,5 +416,69 @@ class OrderTest {
         mutable.clear();
 
         assertThat(order.items()).hasSize(1);
+    }
+    // ── Canal MESA (PDV-F010) ────────────────────────────────────────────────────────────────
+
+    @Test
+    void openMesa_startsInCriadoCarryingTheComandaOrigin() {
+        Order order = mesa();
+
+        assertThat(order.channel()).isEqualTo(SalesChannel.MESA);
+        assertThat(order.status()).isEqualTo(OrderStatus.CRIADO);
+        assertThat(order.sessionId()).isEqualTo(1L);
+        assertThat(order.comandaId()).isEqualTo(50L);
+        assertThat(order.tableLabel()).isEqualTo("Mesa 4");
+        assertThat(order.netAmount()).isEqualByComparingTo("44.00");
+    }
+
+    @Test
+    void openMesa_allowsAnonymousCustomer() {
+        // A mesa aberta sem vínculo de cadastro é o caso normal do salão — só o marketplace exige.
+        assertThat(mesa().customerId()).isNull();
+        assertThat(Order.openMesa(1L, "LOJA-01", 7L, 50L, "Mesa 4", twoCharcoals()).customerId())
+                .isEqualTo(7L);
+    }
+
+    @Test
+    void mesaRequiresSession() {
+        // A comanda nasce dentro de uma sessão aberta; um pedido de mesa sem caixa não teria
+        // gaveta para conferir.
+        assertThatThrownBy(() -> Order.openMesa(null, "LOJA-01", null, 50L, "Mesa 4", twoCharcoals()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("sessionId");
+    }
+
+    @Test
+    void mesaRequiresComandaAndTableLabel() {
+        assertThatThrownBy(() -> Order.openMesa(1L, "LOJA-01", null, null, "Mesa 4", twoCharcoals()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("comandaId");
+        assertThatThrownBy(() -> Order.openMesa(1L, "LOJA-01", null, 50L, "  ", twoCharcoals()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("tableLabel");
+    }
+
+    /** A recíproca: origem de mesa em pedido que não é de mesa é dado incoerente, não campo extra. */
+    @Test
+    void comandaOriginIsRejectedOutsideMesa() {
+        assertThatThrownBy(() -> Order.of(null, null, SalesChannel.BALCAO, OrderStatus.CRIADO, null, 1L,
+                "LOJA-01", twoCharcoals(), new BigDecimal("44.00"), BigDecimal.ZERO, BigDecimal.ZERO,
+                new BigDecimal("44.00"), null, null, NOW, null, null, null, null, null, null, null, null,
+                0L, 50L, "Mesa 4"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("só existem em pedido de MESA");
+    }
+
+    /**
+     * A mesa fecha pela MESMA {@code validatePaymentsAndComputeChange} da venda de balcão, então
+     * fechamento em espécie com valor tendido a mais gera troco igual — recusá-lo aqui quebraria
+     * todo fechamento de mesa em dinheiro.
+     */
+    @Test
+    void mesaAllowsChangeAmount() {
+        Order concluded = mesa().concluded("2026-000123", new BigDecimal("6.00"), NOW);
+
+        assertThat(concluded.changeAmount()).isEqualByComparingTo("6.00");
+        assertThat(concluded.status()).isEqualTo(OrderStatus.CONCLUIDO);
     }
 }

@@ -76,6 +76,7 @@ import com.cernecommerce.core.ports.in.NotificationUseCase;
 import com.cernecommerce.core.ports.in.EstoqueUseCase.CatalogSaleInfo;
 import com.cernecommerce.core.ports.in.EstoqueUseCase.InitialStockCommand;
 import com.cernecommerce.core.ports.in.EstoqueUseCase.KitComponentCommand;
+import com.cernecommerce.core.ports.in.EstoqueUseCase.TableSessionCommand;
 import com.cernecommerce.core.ports.out.AfterCommitExecutor;
 import com.cernecommerce.core.ports.out.estoque.CategoryRepository;
 import com.cernecommerce.core.ports.out.estoque.KitComponentRepository;
@@ -300,7 +301,7 @@ class EstoqueServiceTest {
 
         Product result = estoqueService.createProduct("EST23-001", "Produto", "categoria", List.of(), Pricing.empty(),
                 null, null, false, false, null, null, List.of(), List.of(), null,
-                null, null, false, false, null, null, null, null, null, null, null, null);
+                null, null, false, false, null, null, null, null, null, null, null, null, null);
 
         assertThat(result.status()).isEqualTo(ProductStatus.ATIVO);
         verify(productRepository, never()).countByStatus(any());
@@ -315,7 +316,7 @@ class EstoqueServiceTest {
         // Só sku + name — nenhum outro campo obrigatório, mesma validação mínima de ATIVO.
         Product result = estoqueService.createProduct("EST23-002", "Rascunho", null, List.of(), null,
                 null, null, false, false, null, null, List.of(), List.of(), null,
-                null, null, false, false, null, null, null, null, null, null, ProductStatus.RASCUNHO, null);
+                null, null, false, false, null, null, null, null, null, null, ProductStatus.RASCUNHO, null, null);
 
         assertThat(result.status()).isEqualTo(ProductStatus.RASCUNHO);
         assertThat(result.isDraft()).isTrue();
@@ -327,7 +328,7 @@ class EstoqueServiceTest {
 
         assertThatThrownBy(() -> estoqueService.createProduct("EST23-003", "Rascunho", null, List.of(), null,
                 null, null, false, false, null, null, List.of(), List.of(), null,
-                null, null, false, false, null, null, null, null, null, null, ProductStatus.RASCUNHO, null))
+                null, null, false, false, null, null, null, null, null, null, ProductStatus.RASCUNHO, null, null))
                 .isInstanceOf(DraftLimitReachedException.class);
         verify(productRepository, never()).save(any());
     }
@@ -340,7 +341,7 @@ class EstoqueServiceTest {
 
         assertThatCode(() -> estoqueService.createProduct("EST23-004", "Rascunho", null, List.of(), null,
                 null, null, false, false, null, null, List.of(), List.of(), null,
-                null, null, false, false, null, null, null, null, null, null, ProductStatus.RASCUNHO, null))
+                null, null, false, false, null, null, null, null, null, null, ProductStatus.RASCUNHO, null, null))
                 .doesNotThrowAnyException();
     }
 
@@ -352,7 +353,7 @@ class EstoqueServiceTest {
         when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         Product result = estoqueService.updateProduct("EST23-005", null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, null, ProductStatus.ATIVO, null);
+                null, null, null, null, null, null, null, null, null, null, ProductStatus.ATIVO, null, null);
 
         assertThat(result.status()).isEqualTo(ProductStatus.ATIVO);
         verify(productRepository, never()).countByStatus(any());
@@ -365,7 +366,7 @@ class EstoqueServiceTest {
         when(productRepository.countByStatus(ProductStatus.RASCUNHO)).thenReturn(5L);
 
         assertThatThrownBy(() -> estoqueService.updateProduct("EST23-006", null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, null, null, ProductStatus.RASCUNHO, null))
+                null, null, null, null, null, null, null, null, null, null, null, ProductStatus.RASCUNHO, null, null))
                 .isInstanceOf(DraftLimitReachedException.class);
         verify(productRepository, never()).save(any());
     }
@@ -378,7 +379,7 @@ class EstoqueServiceTest {
         when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         Product result = estoqueService.updateProduct("EST23-007", "Novo Nome", null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, null, null, ProductStatus.RASCUNHO, null);
+                null, null, null, null, null, null, null, null, null, null, null, ProductStatus.RASCUNHO, null, null);
 
         assertThat(result.status()).isEqualTo(ProductStatus.RASCUNHO);
         // A ausência de stub para countByStatus prova que o limite não é sequer consultado quando
@@ -3548,7 +3549,7 @@ class EstoqueServiceTest {
 
         Product created = estoqueService.createProduct("ESS-001", "Essência", "essencia", List.of(), Pricing.empty(),
                 "Zomo", null, false, false, null, null, List.of(), List.of(), null,
-                null, null, false, false, null, null, null, null, null, null, null, null);
+                null, null, false, false, null, null, null, null, null, null, null, null, null);
 
         assertThat(created.brandId()).isEqualTo(7L);
         verify(brandRepository, never()).save(any());
@@ -3563,7 +3564,7 @@ class EstoqueServiceTest {
 
         Product created = estoqueService.createProduct("ESS-002", "Essência", "essencia", List.of(), Pricing.empty(),
                 "Nova Marca", null, false, false, null, null, List.of(), List.of(), null,
-                null, null, false, false, null, null, null, null, null, null, null, null);
+                null, null, false, false, null, null, null, null, null, null, null, null, null);
 
         assertThat(created.brandId()).isEqualTo(10L);
         verify(brandRepository).save(argThat(b -> b.name().equals("Nova Marca")));
@@ -3576,7 +3577,7 @@ class EstoqueServiceTest {
 
         assertThatThrownBy(() -> estoqueService.createProduct("ESS-003", "Essência", "essencia", List.of(),
                 Pricing.empty(), null, null, false, false, null, null, List.of(), List.of(), null,
-                null, null, false, false, null, null, null, null, null, null, null, 99L))
+                null, null, false, false, null, null, null, null, null, null, null, 99L, null))
                 .isInstanceOf(BrandNotFoundException.class);
     }
 
@@ -3588,7 +3589,7 @@ class EstoqueServiceTest {
         when(brandRepository.findById(7L)).thenReturn(Optional.of(Brand.of(7L, "Zomo", true)));
 
         Product updated = estoqueService.updateProduct("ESS-001", null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, null, null, 7L);
+                null, null, null, null, null, null, null, null, null, null, null, 7L, null);
 
         assertThat(updated.brandId()).isEqualTo(7L);
         assertThat(updated.brand()).isEqualTo("Zomo");
@@ -4185,5 +4186,78 @@ class EstoqueServiceTest {
                 "7891234567895"))
                 .isInstanceOf(DuplicateBarcodeException.class);
         verify(productRepository, never()).save(any());
+    }
+    // ── Campos de mesa e de sessão do produto (PDV-F010) ─────────────────────────────────────
+
+    @Test
+    void createProduct_semTableSession_resolveOsDefaultsDaMigration() {
+        when(productRepository.existsBySku(any())).thenReturn(false);
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Product result = estoqueService.createProduct("MESA-001", "Produto", "categoria", List.of(),
+                Pricing.empty(), null, null, false, false, null, null, List.of(), List.of(), null,
+                null, null, false, false, null, null, null, null, null, null, null, null, null);
+
+        // "Omitido" não pode virar false: todo produto já cadastrado sai na mesa, e nenhum é de
+        // sessão — mesma convenção de visibleInPos.
+        assertThat(result.availableForTable()).isTrue();
+        assertThat(result.sessionProduct()).isFalse();
+        assertThat(result.sessionsPerUnit()).isNull();
+        assertThat(result.openRoshPrice()).isNull();
+    }
+
+    @Test
+    void createProduct_comTableSession_persisteOsQuatroCampos() {
+        when(productRepository.existsBySku(any())).thenReturn(false);
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Product result = estoqueService.createProduct("SESS-001", "Sessão de narguilé", "sessao", List.of(),
+                Pricing.empty(), null, null, false, false, null, null, List.of(), List.of(), null,
+                null, null, false, false, null, null, null, null, null, null, null, null,
+                new TableSessionCommand(false, true, 10, new BigDecimal("60.00")));
+
+        assertThat(result.availableForTable()).isFalse();
+        assertThat(result.sessionProduct()).isTrue();
+        assertThat(result.sessionsPerUnit()).isEqualTo(10);
+        assertThat(result.openRoshPrice()).isEqualByComparingTo("60.00");
+    }
+
+    @Test
+    void updateProduct_tableSessionComCampoNulo_mantemOValorAtual() {
+        Product atual = Product.of(1L, "SESS-001", "Sessão", "sessao", true, List.of())
+                .withSessionProduct(true)
+                .withSessionsPerUnit(10)
+                .withOpenRoshPrice(new BigDecimal("60.00"));
+        when(productRepository.findBySku("SESS-001")).thenReturn(Optional.of(atual));
+        when(productRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        // Só o openRoshPrice vem preenchido: os outros três são "não mexa", semântica de PATCH.
+        Product result = estoqueService.updateProduct("SESS-001", null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null, null, null, null,
+                new TableSessionCommand(null, null, null, new BigDecimal("75.00")));
+
+        assertThat(result.openRoshPrice()).isEqualByComparingTo("75.00");
+        assertThat(result.sessionProduct()).isTrue();
+        assertThat(result.sessionsPerUnit()).isEqualTo(10);
+    }
+
+    /**
+     * O SKU da variação serve para saber qual essência sai do estoque; disponibilidade na mesa e
+     * preço de open rosh não têm versão por sabor, e vêm sempre do produto pai.
+     */
+    @Test
+    void resolveSaleInfo_devolveOsCamposDeMesaDoProdutoPai() {
+        Product pai = Product.of(1L, "SESS-001", "Sessão", "sessao", true, List.of())
+                .withPricing(Pricing.of(new BigDecimal("10.00"), null, new BigDecimal("25.00")))
+                .withAvailableForTable(true)
+                .withSessionProduct(true)
+                .withOpenRoshPrice(new BigDecimal("60.00"));
+        when(productRepository.findByAnySku("SESS-BLUE")).thenReturn(Optional.of(pai));
+
+        CatalogSaleInfo info = estoqueService.resolveSaleInfo("SESS-BLUE");
+
+        assertThat(info.availableForTable()).isTrue();
+        assertThat(info.sessionProduct()).isTrue();
+        assertThat(info.openRoshPrice()).isEqualByComparingTo("60.00");
     }
 }
