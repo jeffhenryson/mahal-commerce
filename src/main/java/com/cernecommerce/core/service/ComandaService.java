@@ -9,6 +9,7 @@ import com.cernecommerce.core.domain.exception.pdv.NotASessionProductException;
 import com.cernecommerce.core.domain.exception.pdv.NotAnOpenRoshException;
 import com.cernecommerce.core.domain.exception.pdv.NotAvailableForTableException;
 import com.cernecommerce.core.domain.exception.pdv.OpenRoshNotPricedException;
+import com.cernecommerce.core.domain.model.cashback.CashbackRate;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.pagamento.OrderPayment;
 import com.cernecommerce.core.domain.model.pdv.CashRegisterSession;
@@ -228,8 +229,16 @@ public class ComandaService implements ComandaUseCase {
         // Sem desconto por item nesta entrega (fora de escopo do PDV-F009).
         List<OrderItem> orderItems = new ArrayList<>(comanda.items().size());
         for (ComandaItem item : comanda.items()) {
+            // CRM-F003, mesma regra do balcão (PdvService.registerSale): a taxa vigente é resolvida
+            // e CARIMBADA no pedido, para mudar a taxa amanhã não reescrever o cashback de hoje.
+            // Sem isto o cliente vinculado na abertura chega ao pedido e não ganha nada — o
+            // recordEarnedForOrder lá embaixo é chamado, mas não acha item nenhum com valor a
+            // lançar. Cortesia não precisa de exceção: o ganho é sobre o líquido, e o líquido dela
+            // é zero por construção.
+            CashbackRate rate = cashbackUseCase.resolveApplicableRate(item.sku());
             orderItems.add(OrderItem.of(null, item.sku(), item.quantity(), item.unitPrice(), item.costPrice(),
-                    BigDecimal.ZERO, null, item.productName(), item.mode(), item.courtesy()));
+                    BigDecimal.ZERO, rate == null ? null : rate.percent(), item.productName(), item.mode(),
+                    item.courtesy()));
         }
 
         // O canal é imutável: o pedido da mesa precisa NASCER MESA, não virar depois. O depósito
