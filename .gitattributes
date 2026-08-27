@@ -1,2 +1,6 @@
+# O tree inteiro foi convertido para CRLF em algum ponto e 741 arquivos passaram a aparecer
+# modificados sem nenhuma mudanca de conteudo. LF explicito impede que volte a acontecer.
+* text=auto eol=lf
+
 /mvnw text eol=lf
 *.cmd text eol=crlf

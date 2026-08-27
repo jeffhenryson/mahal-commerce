@@ -70,3 +70,7 @@ data/
 log_teste.txt
 log_sistema.txt
 
+# Python bytecode (scripts/demo-seed)
+__pycache__/
+*.pyc
+
