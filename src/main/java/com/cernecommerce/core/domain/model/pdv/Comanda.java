@@ -23,12 +23,17 @@ import java.util.List;
  *        depósito alheio pela porta da comanda.
  * @param orderId preenchido só no fechamento. Nulo em {@code ABERTA} e em {@code CANCELADA} —
  *        comanda cancelada nunca vira pedido.
+ * @param customerId cliente identificado na abertura da mesa (PDV-F010), opcional. <b>Não</b> se
+ *        confunde com {@link #tableOrCustomerLabel}, que é texto livre para achar a mesa na tela
+ *        ("Mesa 4", "o rapaz de boné") e nunca foi vínculo de cadastro. É o {@code customerId} que
+ *        faz o pedido da mesa sair com nome e gerar cashback, como já acontece no balcão.
  */
 public record Comanda(
         Long id,
         Long sessionId,
         String warehouseCode,
         String tableOrCustomerLabel,
+        Long customerId,
         ComandaStatus status,
         List<ComandaItem> items,
         Long orderId,
@@ -86,7 +91,13 @@ public record Comanda(
 
     /** Abre uma comanda nova, vazia, na sessão informada. */
     public static Comanda open(Long sessionId, String warehouseCode, String tableOrCustomerLabel, String openedBy) {
-        return new Comanda(null, sessionId, warehouseCode, tableOrCustomerLabel, ComandaStatus.ABERTA,
+        return open(sessionId, warehouseCode, tableOrCustomerLabel, null, openedBy);
+    }
+
+    /** Abre uma comanda nova, vazia, vinculada a um cliente do CRM (PDV-F010). */
+    public static Comanda open(Long sessionId, String warehouseCode, String tableOrCustomerLabel,
+            Long customerId, String openedBy) {
+        return new Comanda(null, sessionId, warehouseCode, tableOrCustomerLabel, customerId, ComandaStatus.ABERTA,
                 List.of(), null, openedBy, Instant.now(), null);
     }
 
@@ -94,7 +105,15 @@ public record Comanda(
     public static Comanda of(Long id, Long sessionId, String warehouseCode, String tableOrCustomerLabel,
             ComandaStatus status, List<ComandaItem> items, Long orderId, String openedBy, Instant openedAt,
             Instant closedAt) {
-        return new Comanda(id, sessionId, warehouseCode, tableOrCustomerLabel, status, items, orderId,
+        return of(id, sessionId, warehouseCode, tableOrCustomerLabel, null, status, items, orderId,
+                openedBy, openedAt, closedAt);
+    }
+
+    /** Reconstitui uma comanda a partir de persistência, com o cliente vinculado (PDV-F010). */
+    public static Comanda of(Long id, Long sessionId, String warehouseCode, String tableOrCustomerLabel,
+            Long customerId, ComandaStatus status, List<ComandaItem> items, Long orderId, String openedBy,
+            Instant openedAt, Instant closedAt) {
+        return new Comanda(id, sessionId, warehouseCode, tableOrCustomerLabel, customerId, status, items, orderId,
                 openedBy, openedAt, closedAt);
     }
 
@@ -109,7 +128,7 @@ public record Comanda(
         requireOpen();
         List<ComandaItem> newItems = new ArrayList<>(items);
         newItems.add(item);
-        return new Comanda(id, sessionId, warehouseCode, tableOrCustomerLabel, status, newItems, orderId,
+        return new Comanda(id, sessionId, warehouseCode, tableOrCustomerLabel, customerId, status, newItems, orderId,
                 openedBy, openedAt, closedAt);
     }
 
@@ -126,7 +145,7 @@ public record Comanda(
         if (closedAt == null) {
             throw new IllegalArgumentException("closedAt é obrigatório ao fechar a comanda");
         }
-        return new Comanda(id, sessionId, warehouseCode, tableOrCustomerLabel, ComandaStatus.FECHADA,
+        return new Comanda(id, sessionId, warehouseCode, tableOrCustomerLabel, customerId, ComandaStatus.FECHADA,
                 items, orderId, openedBy, openedAt, closedAt);
     }
 
@@ -141,7 +160,7 @@ public record Comanda(
         if (closedAt == null) {
             throw new IllegalArgumentException("closedAt é obrigatório ao cancelar a comanda");
         }
-        return new Comanda(id, sessionId, warehouseCode, tableOrCustomerLabel, ComandaStatus.CANCELADA,
+        return new Comanda(id, sessionId, warehouseCode, tableOrCustomerLabel, customerId, ComandaStatus.CANCELADA,
                 items, null, openedBy, openedAt, closedAt);
     }
 

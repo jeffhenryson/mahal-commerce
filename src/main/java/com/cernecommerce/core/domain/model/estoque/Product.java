@@ -1,5 +1,6 @@
 package com.cernecommerce.core.domain.model.estoque;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 /**
@@ -58,7 +59,11 @@ public record Product(
     boolean visibleInPos,
     boolean visibleInMarketplace,
     ProductStatus status,
-    Long brandId
+    Long brandId,
+    boolean availableForTable,
+    boolean sessionProduct,
+    Integer sessionsPerUnit,
+    BigDecimal openRoshPrice
 ) {
 
     public Product {
@@ -79,6 +84,13 @@ public record Product(
         if (type == ProductType.KIT && lotTracked) {
             throw new IllegalArgumentException(
                     "kit não pode ser lote-rastreado: kit não tem saldo físico próprio (EST-F015)");
+        }
+        if (sessionsPerUnit != null && sessionsPerUnit <= 0) {
+            throw new IllegalArgumentException(
+                    "sessionsPerUnit deve ser maior que zero quando informado: " + sessionsPerUnit);
+        }
+        if (openRoshPrice != null && openRoshPrice.signum() < 0) {
+            throw new IllegalArgumentException("openRoshPrice não pode ser negativo: " + openRoshPrice);
         }
     }
 
@@ -160,7 +172,7 @@ public record Product(
             List<ProductAttribute> attributes, Long categoryId, Long brandId) {
         return new Product(null, sku, name, category, true, variants, pricing, type, lotTracked, brand, imageUrl,
                 onSale, superPromo, description, videoUrl, images, attributes, categoryId,
-                null, null, false, false, true, true, ProductStatus.ATIVO, brandId);
+                null, null, false, false, true, true, ProductStatus.ATIVO, brandId, true, false, null, null);
     }
 
     /** Reconstitui um produto sem precificação a partir de persistência. */
@@ -238,14 +250,14 @@ public record Product(
             List<String> images, List<ProductAttribute> attributes, Long categoryId) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
                 onSale, superPromo, description, videoUrl, images, attributes, categoryId,
-                null, null, false, false, true, true, null, null);
+                null, null, false, false, true, true, null, null, true, false, null, null);
     }
 
     /**
      * Reconstitui um produto a partir de persistência — forma canônica completa, com todos os
      * campos aditivos (código de barras, unidade, testador, elegibilidade de kit, visibilidade
-     * por canal, status de publicação). Único ponto de reconstituição usado por
-     * {@code ProductRepositoryImpl}.
+     * por canal, status de publicação), <b>sem</b> os campos de mesa/sessão (PDV-F010): resolvem
+     * para o mesmo default da migration — disponível na mesa, não vendido por sessão.
      */
     public static Product of(Long id, String sku, String name, String category, boolean active,
             List<ProductVariant> variants, Pricing pricing, ProductType type, boolean lotTracked, String brand,
@@ -253,9 +265,28 @@ public record Product(
             List<String> images, List<ProductAttribute> attributes, Long categoryId, String barcode,
             MeasurementUnit unit, boolean sampleProduct, boolean kitComponentEligible, boolean visibleInPos,
             boolean visibleInMarketplace, ProductStatus status, Long brandId) {
+        return of(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
+                onSale, superPromo, description, videoUrl, images, attributes, categoryId, barcode, unit,
+                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId,
+                true, false, null, null);
+    }
+
+    /**
+     * Reconstitui um produto a partir de persistência — forma canônica completa <b>com</b> os
+     * campos de mesa e de sessão de narguilé (PDV-F010). Único ponto de reconstituição usado por
+     * {@code ProductRepositoryImpl}.
+     */
+    public static Product of(Long id, String sku, String name, String category, boolean active,
+            List<ProductVariant> variants, Pricing pricing, ProductType type, boolean lotTracked, String brand,
+            String imageUrl, boolean onSale, boolean superPromo, String description, String videoUrl,
+            List<String> images, List<ProductAttribute> attributes, Long categoryId, String barcode,
+            MeasurementUnit unit, boolean sampleProduct, boolean kitComponentEligible, boolean visibleInPos,
+            boolean visibleInMarketplace, ProductStatus status, Long brandId, boolean availableForTable,
+            boolean sessionProduct, Integer sessionsPerUnit, BigDecimal openRoshPrice) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
                 onSale, superPromo, description, videoUrl, images, attributes, categoryId, barcode, unit,
-                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId);
+                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId,
+                availableForTable, sessionProduct, sessionsPerUnit, openRoshPrice);
     }
 
     /**
@@ -302,14 +333,14 @@ public record Product(
                 newDescription == null ? description : newDescription,
                 newVideoUrl == null ? videoUrl : newVideoUrl,
                 images, attributes, categoryId, barcode, unit, sampleProduct, kitComponentEligible, visibleInPos,
-                visibleInMarketplace, status, brandId);
+                visibleInMarketplace, status, brandId, availableForTable, sessionProduct, sessionsPerUnit, openRoshPrice);
     }
 
     /** Ativa ou desativa o produto, preservando o resto. */
     public Product withActive(boolean newActive) {
         return new Product(id, sku, name, category, newActive, variants, pricing, type, lotTracked, brand, imageUrl,
                 onSale, superPromo, description, videoUrl, images, attributes, categoryId, barcode, unit,
-                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId);
+                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId, availableForTable, sessionProduct, sessionsPerUnit, openRoshPrice);
     }
 
     /**
@@ -320,14 +351,14 @@ public record Product(
     public Product withStatus(ProductStatus newStatus) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
                 onSale, superPromo, description, videoUrl, images, attributes, categoryId, barcode, unit,
-                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, newStatus, brandId);
+                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, newStatus, brandId, availableForTable, sessionProduct, sessionsPerUnit, openRoshPrice);
     }
 
     /** Substitui a precificação do produto, preservando o resto. */
     public Product withPricing(Pricing newPricing) {
         return new Product(id, sku, name, category, active, variants, newPricing, type, lotTracked, brand, imageUrl,
                 onSale, superPromo, description, videoUrl, images, attributes, categoryId, barcode, unit,
-                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId);
+                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId, availableForTable, sessionProduct, sessionsPerUnit, openRoshPrice);
     }
 
     /**
@@ -338,7 +369,7 @@ public record Product(
     public Product withType(ProductType newType) {
         return new Product(id, sku, name, category, active, variants, pricing, newType, lotTracked, brand, imageUrl,
                 onSale, superPromo, description, videoUrl, images, attributes, categoryId, barcode, unit,
-                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId);
+                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId, availableForTable, sessionProduct, sessionsPerUnit, openRoshPrice);
     }
 
     /**
@@ -349,21 +380,21 @@ public record Product(
     public Product withLotTracked(boolean newLotTracked) {
         return new Product(id, sku, name, category, active, variants, pricing, type, newLotTracked, brand, imageUrl,
                 onSale, superPromo, description, videoUrl, images, attributes, categoryId, barcode, unit,
-                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId);
+                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId, availableForTable, sessionProduct, sessionsPerUnit, openRoshPrice);
     }
 
     /** Marca ou desmarca o produto como em promoção (Estágio 01 do admin), preservando o resto. */
     public Product withOnSale(boolean newOnSale) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
                 newOnSale, superPromo, description, videoUrl, images, attributes, categoryId, barcode, unit,
-                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId);
+                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId, availableForTable, sessionProduct, sessionsPerUnit, openRoshPrice);
     }
 
     /** Marca ou desmarca o produto com o selo de super promoção, preservando o resto. */
     public Product withSuperPromo(boolean newSuperPromo) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
                 onSale, newSuperPromo, description, videoUrl, images, attributes, categoryId, barcode, unit,
-                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId);
+                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId, availableForTable, sessionProduct, sessionsPerUnit, openRoshPrice);
     }
 
     /**
@@ -373,7 +404,7 @@ public record Product(
     public Product withImages(List<String> newImages) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
                 onSale, superPromo, description, videoUrl, newImages, attributes, categoryId, barcode, unit,
-                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId);
+                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId, availableForTable, sessionProduct, sessionsPerUnit, openRoshPrice);
     }
 
     /**
@@ -383,7 +414,7 @@ public record Product(
     public Product withAttributes(List<ProductAttribute> newAttributes) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
                 onSale, superPromo, description, videoUrl, images, newAttributes, categoryId, barcode, unit,
-                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId);
+                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId, availableForTable, sessionProduct, sessionsPerUnit, openRoshPrice);
     }
 
     /**
@@ -398,7 +429,7 @@ public record Product(
                 newCategoryName == null ? category : newCategoryName,
                 active, variants, pricing, type, lotTracked, brand, imageUrl, onSale, superPromo, description,
                 videoUrl, images, attributes, newCategoryId, barcode, unit, sampleProduct, kitComponentEligible,
-                visibleInPos, visibleInMarketplace, status, brandId);
+                visibleInPos, visibleInMarketplace, status, brandId, availableForTable, sessionProduct, sessionsPerUnit, openRoshPrice);
     }
 
     /**
@@ -409,21 +440,21 @@ public record Product(
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked,
                 newBrandName == null ? brand : newBrandName,
                 imageUrl, onSale, superPromo, description, videoUrl, images, attributes, categoryId, barcode, unit,
-                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, newBrandId);
+                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, newBrandId, availableForTable, sessionProduct, sessionsPerUnit, openRoshPrice);
     }
 
     /** Define o código de barras/EAN do produto, preservando o resto. {@code null} limpa o campo. */
     public Product withBarcode(String newBarcode) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
                 onSale, superPromo, description, videoUrl, images, attributes, categoryId, newBarcode, unit,
-                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId);
+                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId, availableForTable, sessionProduct, sessionsPerUnit, openRoshPrice);
     }
 
     /** Define a unidade de medida do produto, preservando o resto. */
     public Product withUnit(MeasurementUnit newUnit) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
                 onSale, superPromo, description, videoUrl, images, attributes, categoryId, barcode, newUnit,
-                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId);
+                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId, availableForTable, sessionProduct, sessionsPerUnit, openRoshPrice);
     }
 
     /**
@@ -433,7 +464,7 @@ public record Product(
     public Product withSampleProduct(boolean newSampleProduct) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
                 onSale, superPromo, description, videoUrl, images, attributes, categoryId, barcode, unit,
-                newSampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId);
+                newSampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId, availableForTable, sessionProduct, sessionsPerUnit, openRoshPrice);
     }
 
     /**
@@ -443,21 +474,82 @@ public record Product(
     public Product withKitComponentEligible(boolean newKitComponentEligible) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
                 onSale, superPromo, description, videoUrl, images, attributes, categoryId, barcode, unit,
-                sampleProduct, newKitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId);
+                sampleProduct, newKitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId, availableForTable, sessionProduct, sessionsPerUnit, openRoshPrice);
     }
 
     /** Controla se o produto aparece no PDV, preservando o resto. */
     public Product withVisibleInPos(boolean newVisibleInPos) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
                 onSale, superPromo, description, videoUrl, images, attributes, categoryId, barcode, unit,
-                sampleProduct, kitComponentEligible, newVisibleInPos, visibleInMarketplace, status, brandId);
+                sampleProduct, kitComponentEligible, newVisibleInPos, visibleInMarketplace, status, brandId, availableForTable, sessionProduct, sessionsPerUnit, openRoshPrice);
     }
 
     /** Controla se o produto aparece no marketplace/app, preservando o resto. */
     public Product withVisibleInMarketplace(boolean newVisibleInMarketplace) {
         return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
                 onSale, superPromo, description, videoUrl, images, attributes, categoryId, barcode, unit,
-                sampleProduct, kitComponentEligible, visibleInPos, newVisibleInMarketplace, status, brandId);
+                sampleProduct, kitComponentEligible, visibleInPos, newVisibleInMarketplace, status, brandId, availableForTable, sessionProduct, sessionsPerUnit, openRoshPrice);
+    }
+
+    /**
+     * Controla se o produto pode ser lançado numa comanda de mesa (PDV-F010), preservando o resto.
+     *
+     * <p>Ortogonal a {@link #visibleInPos()}: bebida e narguilé saem na mesa e no balcão; cigarro
+     * e isqueiro saem só no balcão. Default {@code true} — o catálogo já cadastrado sai na mesa,
+     * mesma escolha de {@code visibleInPos} na V91.</p>
+     */
+    public Product withAvailableForTable(boolean newAvailableForTable) {
+        return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
+                onSale, superPromo, description, videoUrl, images, attributes, categoryId, barcode, unit,
+                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId,
+                newAvailableForTable, sessionProduct, sessionsPerUnit, openRoshPrice);
+    }
+
+    /**
+     * Marca/desmarca o produto como vendido por <b>sessão de mesa</b>, não por unidade (PDV-F010),
+     * preservando o resto.
+     *
+     * <p>A essência avulsa do balcão e a sessão de narguilé são <b>produtos distintos</b> no
+     * catálogo, não dois preços do mesmo SKU: os sabores da sessão são as variações da grade, e o
+     * {@code salePrice} de cada variação <b>é</b> o preço de sessão daquele sabor.</p>
+     */
+    public Product withSessionProduct(boolean newSessionProduct) {
+        return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
+                onSale, superPromo, description, videoUrl, images, attributes, categoryId, barcode, unit,
+                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId,
+                availableForTable, newSessionProduct, sessionsPerUnit, openRoshPrice);
+    }
+
+    /**
+     * Quantas sessões saem de uma unidade da origem, preservando o resto. {@code null} = não
+     * informado.
+     *
+     * <p><b>Não movimenta saldo sozinho</b>: é sugestão para o diálogo de conversão de estoque do
+     * admin, que faz saída de 1 lata e entrada de N sessões por {@code POST /estoque/movements}.
+     * Lata e sessão são SKUs distintos porque toda quantidade do sistema é inteira — baixar
+     * {@code 1/N} por sessão mudaria o contrato de ajuste, contagem e reposição de uma vez.</p>
+     */
+    public Product withSessionsPerUnit(Integer newSessionsPerUnit) {
+        return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
+                onSale, superPromo, description, videoUrl, images, attributes, categoryId, barcode, unit,
+                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId,
+                availableForTable, sessionProduct, newSessionsPerUnit, openRoshPrice);
+    }
+
+    /**
+     * Preço do consumo livre (<i>open rosh</i>) — cobrado <b>uma única vez</b> por sessão, com
+     * trocas de sabor ilimitadas. {@code null} = este produto não oferece consumo livre.
+     *
+     * <p>Mora no <b>SKU pai</b>, não na variação, e é isso que o torna a armadilha da feature: a
+     * linha da comanda chega com o SKU da variação (para saber qual essência sair do estoque), mas
+     * o valor cobrado é este. Resolver o preço pelo SKU, como nos outros modos, cobraria o da
+     * variação.</p>
+     */
+    public Product withOpenRoshPrice(BigDecimal newOpenRoshPrice) {
+        return new Product(id, sku, name, category, active, variants, pricing, type, lotTracked, brand, imageUrl,
+                onSale, superPromo, description, videoUrl, images, attributes, categoryId, barcode, unit,
+                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId,
+                availableForTable, sessionProduct, sessionsPerUnit, newOpenRoshPrice);
     }
 
     /**
@@ -475,7 +567,7 @@ public record Product(
     public Product withVariants(List<ProductVariant> newVariants) {
         return new Product(id, sku, name, category, active, newVariants, pricing, type, lotTracked, brand, imageUrl,
                 onSale, superPromo, description, videoUrl, images, attributes, categoryId, barcode, unit,
-                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId);
+                sampleProduct, kitComponentEligible, visibleInPos, visibleInMarketplace, status, brandId, availableForTable, sessionProduct, sessionsPerUnit, openRoshPrice);
     }
 
     /**

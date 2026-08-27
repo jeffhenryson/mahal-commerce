@@ -194,7 +194,8 @@ public interface EstoqueUseCase {
             List<KitComponentCommand> kitComponents) {
         return createProduct(sku, name, category, variants, pricing, brand, imageUrl, onSale, superPromo, description,
                 videoUrl, images, attributes, categoryId, barcode, unit, sampleProduct, kitComponentEligible,
-                visibleInPos, visibleInMarketplace, type, initialStock, actorUsername, kitComponents, null, null);
+                visibleInPos, visibleInMarketplace, type, initialStock, actorUsername, kitComponents, null, null,
+                null);
     }
 
     /**
@@ -214,7 +215,8 @@ public interface EstoqueUseCase {
             List<String> images, List<ProductAttribute> attributes, Long categoryId, String barcode,
             MeasurementUnit unit, boolean sampleProduct, boolean kitComponentEligible, Boolean visibleInPos,
             Boolean visibleInMarketplace, ProductType type, InitialStockCommand initialStock, String actorUsername,
-            List<KitComponentCommand> kitComponents, ProductStatus status, Long brandId);
+            List<KitComponentCommand> kitComponents, ProductStatus status, Long brandId,
+            TableSessionCommand tableSession);
 
     /**
      * Estoque inicial informado na criação do produto (EST-F023). {@code quantity} estritamente
@@ -222,6 +224,28 @@ public interface EstoqueUseCase {
      * aceita {@code AJUSTE} com valor zero.
      */
     record InitialStockCommand(String warehouseCode, BigDecimal quantity, String lotCode, LocalDate expiryDate) {
+    }
+
+    /**
+     * Campos de mesa e de sessão de narguilé do produto (PDV-F010), agrupados por um motivo
+     * prático: {@code createProduct} já carrega parâmetros demais, e os quatro andam juntos —
+     * quem marca {@code sessionProduct} é quem preenche {@code sessionsPerUnit} e
+     * {@code openRoshPrice}. Mesmo idioma de {@link InitialStockCommand}.
+     *
+     * <p>Todos {@code Boolean}/wrapper: no {@code create}, {@code null} resolve para o default
+     * ({@code availableForTable = true}, {@code sessionProduct = false}); no {@code update},
+     * {@code null} significa <b>não mexer neste campo</b>, mesma semântica de PATCH do resto do
+     * DTO. O próprio comando pode vir nulo — é o caso de quem não mexe em nada disso.</p>
+     */
+    record TableSessionCommand(Boolean availableForTable, Boolean sessionProduct, Integer sessionsPerUnit,
+            BigDecimal openRoshPrice) {
+
+        public static final TableSessionCommand EMPTY = new TableSessionCommand(null, null, null, null);
+
+        /** Nunca devolve nulo — poupa o chamador de um {@code if} por campo. */
+        public static TableSessionCommand orEmpty(TableSessionCommand command) {
+            return command == null ? EMPTY : command;
+        }
     }
 
     /** Lista produtos paginados, sem filtro e ordenados por id. */
@@ -355,7 +379,7 @@ public interface EstoqueUseCase {
             Boolean visibleInMarketplace) {
         return updateProduct(sku, name, category, pricing, brand, imageUrl, onSale, superPromo, description, videoUrl,
                 images, attributes, categoryId, barcode, unit, sampleProduct, kitComponentEligible, visibleInPos,
-                visibleInMarketplace, null, null);
+                visibleInMarketplace, null, null, null);
     }
 
     /**
@@ -377,7 +401,7 @@ public interface EstoqueUseCase {
             Boolean onSale, Boolean superPromo, String description, String videoUrl, List<String> images,
             List<ProductAttribute> attributes, Long categoryId, String barcode, MeasurementUnit unit,
             Boolean sampleProduct, Boolean kitComponentEligible, Boolean visibleInPos, Boolean visibleInMarketplace,
-            ProductStatus status, Long brandId);
+            ProductStatus status, Long brandId, TableSessionCommand tableSession);
 
     /**
      * Acrescenta uma ou mais variações novas à grade de um produto já existente (EST-F024).
@@ -626,8 +650,26 @@ public interface EstoqueUseCase {
      */
     CatalogSaleInfo resolveSaleInfo(String sku);
 
-    /** @param productName nome do SKU pai — variação herda o nome, mesma regra de preço (EST-F019). */
-    record CatalogSaleInfo(String productName, Pricing pricing) {
+    /**
+     * @param productName nome do SKU pai — variação herda o nome, mesma regra de preço (EST-F019).
+     * @param availableForTable se o SKU pode ser lançado numa comanda de mesa (PDV-F010). Mora no
+     *        pai: a variação não tem disponibilidade própria.
+     * @param sessionProduct se o produto é vendido por <b>sessão de mesa</b>, não por unidade.
+     * @param openRoshPrice preço do consumo livre, <b>do SKU pai</b>. É o campo que impede a
+     *        armadilha do open rosh: a linha da comanda chega com o SKU da variação (para saber
+     *        qual essência sair do estoque), mas o valor cobrado é este, e não
+     *        {@code pricing.effectivePrice()}. Nulo quando o produto não oferece consumo livre.
+     */
+    record CatalogSaleInfo(String productName, Pricing pricing, boolean availableForTable,
+            boolean sessionProduct, BigDecimal openRoshPrice) {
+
+        /**
+         * Forma curta, para quem só precisa do par nome/preço: resolve os campos de mesa para o
+         * mesmo default da migration — disponível na mesa, não vendido por sessão, sem open rosh.
+         */
+        public CatalogSaleInfo(String productName, Pricing pricing) {
+            this(productName, pricing, true, false, null);
+        }
     }
 
     /**

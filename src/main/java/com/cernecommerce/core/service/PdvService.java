@@ -312,6 +312,29 @@ public class PdvService implements PdvUseCase {
         return session;
     }
 
+    /**
+     * Sessão aberta, <b>sem</b> exigir posse (PDV-F010).
+     *
+     * <p>Existe para a comanda de mesa, e só para ela. A decisão do dono é <b>caixa por atendente,
+     * mesas compartilhadas</b>: quem assume o posto do colega precisa lançar, fechar e cancelar as
+     * mesas do salão, mantendo cada um a sua gaveta.</p>
+     *
+     * <p><b>Não é regressão do isolamento de PDV-C004.</b> Aquele resolveu o buraco da <i>venda de
+     * balcão</i>, onde vender no caixa alheio criava diferença sem dono — e continua valendo:
+     * {@link #registerSale}, {@link #registerCashMovement} e a abertura de sessão seguem em
+     * {@link #requireOwnOpenSession}. Mesa é outro caso: o consumo é do salão, não do operador. O
+     * controle de acesso da mesa é a permissão {@code PDV_COMANDA_MANAGE}, não a posse da gaveta.
+     * Precedente do mesmo espírito já aceito no projeto: a lista de reposição, por armazém e
+     * compartilhada entre operadores.</p>
+     */
+    CashRegisterSession requireOpenSession(Long sessionId) {
+        CashRegisterSession session = getSession(sessionId);
+        if (!session.isOpen()) {
+            throw new CashRegisterSessionClosedException(sessionId);
+        }
+        return session;
+    }
+
     /** Package-private — ver a nota em {@link #requireOwnOpenSession}. */
     void requireDiscountWithinLimit(Order order) {
         if (order.discountAmount().signum() == 0 || order.grossAmount().signum() == 0) {

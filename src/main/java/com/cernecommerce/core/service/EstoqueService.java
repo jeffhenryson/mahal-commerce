@@ -180,7 +180,9 @@ public class EstoqueService implements EstoqueUseCase {
             String videoUrl, List<String> images, List<ProductAttribute> attributes, Long categoryId,
             String barcode, MeasurementUnit unit, boolean sampleProduct, boolean kitComponentEligible,
             Boolean visibleInPos, Boolean visibleInMarketplace, ProductType type, InitialStockCommand initialStock,
-            String actorUsername, List<KitComponentCommand> kitComponents, ProductStatus status, Long brandId) {
+            String actorUsername, List<KitComponentCommand> kitComponents, ProductStatus status, Long brandId,
+            TableSessionCommand tableSession) {
+        TableSessionCommand mesa = TableSessionCommand.orEmpty(tableSession);
         List<ProductVariant> safeVariants = variants == null ? List.of() : variants;
         ProductType resolvedType = type == null ? ProductType.SIMPLES : type;
         ProductStatus resolvedStatus = status == null ? ProductStatus.ATIVO : status;
@@ -252,6 +254,12 @@ public class EstoqueService implements EstoqueUseCase {
                 .withKitComponentEligible(kitComponentEligible)
                 .withVisibleInPos(visibleInPos == null || visibleInPos)
                 .withVisibleInMarketplace(visibleInMarketplace == null || visibleInMarketplace)
+                // PDV-F010: mesma convenção de visibleInPos — omitido resolve para o default da
+                // migration (sai na mesa, não é sessão), nunca para false por acidente.
+                .withAvailableForTable(mesa.availableForTable() == null || mesa.availableForTable())
+                .withSessionProduct(Boolean.TRUE.equals(mesa.sessionProduct()))
+                .withSessionsPerUnit(mesa.sessionsPerUnit())
+                .withOpenRoshPrice(mesa.openRoshPrice())
                 .withStatus(resolvedStatus);
         Product saved = productRepository.save(product);
         // Mesma transação da criação — se a receita falhar validação em algum item, o rollback
@@ -290,7 +298,9 @@ public class EstoqueService implements EstoqueUseCase {
             String imageUrl, Boolean onSale, Boolean superPromo, String description, String videoUrl,
             List<String> images, List<ProductAttribute> attributes, Long categoryId, String barcode,
             MeasurementUnit unit, Boolean sampleProduct, Boolean kitComponentEligible, Boolean visibleInPos,
-            Boolean visibleInMarketplace, ProductStatus status, Long brandId) {
+            Boolean visibleInMarketplace, ProductStatus status, Long brandId,
+            TableSessionCommand tableSession) {
+        TableSessionCommand mesa = TableSessionCommand.orEmpty(tableSession);
         Product current = productRepository.findBySku(sku)
                 .orElseThrow(() -> new ProductNotFoundException(sku));
         // EST-F023: só conta contra o teto quem está ENTRANDO em RASCUNHO agora — editar um
@@ -360,6 +370,19 @@ public class EstoqueService implements EstoqueUseCase {
         }
         if (visibleInMarketplace != null) {
             updated = updated.withVisibleInMarketplace(visibleInMarketplace);
+        }
+        // PDV-F010, mesma semântica de "nulo mantém" do resto deste método.
+        if (mesa.availableForTable() != null) {
+            updated = updated.withAvailableForTable(mesa.availableForTable());
+        }
+        if (mesa.sessionProduct() != null) {
+            updated = updated.withSessionProduct(mesa.sessionProduct());
+        }
+        if (mesa.sessionsPerUnit() != null) {
+            updated = updated.withSessionsPerUnit(mesa.sessionsPerUnit());
+        }
+        if (mesa.openRoshPrice() != null) {
+            updated = updated.withOpenRoshPrice(mesa.openRoshPrice());
         }
         return productRepository.save(updated);
     }
@@ -798,7 +821,10 @@ public class EstoqueService implements EstoqueUseCase {
         Product product = productRepository.findByAnySku(sku)
                 .orElseThrow(() -> new ProductNotFoundException(sku));
         Pricing pricing = product.isKit() ? derivedKitPricing(product) : product.effectivePricingFor(sku);
-        return new CatalogSaleInfo(product.name(), pricing);
+        // availableForTable/sessionProduct/openRoshPrice vêm do PAI, mesmo quando o SKU pedido é o
+        // de uma variação: disponibilidade na mesa e preço de open rosh não têm versão por sabor.
+        return new CatalogSaleInfo(product.name(), pricing, product.availableForTable(),
+                product.sessionProduct(), product.openRoshPrice());
     }
 
 

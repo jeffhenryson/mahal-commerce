@@ -62,7 +62,9 @@ public record Order(
         Instant separatedAt,
         Instant shippedAt,
         Instant deliveredAt,
-        long version) {
+        long version,
+        Long comandaId,
+        String tableLabel) {
 
     public Order {
         if (channel == null) {
@@ -84,11 +86,25 @@ public record Order(
         if (channel == SalesChannel.MARKETPLACE && customerId == null) {
             throw new IllegalArgumentException("customerId é obrigatório em pedido de MARKETPLACE");
         }
-        // Sessão de caixa: o balcão sempre tem uma. O marketplace normalmente não tem — mas PODE
-        // ter, quando o cliente monta o pedido no app e vem pagar na loja. Ver a nota sobre
-        // sessionId na documentação do tipo.
-        if (channel == SalesChannel.BALCAO && sessionId == null) {
-            throw new IllegalArgumentException("sessionId é obrigatório em venda de BALCAO");
+        // Sessão de caixa: o balcão sempre tem uma, e a MESA também — a comanda nasce dentro de
+        // uma sessão aberta. O marketplace normalmente não tem, mas PODE ter, quando o cliente
+        // monta o pedido no app e vem pagar na loja. Ver a nota sobre sessionId na documentação
+        // do tipo.
+        if ((channel == SalesChannel.BALCAO || channel == SalesChannel.MESA) && sessionId == null) {
+            throw new IllegalArgumentException("sessionId é obrigatório em venda de " + channel);
+        }
+        // PDV-F010: a origem de mesa só existe no canal MESA, e é obrigatória nele — é o que
+        // permite o histórico da mesa aparecer no pedido sem consulta reversa à comanda.
+        if (channel == SalesChannel.MESA) {
+            if (comandaId == null) {
+                throw new IllegalArgumentException("comandaId é obrigatório em pedido de MESA");
+            }
+            if (tableLabel == null || tableLabel.isBlank()) {
+                throw new IllegalArgumentException("tableLabel é obrigatório em pedido de MESA");
+            }
+        } else if (comandaId != null || tableLabel != null) {
+            throw new IllegalArgumentException(
+                    "comandaId/tableLabel só existem em pedido de MESA: channel=" + channel);
         }
 
         grossAmount = requireNonNegative(grossAmount, "grossAmount");
@@ -102,13 +118,15 @@ public record Order(
                     + "esperado " + expectedNet + ", recebido " + netAmount);
         }
 
-        // Troco só existe onde há dinheiro em espécie mudando de mão.
+        // Troco só existe onde há dinheiro em espécie mudando de mão — balcão e mesa. O
+        // fechamento de comanda passa pela MESMA validatePaymentsAndComputeChange da venda de
+        // balcão, então recusar troco aqui quebraria o fechamento em dinheiro de toda mesa.
         if (changeAmount != null) {
             if (changeAmount.signum() < 0) {
                 throw new IllegalArgumentException("changeAmount não pode ser negativo");
             }
-            if (channel != SalesChannel.BALCAO && changeAmount.signum() > 0) {
-                throw new IllegalArgumentException("changeAmount só existe em venda de BALCAO");
+            if (channel == SalesChannel.MARKETPLACE && changeAmount.signum() > 0) {
+                throw new IllegalArgumentException("changeAmount não existe em pedido de MARKETPLACE");
             }
         }
 
@@ -149,7 +167,34 @@ public record Order(
         Totals totals = Totals.from(items);
         return new Order(null, null, SalesChannel.BALCAO, OrderStatus.CRIADO, customerId, sessionId,
                 warehouseCode, items, totals.gross(), totals.discount(), BigDecimal.ZERO, totals.net(),
-                null, null, Instant.now(), null, null, null, null, null, null, null, null, 0L);
+                null, null, Instant.now(), null, null, null, null, null, null, null, null, 0L, null, null);
+    }
+
+    /**
+     * Abre uma venda de <b>mesa</b> em {@link OrderStatus#CRIADO} — o pedido gerado pelo
+     * fechamento de uma comanda (PDV-F010). Estado efêmero, como {@link #openBalcao}: quem chama
+     * conclui na mesma transação.
+     *
+     * <p>O canal é <b>imutável</b>, então o pedido da mesa precisa <b>nascer</b> {@code MESA}: não
+     * há caminho de "virar MESA depois". É por isso que esta fábrica existe em vez de um
+     * {@code withChannel}.</p>
+     *
+     * <p>{@code customerId} é opcional, como no balcão — a mesa pode ser aberta sem vínculo de
+     * cadastro. Quando vem preenchido, é ele que faz o pedido sair com nome e gerar cashback.</p>
+     *
+     * @param sessionId a sessão de caixa que <b>recebe</b> o pagamento, que não é necessariamente
+     *        a que abriu a comanda: com mesas compartilhadas entre atendentes, quem fecha a mesa
+     *        pode ser outro operador, e o dinheiro pertence à gaveta que o recebeu.
+     * @param warehouseCode o depósito da <b>comanda</b>, não o de quem fecha — é de lá que o
+     *        estoque já saiu, item a item, no lançamento.
+     */
+    public static Order openMesa(Long sessionId, String warehouseCode, Long customerId, Long comandaId,
+            String tableLabel, List<OrderItem> items) {
+        Totals totals = Totals.from(items);
+        return new Order(null, null, SalesChannel.MESA, OrderStatus.CRIADO, customerId, sessionId,
+                warehouseCode, items, totals.gross(), totals.discount(), BigDecimal.ZERO, totals.net(),
+                null, null, Instant.now(), null, null, null, null, null, null, null, null, 0L,
+                comandaId, tableLabel);
     }
 
     /**
@@ -160,7 +205,7 @@ public record Order(
         Totals totals = Totals.from(items);
         return new Order(null, null, SalesChannel.MARKETPLACE, OrderStatus.AGUARDANDO_PAGAMENTO, customerId,
                 null, warehouseCode, items, totals.gross(), totals.discount(), BigDecimal.ZERO, totals.net(),
-                null, null, Instant.now(), null, null, null, null, null, null, null, null, 0L);
+                null, null, Instant.now(), null, null, null, null, null, null, null, null, 0L, null, null);
     }
 
     /**
@@ -204,10 +249,28 @@ public record Order(
             BigDecimal netAmount, BigDecimal changeAmount, String cancelReason, Instant createdAt,
             Instant paidAt, Instant concludedAt, Instant cancelledAt, Instant refundedAt, Instant reservedAt,
             Instant separatedAt, Instant shippedAt, Instant deliveredAt, long version) {
+        return of(id, orderNumber, channel, status, customerId, sessionId, warehouseCode, items,
+                grossAmount, discountAmount, cashbackRedeemed, netAmount, changeAmount, cancelReason,
+                createdAt, paidAt, concludedAt, cancelledAt, refundedAt, reservedAt, separatedAt, shippedAt,
+                deliveredAt, version, null, null);
+    }
+
+    /**
+     * Reconstitui um pedido a partir de persistência — forma canônica <b>com</b> a origem de mesa
+     * (PDV-F010). {@code comandaId}/{@code tableLabel} são nulos em todo canal que não é
+     * {@code MESA}, e é por isso que a forma anterior continua valendo para balcão e marketplace.
+     */
+    public static Order of(Long id, String orderNumber, SalesChannel channel, OrderStatus status,
+            Long customerId, Long sessionId, String warehouseCode, List<OrderItem> items,
+            BigDecimal grossAmount, BigDecimal discountAmount, BigDecimal cashbackRedeemed,
+            BigDecimal netAmount, BigDecimal changeAmount, String cancelReason, Instant createdAt,
+            Instant paidAt, Instant concludedAt, Instant cancelledAt, Instant refundedAt, Instant reservedAt,
+            Instant separatedAt, Instant shippedAt, Instant deliveredAt, long version, Long comandaId,
+            String tableLabel) {
         return new Order(id, orderNumber, channel, status, customerId, sessionId, warehouseCode, items,
                 grossAmount, discountAmount, cashbackRedeemed, netAmount, changeAmount, cancelReason,
                 createdAt, paidAt, concludedAt, cancelledAt, refundedAt, reservedAt, separatedAt, shippedAt,
-                deliveredAt, version);
+                deliveredAt, version, comandaId, tableLabel);
     }
 
     /**
@@ -225,7 +288,7 @@ public record Order(
         return new Order(id, orderNumber, channel, OrderStatus.CONCLUIDO, customerId, sessionId,
                 warehouseCode, items, grossAmount, discountAmount, cashbackRedeemed, netAmount,
                 changeAmount, cancelReason, createdAt, paidAt == null ? concludedAt : paidAt,
-                concludedAt, null, null, reservedAt, separatedAt, shippedAt, deliveredAt, version);
+                concludedAt, null, null, reservedAt, separatedAt, shippedAt, deliveredAt, version, comandaId, tableLabel);
     }
 
     /**
@@ -249,7 +312,7 @@ public record Order(
         return new Order(id, orderNumber, channel, OrderStatus.RESERVADO, customerId, sessionId,
                 warehouseCode, items, grossAmount, discountAmount, cashbackRedeemed, netAmount,
                 changeAmount, cancelReason, createdAt, paidAt == null ? reservedAt : paidAt,
-                null, null, null, reservedAt, separatedAt, shippedAt, deliveredAt, version);
+                null, null, null, reservedAt, separatedAt, shippedAt, deliveredAt, version, comandaId, tableLabel);
     }
 
     /**
@@ -264,7 +327,7 @@ public record Order(
         return new Order(id, orderNumber, channel, OrderStatus.CONCLUIDO, customerId, sessionId,
                 warehouseCode, items, grossAmount, discountAmount, cashbackRedeemed, netAmount,
                 changeAmount, cancelReason, createdAt, paidAt, concludedAt, null, null, reservedAt,
-                separatedAt, shippedAt, deliveredAt, version);
+                separatedAt, shippedAt, deliveredAt, version, comandaId, tableLabel);
     }
 
     /** Marca o pagamento como confirmado — caminho do marketplace, disparado pelo webhook. */
@@ -273,7 +336,7 @@ public record Order(
         return new Order(id, orderNumber, channel, OrderStatus.PAGO, customerId, sessionId, warehouseCode,
                 items, grossAmount, discountAmount, cashbackRedeemed, netAmount, changeAmount, cancelReason,
                 createdAt, paidAt, concludedAt, null, null, reservedAt, separatedAt, shippedAt, deliveredAt,
-                version);
+                version, comandaId, tableLabel);
     }
 
     /**
@@ -290,7 +353,7 @@ public record Order(
         return new Order(id, orderNumber, channel, newStatus, customerId, sessionId, warehouseCode, items,
                 grossAmount, discountAmount, cashbackRedeemed, netAmount, changeAmount, cancelReason,
                 createdAt, paidAt, concludedAt, null, null, reservedAt, newSeparatedAt, newShippedAt,
-                newDeliveredAt, version);
+                newDeliveredAt, version, comandaId, tableLabel);
     }
 
     /**
@@ -307,7 +370,7 @@ public record Order(
         return new Order(id, orderNumber, channel, OrderStatus.CANCELADO, customerId, sessionId,
                 warehouseCode, items, grossAmount, discountAmount, cashbackRedeemed, netAmount,
                 changeAmount, reason, createdAt, paidAt, concludedAt, cancelledAt, null, reservedAt,
-                separatedAt, shippedAt, deliveredAt, version);
+                separatedAt, shippedAt, deliveredAt, version, comandaId, tableLabel);
     }
 
     /**
@@ -323,7 +386,7 @@ public record Order(
         return new Order(id, orderNumber, channel, OrderStatus.REEMBOLSADO, customerId, sessionId,
                 warehouseCode, items, grossAmount, discountAmount, cashbackRedeemed, netAmount,
                 changeAmount, reason, createdAt, paidAt, concludedAt, null, refundedAt, reservedAt,
-                separatedAt, shippedAt, deliveredAt, version);
+                separatedAt, shippedAt, deliveredAt, version, comandaId, tableLabel);
     }
 
     /**
@@ -338,7 +401,7 @@ public record Order(
         return new Order(id, orderNumber, channel, status, customerId, sessionId, warehouseCode, items,
                 grossAmount, discountAmount, value, newNet, changeAmount, cancelReason, createdAt,
                 paidAt, concludedAt, cancelledAt, refundedAt, reservedAt, separatedAt, shippedAt,
-                deliveredAt, version);
+                deliveredAt, version, comandaId, tableLabel);
     }
 
     /**
@@ -361,7 +424,7 @@ public record Order(
         return new Order(id, orderNumber, channel, status, customerId, newSessionId, warehouseCode,
                 items, grossAmount, discountAmount, cashbackRedeemed, netAmount, changeAmount,
                 cancelReason, createdAt, paidAt, concludedAt, cancelledAt, refundedAt, reservedAt,
-                separatedAt, shippedAt, deliveredAt, version);
+                separatedAt, shippedAt, deliveredAt, version, comandaId, tableLabel);
     }
 
     /** Vincula o pedido a um cliente identificado depois da montagem — o "CPF na nota?" do balcão. */
@@ -369,7 +432,7 @@ public record Order(
         return new Order(id, orderNumber, channel, status, newCustomerId, sessionId, warehouseCode, items,
                 grossAmount, discountAmount, cashbackRedeemed, netAmount, changeAmount, cancelReason,
                 createdAt, paidAt, concludedAt, cancelledAt, refundedAt, reservedAt, separatedAt, shippedAt,
-                deliveredAt, version);
+                deliveredAt, version, comandaId, tableLabel);
     }
 
     /** Soma do cashback gerado por todos os itens; ignora itens sem taxa carimbada. */

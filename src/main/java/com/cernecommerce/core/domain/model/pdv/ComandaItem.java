@@ -3,6 +3,7 @@ package com.cernecommerce.core.domain.model.pdv;
 import com.cernecommerce.core.domain.exception.pedido.ProductNotPricedException;
 import com.cernecommerce.core.domain.model.Money;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
+import com.cernecommerce.core.domain.model.pedido.ConsumptionMode;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -26,7 +27,10 @@ public record ComandaItem(
         BigDecimal unitPrice,
         BigDecimal costPrice,
         String productName,
-        Instant addedAt) {
+        Instant addedAt,
+        ConsumptionMode mode,
+        boolean courtesy,
+        Long linkedItemId) {
 
     public ComandaItem {
         if (sku == null || sku.isBlank()) {
@@ -44,6 +48,18 @@ public record ComandaItem(
         if (addedAt == null) {
             throw new IllegalArgumentException("addedAt é obrigatório");
         }
+        mode = mode == null ? ConsumptionMode.NORMAL : mode;
+        // Cortesia é preço zero por definição — espelha o CHECK ck_comanda_item_courtesy_is_free.
+        // A recíproca NÃO vale: um item pode custar zero sem ser cortesia (produto de brinde
+        // cadastrado a zero), e é por isso que o campo existe em vez de ser inferido do preço.
+        if (courtesy && unitPrice.signum() != 0) {
+            throw new IllegalArgumentException(
+                    "linha de cortesia tem que ter unitPrice zero: " + unitPrice);
+        }
+        if (linkedItemId != null && !mode.requiresLinkedItem()) {
+            throw new IllegalArgumentException(
+                    "linkedItemId só faz sentido em SABOR_EXTRA ou TROCA: mode=" + mode);
+        }
     }
 
     /**
@@ -57,13 +73,46 @@ public record ComandaItem(
             throw new ProductNotPricedException(sku);
         }
         return new ComandaItem(null, sku, quantity, pricing.effectivePrice(), pricing.costPrice(),
-                productName, Instant.now());
+                productName, Instant.now(), ConsumptionMode.NORMAL, false, null);
+    }
+
+    /**
+     * Monta uma linha de sessão de narguilé (PDV-F010): o preço vem de fora, e não do
+     * {@code pricing} do SKU.
+     *
+     * <p>É a diferença que a feature inteira gira em torno. Em {@code OPEN_ROSH} o valor é o
+     * {@code openRoshPrice} do produto <b>pai</b> — resolver pelo SKU da linha, como
+     * {@link #fromCatalog} faz, cobraria o preço da variação do sabor. Em cortesia o valor é zero.
+     * O {@code costPrice} continua vindo do catálogo <b>em todos os casos</b>, inclusive na
+     * cortesia: é ele que faz a margem do pedido mostrar o prejuízo real da promo, e um custo nulo
+     * ali mentiria sobre a pergunta de negócio por trás do open rosh.</p>
+     *
+     * @param unitPrice já resolvido pelo chamador segundo o modo — ver {@code ComandaService.addItem}.
+     * @throws ProductNotPricedException se o produto não tem custo/preço conhecido no catálogo. A
+     *         checagem continua valendo mesmo em cortesia, justamente para não gravar custo nulo.
+     */
+    public static ComandaItem forSession(String sku, BigDecimal quantity, BigDecimal unitPrice, Pricing pricing,
+            String productName, ConsumptionMode mode, boolean courtesy, Long linkedItemId) {
+        if (pricing == null || !pricing.isPriced()) {
+            throw new ProductNotPricedException(sku);
+        }
+        return new ComandaItem(null, sku, quantity, unitPrice, pricing.costPrice(), productName,
+                Instant.now(), mode, courtesy, linkedItemId);
     }
 
     /** Reconstitui um item a partir de persistência. */
     public static ComandaItem of(Long id, String sku, BigDecimal quantity, BigDecimal unitPrice,
             BigDecimal costPrice, String productName, Instant addedAt) {
-        return new ComandaItem(id, sku, quantity, unitPrice, costPrice, productName, addedAt);
+        return of(id, sku, quantity, unitPrice, costPrice, productName, addedAt, ConsumptionMode.NORMAL,
+                false, null);
+    }
+
+    /** Reconstitui um item a partir de persistência, com o modo da sessão (PDV-F010). */
+    public static ComandaItem of(Long id, String sku, BigDecimal quantity, BigDecimal unitPrice,
+            BigDecimal costPrice, String productName, Instant addedAt, ConsumptionMode mode, boolean courtesy,
+            Long linkedItemId) {
+        return new ComandaItem(id, sku, quantity, unitPrice, costPrice, productName, addedAt, mode, courtesy,
+                linkedItemId);
     }
 
     /** {@code quantity * unitPrice}. */

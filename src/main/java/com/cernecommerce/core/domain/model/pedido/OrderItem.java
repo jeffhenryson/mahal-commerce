@@ -42,12 +42,16 @@ public record OrderItem(
         BigDecimal costPrice,
         BigDecimal discountAmount,
         BigDecimal cashbackPercent,
-        String productName) {
+        String productName,
+        ConsumptionMode mode,
+        boolean courtesy) {
 
     public OrderItem {
         if (sku == null || sku.isBlank()) {
             throw new IllegalArgumentException("sku é obrigatório");
         }
+        // Dado legado (linha anterior a PDV-F010) lê como NORMAL, não-cortesia.
+        mode = mode == null ? ConsumptionMode.NORMAL : mode;
         if (quantity == null || quantity.signum() <= 0) {
             throw new IllegalArgumentException("quantity deve ser maior que zero");
         }
@@ -103,7 +107,7 @@ public record OrderItem(
             throw new ProductNotPricedException(sku);
         }
         return new OrderItem(null, sku, quantity, pricing.effectivePrice(), pricing.costPrice(),
-                discountAmount, null, productName);
+                discountAmount, null, productName, ConsumptionMode.NORMAL, false);
     }
 
     /**
@@ -119,17 +123,34 @@ public record OrderItem(
     /** Reconstitui um item a partir de persistência, com o nome do produto congelado (dado legado: {@code null}). */
     public static OrderItem of(Long id, String sku, BigDecimal quantity, BigDecimal unitPrice,
             BigDecimal costPrice, BigDecimal discountAmount, BigDecimal cashbackPercent, String productName) {
-        return new OrderItem(id, sku, quantity, unitPrice, costPrice, discountAmount, cashbackPercent, productName);
+        return of(id, sku, quantity, unitPrice, costPrice, discountAmount, cashbackPercent, productName,
+                ConsumptionMode.NORMAL, false);
+    }
+
+    /**
+     * Reconstitui um item a partir de persistência, com o modo da sessão de mesa (PDV-F010).
+     *
+     * <p>{@code mode}/{@code courtesy} viajam do {@code ComandaItem} para cá no fechamento da
+     * comanda. Sem eles no pedido, o histórico da mesa não distingue cortesia de item cobrado — e
+     * inferir por preço zero mentiria, porque um desconto de 100% dá o mesmo zero.</p>
+     */
+    public static OrderItem of(Long id, String sku, BigDecimal quantity, BigDecimal unitPrice,
+            BigDecimal costPrice, BigDecimal discountAmount, BigDecimal cashbackPercent, String productName,
+            ConsumptionMode mode, boolean courtesy) {
+        return new OrderItem(id, sku, quantity, unitPrice, costPrice, discountAmount, cashbackPercent, productName,
+                mode, courtesy);
     }
 
     /** Carimba a taxa de cashback vigente. Cópia — o item permanece imutável. */
     public OrderItem withCashbackPercent(BigDecimal newCashbackPercent) {
-        return new OrderItem(id, sku, quantity, unitPrice, costPrice, discountAmount, newCashbackPercent, productName);
+        return new OrderItem(id, sku, quantity, unitPrice, costPrice, discountAmount, newCashbackPercent, productName,
+                mode, courtesy);
     }
 
     /** Concede desconto neste item. Cópia — o item permanece imutável. */
     public OrderItem withDiscount(BigDecimal newDiscountAmount) {
-        return new OrderItem(id, sku, quantity, unitPrice, costPrice, newDiscountAmount, cashbackPercent, productName);
+        return new OrderItem(id, sku, quantity, unitPrice, costPrice, newDiscountAmount, cashbackPercent, productName,
+                mode, courtesy);
     }
 
     /**

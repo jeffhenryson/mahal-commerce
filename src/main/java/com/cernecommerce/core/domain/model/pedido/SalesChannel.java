@@ -22,6 +22,22 @@ public enum SalesChannel {
     BALCAO,
 
     /**
+     * Consumo de salão, gerado pelo <b>fechamento de uma comanda de mesa</b> (PDV-F010). Sempre
+     * vinculado a uma sessão de caixa e a uma comanda; cliente é opcional, como no balcão.
+     *
+     * <p><b>Por que não é BALCAO.</b> Os dois são presenciais e liquidam na mesma gaveta, mas a
+     * pergunta que o canal responde é "de onde este pedido veio", e mesa e balcão são operações
+     * distintas: o balcão é instantâneo, a mesa acumula consumo por horas e baixa estoque a cada
+     * item lançado. Sem o canal, o histórico da mesa fica indistinguível de uma venda avulsa, e
+     * relatório por canal soma coisas que a operação separa.</p>
+     *
+     * <p><b>Não abre uma terceira tabela</b>, pelo mesmo motivo que MARKETPLACE não abriu a
+     * segunda: quem precisa distinguir paga um {@code WHERE channel = ?} e quem não precisa não
+     * paga nada.</p>
+     */
+    MESA,
+
+    /**
      * Pedido online. Nunca tem sessão de caixa e <b>sempre</b> tem cliente — um pedido online sem
      * cliente não tem para quem entregar nem para quem estornar.
      */
