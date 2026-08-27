@@ -99,6 +99,10 @@ public class ProductDTOConverter {
         dto.setKitComponentEligible(product.kitComponentEligible());
         dto.setVisibleInPos(product.visibleInPos());
         dto.setVisibleInMarketplace(product.visibleInMarketplace());
+        dto.setAvailableForTable(product.availableForTable());
+        dto.setSessionProduct(product.sessionProduct());
+        dto.setSessionsPerUnit(product.sessionsPerUnit());
+        dto.setOpenRoshPrice(product.openRoshPrice());
         dto.setStatus(product.status().name());
         return dto;
     }

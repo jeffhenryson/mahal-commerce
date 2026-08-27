@@ -68,6 +68,10 @@ public class ProductRepositoryImpl implements ProductRepository {
         entity.setKitComponentEligible(product.kitComponentEligible());
         entity.setVisibleInPos(product.visibleInPos());
         entity.setVisibleInMarketplace(product.visibleInMarketplace());
+        entity.setAvailableForTable(product.availableForTable());
+        entity.setSessionProduct(product.sessionProduct());
+        entity.setSessionsPerUnit(product.sessionsPerUnit());
+        entity.setOpenRoshPrice(product.openRoshPrice());
         entity.setCauseAmount(product.pricing().causeAmount());
         entity.getImages().addAll(product.images());
         entity.getAttributes().addAll(product.attributes().stream()
@@ -309,7 +313,8 @@ public class ProductRepositoryImpl implements ProductRepository {
                 e.isLotTracked(), e.getBrand(), e.getImageUrl(), e.isOnSale(), e.isSuperPromo(), e.getDescription(),
                 e.getVideoUrl(), List.copyOf(e.getImages()), attributes, e.getCategoryId(), e.getBarcode(), unit,
                 e.isSampleProduct(), e.isKitComponentEligible(), e.isVisibleInPos(), e.isVisibleInMarketplace(),
-                status, e.getBrandId());
+                status, e.getBrandId(), e.isAvailableForTable(), e.isSessionProduct(), e.getSessionsPerUnit(),
+                e.getOpenRoshPrice());
     }
 
     private ProductVariant toDomain(ProductVariantEntity e) {

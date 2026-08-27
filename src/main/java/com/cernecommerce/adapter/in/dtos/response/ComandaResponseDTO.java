@@ -14,6 +14,12 @@ public class ComandaResponseDTO {
     private Long sessionId;
     private String warehouseCode;
     private String tableOrCustomerLabel;
+
+    @Schema(description = "Cliente do CRM vinculado à mesa (PDV-F010). Nulo em mesa sem vínculo.")
+    private Long customerId;
+
+    @Schema(description = "Nome do cliente vinculado, resolvido no CRM. Nulo em mesa sem vínculo.")
+    private String customerName;
     private String status;
     private List<ComandaItemResponseDTO> items;
 

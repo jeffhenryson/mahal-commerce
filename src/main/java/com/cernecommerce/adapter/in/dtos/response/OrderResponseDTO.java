@@ -16,8 +16,14 @@ public class OrderResponseDTO {
             + "anteriores à V65 têm prefixo LEG-.", example = "000001000")
     private String orderNumber;
 
-    @Schema(description = "BALCAO ou MARKETPLACE.")
+    @Schema(description = "BALCAO, MESA ou MARKETPLACE.")
     private String channel;
+
+    @Schema(description = "Comanda que originou o pedido. Preenchido só em channel = MESA.")
+    private Long comandaId;
+
+    @Schema(description = "Rótulo da mesa, congelado no fechamento. Preenchido só em channel = MESA.")
+    private String tableLabel;
 
     private String status;
 

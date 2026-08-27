@@ -2,6 +2,7 @@ package com.cernecommerce.adapter.in.dtos.response;
 
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 @Data
@@ -78,6 +79,18 @@ public class ProductResponseDTO {
 
     /** Aparece no marketplace/app. */
     private boolean visibleInMarketplace;
+
+    /** Pode ser lançado numa comanda de mesa (PDV-F010). */
+    private boolean availableForTable;
+
+    /** Vendido por sessão de mesa, não por unidade (PDV-F010). Os sabores são as variações da grade. */
+    private boolean sessionProduct;
+
+    /** Quantas sessões saem de uma unidade da origem. Nulo quando não informado. */
+    private Integer sessionsPerUnit;
+
+    /** Consumo livre por valor fixo, cobrado uma vez por sessão. Nulo quando o produto não tem open rosh. */
+    private BigDecimal openRoshPrice;
 
     /** {@code RASCUNHO} ou {@code ATIVO} (EST-F023). */
     private String status;

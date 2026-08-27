@@ -48,4 +48,18 @@ public class ComandaItemEntity {
 
     @Column(name = "added_at", nullable = false)
     private Instant addedAt;
+
+    // PDV-F010 — por que a linha existe. Sem @Enumerated: mesma convenção enum-como-string de
+    // product.type/product.unit.
+    @Column(nullable = false, length = 20)
+    private String mode;
+
+    // Linha a preço zero que AINDA baixa estoque (promo "pague 1 leve 2", troca de open rosh).
+    // Campo próprio, e não inferido de unit_price = 0: um desconto de 100% dá o mesmo zero.
+    @Column(nullable = false)
+    private boolean courtesy;
+
+    // Liga o segundo sabor (ou a troca) à linha de origem, na mesma comanda.
+    @Column(name = "linked_item_id")
+    private Long linkedItemId;
 }

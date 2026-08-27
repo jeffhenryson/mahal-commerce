@@ -15,6 +15,7 @@ public class ComandaDTOConverter {
         dto.setSessionId(comanda.sessionId());
         dto.setWarehouseCode(comanda.warehouseCode());
         dto.setTableOrCustomerLabel(comanda.tableOrCustomerLabel());
+        dto.setCustomerId(comanda.customerId());
         dto.setStatus(comanda.status().name());
         dto.setItems(comanda.items().stream().map(this::toResponse).toList());
         dto.setRunningTotal(comanda.runningTotal());
@@ -39,6 +40,9 @@ public class ComandaDTOConverter {
         dto.setCostPrice(item.costPrice());
         dto.setSubtotal(item.subtotal());
         dto.setAddedAt(item.addedAt());
+        dto.setMode(item.mode().name());
+        dto.setCourtesy(item.courtesy());
+        dto.setLinkedItemId(item.linkedItemId());
         return dto;
     }
 }

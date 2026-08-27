@@ -174,10 +174,12 @@ public class OrdersController {
         return ResponseEntity.ok(dto);
     }
 
-    @Operation(summary = "Recibo do pedido — funciona para BALCAO e MARKETPLACE",
+    @Operation(summary = "Recibo do pedido — funciona para BALCAO, MESA e MARKETPLACE",
             description = "Equivalente a GET /pdv/sales/{id}/receipt, mas sem exigir PDV_READ: "
-                    + "pedido de marketplace nunca passa por um caixa. O endpoint do PDV continua "
-                    + "existindo, sem mudança, para o fluxo de balcão.")
+                    + "pedido de marketplace nunca passa por um caixa, e pedido de MESA nasce de "
+                    + "um fechamento de comanda, não de um sale — o endpoint do PDV responderia "
+                    + "404 para ele. O endpoint do PDV continua existindo, sem mudança, para o "
+                    + "fluxo de balcão; o admin já migrou para esta rota nos três canais.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = SaleReceiptResponseDTO.class))),
             @ApiResponse(responseCode = "404", description = "Pedido não encontrado", content = @Content)

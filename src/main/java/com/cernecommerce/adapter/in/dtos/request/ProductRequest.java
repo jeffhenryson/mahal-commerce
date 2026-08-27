@@ -7,9 +7,12 @@ import com.cernecommerce.core.domain.model.estoque.ProductType;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 @Data
@@ -111,6 +114,37 @@ public class ProductRequest {
 
     /** Aparece no marketplace/app. Mesma convenção de {@code visibleInPos}: omitido resolve para {@code true}. */
     private Boolean visibleInMarketplace;
+
+    /**
+     * Pode ser lançado numa comanda de mesa (PDV-F010). Mesma convenção de {@code visibleInPos}:
+     * omitido resolve para {@code true}. Ortogonal a {@code visibleInPos} — bebida e narguilé saem
+     * na mesa e no balcão; cigarro e isqueiro, só no balcão.
+     */
+    private Boolean availableForTable;
+
+    /**
+     * Vendido por <b>sessão de mesa</b>, não por unidade (PDV-F010). Omitido, nasce {@code false}:
+     * a sessão é a exceção do catálogo, não a regra.
+     *
+     * <p>Os sabores da sessão são as <b>variações da grade</b> ({@code variants}), e o preço de
+     * venda de cada variação é o preço de sessão daquele sabor — não existe campo
+     * {@code sessionPrice}.</p>
+     */
+    private Boolean sessionProduct;
+
+    /**
+     * Quantas sessões saem de uma unidade da origem. Só sugestão para o diálogo de conversão de
+     * estoque do admin — <b>não movimenta saldo sozinho</b>.
+     */
+    @Positive(message = "sessionsPerUnit deve ser maior que zero")
+    private Integer sessionsPerUnit;
+
+    /**
+     * Consumo livre (<i>open rosh</i>): valor fixo cobrado <b>uma única vez</b> por sessão, com
+     * trocas de sabor ilimitadas. Nulo quando o produto não oferece consumo livre.
+     */
+    @PositiveOrZero(message = "openRoshPrice não pode ser negativo")
+    private BigDecimal openRoshPrice;
 
     /**
      * {@code SIMPLES} ou {@code KIT}. Omitido, nasce {@code SIMPLES} — comportamento anterior a

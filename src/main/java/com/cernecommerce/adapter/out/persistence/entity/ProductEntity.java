@@ -153,6 +153,25 @@ public class ProductEntity {
     @Column(name = "visible_in_marketplace", nullable = false)
     private boolean visibleInMarketplace;
 
+    // PDV-F010 — mesa e sessão de narguilé. available_for_table é ortogonal a visible_in_pos:
+    // bebida e narguilé saem na mesa e no balcão, cigarro e isqueiro só no balcão.
+    @Column(name = "available_for_table", nullable = false)
+    private boolean availableForTable;
+
+    // Vendido por sessão de mesa, não por unidade. Os sabores são as variações da grade.
+    @Column(name = "session_product", nullable = false)
+    private boolean sessionProduct;
+
+    // Quantas sessões saem de uma unidade da origem — sugestão do diálogo de conversão de estoque
+    // do admin. Nullable: não movimenta saldo sozinho, e a maioria dos produtos não é sessão.
+    @Column(name = "sessions_per_unit")
+    private Integer sessionsPerUnit;
+
+    // Consumo livre por valor fixo, cobrado uma vez por sessão. Mora no SKU pai de propósito —
+    // ver ComandaService.addItem, que resolve OPEN_ROSH por aqui e não pelo preço da variação.
+    @Column(name = "open_rosh_price", precision = 14, scale = 2)
+    private BigDecimal openRoshPrice;
+
     // Preço extraordinário — valor adicional destinado a uma causa, por fora do preço de venda.
     // Puramente informativo (ver Pricing.causeAmount); nullable pelo mesmo motivo dos demais
     // campos de precificação.

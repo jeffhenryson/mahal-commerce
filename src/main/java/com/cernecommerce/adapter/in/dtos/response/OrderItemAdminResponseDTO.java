@@ -38,4 +38,13 @@ public class OrderItemAdminResponseDTO {
 
     private BigDecimal cashbackPercent;
     private BigDecimal cashbackAmount;
+
+    @Schema(description = "Modo da linha na comanda que originou o pedido: NORMAL, OPEN_ROSH, "
+            + "SABOR_EXTRA ou TROCA (PDV-F010). NORMAL em toda venda que não veio de mesa.")
+    private String mode;
+
+    @Schema(description = "Linha cortesia: cobrada a zero, com o custo congelado normalmente. É o "
+            + "que faz a margem mostrar o prejuízo real da promo e do open rosh. Campo próprio, "
+            + "não inferido de netAmount = 0 — um desconto de 100% dá o mesmo zero.")
+    private boolean courtesy;
 }

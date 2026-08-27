@@ -3,6 +3,7 @@ package com.cernecommerce.adapter.out.persistence.repository;
 import com.cernecommerce.adapter.out.persistence.entity.OrderEntity;
 import com.cernecommerce.adapter.out.persistence.entity.OrderItemEntity;
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.pedido.ConsumptionMode;
 import com.cernecommerce.core.domain.model.pedido.Order;
 import com.cernecommerce.core.domain.model.pedido.OrderItem;
 import com.cernecommerce.core.domain.model.pedido.OrderStatus;
@@ -60,6 +61,8 @@ public class OrderRepositoryImpl implements OrderRepository {
         entity.setSeparatedAt(order.separatedAt());
         entity.setShippedAt(order.shippedAt());
         entity.setDeliveredAt(order.deliveredAt());
+        entity.setComandaId(order.comandaId());
+        entity.setTableLabel(order.tableLabel());
 
         // Os itens são reescritos por inteiro: o pedido é imutável depois de concluído, então este
         // caminho só é exercitado antes da conclusão. orphanRemoval limpa os antigos.
@@ -74,6 +77,8 @@ public class OrderRepositoryImpl implements OrderRepository {
             itemEntity.setDiscountAmount(item.discountAmount());
             itemEntity.setCashbackPercent(item.cashbackPercent());
             itemEntity.setProductName(item.productName());
+            itemEntity.setMode(item.mode().name());
+            itemEntity.setCourtesy(item.courtesy());
             entity.getItems().add(itemEntity);
         }
         return toDomain(orderJpaRepository.save(entity));
@@ -144,11 +149,13 @@ public class OrderRepositoryImpl implements OrderRepository {
                 e.getChangeAmount(), e.getCancelReason(), e.getCreatedAt(), e.getPaidAt(),
                 e.getConcludedAt(), e.getCancelledAt(), e.getRefundedAt(), e.getReservedAt(),
                 e.getSeparatedAt(), e.getShippedAt(), e.getDeliveredAt(),
-                e.getVersion() == null ? 0L : e.getVersion());
+                e.getVersion() == null ? 0L : e.getVersion(), e.getComandaId(), e.getTableLabel());
     }
 
     private OrderItem toDomain(OrderItemEntity e) {
         return OrderItem.of(e.getId(), e.getSku(), e.getQuantity(), e.getUnitPrice(), e.getCostPrice(),
-                e.getDiscountAmount(), e.getCashbackPercent(), e.getProductName());
+                e.getDiscountAmount(), e.getCashbackPercent(), e.getProductName(),
+                e.getMode() == null ? ConsumptionMode.NORMAL : ConsumptionMode.valueOf(e.getMode()),
+                e.isCourtesy());
     }
 }

@@ -5,9 +5,12 @@ import com.cernecommerce.core.domain.model.estoque.ProductStatus;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 /**
@@ -107,6 +110,26 @@ public class ProductPatchRequest {
 
     /** Aparece no marketplace/app. Nulo mantém; {@code true}/{@code false} troca. */
     private Boolean visibleInMarketplace;
+
+    /** Pode ser lançado numa comanda de mesa (PDV-F010). Nulo mantém; {@code true}/{@code false} troca. */
+    private Boolean availableForTable;
+
+    /** Vendido por sessão de mesa, não por unidade (PDV-F010). Nulo mantém; {@code true}/{@code false} troca. */
+    private Boolean sessionProduct;
+
+    /**
+     * Quantas sessões saem de uma unidade da origem. Nulo mantém.
+     *
+     * <p>Consequência da semântica de PATCH deste DTO ("nulo mantém"): não há como <b>limpar</b> o
+     * campo por aqui, só trocá-lo — mesmo custo já documentado para {@code category}/{@code brand}
+     * em {@code Product.patched}.</p>
+     */
+    @Positive(message = "sessionsPerUnit deve ser maior que zero")
+    private Integer sessionsPerUnit;
+
+    /** Preço do consumo livre (open rosh). Nulo mantém — mesma limitação de {@code sessionsPerUnit}. */
+    @PositiveOrZero(message = "openRoshPrice não pode ser negativo")
+    private BigDecimal openRoshPrice;
 
     /**
      * Status de publicação (EST-F023). Nulo mantém o atual. Promover {@code RASCUNHO → ATIVO} não

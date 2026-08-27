@@ -41,6 +41,11 @@ public class ComandaEntity {
     @Column(name = "order_id")
     private Long orderId;
 
+    // PDV-F010 — cliente do CRM vinculado na abertura. Distinto de table_or_customer_label, que
+    // é texto livre para achar a mesa na tela e nunca foi vínculo de cadastro.
+    @Column(name = "customer_id")
+    private Long customerId;
+
     @Column(name = "opened_by", nullable = false, length = 80)
     private String openedBy;
 
@@ -50,7 +55,11 @@ public class ComandaEntity {
     @Column(name = "closed_at")
     private Instant closedAt;
 
+    // @OrderBy porque a comanda é lida na ordem de lançamento — é assim que a tela mostra a
+    // sessão antes das trocas que se penduram nela, e sem isso a ordem de um bag fica a critério
+    // do banco.
     @OneToMany(mappedBy = "comanda", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    @OrderBy("id ASC")
     @ToString.Exclude
     private List<ComandaItemEntity> items = new ArrayList<>();
 }

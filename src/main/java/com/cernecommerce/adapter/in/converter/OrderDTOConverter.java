@@ -56,6 +56,8 @@ public class OrderDTOConverter {
         dto.setId(order.id());
         dto.setOrderNumber(order.orderNumber());
         dto.setChannel(order.channel().name());
+        dto.setComandaId(order.comandaId());
+        dto.setTableLabel(order.tableLabel());
         dto.setStatus(order.status().name());
         dto.setCustomerId(order.customerId());
         dto.setSessionId(order.sessionId());
@@ -154,6 +156,8 @@ public class OrderDTOConverter {
         dto.setId(order.id());
         dto.setOrderNumber(order.orderNumber());
         dto.setChannel(order.channel().name());
+        dto.setComandaId(order.comandaId());
+        dto.setTableLabel(order.tableLabel());
         dto.setStatus(order.status().name());
         dto.setCustomerId(order.customerId());
         dto.setSessionId(order.sessionId());
@@ -198,6 +202,8 @@ public class OrderDTOConverter {
         dto.setMarginAmount(item.marginAmount());
         dto.setCashbackPercent(item.cashbackPercent());
         dto.setCashbackAmount(item.cashbackAmount());
+        dto.setMode(item.mode().name());
+        dto.setCourtesy(item.courtesy());
         return dto;
     }
 

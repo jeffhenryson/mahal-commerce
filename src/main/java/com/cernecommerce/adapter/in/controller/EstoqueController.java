@@ -522,7 +522,9 @@ public class EstoqueController {
                 initialStock == null ? null : new EstoqueUseCase.InitialStockCommand(initialStock.getWarehouseCode(),
                         initialStock.getQuantity(), initialStock.getLotCode(), initialStock.getExpiryDate()),
                 authentication.getName(), converter.toKitComponentCommands(request.getComponents()),
-                request.getStatus(), request.getBrandId());
+                request.getStatus(), request.getBrandId(),
+                new EstoqueUseCase.TableSessionCommand(request.getAvailableForTable(),
+                        request.getSessionProduct(), request.getSessionsPerUnit(), request.getOpenRoshPrice()));
         publisher.publishEvent(AuditEvent.of(EventType.PRODUCT_CREATED,
                 authentication.getName(), Map.of("sku", created.sku())));
         return ResponseEntity.created(URI.create("/estoque/products/" + created.sku()))
@@ -557,7 +559,9 @@ public class EstoqueController {
                 request.getAttributes() == null ? null : converter.toAttributes(request.getAttributes()),
                 request.getCategoryId(), request.getBarcode(), request.getUnit(), request.getSampleProduct(),
                 request.getKitComponentEligible(), request.getVisibleInPos(), request.getVisibleInMarketplace(),
-                request.getStatus(), request.getBrandId());
+                request.getStatus(), request.getBrandId(),
+                new EstoqueUseCase.TableSessionCommand(request.getAvailableForTable(),
+                        request.getSessionProduct(), request.getSessionsPerUnit(), request.getOpenRoshPrice()));
         publisher.publishEvent(AuditEvent.of(EventType.PRODUCT_UPDATED,
                 authentication.getName(), Map.of("sku", updated.sku())));
         // Evento próprio para mudança de preço: quem baixou o preço de quê e quando é a pergunta

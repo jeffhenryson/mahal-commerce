@@ -14,9 +14,17 @@ public class OrderAdminResponseDTO {
     private Long id;
     private String orderNumber;
 
-    @Schema(description = "Origem do pedido: BALCAO ou MARKETPLACE. Imutável — não muda quando um "
-            + "pedido do app é pago no balcão.")
+    @Schema(description = "Origem do pedido: BALCAO, MESA ou MARKETPLACE. Imutável — não muda "
+            + "quando um pedido do app é pago no balcão, e o pedido de mesa NASCE MESA no "
+            + "fechamento da comanda.")
     private String channel;
+
+    @Schema(description = "Comanda que originou o pedido. Preenchido só em channel = MESA.")
+    private Long comandaId;
+
+    @Schema(description = "Rótulo da mesa, congelado no fechamento (ex.: \"Mesa 4\"). Preenchido "
+            + "só em channel = MESA.")
+    private String tableLabel;
 
     private String status;
     private Long customerId;

@@ -63,6 +63,17 @@ public class OrderEntity {
     @Column(name = "cancel_reason", length = 255)
     private String cancelReason;
 
+    // PDV-F010 — origem de mesa. Só preenchidos em channel = MESA (CHECK ck_sales_order_mesa_origin).
+    // comanda_id é redundante com comanda.order_id, que aponta de volta: a redundância evita join
+    // reverso em toda página de Vendas > Pedidos.
+    @Column(name = "comanda_id")
+    private Long comandaId;
+
+    // Rótulo congelado no fechamento, não lido da comanda — renomear a mesa depois não pode
+    // reescrever o histórico. Mesma razão de order_item.product_name.
+    @Column(name = "table_label", length = 100)
+    private String tableLabel;
+
     /** Instante da criação. Mantém o nome de coluna {@code sold_at} de V57. */
     @Column(name = "sold_at", nullable = false)
     private Instant createdAt;

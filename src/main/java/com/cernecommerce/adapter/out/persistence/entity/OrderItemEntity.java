@@ -54,4 +54,12 @@ public class OrderItemEntity {
     // esta migration.
     @Column(name = "product_name", length = 255)
     private String productName;
+
+    // PDV-F010 — modo e cortesia viajam do ComandaItem para cá no fechamento da comanda. Sem eles,
+    // o histórico da mesa no pedido não distingue cortesia de item cobrado.
+    @Column(nullable = false, length = 20)
+    private String mode;
+
+    @Column(nullable = false)
+    private boolean courtesy;
 }
