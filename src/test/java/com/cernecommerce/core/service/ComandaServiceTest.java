@@ -11,6 +11,8 @@ import com.cernecommerce.core.domain.exception.pdv.NotAvailableForTableException
 import com.cernecommerce.core.domain.exception.pdv.OpenRoshNotPricedException;
 import com.cernecommerce.core.domain.exception.estoque.InsufficientStockException;
 import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
+import com.cernecommerce.core.domain.model.cashback.CashbackRate;
+import com.cernecommerce.core.domain.model.cashback.CashbackScope;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.pagamento.PaymentMethod;
@@ -542,14 +544,21 @@ class ComandaServiceTest {
         verifyNoInteractions(orderRepository);
     }
 
-    /** O cliente vinculado na abertura chega ao pedido — é o que gera cashback na mesa. */
+    /**
+     * O cliente vinculado na abertura chega ao pedido — e a taxa vigente é carimbada em cada linha,
+     * que é o que de fato gera o cashback. Verificar só que {@code recordEarnedForOrder} foi
+     * chamado não bastava: com a taxa nula o ganho sai zero, e foi assim que a mesa passou a
+     * entrega inteira sem gerar cashback nenhum (visto por {@code ComandaCashCycleIT}).
+     */
     @Test
-    void closeComanda_carriesTheComandaCustomerIntoTheOrder() {
+    void closeComanda_carriesTheComandaCustomerAndStampsTheCashbackRate() {
         Comanda comMesa = Comanda.of(10L, 1L, "LOJA-01", "Mesa 4", 42L, ComandaStatus.ABERTA,
                 List.of(essenciaItem()), null, "caixa1", Instant.now(), null);
         when(comandaRepository.findById(10L)).thenReturn(Optional.of(comMesa));
         when(pdvService.getCurrentSession("caixa1")).thenReturn(openSession());
         when(pdvService.validatePaymentsAndComputeChange(any(), any())).thenReturn(null);
+        when(cashbackUseCase.resolveApplicableRate("ESS-MENTA")).thenReturn(new CashbackRate(1L,
+                CashbackScope.GLOBAL, null, new BigDecimal("3.00"), true, Instant.now(), null, Instant.now()));
         givenOrderPersistenceAssignsId();
         when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
@@ -557,6 +566,28 @@ class ComandaServiceTest {
                 new BigDecimal("25.00"), null)), "caixa1");
 
         assertThat(order.customerId()).isEqualTo(42L);
+        assertThat(order.items().get(0).cashbackPercent()).isEqualByComparingTo("3.00");
+        // 25,00 líquidos x 3% — o ganho que recordEarnedForOrder tem para lançar.
+        assertThat(order.totalCashbackEarned()).isEqualByComparingTo("0.75");
         verify(cashbackUseCase).recordEarnedForOrder(any());
+    }
+
+    /** Sem taxa vigente para o SKU, a linha vai sem carimbo — e não quebra o fechamento. */
+    @Test
+    void closeComanda_semTaxaVigente_fechaSemCashback() {
+        Comanda comMesa = Comanda.of(10L, 1L, "LOJA-01", "Mesa 4", 42L, ComandaStatus.ABERTA,
+                List.of(essenciaItem()), null, "caixa1", Instant.now(), null);
+        when(comandaRepository.findById(10L)).thenReturn(Optional.of(comMesa));
+        when(pdvService.getCurrentSession("caixa1")).thenReturn(openSession());
+        when(pdvService.validatePaymentsAndComputeChange(any(), any())).thenReturn(null);
+        when(cashbackUseCase.resolveApplicableRate("ESS-MENTA")).thenReturn(null);
+        givenOrderPersistenceAssignsId();
+        when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Order order = comandaService.closeComanda(10L, List.of(new PaymentCommand(PaymentMethod.DINHEIRO,
+                new BigDecimal("25.00"), null)), "caixa1");
+
+        assertThat(order.items().get(0).cashbackPercent()).isNull();
+        assertThat(order.totalCashbackEarned()).isEqualByComparingTo("0");
     }
 }
