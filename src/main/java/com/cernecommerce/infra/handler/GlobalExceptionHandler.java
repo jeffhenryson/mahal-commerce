@@ -100,8 +100,15 @@ import com.cernecommerce.core.domain.exception.compras.NfeImportNotFoundExceptio
 import com.cernecommerce.core.domain.exception.compras.SupplierNotFoundByTaxIdException;
 import com.cernecommerce.core.domain.exception.compras.UnmatchedNfeLineException;
 import com.cernecommerce.core.domain.exception.pdv.ComandaEmptyException;
+import com.cernecommerce.core.domain.exception.pdv.ComandaOnlyCourtesyException;
 import com.cernecommerce.core.domain.exception.pdv.ComandaNotFoundException;
 import com.cernecommerce.core.domain.exception.pdv.ComandaNotOpenException;
+import com.cernecommerce.core.domain.exception.pdv.CourtesyNotAllowedException;
+import com.cernecommerce.core.domain.exception.pdv.LinkedItemRequiredException;
+import com.cernecommerce.core.domain.exception.pdv.NotASessionProductException;
+import com.cernecommerce.core.domain.exception.pdv.NotAnOpenRoshException;
+import com.cernecommerce.core.domain.exception.pdv.NotAvailableForTableException;
+import com.cernecommerce.core.domain.exception.pdv.OpenRoshNotPricedException;
 import com.cernecommerce.core.domain.exception.pdv.NoOpenCashRegisterSessionException;
 import com.cernecommerce.core.domain.exception.pedido.DiscountLimitExceededException;
 import com.cernecommerce.core.domain.exception.pedido.InvalidOrderStatusTransitionException;
@@ -836,6 +843,66 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ComandaEmptyException.class)
     public ResponseEntity<ApiError> handleComandaEmpty(ComandaEmptyException ex, HttpServletRequest req) {
         return error(HttpStatus.CONFLICT, ex.getMessage(), "COMANDA_EMPTY", req);
+    }
+
+    /**
+     * PDV-F010 — comanda cujo total é zero por ser toda de cortesia. Irmã de
+     * {@code COMANDA_EMPTY}: as duas fecham a porta do pedido concluído de R$ 0.
+     */
+    @ExceptionHandler(ComandaOnlyCourtesyException.class)
+    public ResponseEntity<ApiError> handleComandaOnlyCourtesy(ComandaOnlyCourtesyException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "COMANDA_ONLY_COURTESY", req);
+    }
+
+    /**
+     * PDV-F010 — modo de sessão pedido para um SKU que não é produto de sessão. 400: o que está
+     * errado é a combinação no corpo, não o estado do cadastro.
+     */
+    @ExceptionHandler(NotASessionProductException.class)
+    public ResponseEntity<ApiError> handleNotASessionProduct(NotASessionProductException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "NOT_A_SESSION_PRODUCT", req);
+    }
+
+    /** PDV-F010 — open rosh num produto sem preço de consumo livre. Sem fallback: recusa. */
+    @ExceptionHandler(OpenRoshNotPricedException.class)
+    public ResponseEntity<ApiError> handleOpenRoshNotPriced(OpenRoshNotPricedException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "OPEN_ROSH_NOT_PRICED", req);
+    }
+
+    /**
+     * PDV-F010 — cortesia sem {@code PDV_COMANDA_COURTESY}. 403 pela mesma razão de
+     * {@code PDV_SALE_DISCOUNT}: linha a preço zero é desconto de 100%.
+     */
+    @ExceptionHandler(CourtesyNotAllowedException.class)
+    public ResponseEntity<ApiError> handleCourtesyNotAllowed(CourtesyNotAllowedException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.FORBIDDEN, ex.getMessage(), "COURTESY_NOT_ALLOWED", req);
+    }
+
+    /** PDV-F010 — segundo sabor ou troca sem linha de origem válida na mesma comanda. */
+    @ExceptionHandler(LinkedItemRequiredException.class)
+    public ResponseEntity<ApiError> handleLinkedItemRequired(LinkedItemRequiredException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "LINKED_ITEM_REQUIRED", req);
+    }
+
+    /**
+     * PDV-F010 — troca apontando para linha que não é open rosh. 409 e não 400: o id existe e é
+     * válido; o que impede é o estado daquela linha.
+     */
+    @ExceptionHandler(NotAnOpenRoshException.class)
+    public ResponseEntity<ApiError> handleNotAnOpenRosh(NotAnOpenRoshException ex, HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "NOT_AN_OPEN_ROSH", req);
+    }
+
+    /** PDV-F010 — SKU sem disponibilidade para mesa lançado numa comanda. */
+    @ExceptionHandler(NotAvailableForTableException.class)
+    public ResponseEntity<ApiError> handleNotAvailableForTable(NotAvailableForTableException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "NOT_AVAILABLE_FOR_TABLE", req);
     }
 
     /**
