@@ -7,6 +7,7 @@ import com.cernecommerce.core.domain.model.crm.Customer;
 import com.cernecommerce.core.domain.model.pagamento.PaymentMethod;
 import com.cernecommerce.core.domain.model.pdv.Comanda;
 import com.cernecommerce.core.domain.model.pdv.ComandaStatus;
+import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionHasOpenComandasException;
 import com.cernecommerce.core.domain.model.pdv.CashRegisterSession;
 import com.cernecommerce.core.domain.model.pedido.Order;
 import com.cernecommerce.core.domain.model.pedido.ConsumptionMode;
@@ -31,6 +32,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Comanda de mesa de ponta a ponta contra banco real (PDV-F009).
@@ -50,6 +52,7 @@ class ComandaCashCycleIT {
     @Autowired EstoqueUseCase estoqueUseCase;
     @Autowired CrmUseCase crmUseCase;
     @Autowired CashbackUseCase cashbackUseCase;
+    @Autowired com.cernecommerce.core.ports.out.pedido.OrderRepository orderRepository;
 
     @PersistenceContext EntityManager em;
 
@@ -111,7 +114,7 @@ class ComandaCashCycleIT {
         List<PaymentCommand> split = List.of(
                 new PaymentCommand(PaymentMethod.DEBITO, new BigDecimal("30.00"), null),
                 new PaymentCommand(PaymentMethod.DINHEIRO, new BigDecimal("20.00"), null));
-        Order order = comandaUseCase.closeComanda(comanda.id(), split, operator);
+        Order order = comandaUseCase.closeComanda(comanda.id(), split, null, false, operator);
         flushAndClear();
 
         assertThat(order.status()).isEqualTo(OrderStatus.CONCLUIDO);
@@ -131,7 +134,7 @@ class ComandaCashCycleIT {
         Comanda fechada = comandaUseCase.getComanda(comanda.id());
         assertThat(fechada.status()).isEqualTo(ComandaStatus.FECHADA);
         assertThat(fechada.orderId()).isEqualTo(order.id());
-        assertThat(comandaUseCase.listOpenComandas(session.id())).isEmpty();
+        assertThat(comandaUseCase.listOpenComandas(session.id(), null, 0, 50).content()).isEmpty();
     }
 
     @Test
@@ -155,7 +158,7 @@ class ComandaCashCycleIT {
         // Devolveu ao estoque exatamente o que tinha sido debitado — de volta a 50.
         assertThat(estoqueUseCase.getStockBalance(sku, warehouseCode).quantity())
                 .isEqualByComparingTo("50.000");
-        assertThat(comandaUseCase.listOpenComandas(session.id())).isEmpty();
+        assertThat(comandaUseCase.listOpenComandas(session.id(), null, 0, 50).content()).isEmpty();
     }
 
     /**
@@ -202,7 +205,7 @@ class ComandaCashCycleIT {
                 .isEqualByComparingTo("48.000");
 
         Order order = comandaUseCase.closeComanda(comanda.id(),
-                List.of(new PaymentCommand(PaymentMethod.DINHEIRO, new BigDecimal("25.00"), null)),
+                List.of(new PaymentCommand(PaymentMethod.DINHEIRO, new BigDecimal("25.00"), null)), null, false,
                 operator);
         flushAndClear();
 
@@ -223,6 +226,265 @@ class ComandaCashCycleIT {
         // 25,00 líquido x 3% (taxa GLOBAL da V70) = 0,75, ainda em carência.
         assertThat(cashbackUseCase.getCustomerBalance(cliente.id()).pending())
                 .isEqualByComparingTo("0.75");
+    }
+
+    /**
+     * PDV-C005 — o beco sem saída, provado de ponta a ponta contra o banco real.
+     *
+     * <p>Antes desta barreira o fechamento passava, e a mesa que sobrava virava um objeto
+     * intocável: {@code addItem} e {@code cancelComanda} exigem a sessão de origem ABERTA, então as
+     * duas respondiam 409 para sempre, com a essência já debitada e sem nenhum caminho de
+     * devolução. A regra existia só no cliente.</p>
+     */
+    @Test
+    void closeSession_comMesaAberta_eRecusadoEAMesaContinuaOperavel() {
+        String operator = "caixa-" + uniqueSuffix();
+        String[] setup = givenStockedWarehouse(operator).split("\\|");
+        String warehouseCode = setup[0];
+        String sku = setup[1];
+
+        CashRegisterSession session = pdvUseCase.openSession(operator, BigDecimal.ZERO, warehouseCode);
+        Comanda comanda = comandaUseCase.openComanda(session.id(), "Mesa 4", operator);
+        comandaUseCase.addItem(comanda.id(), sku, BigDecimal.ONE, operator);
+        flushAndClear();
+
+        assertThatThrownBy(() -> pdvUseCase.closeSession(session.id(), BigDecimal.ZERO, "gerente"))
+                .isInstanceOf(CashRegisterSessionHasOpenComandasException.class)
+                .hasMessageContaining(String.valueOf(comanda.id()));
+        flushAndClear();
+
+        // O caixa continua ABERTO — e é isso que mantém a mesa operável.
+        assertThat(pdvUseCase.getSession(session.id()).isOpen()).isTrue();
+
+        // Prova do que a barreira protege: cancelar ainda funciona e devolve o estoque.
+        comandaUseCase.cancelComanda(comanda.id(), operator);
+        flushAndClear();
+        assertThat(comandaUseCase.getComanda(comanda.id()).status()).isEqualTo(ComandaStatus.CANCELADA);
+        assertThat(estoqueUseCase.getStockBalance(sku, warehouseCode).quantity())
+                .isEqualByComparingTo("50.000");
+
+        // Resolvida a mesa, o caixa fecha normalmente.
+        assertThat(pdvUseCase.closeSession(session.id(), BigDecimal.ZERO, "gerente").isOpen()).isFalse();
+    }
+
+    /**
+     * PDV-F011 de ponta a ponta: o setup da mesa e o acréscimo do open rosh sobrevivem ao
+     * fechamento e chegam ao pedido. Sem isso, a tela de Vendas &gt; Pedidos não responde "qual
+     * pinça saiu com aquela mesa" — pergunta que só é feita depois de a mesa ter fechado.
+     */
+    @Test
+    void fullCycle_openRoshComAcrescimoEComponentes_chegaInteiroNoPedido() {
+        String suffix = uniqueSuffix();
+        String operator = "caixa-" + suffix;
+        String[] setup = givenStockedWarehouse(operator).split("\\|");
+        String warehouseCode = setup[0];
+        String sku = setup[1];
+
+        // openRoshPrice = 60,00 no PAI; o salePrice da variação continua 25,00.
+        estoqueUseCase.updateProduct(sku, null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null,
+                new EstoqueUseCase.TableSessionCommand(true, true, 10, new BigDecimal("60.00")));
+        flushAndClear();
+
+        CashRegisterSession session = pdvUseCase.openSession(operator, BigDecimal.ZERO, warehouseCode);
+        Comanda comanda = comandaUseCase.openComanda(session.id(), "Mesa 15", operator);
+        flushAndClear();
+
+        String componentes = "Narguilé grande · Com filtro · Pinça P-02";
+        Comanda comOpenRosh = comandaUseCase.addItem(comanda.id(), sku, BigDecimal.ONE,
+                ConsumptionMode.OPEN_ROSH, false, null, componentes, new BigDecimal("15.00"), operator);
+        flushAndClear();
+
+        // 60,00 do PAI + 15,00 de acréscimo. Somar sobre a variação daria 40,00.
+        assertThat(comOpenRosh.items().get(0).unitPrice()).isEqualByComparingTo("75.00");
+        assertThat(comOpenRosh.items().get(0).surchargeAmount()).isEqualByComparingTo("15.00");
+        assertThat(comOpenRosh.items().get(0).notes()).isEqualTo(componentes);
+        assertThat(comOpenRosh.runningTotal()).isEqualByComparingTo("75.00");
+
+        Order order = comandaUseCase.closeComanda(comanda.id(),
+                List.of(new PaymentCommand(PaymentMethod.DINHEIRO, new BigDecimal("75.00"), null)), null, false,
+                operator);
+        flushAndClear();
+
+        assertThat(order.channel()).isEqualTo(SalesChannel.MESA);
+        assertThat(order.netAmount()).isEqualByComparingTo("75.00");
+        assertThat(order.items().get(0)).satisfies(item -> {
+            assertThat(item.notes()).isEqualTo(componentes);
+            assertThat(item.surchargeAmount()).isEqualByComparingTo("15.00");
+            assertThat(item.unitPrice()).isEqualByComparingTo("75.00");
+            // Acréscimo é margem, não custo — o custo congelado não se mexeu.
+            assertThat(item.costPrice()).isEqualByComparingTo("10.00");
+            assertThat(item.marginAmount()).isEqualByComparingTo("65.00");
+        });
+    }
+
+    /**
+     * PDV-F014 + PDV-F015 contra banco real, no mesmo fechamento: o desconto rateado entre as
+     * linhas e a taxa incidindo sobre o que sobra.
+     *
+     * <p>É aqui que a decisão de desenho aparece de ponta a ponta — o valor gravado em
+     * {@code net_amount}, que quatro agregações somam como receita, <b>não</b> inclui os 10% do
+     * garçom, mas o pagamento exigido e o dinheiro na gaveta incluem.</p>
+     */
+    @Test
+    void fullCycle_mesaComDescontoRateadoETaxaDeServico() {
+        String operator = "caixa-" + uniqueSuffix();
+        String[] setup = givenStockedWarehouse(operator).split("\\|");
+        String warehouseCode = setup[0];
+        String sku = setup[1];
+
+        CashRegisterSession session = pdvUseCase.openSession(operator, BigDecimal.ZERO, warehouseCode);
+        flushAndClear();
+
+        Comanda comanda = comandaUseCase.openComanda(session.id(), "Mesa 9", operator);
+        flushAndClear();
+        // Quatro essências de 25,00 = 100,00 de conta.
+        comandaUseCase.addItem(comanda.id(), sku, new BigDecimal("4"), operator);
+        flushAndClear();
+
+        // Desconto de 10,00 (dentro do teto de 10%) e taxa de serviço aplicada.
+        // 100,00 − 10,00 = 90,00 de líquido; 10% disso = 9,00; total a pagar 99,00.
+        Order order = comandaUseCase.closeComanda(comanda.id(),
+                List.of(new PaymentCommand(PaymentMethod.DINHEIRO, new BigDecimal("100.00"), null)),
+                new BigDecimal("10.00"), true, operator);
+        flushAndClear();
+
+        assertThat(order.status()).isEqualTo(OrderStatus.CONCLUIDO);
+        assertThat(order.channel()).isEqualTo(SalesChannel.MESA);
+        assertThat(order.grossAmount()).isEqualByComparingTo("100.00");
+        assertThat(order.discountAmount()).isEqualByComparingTo("10.00");
+        // A RECEITA não enxerga a gorjeta.
+        assertThat(order.netAmount()).isEqualByComparingTo("90.00");
+        // A taxa fica em coluna própria, conferível.
+        assertThat(order.serviceFeeAmount()).isEqualByComparingTo("9.00");
+        assertThat(order.totalPayable()).isEqualByComparingTo("99.00");
+        // Troco de 100,00 sobre 99,00 — calculado sobre o total COM taxa, não sobre o líquido.
+        assertThat(order.changeAmount()).isEqualByComparingTo("1.00");
+
+        // O desconto foi rateado: uma linha só, absorve os 10,00 inteiros.
+        assertThat(order.items()).hasSize(1);
+        assertThat(order.items().get(0).discountAmount()).isEqualByComparingTo("10.00");
+
+        // Round-trip: a taxa sobrevive à persistência, não só ao objeto em memória.
+        Order relido = orderRepository.findById(order.id()).orElseThrow();
+        assertThat(relido.serviceFeeAmount()).isEqualByComparingTo("9.00");
+        assertThat(relido.netAmount()).isEqualByComparingTo("90.00");
+        assertThat(relido.totalPayable()).isEqualByComparingTo("99.00");
+    }
+
+    /**
+     * A contrapartida da decisão: o dinheiro da taxa passa pela gaveta como qualquer outro, então
+     * a conferência do fechamento tem que enxergá-lo. Ela soma {@code order_payment}, não
+     * {@code net_amount} — é por isso que manter a taxa fora do líquido não quebrou o caixa.
+     */
+    @Test
+    void closeSession_expectedAmountIncludesTheServiceFeePaidInCash() {
+        String operator = "caixa-" + uniqueSuffix();
+        String[] setup = givenStockedWarehouse(operator).split("\\|");
+        String warehouseCode = setup[0];
+        String sku = setup[1];
+
+        CashRegisterSession session = pdvUseCase.openSession(operator, BigDecimal.ZERO, warehouseCode);
+        flushAndClear();
+        Comanda comanda = comandaUseCase.openComanda(session.id(), "Mesa 10", operator);
+        flushAndClear();
+        comandaUseCase.addItem(comanda.id(), sku, new BigDecimal("4"), operator);
+        flushAndClear();
+
+        // 100,00 de conta + 10,00 de taxa = 110,00, pagos em dinheiro.
+        comandaUseCase.closeComanda(comanda.id(),
+                List.of(new PaymentCommand(PaymentMethod.DINHEIRO, new BigDecimal("110.00"), null)),
+                null, true, operator);
+        flushAndClear();
+
+        CashRegisterSession fechada = pdvUseCase.closeSession(session.id(), new BigDecimal("110.00"), operator);
+
+        // 110,00, e não 100,00: a gorjeta está fisicamente na gaveta.
+        assertThat(fechada.expectedAmount()).isEqualByComparingTo("110.00");
+        assertThat(fechada.differenceAmount()).isEqualByComparingTo("0.00");
+    }
+
+    /**
+     * PDV-F012 contra banco real: a linha sai, o estoque volta, e a mesa continua aberta — que é
+     * exatamente o que cancelar a comanda inteira <b>não</b> permitia.
+     */
+    @Test
+    void removeItem_returnsStockAndKeepsTheComandaOpen() {
+        String operator = "caixa-" + uniqueSuffix();
+        String[] setup = givenStockedWarehouse(operator).split("\\|");
+        String warehouseCode = setup[0];
+        String sku = setup[1];
+
+        CashRegisterSession session = pdvUseCase.openSession(operator, BigDecimal.ZERO, warehouseCode);
+        flushAndClear();
+        Comanda comanda = comandaUseCase.openComanda(session.id(), "Mesa 11", operator);
+        flushAndClear();
+        comandaUseCase.addItem(comanda.id(), sku, new BigDecimal("2"), operator);
+        Comanda comDoisLancamentos = comandaUseCase.addItem(comanda.id(), sku, BigDecimal.ONE, operator);
+        flushAndClear();
+        assertThat(estoqueUseCase.getStockBalance(sku, warehouseCode).quantity())
+                .isEqualByComparingTo("47.000");
+        Long primeiraLinha = comDoisLancamentos.items().get(0).id();
+
+        Comanda depois = comandaUseCase.removeItem(comanda.id(), primeiraLinha, operator);
+        flushAndClear();
+
+        // Devolveu as 2 unidades da linha removida — e só elas.
+        assertThat(estoqueUseCase.getStockBalance(sku, warehouseCode).quantity())
+                .isEqualByComparingTo("49.000");
+        // A mesa segue ABERTA, com a outra linha: o cliente continua consumindo.
+        assertThat(depois.status()).isEqualTo(ComandaStatus.ABERTA);
+        assertThat(depois.items()).hasSize(1);
+        assertThat(depois.runningTotal()).isEqualByComparingTo("25.00");
+
+        // E ainda fecha normalmente, cobrando só o que sobrou.
+        Order order = comandaUseCase.closeComanda(comanda.id(),
+                List.of(new PaymentCommand(PaymentMethod.DINHEIRO, new BigDecimal("25.00"), null)),
+                null, false, operator);
+        flushAndClear();
+        assertThat(order.netAmount()).isEqualByComparingTo("25.00");
+        assertThat(order.items()).hasSize(1);
+    }
+
+    /**
+     * A cascata contra banco real, que é onde ela importa: {@code linked_item_id} é FK
+     * auto-referente, então deixar a troca para trás violaria a constraint — o teste falharia no
+     * flush, não numa asserção.
+     */
+    @Test
+    void removeItem_dragsTheTrocaAndReturnsStockForBoth() {
+        String operator = "caixa-" + uniqueSuffix();
+        String[] setup = givenStockedWarehouse(operator).split("\\|");
+        String warehouseCode = setup[0];
+        String sku = setup[1];
+
+        // Mesmo setup do teste de open rosh acima: openRoshPrice = 60,00 no produto.
+        estoqueUseCase.updateProduct(sku, null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null,
+                new EstoqueUseCase.TableSessionCommand(true, true, 10, new BigDecimal("60.00")));
+        flushAndClear();
+
+        CashRegisterSession session = pdvUseCase.openSession(operator, BigDecimal.ZERO, warehouseCode);
+        Comanda comanda = comandaUseCase.openComanda(session.id(), "Mesa 12", operator);
+        flushAndClear();
+
+        Comanda comSessao = comandaUseCase.addItem(comanda.id(), sku, BigDecimal.ONE,
+                ConsumptionMode.OPEN_ROSH, false, null, operator);
+        flushAndClear();
+        Long sessaoId = comSessao.items().get(0).id();
+        comandaUseCase.addItem(comanda.id(), sku, BigDecimal.ONE, ConsumptionMode.TROCA, true,
+                sessaoId, operator);
+        flushAndClear();
+        assertThat(estoqueUseCase.getStockBalance(sku, warehouseCode).quantity())
+                .isEqualByComparingTo("48.000");
+
+        Comanda depois = comandaUseCase.removeItem(comanda.id(), sessaoId, operator);
+        flushAndClear();
+
+        // As duas linhas saíram, e o estoque das duas voltou.
+        assertThat(depois.items()).isEmpty();
+        assertThat(estoqueUseCase.getStockBalance(sku, warehouseCode).quantity())
+                .isEqualByComparingTo("50.000");
     }
 
     private String uniqueCpf() {

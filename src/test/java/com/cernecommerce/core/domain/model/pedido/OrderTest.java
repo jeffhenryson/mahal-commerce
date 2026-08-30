@@ -157,6 +157,81 @@ class OrderTest {
                 .hasMessageContaining("changeAmount");
     }
 
+    // ── Taxa de serviço (PDV-F015) ───────────────────────────────────────────────────────────
+
+    @Test
+    void order_startsWithoutServiceFee() {
+        assertThat(mesa().serviceFeeAmount()).isEqualByComparingTo("0");
+        assertThat(balcao().serviceFeeAmount()).isEqualByComparingTo("0");
+    }
+
+    @Test
+    void withServiceFeeOf_computesThePercentOverTheNetAmount() {
+        Order comTaxa = mesa().withServiceFeeOf(new BigDecimal("10"));
+
+        // 44,00 de líquido → 4,40 de taxa.
+        assertThat(comTaxa.serviceFeeAmount()).isEqualByComparingTo("4.40");
+    }
+
+    /**
+     * O ponto da decisão de desenho: a taxa NÃO entra no líquido. {@code netAmount} é somado como
+     * receita em quatro agregações, e a gorjeta é do garçom — somá-la ali inflaria receita e
+     * margem com dinheiro que a loja apenas repassa.
+     */
+    @Test
+    void withServiceFeeOf_leavesNetAmountUntouchedAndOnlyMovesTotalPayable() {
+        Order semTaxa = mesa();
+        Order comTaxa = semTaxa.withServiceFeeOf(new BigDecimal("10"));
+
+        assertThat(comTaxa.netAmount()).isEqualByComparingTo(semTaxa.netAmount());
+        assertThat(comTaxa.grossAmount()).isEqualByComparingTo(semTaxa.grossAmount());
+        assertThat(comTaxa.totalPayable()).isEqualByComparingTo("48.40");
+        assertThat(semTaxa.totalPayable()).isEqualByComparingTo("44.00");
+    }
+
+    /** Fora da mesa não há serviço a cobrar, e os dois totais coincidem sempre. */
+    @Test
+    void totalPayable_equalsNetAmountWhenThereIsNoServiceFee() {
+        assertThat(balcao().totalPayable()).isEqualByComparingTo(balcao().netAmount());
+    }
+
+    @Test
+    void withServiceFeeOf_zeroOrNullPercent_leavesTheOrderUntouched() {
+        assertThat(mesa().withServiceFeeOf(BigDecimal.ZERO).serviceFeeAmount()).isEqualByComparingTo("0");
+        assertThat(mesa().withServiceFeeOf(null).serviceFeeAmount()).isEqualByComparingTo("0");
+    }
+
+    /** Serviço de mesa só existe onde há mesa — espelhado pelo CHECK da V118. */
+    @Test
+    void serviceFeeOnlyExistsInMesa() {
+        assertThatThrownBy(() -> Order.of(1L, "000001", SalesChannel.BALCAO, OrderStatus.CONCLUIDO,
+                null, 1L, "LOJA-01", twoCharcoals(), new BigDecimal("44.00"), BigDecimal.ZERO,
+                BigDecimal.ZERO, new BigDecimal("44.00"), null, null, NOW, NOW, NOW, null, null, null,
+                null, null, null, 0L, null, null, new BigDecimal("4.40")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("serviceFeeAmount");
+    }
+
+    @Test
+    void serviceFeeAmount_cannotBeNegative() {
+        assertThatThrownBy(() -> Order.of(1L, "000001", SalesChannel.MESA, OrderStatus.CONCLUIDO,
+                null, 1L, "LOJA-01", twoCharcoals(), new BigDecimal("44.00"), BigDecimal.ZERO,
+                BigDecimal.ZERO, new BigDecimal("44.00"), null, null, NOW, NOW, NOW, null, null, null,
+                null, null, null, 0L, 50L, "Mesa 4", new BigDecimal("-1.00")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("serviceFeeAmount");
+    }
+
+    /** A taxa atravessa a conclusão: sem isso ela seria calculada e perdida no mesmo método. */
+    @Test
+    void concluded_carriesTheServiceFeeThrough() {
+        Order concluido = mesa().withServiceFeeOf(new BigDecimal("10"))
+                .concluded("000042", new BigDecimal("1.60"), NOW);
+
+        assertThat(concluido.serviceFeeAmount()).isEqualByComparingTo("4.40");
+        assertThat(concluido.totalPayable()).isEqualByComparingTo("48.40");
+    }
+
     // ── Transições ───────────────────────────────────────────────────────────────────────────
 
     @Test

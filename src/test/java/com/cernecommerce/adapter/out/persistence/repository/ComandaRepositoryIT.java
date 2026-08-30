@@ -1,5 +1,6 @@
 package com.cernecommerce.adapter.out.persistence.repository;
 
+import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.crm.Customer;
 import com.cernecommerce.core.domain.model.pdv.Comanda;
 import com.cernecommerce.core.domain.model.pdv.ComandaItem;
@@ -8,6 +9,8 @@ import com.cernecommerce.core.domain.model.pedido.ConsumptionMode;
 import com.cernecommerce.core.ports.in.CrmUseCase;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import org.hibernate.SessionFactory;
+import org.hibernate.stat.Statistics;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -16,6 +19,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -25,7 +30,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>Mesma razão de {@code PedidoRepositoryIT}: a suíte de unidade mocka {@code ComandaRepository},
  * então nada exercitava o mapeamento domínio↔entidade de {@code comanda}/{@code comanda_item} nem a
- * query de "comandas abertas da sessão".</p>
+ * query de "comandas abertas" — que PDV-C007 abriu para a loja inteira e PDV-C009 passou a carregar com
+ * {@code JOIN FETCH}.</p>
  */
 @SpringBootTest
 @ActiveProfiles("dev")
@@ -89,16 +95,160 @@ class ComandaRepositoryIT {
     }
 
     @Test
-    void findOpenBySessionId_returnsOnlyAbertaComandas() {
+    void findOpen_returnsOnlyAbertaComandas() {
         Comanda aberta = comandaRepository.save(Comanda.open(3L, "LOJA-01", "Mesa 1", "caixa1"));
         Comanda fechada = comandaRepository.save(Comanda.open(3L, "LOJA-01", "Mesa 2", "caixa1")
                 .withAddedItem(essenciaItem()));
         comandaRepository.save(fechada.closed(999L, Instant.now()));
+        Comanda cancelada = comandaRepository.save(Comanda.open(3L, "LOJA-01", "Mesa 3", "caixa1"));
+        comandaRepository.save(cancelada.cancelled(Instant.now()));
         flushAndClear();
 
-        List<Comanda> abertas = comandaRepository.findOpenBySessionId(3L);
+        List<Comanda> abertas = comandaRepository.findOpen(3L, null, 0, 50).content();
 
         assertThat(abertas).extracting(Comanda::id).containsExactly(aberta.id());
+    }
+
+    /**
+     * PDV-C007, o ponto da entrega: sem {@code sessionId} a consulta devolve as mesas de
+     * <b>todas</b> as sessões. Era a obrigatoriedade do filtro que forçava o cliente a listar as
+     * sessões abertas e disparar uma chamada por sessão, mesclando o resultado no navegador.
+     *
+     * <p>Sem filtro por status da sessão de caixa, e isso é a invariante de PDV-C005: caixa não
+     * fecha com mesa aberta, logo mesa {@code ABERTA} já implica sessão {@code OPEN}.</p>
+     */
+    @Test
+    void findOpen_withoutSessionId_returnsTheMesasOfEveryCashRegisterSession() {
+        Comanda daSessao30 = comandaRepository.save(Comanda.open(30L, "SALAO-A", "Mesa 1", "caixa1"));
+        Comanda daSessao31 = comandaRepository.save(Comanda.open(31L, "SALAO-A", "Mesa 2", "caixa2"));
+        Comanda fechada = comandaRepository.save(Comanda.open(32L, "SALAO-A", "Mesa 3", "caixa3")
+                .withAddedItem(essenciaItem()));
+        comandaRepository.save(fechada.closed(998L, Instant.now()));
+        flushAndClear();
+
+        List<Comanda> abertas = comandaRepository.findOpen(null, "SALAO-A", 0, 50).content();
+
+        assertThat(abertas).extracting(Comanda::id)
+                .containsExactly(daSessao31.id(), daSessao30.id())
+                .doesNotContain(fechada.id());
+        // Duas gavetas diferentes numa consulta só — o merge que o cliente fazia à mão.
+        assertThat(abertas).extracting(Comanda::sessionId).containsExactly(31L, 30L);
+    }
+
+    /**
+     * A guarda de PDV-C005 tem consulta própria, não paginada: ela precisa de <b>todas</b> as mesas
+     * abertas do caixa para decidir, e uma página cortaria a resposta em silêncio — um caixa com
+     * mais mesas que o tamanho da página voltaria a fechar com mesa aberta, que é o bug que aquela
+     * correção fechou.
+     */
+    @Test
+    void findOpenIdsBySessionId_returnsEveryOpenMesaOfTheSession() {
+        Comanda a = comandaRepository.save(Comanda.open(45L, "SALAO-G", "Mesa 1", "caixa1"));
+        Comanda b = comandaRepository.save(Comanda.open(45L, "SALAO-G", "Mesa 2", "caixa1"));
+        Comanda fechada = comandaRepository.save(Comanda.open(45L, "SALAO-G", "Mesa 3", "caixa1")
+                .withAddedItem(essenciaItem()));
+        comandaRepository.save(fechada.closed(997L, Instant.now()));
+        comandaRepository.save(Comanda.open(46L, "SALAO-G", "Mesa de outro caixa", "caixa2"));
+        flushAndClear();
+
+        assertThat(comandaRepository.findOpenIdsBySessionId(45L))
+                .containsExactlyInAnyOrder(a.id(), b.id());
+        assertThat(comandaRepository.findOpenIdsBySessionId(45L)).doesNotContain(fechada.id());
+    }
+
+    @Test
+    void findOpen_filtersByWarehouseCode() {
+        Comanda naLoja = comandaRepository.save(Comanda.open(40L, "SALAO-B", "Mesa 1", "caixa1"));
+        comandaRepository.save(Comanda.open(41L, "SALAO-C", "Mesa 2", "caixa2"));
+        flushAndClear();
+
+        assertThat(comandaRepository.findOpen(null, "SALAO-B", 0, 50).content())
+                .extracting(Comanda::id).containsExactly(naLoja.id());
+    }
+
+    /**
+     * PDV-C012 — a rota devolvia {@code List} sem teto. A ordem é {@code id DESC}, chave única e
+     * monotônica, então a paginação é determinística: nenhuma mesa aparece em duas páginas nem some
+     * entre elas (a armadilha que EST-C012 documentou no ledger de estoque).
+     */
+    @Test
+    void findOpen_paginatesWithAStableOrder() {
+        List<Long> ids = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            ids.add(comandaRepository.save(Comanda.open(50L, "SALAO-D", "Mesa " + i, "caixa1")).id());
+        }
+        flushAndClear();
+        List<Long> esperados = new ArrayList<>(ids);
+        esperados.sort(Comparator.reverseOrder());
+
+        PageResult<Comanda> primeira = comandaRepository.findOpen(50L, null, 0, 2);
+        PageResult<Comanda> segunda = comandaRepository.findOpen(50L, null, 1, 2);
+        PageResult<Comanda> terceira = comandaRepository.findOpen(50L, null, 2, 2);
+
+        assertThat(primeira.totalElements()).isEqualTo(5);
+        assertThat(primeira.totalPages()).isEqualTo(3);
+        assertThat(primeira.content()).extracting(Comanda::id).containsExactly(esperados.get(0), esperados.get(1));
+        assertThat(segunda.content()).extracting(Comanda::id).containsExactly(esperados.get(2), esperados.get(3));
+        assertThat(terceira.content()).extracting(Comanda::id).containsExactly(esperados.get(4));
+    }
+
+    /** Página além do fim devolve vazio, não estoura o {@code IN ()} da segunda consulta. */
+    @Test
+    void findOpen_pastTheLastPage_returnsEmptyWithoutFailing() {
+        comandaRepository.save(Comanda.open(60L, "SALAO-E", "Mesa 1", "caixa1"));
+        flushAndClear();
+
+        PageResult<Comanda> vazia = comandaRepository.findOpen(60L, null, 9, 50);
+
+        assertThat(vazia.content()).isEmpty();
+        assertThat(vazia.totalElements()).isEqualTo(1);
+    }
+
+    /**
+     * PDV-C009 — a prova de que o N+1 morreu: o número de consultas <b>não cresce</b> com o número
+     * de mesas. Antes {@code toDomain} tocava a coleção {@code LAZY} de cada comanda, uma consulta
+     * por mesa aberta; com PDV-C007 abrindo a listagem para a loja inteira isso ficaria pior, não
+     * melhor.
+     *
+     * <p>Contado por {@code Statistics} do Hibernate porque não há outro jeito honesto de afirmar
+     * isso — os itens estariam acessíveis nos dois desenhos, já que a leitura acontece dentro da
+     * transação. É o primeiro teste de contagem de consultas do módulo.</p>
+     */
+    @Test
+    void findOpen_loadsItemsWithoutOneQueryPerComanda() {
+        Statistics stats = em.getEntityManagerFactory().unwrap(SessionFactory.class).getStatistics();
+        // O contexto do Spring é compartilhado com o resto da suíte: liga a estatística, mede, e
+        // devolve o estado como estava no finally.
+        boolean estavaLigada = stats.isStatisticsEnabled();
+        stats.setStatisticsEnabled(true);
+        try {
+            comandaRepository.save(Comanda.open(70L, "SALAO-F", "Mesa 1", "caixa1")
+                    .withAddedItem(essenciaItem()));
+            flushAndClear();
+            stats.clear();
+            List<Comanda> umaMesa = comandaRepository.findOpen(70L, null, 0, 50).content();
+            long consultasComUmaMesa = stats.getPrepareStatementCount();
+
+            for (int i = 2; i <= 4; i++) {
+                comandaRepository.save(Comanda.open(70L, "SALAO-F", "Mesa " + i, "caixa1")
+                        .withAddedItem(essenciaItem()));
+            }
+            flushAndClear();
+            stats.clear();
+            List<Comanda> quatroMesas = comandaRepository.findOpen(70L, null, 0, 50).content();
+            long consultasComQuatroMesas = stats.getPrepareStatementCount();
+
+            // Os itens vieram junto, nas duas leituras.
+            assertThat(umaMesa).hasSize(1);
+            assertThat(umaMesa.getFirst().items()).hasSize(1);
+            assertThat(quatroMesas).hasSize(4);
+            assertThat(quatroMesas).allSatisfy(c -> assertThat(c.items()).hasSize(1));
+
+            // E quadruplicar as mesas não mudou o número de consultas: ids + fetch, sempre.
+            assertThat(consultasComQuatroMesas).isEqualTo(consultasComUmaMesa);
+        } finally {
+            stats.setStatisticsEnabled(estavaLigada);
+        }
     }
 
     @Test
@@ -215,5 +365,67 @@ class ComandaRepositoryIT {
         assertThat(reloaded.items()).extracting(ComandaItem::id)
                 .containsExactly(openRoshId, trocaId, reloaded.items().get(2).id());
         assertThat(reloaded.items().get(1).linkedItemId()).isEqualTo(openRoshId);
+    }
+
+    /**
+     * PDV-F011 — ida e volta de {@code notes} e {@code surcharge_amount}. Mapeamento novo em coluna
+     * nova: sem este teste, um {@code @Column} com o nome errado só apareceria em produção, com a
+     * nota do setup sumindo em silêncio no reload.
+     */
+    @Test
+    void save_roundTripsNotesAndSurchargeAmount() {
+        String setup = "Narguilé grande · Com filtro · Pinça P-02";
+        ComandaItem comAcrescimo = ComandaItem.of(null, "SESS-BLUE", BigDecimal.ONE,
+                new BigDecimal("75.00"), new BigDecimal("10.00"), "Sessão Blueberry", Instant.now(),
+                ConsumptionMode.OPEN_ROSH, false, null, setup, new BigDecimal("15.00"));
+
+        Comanda saved = comandaRepository.save(
+                Comanda.open(20L, "LOJA-01", "Mesa 15", "caixa1").withAddedItem(comAcrescimo));
+        flushAndClear();
+
+        ComandaItem reloaded = comandaRepository.findById(saved.id()).orElseThrow().items().get(0);
+        assertThat(reloaded.notes()).isEqualTo(setup);
+        assertThat(reloaded.surchargeAmount()).isEqualByComparingTo("15.00");
+        // O unitPrice gravado é o total já somado — é ele que faz o subtotal fechar.
+        assertThat(reloaded.unitPrice()).isEqualByComparingTo("75.00");
+        assertThat(reloaded.costPrice()).isEqualByComparingTo("10.00");
+    }
+
+    /** Linha sem os dois campos continua nula depois do reload — null é "não teve", não zero. */
+    @Test
+    void save_leavesNotesAndSurchargeNullWhenTheLineHasNeither() {
+        Comanda saved = comandaRepository.save(
+                Comanda.open(21L, "LOJA-01", "Mesa 16", "caixa1").withAddedItem(essenciaItem()));
+        flushAndClear();
+
+        ComandaItem reloaded = comandaRepository.findById(saved.id()).orElseThrow().items().get(0);
+        assertThat(reloaded.notes()).isNull();
+        assertThat(reloaded.surchargeAmount()).isNull();
+    }
+
+    /**
+     * PDV-C008 — a leitura travada devolve a mesma comanda que a leitura comum. O que a trava faz
+     * (segurar a linha até o fim da transação) só se prova sob concorrência real, em
+     * {@code ComandaConcurrencyIT}; aqui o que se garante é que o {@code @Query} novo não mudou o
+     * resultado nem quebrou o mapeamento.
+     */
+    @Test
+    void findByIdForUpdate_returnsTheSameAggregateAsFindById() {
+        Comanda saved = comandaRepository.save(
+                Comanda.open(22L, "LOJA-01", "Mesa 17", "caixa1").withAddedItem(essenciaItem()));
+        flushAndClear();
+
+        Comanda travada = comandaRepository.findByIdForUpdate(saved.id()).orElseThrow();
+        Comanda comum = comandaRepository.findById(saved.id()).orElseThrow();
+
+        assertThat(travada.id()).isEqualTo(comum.id());
+        assertThat(travada.status()).isEqualTo(comum.status());
+        assertThat(travada.items()).hasSameSizeAs(comum.items());
+        assertThat(travada.runningTotal()).isEqualByComparingTo(comum.runningTotal());
+    }
+
+    @Test
+    void findByIdForUpdate_returnsEmptyForAnUnknownId() {
+        assertThat(comandaRepository.findByIdForUpdate(999_999L)).isEmpty();
     }
 }

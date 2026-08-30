@@ -126,6 +126,57 @@ class PdvComandaControllerSecurityTest {
                 .andExpect(status().isOk());
     }
 
+    /** PDV-C007 — sem sessionId a rota passou a ser válida: são as mesas da loja. */
+    @Test
+    void list_open_comandas_without_sessionId_returns_200() throws Exception {
+        mockMvc.perform(get("/pdv/comandas")
+                        .with(user("gerente").authorities(new SimpleGrantedAuthority("PDV_READ"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isArray())
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(50));
+    }
+
+    /**
+     * PDV-C012 — o teto tem que ser aplicado de verdade, e é aqui que isso se prova: sem
+     * {@code @Validated} na classe (ausente até esta correção) as constraints de parâmetro de
+     * query são ignoradas em silêncio e a resposta seria 200.
+     *
+     * <p>Desde o Spring Framework 6.1 a violação chega como {@code HandlerMethodValidationException},
+     * não {@code ConstraintViolationException} — ver EST-C005, onde a falta desse handler fazia
+     * {@code GET /compras/suppliers?size=200} responder 500. O teste passa pela cadeia real de
+     * propósito: o setup standalone não monta esse caminho.</p>
+     */
+    @Test
+    void list_open_comandas_with_size_above_the_cap_returns_400() throws Exception {
+        mockMvc.perform(get("/pdv/comandas?size=200")
+                        .with(user("gerente").authorities(new SimpleGrantedAuthority("PDV_READ"))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    void list_open_comandas_with_negative_page_returns_400() throws Exception {
+        mockMvc.perform(get("/pdv/comandas?page=-1")
+                        .with(user("gerente").authorities(new SimpleGrantedAuthority("PDV_READ"))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("VALIDATION_ERROR"));
+    }
+
+    /**
+     * PDV-C011 — o rótulo é {@code VARCHAR(100)} (V104) e tinha só {@code @NotBlank}: mais que isso
+     * atravessava a validação e estourava no banco como 500, quando o certo é 400.
+     */
+    @Test
+    void open_comanda_with_an_oversized_label_returns_400_not_500() throws Exception {
+        String rotuloLongo = "M".repeat(101);
+        mockMvc.perform(post("/pdv/comandas?sessionId=999999")
+                        .with(user("gerente").authorities(new SimpleGrantedAuthority("PDV_COMANDA_MANAGE")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tableOrCustomerLabel\":\"" + rotuloLongo + "\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
     // ── Fechar ───────────────────────────────────────────────────────────────────────────────
 
     @Test
@@ -150,6 +201,98 @@ class PdvComandaControllerSecurityTest {
                         .contentType(MediaType.APPLICATION_JSON).content(CLOSE_BODY))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.errorCode").value("COMANDA_NOT_FOUND"));
+    }
+
+    /**
+     * PDV-F014 — desconto no fechamento exige PDV_COMANDA_DISCOUNT, checado ANTES de qualquer
+     * lookup: por isso a comanda inexistente responde 403 e não 404. Mesmo padrão da cortesia.
+     */
+    @Test
+    void close_comanda_with_discount_without_the_discount_authority_returns_403() throws Exception {
+        mockMvc.perform(post("/pdv/comandas/999999/close")
+                        .with(user("atendente").authorities(
+                                new SimpleGrantedAuthority("PDV_COMANDA_MANAGE")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"payments\":[{\"method\":\"DINHEIRO\",\"amount\":90.00}],"
+                                + "\"discountAmount\":10.00}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.errorCode").value("COMANDA_DISCOUNT_NOT_ALLOWED"));
+    }
+
+    /** Com a permissão, o desconto passa da barreira e o fluxo segue até o 404 da comanda. */
+    @Test
+    void close_comanda_with_discount_and_the_authority_passes_the_permission_gate() throws Exception {
+        mockMvc.perform(post("/pdv/comandas/999999/close")
+                        .with(user("gerente").authorities(
+                                new SimpleGrantedAuthority("PDV_COMANDA_MANAGE"),
+                                new SimpleGrantedAuthority("PDV_COMANDA_DISCOUNT")))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"payments\":[{\"method\":\"DINHEIRO\",\"amount\":90.00}],"
+                                + "\"discountAmount\":10.00}"))
+                .andExpect(status().isNotFound());
+    }
+
+    /** Fechamento sem desconto não pode exigir a permissão — seria 403 em toda mesa do salão. */
+    @Test
+    void close_comanda_without_discount_does_not_require_the_discount_authority() throws Exception {
+        mockMvc.perform(post("/pdv/comandas/999999/close")
+                        .with(user("atendente").authorities(
+                                new SimpleGrantedAuthority("PDV_COMANDA_MANAGE")))
+                        .contentType(MediaType.APPLICATION_JSON).content(CLOSE_BODY))
+                .andExpect(status().isNotFound());
+    }
+
+    // ── Remover item (PDV-F012) ──────────────────────────────────────────────────────────────
+
+    @Test
+    void remove_item_without_auth_returns_401() throws Exception {
+        mockMvc.perform(delete("/pdv/comandas/999999/items/1"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void remove_item_without_pdv_comanda_manage_returns_403() throws Exception {
+        mockMvc.perform(delete("/pdv/comandas/999999/items/1")
+                        .with(user("bob").authorities(new SimpleGrantedAuthority("PDV_READ"))))
+                .andExpect(status().isForbidden());
+    }
+
+    /**
+     * Reusa {@code PDV_COMANDA_MANAGE} de propósito: quem já pode cancelar a mesa inteira não
+     * precisa de permissão maior para remover uma linha dela.
+     */
+    @Test
+    void remove_item_with_pdv_comanda_manage_passes_the_permission_gate() throws Exception {
+        mockMvc.perform(delete("/pdv/comandas/999999/items/1")
+                        .with(user("atendente").authorities(
+                                new SimpleGrantedAuthority("PDV_COMANDA_MANAGE"))))
+                .andExpect(status().isNotFound());
+    }
+
+    // ── Taxa de serviço (PDV-F015) ───────────────────────────────────────────────────────────
+
+    @Test
+    void get_service_fee_without_auth_returns_401() throws Exception {
+        mockMvc.perform(get("/pdv/comandas/service-fee")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void get_service_fee_without_pdv_read_returns_403() throws Exception {
+        mockMvc.perform(get("/pdv/comandas/service-fee")
+                        .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isForbidden());
+    }
+
+    /**
+     * Também prova que a rota literal ganha de {@code GET /pdv/comandas/{id}}: sem essa
+     * precedência, "service-fee" cairia na conversão para Long e viraria 400.
+     */
+    @Test
+    void get_service_fee_with_pdv_read_returns_200() throws Exception {
+        mockMvc.perform(get("/pdv/comandas/service-fee")
+                        .with(user("gerente").authorities(new SimpleGrantedAuthority("PDV_READ"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.percent").exists());
     }
 
     // ── Cancelar ─────────────────────────────────────────────────────────────────────────────

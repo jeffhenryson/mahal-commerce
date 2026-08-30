@@ -76,6 +76,15 @@ public class PdvControllerSecurityTest {
 
     private static final String CLOSE_BODY = "{\"countedAmount\":495.00}";
 
+    /**
+     * PDV-C015 — a liquidação passou a exigir corpo. O valor não importa em nenhum destes
+     * testes: {@code @Valid @RequestBody} é resolvido ANTES do {@code @PreAuthorize} (o
+     * argumento é desserializado na resolução de argumentos, o interceptor de segurança roda na
+     * invocação), então sem corpo o 403/404 que cada teste espera viraria 400.
+     */
+    private static final String SETTLE_BODY =
+            "{\"payments\":[{\"method\":\"DINHEIRO\",\"amount\":10.00}]}";
+
     @Test
     void register_sale_without_auth_returns_401() throws Exception {
         mockMvc.perform(post("/pdv/sessions/999999/sales")
@@ -227,6 +236,8 @@ public class PdvControllerSecurityTest {
     @Test
     void settle_online_order_without_pdv_sale_manage_returns_403() throws Exception {
         mockMvc.perform(post("/pdv/sessions/999999/orders/7/settle")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(SETTLE_BODY)
                 .with(user("caixa").authorities(new SimpleGrantedAuthority("PDV_READ"))))
                 .andExpect(status().isForbidden());
     }
@@ -234,6 +245,8 @@ public class PdvControllerSecurityTest {
     @Test
     void settle_nonexistent_session_returns_404() throws Exception {
         mockMvc.perform(post("/pdv/sessions/999999/orders/7/settle")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(SETTLE_BODY)
                 .with(user("caixa").authorities(new SimpleGrantedAuthority("PDV_SALE_MANAGE"))))
                 .andExpect(status().isNotFound());
     }
@@ -377,6 +390,7 @@ public class PdvControllerSecurityTest {
                 .andExpect(status().isForbidden());
     }
 
+    /** PDV-C012 — a rota devolvia a List na raiz e passou a devolver PageResult. */
     @Test
     void list_cash_movements_with_pdv_read_returns_200() throws Exception {
         String warehouseCode = givenWarehouse();
@@ -387,7 +401,23 @@ public class PdvControllerSecurityTest {
                         new SimpleGrantedAuthority("ROLE_ADMIN"),
                         new SimpleGrantedAuthority("PDV_READ"))))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$").isArray());
+                .andExpect(jsonPath("$.content").isArray())
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(50));
+    }
+
+    /** PDV-C012 — o teto vale aqui como já valia em GET /pdv/sessions. */
+    @Test
+    void list_cash_movements_with_size_above_the_cap_returns_400() throws Exception {
+        String warehouseCode = givenWarehouse();
+        Long sessionId = givenOpenSession("operador-movements-cap", warehouseCode);
+
+        mockMvc.perform(get("/pdv/sessions/" + sessionId + "/movements?size=200")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("PDV_READ"))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("VALIDATION_ERROR"));
     }
 
     // ── Venda completa de ponta a ponta, propriedade horizontal e mass assignment ──────────────
@@ -489,6 +519,8 @@ public class PdvControllerSecurityTest {
         Long sessionId = givenOpenSession("operadorC", warehouseCode);
 
         mockMvc.perform(post("/pdv/sessions/" + sessionId + "/orders/999999/settle")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(SETTLE_BODY)
                 .with(user("operadorD").authorities(
                         new SimpleGrantedAuthority("ROLE_ADMIN"),
                         new SimpleGrantedAuthority("PDV_SALE_MANAGE"))))

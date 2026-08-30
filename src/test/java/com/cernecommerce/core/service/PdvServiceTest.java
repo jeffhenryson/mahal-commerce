@@ -2,6 +2,7 @@ package com.cernecommerce.core.service;
 
 import com.cernecommerce.core.domain.exception.estoque.InsufficientStockException;
 import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
+import com.cernecommerce.core.domain.exception.pagamento.ChangeNotSupportedException;
 import com.cernecommerce.core.domain.exception.pagamento.InsufficientPaymentException;
 import com.cernecommerce.core.domain.exception.pagamento.PaymentExceedsOrderTotalException;
 import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionAlreadyOpenException;
@@ -10,6 +11,7 @@ import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionNotFoundEx
 import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionNotOwnedException;
 import com.cernecommerce.core.domain.exception.pdv.NoOpenCashRegisterSessionException;
 import com.cernecommerce.core.domain.exception.pedido.DiscountLimitExceededException;
+import com.cernecommerce.core.domain.exception.pedido.ItemDiscountExceedsGrossException;
 import com.cernecommerce.core.domain.exception.pedido.InvalidOrderStatusTransitionException;
 import com.cernecommerce.core.domain.exception.pedido.OrderNotFoundException;
 import com.cernecommerce.core.domain.exception.pedido.ProductNotPricedException;
@@ -19,6 +21,7 @@ import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.estoque.StockBalance;
 import com.cernecommerce.core.domain.model.pagamento.OrderPayment;
+import com.cernecommerce.core.domain.model.pagamento.PaymentStatus;
 import com.cernecommerce.core.domain.model.pagamento.PaymentMethod;
 import com.cernecommerce.core.domain.model.pdv.CashMovement;
 import com.cernecommerce.core.domain.model.pdv.CashMovementType;
@@ -34,10 +37,13 @@ import com.cernecommerce.core.ports.in.PdvUseCase.SaleItemCommand;
 import com.cernecommerce.core.ports.out.pagamento.OrderPaymentRepository;
 import com.cernecommerce.core.ports.out.pdv.CashMovementRepository;
 import com.cernecommerce.core.ports.out.pdv.CashRegisterRepository;
+import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionHasOpenComandasException;
+import com.cernecommerce.core.ports.out.pdv.ComandaRepository;
 import com.cernecommerce.core.ports.out.pedido.OrderRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -66,13 +72,16 @@ class PdvServiceTest {
     @Mock OrderPaymentRepository orderPaymentRepository;
     @Mock EstoqueUseCase estoqueUseCase;
     @Mock CashbackUseCase cashbackUseCase;
+    // PDV-C005 — o fechamento consulta as mesas abertas da sessão antes de deixar fechar.
+    @Mock ComandaRepository comandaRepository;
 
     PdvService pdvService;
 
     @BeforeEach
     void setUp() {
         pdvService = new PdvService(cashRegisterRepository, cashMovementRepository, orderRepository,
-                orderPaymentRepository, estoqueUseCase, cashbackUseCase, MAX_DISCOUNT_PERCENT);
+                orderPaymentRepository, estoqueUseCase, cashbackUseCase, comandaRepository,
+                MAX_DISCOUNT_PERCENT);
     }
 
     /** Uma linha de pagamento em dinheiro, exata — o caso comum dos testes que não testam pagamento. */
@@ -145,6 +154,17 @@ class PdvServiceTest {
                 .isInstanceOf(NoOpenCashRegisterSessionException.class);
     }
 
+    /**
+     * PDV-C017/C018 — nenhuma saída em espécie na sessão: nenhum troco devolvido, nenhum estorno.
+     * Precisa ser explícito porque o mock devolve {@code null} para {@code BigDecimal}, enquanto o
+     * contrato dos dois ports é "zero, nunca null".
+     */
+    private void givenNoCashOutflows() {
+        when(orderPaymentRepository.sumRefundedAmountBySessionIdAndMethod(1L, PaymentMethod.DINHEIRO))
+                .thenReturn(BigDecimal.ZERO);
+        when(orderRepository.sumChangeAmountBySessionId(1L)).thenReturn(BigDecimal.ZERO);
+    }
+
     @Test
     void closeSession_computesExpectedFromOpeningCashSalesAndMovements() {
         when(cashRegisterRepository.findById(1L)).thenReturn(Optional.of(openSession()));
@@ -152,6 +172,7 @@ class PdvServiceTest {
         when(orderPaymentRepository.sumCapturedAmountBySessionIdAndMethod(1L, PaymentMethod.DINHEIRO))
                 .thenReturn(new BigDecimal("500.00"));
         when(cashMovementRepository.sumSignedAmountBySessionId(1L)).thenReturn(new BigDecimal("-150.00"));
+        givenNoCashOutflows();
         when(cashRegisterRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         CashRegisterSession closed = pdvService.closeSession(1L, new BigDecimal("355.00"), "gerente");
@@ -170,6 +191,7 @@ class PdvServiceTest {
         when(orderPaymentRepository.sumCapturedAmountBySessionIdAndMethod(1L, PaymentMethod.DINHEIRO))
                 .thenReturn(BigDecimal.ZERO);
         when(cashMovementRepository.sumSignedAmountBySessionId(1L)).thenReturn(BigDecimal.ZERO);
+        givenNoCashOutflows();
         when(cashRegisterRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         // Só a abertura conta: nenhuma venda em dinheiro na sessão, mesmo que tenha vendido em cartão.
@@ -185,9 +207,115 @@ class PdvServiceTest {
         when(orderPaymentRepository.sumCapturedAmountBySessionIdAndMethod(1L, PaymentMethod.DINHEIRO))
                 .thenReturn(BigDecimal.ZERO);
         when(cashMovementRepository.sumSignedAmountBySessionId(1L)).thenReturn(BigDecimal.ZERO);
+        givenNoCashOutflows();
         when(cashRegisterRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         assertThat(pdvService.closeSession(1L, BigDecimal.TEN, "gerente").closedBy()).isEqualTo("gerente");
+    }
+
+    // ── PDV-C017/C018 — o esperado conta o que SAIU da gaveta ────────────────────────────────
+
+    /**
+     * PDV-C017 — o troco sai do esperado.
+     *
+     * <p>{@code order_payment.amount} em {@code DINHEIRO} é o valor <b>entregue</b> pelo cliente,
+     * não o retido: é assim que {@code validatePaymentsAndComputeChange} deriva o troco, e é o
+     * valor inteiro que vira a linha de pagamento. Sem subtrair o troco, toda venda em dinheiro
+     * com nota quebrada inflava o esperado e o operador fechava o turno acusando uma falta que era
+     * só aritmética.</p>
+     */
+    @Test
+    void closeSession_subtractsTheChangeGivenBackFromTheExpectedAmount() {
+        when(cashRegisterRepository.findById(1L)).thenReturn(Optional.of(openSession()));
+        // abertura 10,00 + entregue em dinheiro 100,00 − troco devolvido 7,00 = 103,00
+        when(orderPaymentRepository.sumCapturedAmountBySessionIdAndMethod(1L, PaymentMethod.DINHEIRO))
+                .thenReturn(new BigDecimal("100.00"));
+        when(orderPaymentRepository.sumRefundedAmountBySessionIdAndMethod(1L, PaymentMethod.DINHEIRO))
+                .thenReturn(BigDecimal.ZERO);
+        when(orderRepository.sumChangeAmountBySessionId(1L)).thenReturn(new BigDecimal("7.00"));
+        when(cashMovementRepository.sumSignedAmountBySessionId(1L)).thenReturn(BigDecimal.ZERO);
+        when(cashRegisterRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        CashRegisterSession closed = pdvService.closeSession(1L, new BigDecimal("103.00"), "gerente");
+
+        assertThat(closed.expectedAmount()).isEqualByComparingTo("103.00");
+        assertThat(closed.diverges()).isFalse();
+    }
+
+    /**
+     * PDV-C018 — a cédula estornada sai do esperado.
+     *
+     * <p>O ledger é append-only de propósito: {@code OrderPayment.refunded} grava uma linha nova e
+     * deixa a {@code CAPTURED} original de pé, que é o desenho certo para o histórico. A
+     * consequência é que a soma de capturados descreve tudo que entrou e nada do que voltou — daí
+     * a subtração precisar de consulta própria em vez de sair de graça.</p>
+     */
+    @Test
+    void closeSession_subtractsRefundedCashFromTheExpectedAmount() {
+        when(cashRegisterRepository.findById(1L)).thenReturn(Optional.of(openSession()));
+        // abertura 10,00 + recebido 100,00 − estornado 30,00 = 80,00
+        when(orderPaymentRepository.sumCapturedAmountBySessionIdAndMethod(1L, PaymentMethod.DINHEIRO))
+                .thenReturn(new BigDecimal("100.00"));
+        when(orderPaymentRepository.sumRefundedAmountBySessionIdAndMethod(1L, PaymentMethod.DINHEIRO))
+                .thenReturn(new BigDecimal("30.00"));
+        when(orderRepository.sumChangeAmountBySessionId(1L)).thenReturn(BigDecimal.ZERO);
+        when(cashMovementRepository.sumSignedAmountBySessionId(1L)).thenReturn(BigDecimal.ZERO);
+        when(cashRegisterRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        CashRegisterSession closed = pdvService.closeSession(1L, new BigDecimal("80.00"), "gerente");
+
+        assertThat(closed.expectedAmount()).isEqualByComparingTo("80.00");
+        assertThat(closed.diverges()).isFalse();
+    }
+
+    // ── PDV-C005 — mesa aberta barra o fechamento do caixa ───────────────────────────────────
+
+    /**
+     * A única regra do ciclo de caixa que BLOQUEIA em vez de apenas registrar, e a assimetria é
+     * deliberada: divergência de contagem é um achado (o dinheiro já é o que é), mas mesa aberta é
+     * uma porta que ainda dá para fechar agora e não dará mais depois — {@code addItem} e
+     * {@code cancelComanda} exigem a sessão de origem ABERTA, então a comanda que sobreviva ao
+     * fechamento congela para sempre, com o estoque já debitado e sem caminho de devolução.
+     */
+    @Test
+    void closeSession_refusesWhenTheSessionStillHasAnOpenComanda() {
+        when(cashRegisterRepository.findById(1L)).thenReturn(Optional.of(openSession()));
+        when(comandaRepository.findOpenIdsBySessionId(1L)).thenReturn(List.of(77L));
+
+        assertThatThrownBy(() -> pdvService.closeSession(1L, BigDecimal.TEN, "gerente"))
+                .isInstanceOf(CashRegisterSessionHasOpenComandasException.class)
+                .hasMessageContaining("77");
+
+        // A sessão não pode ter sido carimbada: fechar pela metade seria o mesmo beco sem saída.
+        verify(cashRegisterRepository, never()).save(any());
+    }
+
+    /** A barreira é anterior ao cálculo do esperado — não adianta conferir uma gaveta que não fecha. */
+    @Test
+    void closeSession_doesNotEvenComputeExpectedWhenAMesaIsStillOpen() {
+        when(cashRegisterRepository.findById(1L)).thenReturn(Optional.of(openSession()));
+        when(comandaRepository.findOpenIdsBySessionId(1L)).thenReturn(List.of(77L));
+
+        assertThatThrownBy(() -> pdvService.closeSession(1L, BigDecimal.TEN, "gerente"))
+                .isInstanceOf(CashRegisterSessionHasOpenComandasException.class);
+
+        verify(orderPaymentRepository, never())
+                .sumCapturedAmountBySessionIdAndMethod(any(), any());
+    }
+
+    /** Comanda já fechada ou cancelada não segura o caixa — findOpenIdsBySessionId só traz ABERTA. */
+    @Test
+    void closeSession_proceedsWhenEveryComandaOfTheSessionIsAlreadySettled() {
+        when(cashRegisterRepository.findById(1L)).thenReturn(Optional.of(openSession()));
+        when(comandaRepository.findOpenIdsBySessionId(1L)).thenReturn(List.of());
+        when(orderPaymentRepository.sumCapturedAmountBySessionIdAndMethod(1L, PaymentMethod.DINHEIRO))
+                .thenReturn(BigDecimal.ZERO);
+        when(cashMovementRepository.sumSignedAmountBySessionId(1L)).thenReturn(BigDecimal.ZERO);
+        givenNoCashOutflows();
+        when(cashRegisterRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        assertThat(pdvService.closeSession(1L, BigDecimal.TEN, "gerente").status())
+                .isEqualTo(CashRegisterSession.Status.CLOSED);
     }
 
     @Test
@@ -300,7 +428,7 @@ class PdvServiceTest {
         when(orderRepository.nextOrderNumber()).thenReturn("000001001");
         when(orderRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        pdvService.settleOnlineOrder(1L, 7L, "caixa1");
+        pdvService.settleOnlineOrder(1L, 7L, cash("44.00"), "caixa1");
 
         verify(estoqueUseCase).consumeReservationsByOwner("ORDER:7", "caixa1");
         // Dar baixa aqui debitaria a mercadoria duas vezes: ela já saiu do disponível na reserva.
@@ -314,7 +442,7 @@ class PdvServiceTest {
         when(orderRepository.nextOrderNumber()).thenReturn("000001001");
         when(orderRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        Order settled = pdvService.settleOnlineOrder(1L, 7L, "caixa1");
+        Order settled = pdvService.settleOnlineOrder(1L, 7L, cash("44.00"), "caixa1");
 
         // O canal é a ORIGEM e não muda — senão o relatório de conversão do site mentiria.
         assertThat(settled.channel()).isEqualTo(SalesChannel.MARKETPLACE);
@@ -324,13 +452,97 @@ class PdvServiceTest {
         assertThat(settled.paidAt()).isNotNull();
     }
 
+    /**
+     * PDV-C015 — era o único caminho de recebimento do projeto que não gravava linha de pagamento.
+     * Sem ela, {@code closeSession} (que soma {@code order_payment}, não pedido) não esperava a
+     * cédula, e o turno fechava acusando sobra sem dono.
+     */
+    @Test
+    void settleOnlineOrder_recordsTheCapturedPaymentInTheReceivingSession() {
+        when(cashRegisterRepository.findById(1L)).thenReturn(Optional.of(openSession()));
+        when(orderRepository.findById(7L)).thenReturn(Optional.of(pendingOnlineOrder()));
+        when(orderRepository.nextOrderNumber()).thenReturn("000001001");
+        when(orderRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        pdvService.settleOnlineOrder(1L, 7L, cash("44.00"), "caixa1");
+
+        ArgumentCaptor<OrderPayment> captor = ArgumentCaptor.forClass(OrderPayment.class);
+        verify(orderPaymentRepository).save(captor.capture());
+        OrderPayment gravado = captor.getValue();
+        assertThat(gravado.method()).isEqualTo(PaymentMethod.DINHEIRO);
+        assertThat(gravado.amount()).isEqualByComparingTo("44.00");
+        assertThat(gravado.status()).isEqualTo(PaymentStatus.CAPTURED);
+    }
+
+    /**
+     * PDV-C015 — a cobrança de gateway aberta no checkout é encerrada, não deixada pendurada.
+     *
+     * <p>{@code ShopService.checkout} grava uma {@code PENDING}/{@code GATEWAY_PIX} em todo pedido
+     * de marketplace. Pago no balcão, nenhum webhook vai confirmá-la: mantida {@code PENDING} ela
+     * descreveria para sempre uma cobrança em aberto que não existe.</p>
+     */
+    @Test
+    void settleOnlineOrder_cancelsThePendingGatewayChargeFromCheckout() {
+        when(cashRegisterRepository.findById(1L)).thenReturn(Optional.of(openSession()));
+        when(orderRepository.findById(7L)).thenReturn(Optional.of(pendingOnlineOrder()));
+        when(orderRepository.nextOrderNumber()).thenReturn("000001001");
+        when(orderRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        OrderPayment doCheckout = OrderPayment.of(99L, 7L, PaymentMethod.GATEWAY_PIX,
+                new BigDecimal("44.00"), PaymentStatus.PENDING, null, null, null, null, Instant.now());
+        when(orderPaymentRepository.findByOrderId(7L)).thenReturn(List.of(doCheckout));
+
+        pdvService.settleOnlineOrder(1L, 7L, cash("44.00"), "caixa1");
+
+        ArgumentCaptor<OrderPayment> captor = ArgumentCaptor.forClass(OrderPayment.class);
+        verify(orderPaymentRepository, times(2)).save(captor.capture());
+        OrderPayment encerrada = captor.getAllValues().stream()
+                .filter(p -> p.method() == PaymentMethod.GATEWAY_PIX)
+                .findFirst().orElseThrow();
+        assertThat(encerrada.status()).isEqualTo(PaymentStatus.CANCELLED);
+        // A MESMA linha, não uma nova ao lado — senão a PENDING continuaria de pé.
+        assertThat(encerrada.id()).isEqualTo(99L);
+        assertThat(encerrada.capturedAt()).isNull();
+    }
+
+    /** Mesma ordem de registerSale: pagamento recusado não custa uma reserva consumida. */
+    @Test
+    void settleOnlineOrder_refusesInsufficientPaymentBeforeConsumingTheReservation() {
+        when(cashRegisterRepository.findById(1L)).thenReturn(Optional.of(openSession()));
+        when(orderRepository.findById(7L)).thenReturn(Optional.of(pendingOnlineOrder()));
+
+        assertThatThrownBy(() -> pdvService.settleOnlineOrder(1L, 7L, cash("40.00"), "caixa1"))
+                .isInstanceOf(InsufficientPaymentException.class);
+
+        verify(estoqueUseCase, never()).consumeReservationsByOwner(any(), any());
+        verify(orderRepository, never()).save(any());
+        verify(orderPaymentRepository, never()).save(any());
+    }
+
+    /**
+     * PDV-C015 — aqui não há troco: o canal continua {@code MARKETPLACE} e {@code Order} recusa
+     * {@code changeAmount} ali. Aceitar o excedente sem ter onde gravá-lo faria a linha de
+     * pagamento afirmar que entrou na gaveta mais do que ficou — o defeito que PDV-C017 acabou de
+     * tirar do fechamento, voltando por outra porta.
+     */
+    @Test
+    void settleOnlineOrder_refusesPaymentAboveTheNetAmountBecauseThereIsNowhereToPutChange() {
+        when(cashRegisterRepository.findById(1L)).thenReturn(Optional.of(openSession()));
+        when(orderRepository.findById(7L)).thenReturn(Optional.of(pendingOnlineOrder()));
+
+        assertThatThrownBy(() -> pdvService.settleOnlineOrder(1L, 7L, cash("50.00"), "caixa1"))
+                .isInstanceOf(ChangeNotSupportedException.class);
+
+        verify(estoqueUseCase, never()).consumeReservationsByOwner(any(), any());
+        verify(orderRepository, never()).save(any());
+    }
+
     @Test
     void settleOnlineOrder_refusesAnOrderThatIsNotAwaitingPayment() {
         when(cashRegisterRepository.findById(1L)).thenReturn(Optional.of(openSession()));
         when(orderRepository.findById(7L))
                 .thenReturn(Optional.of(pendingOnlineOrder().cancelled("desistiu", Instant.now())));
 
-        assertThatThrownBy(() -> pdvService.settleOnlineOrder(1L, 7L, "caixa1"))
+        assertThatThrownBy(() -> pdvService.settleOnlineOrder(1L, 7L, cash("44.00"), "caixa1"))
                 .isInstanceOf(InvalidOrderStatusTransitionException.class);
 
         verify(orderRepository, never()).save(any());
@@ -340,7 +552,7 @@ class PdvServiceTest {
     void settleOnlineOrder_refusesASessionThatBelongsToAnotherOperator() {
         when(cashRegisterRepository.findById(1L)).thenReturn(Optional.of(openSession()));
 
-        assertThatThrownBy(() -> pdvService.settleOnlineOrder(1L, 7L, "outro-caixa"))
+        assertThatThrownBy(() -> pdvService.settleOnlineOrder(1L, 7L, cash("44.00"), "outro-caixa"))
                 .isInstanceOf(CashRegisterSessionNotOwnedException.class);
 
         verify(estoqueUseCase, never()).consumeReservationsByOwner(any(), any());
@@ -462,6 +674,30 @@ class PdvServiceTest {
         assertThatThrownBy(() -> pdvService.registerSale(1L, null,
                 List.of(twoCharcoals(new BigDecimal("5.00"))), cash("39.00"), "caixa1"))
                 .isInstanceOf(DiscountLimitExceededException.class);
+
+        verify(estoqueUseCase, never()).adjustStock(any(), any(), any(), any(), any(), any());
+        verify(orderRepository, never()).save(any());
+    }
+
+    /**
+     * PDV-C016 — desconto de linha acima do bruto dela responde 409 com código próprio.
+     *
+     * <p>A regra existe desde sempre no compact constructor de {@code OrderItem}, mas subia como
+     * {@code IllegalArgumentException}, que o handler global achata num 400 genérico
+     * ({@code BAD_REQUEST}, "Requisição inválida") descartando a mensagem do domínio — a mesma
+     * resposta de qualquer corpo malformado. Não confundir com {@code DISCOUNT_LIMIT_EXCEEDED},
+     * que é o teto percentual da casa: aqui o desconto é aritmeticamente impossível, independente
+     * de teto.</p>
+     */
+    @Test
+    void registerSale_refusesItemDiscountAboveTheLineGrossBeforeTouchingStock() {
+        when(cashRegisterRepository.findById(1L)).thenReturn(Optional.of(openSession()));
+        when(estoqueUseCase.resolveSaleInfo("CARV-001")).thenReturn(new EstoqueUseCase.CatalogSaleInfo("Carvao Coco", CARVAO));
+
+        // 44,01 de desconto sobre uma linha de 44,00: não existe rateio possível.
+        assertThatThrownBy(() -> pdvService.registerSale(1L, null,
+                List.of(twoCharcoals(new BigDecimal("44.01"))), cash("0.01"), "caixa1"))
+                .isInstanceOf(ItemDiscountExceedsGrossException.class);
 
         verify(estoqueUseCase, never()).adjustStock(any(), any(), any(), any(), any(), any());
         verify(orderRepository, never()).save(any());

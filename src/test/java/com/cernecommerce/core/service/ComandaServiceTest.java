@@ -8,7 +8,11 @@ import com.cernecommerce.core.domain.exception.pdv.LinkedItemRequiredException;
 import com.cernecommerce.core.domain.exception.pdv.NotASessionProductException;
 import com.cernecommerce.core.domain.exception.pdv.NotAnOpenRoshException;
 import com.cernecommerce.core.domain.exception.pdv.NotAvailableForTableException;
+import com.cernecommerce.core.domain.exception.pdv.NotesTooLongException;
 import com.cernecommerce.core.domain.exception.pdv.OpenRoshNotPricedException;
+import com.cernecommerce.core.domain.exception.pdv.SurchargeInvalidException;
+import com.cernecommerce.core.domain.exception.pdv.SurchargeNotApplicableException;
+import com.cernecommerce.core.domain.exception.pdv.SurchargeOnCourtesyException;
 import com.cernecommerce.core.domain.exception.estoque.InsufficientStockException;
 import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
 import com.cernecommerce.core.domain.model.cashback.CashbackRate;
@@ -17,6 +21,11 @@ import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.pagamento.PaymentMethod;
 import com.cernecommerce.core.domain.model.pdv.CashRegisterSession;
+import com.cernecommerce.core.domain.exception.pdv.ComandaItemNotFoundException;
+import com.cernecommerce.core.domain.exception.pdv.LinkedItemIsChargedException;
+import com.cernecommerce.core.domain.exception.pdv.DiscountExceedsBillException;
+import com.cernecommerce.core.domain.exception.pedido.DiscountLimitExceededException;
+import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.pdv.Comanda;
 import com.cernecommerce.core.domain.model.pdv.ComandaItem;
 import com.cernecommerce.core.domain.model.pdv.ComandaStatus;
@@ -60,10 +69,13 @@ class ComandaServiceTest {
 
     ComandaService comandaService;
 
+    /** Os 10% do salão (PDV-F015). Os testes que não são sobre a taxa fecham com applyServiceFee=false. */
+    private static final BigDecimal SERVICE_FEE_PERCENT = new BigDecimal("10");
+
     @BeforeEach
     void setUp() {
         comandaService = new ComandaService(comandaRepository, estoqueUseCase, orderRepository,
-                orderPaymentRepository, cashbackUseCase, pdvService);
+                orderPaymentRepository, cashbackUseCase, pdvService, SERVICE_FEE_PERCENT);
     }
 
     private CashRegisterSession openSession() {
@@ -96,7 +108,9 @@ class ComandaServiceTest {
                     arg.cashbackRedeemed(), arg.netAmount(), arg.changeAmount(), arg.cancelReason(),
                     arg.createdAt(), arg.paidAt(), arg.concludedAt(), arg.cancelledAt(), arg.refundedAt(),
                     arg.reservedAt(), arg.separatedAt(), arg.shippedAt(), arg.deliveredAt(), arg.version(),
-                    arg.comandaId(), arg.tableLabel());
+                    // PDV-F015: a taxa TEM que atravessar o save falso. Sem ela aqui, o fake
+                    // devolveria o pedido sem taxa e todo teste de taxa passaria por engano.
+                    arg.comandaId(), arg.tableLabel(), arg.serviceFeeAmount());
         });
     }
 
@@ -129,7 +143,7 @@ class ComandaServiceTest {
     @Test
     void addItem_resolvesPriceFromCatalogAndDebitsStockImmediately() {
         Comanda comanda = abertaComanda();
-        when(comandaRepository.findById(10L)).thenReturn(Optional.of(comanda));
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(comanda));
         when(pdvService.requireOpenSession(1L)).thenReturn(openSession());
         when(estoqueUseCase.resolveSaleInfo("ESS-MENTA"))
                 .thenReturn(new EstoqueUseCase.CatalogSaleInfo("Essência Menta", ESSENCIA));
@@ -147,7 +161,7 @@ class ComandaServiceTest {
     void addItem_refusesOnNonAbertaComandaAndDoesNotTouchStock() {
         Comanda fechada = Comanda.of(10L, 1L, "LOJA-01", "Mesa 4", ComandaStatus.FECHADA,
                 List.of(essenciaItem()), 500L, "caixa1", Instant.now(), Instant.now());
-        when(comandaRepository.findById(10L)).thenReturn(Optional.of(fechada));
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(fechada));
         when(pdvService.requireOpenSession(1L)).thenReturn(openSession());
 
         assertThatThrownBy(() -> comandaService.addItem(10L, "ESS-MENTA", BigDecimal.ONE, "caixa1"))
@@ -157,7 +171,7 @@ class ComandaServiceTest {
 
     @Test
     void addItem_throwsWhenComandaNotFound() {
-        when(comandaRepository.findById(999L)).thenReturn(Optional.empty());
+        when(comandaRepository.findByIdForUpdate(999L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> comandaService.addItem(999L, "ESS-MENTA", BigDecimal.ONE, "caixa1"))
                 .isInstanceOf(ComandaNotFoundException.class);
@@ -167,7 +181,7 @@ class ComandaServiceTest {
     @Test
     void addItem_propagatesUnknownSkuAndDoesNotSave() {
         Comanda comanda = abertaComanda();
-        when(comandaRepository.findById(10L)).thenReturn(Optional.of(comanda));
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(comanda));
         when(pdvService.requireOpenSession(1L)).thenReturn(openSession());
         when(estoqueUseCase.resolveSaleInfo("DESCONHECIDO")).thenThrow(new ProductNotFoundException("DESCONHECIDO"));
 
@@ -179,7 +193,7 @@ class ComandaServiceTest {
     @Test
     void addItem_propagatesInsufficientStockAndDoesNotSave() {
         Comanda comanda = abertaComanda();
-        when(comandaRepository.findById(10L)).thenReturn(Optional.of(comanda));
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(comanda));
         when(pdvService.requireOpenSession(1L)).thenReturn(openSession());
         when(estoqueUseCase.resolveSaleInfo("ESS-MENTA"))
                 .thenReturn(new EstoqueUseCase.CatalogSaleInfo("Essência Menta", ESSENCIA));
@@ -191,12 +205,133 @@ class ComandaServiceTest {
         verify(comandaRepository, never()).save(any());
     }
 
+    // ── Remoção de item (PDV-F012) ───────────────────────────────────────────────────────────
+
+    private static ComandaItem linha(Long id, String sku, String unitPrice, ConsumptionMode mode,
+            boolean courtesy, Long linkedItemId) {
+        return ComandaItem.of(id, sku, BigDecimal.ONE, new BigDecimal(unitPrice), new BigDecimal("5.00"),
+                sku, Instant.now(), mode, courtesy, linkedItemId);
+    }
+
+    private Comanda comandaComSessaoETroca() {
+        return abertaComanda(
+                linha(1L, "SESS-BLUE", "60.00", ConsumptionMode.OPEN_ROSH, false, null),
+                linha(2L, "ESS-UVA", "0.00", ConsumptionMode.TROCA, true, 1L),
+                linha(3L, "BEB-COLA", "12.00", ConsumptionMode.NORMAL, false, null));
+    }
+
+    @Test
+    void removeItem_returnsStockForTheLineAndForTheTrocasDraggedWithIt() {
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(comandaComSessaoETroca()));
+        when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Comanda result = comandaService.removeItem(10L, 1L, "caixa1");
+
+        assertThat(result.items()).extracting(ComandaItem::id).containsExactly(3L);
+        // Uma ENTRADA por linha removida — a sessão E a troca. A cortesia também volta: o cliente
+        // não pagou por ela, mas a essência tinha saído do estoque.
+        verify(estoqueUseCase).adjustStock(eq("SESS-BLUE"), eq("LOJA-01"), eq(MovementType.ENTRADA),
+                any(), contains("Remoção de item da comanda #10"), eq("caixa1"));
+        verify(estoqueUseCase).adjustStock(eq("ESS-UVA"), eq("LOJA-01"), eq(MovementType.ENTRADA),
+                any(), contains("Remoção de item da comanda #10"), eq("caixa1"));
+        verify(estoqueUseCase, times(2)).adjustStock(any(), any(), eq(MovementType.ENTRADA), any(),
+                any(), any());
+    }
+
+    @Test
+    void removeItem_removingALeafLineReturnsOnlyItsOwnStock() {
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(comandaComSessaoETroca()));
+        when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Comanda result = comandaService.removeItem(10L, 3L, "caixa1");
+
+        assertThat(result.items()).extracting(ComandaItem::id).containsExactly(1L, 2L);
+        verify(estoqueUseCase, times(1)).adjustStock(any(), any(), eq(MovementType.ENTRADA), any(),
+                any(), any());
+    }
+
+    /**
+     * O sabor extra pode estar cobrado: arrastá-lo tiraria valor da conta sem ninguém pedir. A
+     * recusa vem <b>antes</b> de tocar no estoque — cada devolução é seu próprio efeito, e abortar
+     * no meio deixaria saldo devolvido sem a linha ter saído.
+     */
+    @Test
+    void removeItem_refusesWhenAChargedSaborExtraHangsOnTheLine_beforeTouchingStock() {
+        Comanda comanda = abertaComanda(
+                linha(1L, "SESS-BLUE", "60.00", ConsumptionMode.OPEN_ROSH, false, null),
+                linha(2L, "SESS-MANGA", "35.00", ConsumptionMode.SABOR_EXTRA, false, 1L));
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(comanda));
+
+        assertThatThrownBy(() -> comandaService.removeItem(10L, 1L, "caixa1"))
+                .isInstanceOf(LinkedItemIsChargedException.class)
+                .hasMessageContaining("2");
+
+        verifyNoInteractions(estoqueUseCase);
+        verify(comandaRepository, never()).save(any());
+    }
+
+    @Test
+    void removeItem_refusesAnItemFromAnotherComanda() {
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(comandaComSessaoETroca()));
+
+        assertThatThrownBy(() -> comandaService.removeItem(10L, 999L, "caixa1"))
+                .isInstanceOf(ComandaItemNotFoundException.class);
+
+        verifyNoInteractions(estoqueUseCase);
+        verify(comandaRepository, never()).save(any());
+    }
+
+    @Test
+    void removeItem_refusesOnAComandaThatIsNotOpen() {
+        Comanda fechada = comandaComSessaoETroca().closed(500L, Instant.now());
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(fechada));
+
+        assertThatThrownBy(() -> comandaService.removeItem(10L, 1L, "caixa1"))
+                .isInstanceOf(ComandaNotOpenException.class);
+
+        verifyNoInteractions(estoqueUseCase);
+    }
+
+    /** PDV-C008 — quarto caminho de mutação, e portanto quarta leitura travada. */
+    @Test
+    void removeItem_readsTheComandaUnderLock() {
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(comandaComSessaoETroca()));
+        when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        comandaService.removeItem(10L, 3L, "caixa1");
+
+        verify(comandaRepository).findByIdForUpdate(10L);
+        verify(comandaRepository, never()).findById(any());
+    }
+
+    /** Mesa compartilhada: remover não exige posse do caixa, mas exige a sessão de ORIGEM aberta. */
+    @Test
+    void removeItem_requiresTheOriginSessionOpenWithoutOwnership() {
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(comandaComSessaoETroca()));
+        when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        comandaService.removeItem(10L, 3L, "outro-atendente");
+
+        verify(pdvService).requireOpenSession(1L);
+        verify(pdvService, never()).requireOwnOpenSession(any(), any());
+    }
+
+    /** Comanda vazia é estado legítimo — é como ela nasce, e COMANDA_EMPTY já barra fechá-la assim. */
+    @Test
+    void removeItem_canEmptyTheComanda() {
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(abertaComanda(
+                linha(1L, "BEB-COLA", "12.00", ConsumptionMode.NORMAL, false, null))));
+        when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        assertThat(comandaService.removeItem(10L, 1L, "caixa1").items()).isEmpty();
+    }
+
     // ── Fechamento ───────────────────────────────────────────────────────────────────────────
 
     @Test
     void closeComanda_convertsAccumulatedItemsWithoutReQueryingTheCatalog() {
         Comanda comanda = abertaComanda(essenciaItem());
-        when(comandaRepository.findById(10L)).thenReturn(Optional.of(comanda));
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(comanda));
         // PDV-F010: fechar não exige posse da comanda, mas exige caixa aberto de quem fecha —
         // é a gaveta dele que recebe o dinheiro.
         when(pdvService.getCurrentSession("caixa1")).thenReturn(openSession());
@@ -207,7 +342,7 @@ class ComandaServiceTest {
 
         List<PaymentCommand> payments = List.of(new PaymentCommand(PaymentMethod.DINHEIRO,
                 new BigDecimal("25.00"), null));
-        Order order = comandaService.closeComanda(10L, payments, "caixa1");
+        Order order = comandaService.closeComanda(10L, payments, null, false, "caixa1");
 
         assertThat(order.id()).isEqualTo(500L);
         // PDV-F010: o pedido NASCE MESA — o canal é imutável, não vira MESA depois.
@@ -225,10 +360,200 @@ class ComandaServiceTest {
                 && c.orderId().equals(500L)));
     }
 
+    // ── Desconto no fechamento (PDV-F014) ────────────────────────────────────────────────────
+
+    /** Fixture de duas linhas com valores que rateiam redondo: 70 + 30. */
+    private Comanda comandaDeDuasLinhas() {
+        return abertaComanda(
+                ComandaItem.of(1L, "ESS-MENTA", BigDecimal.ONE, new BigDecimal("70.00"),
+                        new BigDecimal("20.00"), "Essência Menta", Instant.now()),
+                ComandaItem.of(2L, "BEB-COLA", BigDecimal.ONE, new BigDecimal("30.00"),
+                        new BigDecimal("10.00"), "Refrigerante", Instant.now()));
+    }
+
+    private void givenCloseablePara(Comanda comanda) {
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(comanda));
+        when(pdvService.getCurrentSession("caixa1")).thenReturn(openSession());
+        when(pdvService.validatePaymentsAndComputeChange(any(), any())).thenReturn(null);
+        givenOrderPersistenceAssignsId();
+        when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+    }
+
+    private static List<PaymentCommand> dinheiro(String valor) {
+        return List.of(new PaymentCommand(PaymentMethod.DINHEIRO, new BigDecimal(valor), null));
+    }
+
+    /**
+     * O desconto é pedido sobre a conta, mas gravado por item. Sem o rateio, o cashback seria
+     * creditado sobre o valor cheio e a margem por item mostraria a venda sem o abatimento.
+     */
+    @Test
+    void closeComanda_proratesTheBillDiscountAcrossTheItems() {
+        givenCloseablePara(comandaDeDuasLinhas());
+
+        Order order = comandaService.closeComanda(10L, dinheiro("90.00"), new BigDecimal("10.00"),
+                false, "caixa1");
+
+        assertThat(order.items().get(0).discountAmount()).isEqualByComparingTo("7.00");
+        assertThat(order.items().get(1).discountAmount()).isEqualByComparingTo("3.00");
+        // A invariante do pedido continua valendo: o desconto do pedido é a soma dos itens.
+        assertThat(order.discountAmount()).isEqualByComparingTo("10.00");
+        assertThat(order.netAmount()).isEqualByComparingTo("90.00");
+    }
+
+    /** Sem desconto, todo item entra com zero — o caminho de sempre não mudou. */
+    @Test
+    void closeComanda_withoutDiscount_keepsEveryItemAtZero() {
+        givenCloseablePara(comandaDeDuasLinhas());
+
+        Order order = comandaService.closeComanda(10L, dinheiro("100.00"), null, false, "caixa1");
+
+        assertThat(order.discountAmount()).isEqualByComparingTo("0");
+        assertThat(order.items()).allSatisfy(
+                i -> assertThat(i.discountAmount()).isEqualByComparingTo("0"));
+    }
+
+    /** O teto é o mesmo do balcão, e é o do balcão que decide — não uma cópia da regra. */
+    @Test
+    void closeComanda_checksTheDiscountAgainstTheSameLimitAsTheCounterSale() {
+        givenCloseablePara(comandaDeDuasLinhas());
+
+        comandaService.closeComanda(10L, dinheiro("90.00"), new BigDecimal("10.00"), false, "caixa1");
+
+        verify(pdvService).requireDiscountWithinLimit(argThat(
+                o -> o.discountAmount().compareTo(new BigDecimal("10.00")) == 0));
+    }
+
+    /** Desconto acima do teto aborta antes de gravar pedido ou pagamento. */
+    @Test
+    void closeComanda_refusesDiscountAboveTheLimitBeforeSavingAnything() {
+        Comanda comanda = comandaDeDuasLinhas();
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(comanda));
+        when(pdvService.getCurrentSession("caixa1")).thenReturn(openSession());
+        when(cashbackUseCase.resolveApplicableRate(any())).thenReturn(null);
+        doThrow(new DiscountLimitExceededException(new BigDecimal("50"), new BigDecimal("10")))
+                .when(pdvService).requireDiscountWithinLimit(any());
+
+        assertThatThrownBy(() -> comandaService.closeComanda(10L, dinheiro("50.00"),
+                new BigDecimal("50.00"), false, "caixa1"))
+                .isInstanceOf(DiscountLimitExceededException.class);
+
+        verify(orderRepository, never()).save(any());
+        verifyNoInteractions(orderPaymentRepository);
+    }
+
+    /**
+     * PDV-C016 — desconto maior que a própria conta responde 409, não 500.
+     *
+     * <p>{@code DiscountProration.distribute} já recusava o caso, mas com
+     * {@code IllegalArgumentException}, que o handler global achata num 400 genérico. E o problema
+     * maior é a <b>ordem</b>: o rateio roda <b>antes</b> de {@code requireDiscountWithinLimit},
+     * então o desconto absurdo nunca chegava ao {@code 409 DISCOUNT_LIMIT_EXCEEDED} que a tela já
+     * trata — pedir 11% de desconto dava um erro acionável, pedir o dobro da conta dava
+     * "Requisição inválida".</p>
+     */
+    @Test
+    void closeComanda_refusesDiscountGreaterThanTheBillBeforeProratingAnything() {
+        // Conta de 100,00 (70 + 30) com 150,00 de desconto pedido.
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(comandaDeDuasLinhas()));
+        when(pdvService.getCurrentSession("caixa1")).thenReturn(openSession());
+
+        assertThatThrownBy(() -> comandaService.closeComanda(10L, dinheiro("100.00"),
+                new BigDecimal("150.00"), false, "caixa1"))
+                .isInstanceOf(DiscountExceedsBillException.class);
+
+        // Nem o teto chega a ser consultado: o valor é aritmeticamente impossível antes de ser
+        // política comercial.
+        verify(pdvService, never()).requireDiscountWithinLimit(any());
+        verify(orderRepository, never()).save(any());
+        verifyNoInteractions(orderPaymentRepository);
+    }
+
+    /** Cortesia tem valor zero: a proporção dela é zero, e ela não absorve desconto nenhum. */
+    @Test
+    void closeComanda_courtesyLineAbsorbsNoDiscount() {
+        givenCloseablePara(abertaComanda(
+                ComandaItem.of(1L, "ESS-MENTA", BigDecimal.ONE, new BigDecimal("100.00"),
+                        new BigDecimal("20.00"), "Essência Menta", Instant.now()),
+                ComandaItem.of(2L, "ESS-UVA", BigDecimal.ONE, BigDecimal.ZERO,
+                        new BigDecimal("20.00"), "Essência Uva", Instant.now(),
+                        ConsumptionMode.TROCA, true, 1L)));
+
+        Order order = comandaService.closeComanda(10L, dinheiro("90.00"), new BigDecimal("10.00"),
+                false, "caixa1");
+
+        assertThat(order.items().get(0).discountAmount()).isEqualByComparingTo("10.00");
+        assertThat(order.items().get(1).discountAmount()).isEqualByComparingTo("0");
+    }
+
+    // ── Taxa de serviço (PDV-F015) ───────────────────────────────────────────────────────────
+
+    /** É o padrão do salão: omitir não pode significar deixar de cobrar. */
+    @Test
+    void closeComanda_appliesTheServiceFeeByDefault() {
+        givenCloseablePara(comandaDeDuasLinhas());
+
+        Order order = comandaService.closeComanda(10L, dinheiro("110.00"), null, true, "caixa1");
+
+        assertThat(order.serviceFeeAmount()).isEqualByComparingTo("10.00");
+        assertThat(order.totalPayable()).isEqualByComparingTo("110.00");
+    }
+
+    @Test
+    void closeComanda_whenTheCustomerRefusesTheFee_chargesOnlyTheGoods() {
+        givenCloseablePara(comandaDeDuasLinhas());
+
+        Order order = comandaService.closeComanda(10L, dinheiro("100.00"), null, false, "caixa1");
+
+        assertThat(order.serviceFeeAmount()).isEqualByComparingTo("0");
+        assertThat(order.totalPayable()).isEqualByComparingTo("100.00");
+    }
+
+    /**
+     * A taxa incide sobre o LÍQUIDO, depois do desconto. Cobrar serviço sobre um abatimento que a
+     * casa acabou de conceder seria devolver parte dele com a outra mão.
+     */
+    @Test
+    void closeComanda_computesTheServiceFeeAfterTheDiscount() {
+        givenCloseablePara(comandaDeDuasLinhas());
+
+        Order order = comandaService.closeComanda(10L, dinheiro("99.00"), new BigDecimal("10.00"),
+                true, "caixa1");
+
+        // 100 − 10 = 90 de líquido → 9,00 de taxa, não 10,00.
+        assertThat(order.netAmount()).isEqualByComparingTo("90.00");
+        assertThat(order.serviceFeeAmount()).isEqualByComparingTo("9.00");
+        assertThat(order.totalPayable()).isEqualByComparingTo("99.00");
+    }
+
+    /**
+     * O que o pagamento tem que cobrir é o total COM a taxa. Validar contra o líquido deixaria a
+     * conta fechar com menos dinheiro do que o cliente deve.
+     */
+    @Test
+    void closeComanda_validatesThePaymentAgainstTotalPayableNotNetAmount() {
+        givenCloseablePara(comandaDeDuasLinhas());
+
+        comandaService.closeComanda(10L, dinheiro("110.00"), null, true, "caixa1");
+
+        verify(pdvService).validatePaymentsAndComputeChange(any(), eq(new BigDecimal("110.00")));
+    }
+
+    /** A taxa é do garçom: o líquido, que quatro agregações somam como receita, não a enxerga. */
+    @Test
+    void closeComanda_serviceFeeStaysOutOfTheRevenueFigure() {
+        givenCloseablePara(comandaDeDuasLinhas());
+
+        Order order = comandaService.closeComanda(10L, dinheiro("110.00"), null, true, "caixa1");
+
+        assertThat(order.netAmount()).isEqualByComparingTo("100.00");
+        assertThat(order.grossAmount()).isEqualByComparingTo("100.00");
+    }
+
     @Test
     void closeComanda_doesNotAdjustStockAgain() {
         Comanda comanda = abertaComanda(essenciaItem());
-        when(comandaRepository.findById(10L)).thenReturn(Optional.of(comanda));
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(comanda));
         // PDV-F010: fechar não exige posse da comanda, mas exige caixa aberto de quem fecha —
         // é a gaveta dele que recebe o dinheiro.
         when(pdvService.getCurrentSession("caixa1")).thenReturn(openSession());
@@ -237,7 +562,7 @@ class ComandaServiceTest {
         when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         comandaService.closeComanda(10L, List.of(new PaymentCommand(PaymentMethod.DINHEIRO,
-                new BigDecimal("25.00"), null)), "caixa1");
+                new BigDecimal("25.00"), null)), null, false, "caixa1");
 
         verify(estoqueUseCase, never()).adjustStock(any(), any(), any(), any(), any(), any());
     }
@@ -245,10 +570,10 @@ class ComandaServiceTest {
     @Test
     void closeComanda_refusesEmptyComandaBeforeTouchingOrders() {
         Comanda comanda = abertaComanda();
-        when(comandaRepository.findById(10L)).thenReturn(Optional.of(comanda));
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(comanda));
 
         assertThatThrownBy(() -> comandaService.closeComanda(10L,
-                List.of(new PaymentCommand(PaymentMethod.DINHEIRO, BigDecimal.TEN, null)), "caixa1"))
+                List.of(new PaymentCommand(PaymentMethod.DINHEIRO, BigDecimal.TEN, null)), null, false, "caixa1"))
                 .isInstanceOf(ComandaEmptyException.class);
         verifyNoInteractions(orderRepository);
     }
@@ -257,10 +582,10 @@ class ComandaServiceTest {
     void closeComanda_refusesNonAbertaComanda() {
         Comanda fechada = Comanda.of(10L, 1L, "LOJA-01", "Mesa 4", ComandaStatus.CANCELADA,
                 List.of(essenciaItem()), null, "caixa1", Instant.now(), Instant.now());
-        when(comandaRepository.findById(10L)).thenReturn(Optional.of(fechada));
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(fechada));
 
         assertThatThrownBy(() -> comandaService.closeComanda(10L,
-                List.of(new PaymentCommand(PaymentMethod.DINHEIRO, BigDecimal.TEN, null)), "caixa1"))
+                List.of(new PaymentCommand(PaymentMethod.DINHEIRO, BigDecimal.TEN, null)), null, false, "caixa1"))
                 .isInstanceOf(ComandaNotOpenException.class);
         verifyNoInteractions(orderRepository);
     }
@@ -270,7 +595,7 @@ class ComandaServiceTest {
     @Test
     void cancelComanda_returnsStockPerItem() {
         Comanda comanda = abertaComanda(essenciaItem());
-        when(comandaRepository.findById(10L)).thenReturn(Optional.of(comanda));
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(comanda));
         when(pdvService.requireOpenSession(1L)).thenReturn(openSession());
         when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
@@ -285,7 +610,7 @@ class ComandaServiceTest {
     void cancelComanda_refusesNonAbertaComanda() {
         Comanda fechada = Comanda.of(10L, 1L, "LOJA-01", "Mesa 4", ComandaStatus.FECHADA,
                 List.of(essenciaItem()), 500L, "caixa1", Instant.now(), Instant.now());
-        when(comandaRepository.findById(10L)).thenReturn(Optional.of(fechada));
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(fechada));
         when(pdvService.requireOpenSession(1L)).thenReturn(openSession());
 
         assertThatThrownBy(() -> comandaService.cancelComanda(10L, "caixa1"))
@@ -295,6 +620,11 @@ class ComandaServiceTest {
 
     // ── Leitura ──────────────────────────────────────────────────────────────────────────────
 
+    /**
+     * A leitura de tela usa {@code findById}, <b>sem</b> a trava de PDV-C008: quem só desenha a
+     * comanda não decide nada sobre ela, e travar a linha a cada refresh do salão seguraria a mesa
+     * contra quem quer lançar item nela.
+     */
     @Test
     void getComanda_throwsWhenNotFound() {
         when(comandaRepository.findById(999L)).thenReturn(Optional.empty());
@@ -305,9 +635,32 @@ class ComandaServiceTest {
     @Test
     void listOpenComandas_delegatesToRepository() {
         Comanda comanda = abertaComanda();
-        when(comandaRepository.findOpenBySessionId(1L)).thenReturn(List.of(comanda));
+        when(comandaRepository.findOpen(1L, null, 0, 50))
+                .thenReturn(new PageResult<>(List.of(comanda), 0, 50, 1, 1));
 
-        assertThat(comandaService.listOpenComandas(1L)).containsExactly(comanda);
+        assertThat(comandaService.listOpenComandas(1L, null, 0, 50).content()).containsExactly(comanda);
+    }
+
+    /**
+     * PDV-C007 — sem sessionId a listagem é da loja, e o service repassa o nulo em vez de exigir um
+     * caixa. Era essa exigência que obrigava o cliente a uma chamada por sessão aberta.
+     */
+    @Test
+    void listOpenComandas_withoutSessionId_asksTheRepositoryForTheWholeStore() {
+        Comanda comanda = abertaComanda();
+        when(comandaRepository.findOpen(null, null, 0, 50))
+                .thenReturn(new PageResult<>(List.of(comanda), 0, 50, 1, 1));
+
+        assertThat(comandaService.listOpenComandas(null, null, 0, 50).content()).containsExactly(comanda);
+    }
+
+    @Test
+    void listOpenComandas_passesTheWarehouseFilterThrough() {
+        when(comandaRepository.findOpen(null, "LOJA-01", 1, 20))
+                .thenReturn(new PageResult<>(List.of(), 1, 20, 0, 0));
+
+        assertThat(comandaService.listOpenComandas(null, "LOJA-01", 1, 20).content()).isEmpty();
+        verify(comandaRepository).findOpen(null, "LOJA-01", 1, 20);
     }
 
     // ── Sessão de narguilé (PDV-F010) ────────────────────────────────────────────────────────
@@ -331,7 +684,7 @@ class ComandaServiceTest {
      */
     @Test
     void addItem_openRoshChargesParentPriceNotVariantPrice() {
-        when(comandaRepository.findById(10L)).thenReturn(Optional.of(abertaComanda()));
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(abertaComanda()));
         when(pdvService.requireOpenSession(1L)).thenReturn(openSession());
         when(estoqueUseCase.resolveSaleInfo("SESS-BLUE")).thenReturn(sessao(new BigDecimal("60.00")));
         when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -352,7 +705,7 @@ class ComandaServiceTest {
      */
     @Test
     void addItem_courtesyRecordsZeroPriceButFreezesCostNormally() {
-        when(comandaRepository.findById(10L)).thenReturn(Optional.of(abertaComanda(openRoshLancado())));
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(abertaComanda(openRoshLancado())));
         when(pdvService.requireOpenSession(1L)).thenReturn(openSession());
         when(estoqueUseCase.resolveSaleInfo("SESS-MENTA")).thenReturn(sessao(new BigDecimal("60.00")));
         when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -373,7 +726,7 @@ class ComandaServiceTest {
     /** TROCA é cortesia por definição — não depende de o cliente HTTP ter marcado o campo. */
     @Test
     void addItem_trocaIsCourtesyEvenWhenClientDidNotFlagIt() {
-        when(comandaRepository.findById(10L)).thenReturn(Optional.of(abertaComanda(openRoshLancado())));
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(abertaComanda(openRoshLancado())));
         when(pdvService.requireOpenSession(1L)).thenReturn(openSession());
         when(estoqueUseCase.resolveSaleInfo("SESS-MENTA")).thenReturn(sessao(new BigDecimal("60.00")));
         when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -391,7 +744,7 @@ class ComandaServiceTest {
         ComandaItem primeiraLinha = ComandaItem.of(55L, "SESS-BLUE", BigDecimal.ONE, new BigDecimal("35.00"),
                 new BigDecimal("12.00"), "Sessão de narguilé", Instant.now(), ConsumptionMode.NORMAL,
                 false, null);
-        when(comandaRepository.findById(10L)).thenReturn(Optional.of(abertaComanda(primeiraLinha)));
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(abertaComanda(primeiraLinha)));
         when(pdvService.requireOpenSession(1L)).thenReturn(openSession());
         when(estoqueUseCase.resolveSaleInfo("SESS-MENTA")).thenReturn(sessao(null));
         when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -405,7 +758,7 @@ class ComandaServiceTest {
 
     @Test
     void addItem_refusesSkuNotAvailableForTableBeforeTouchingStock() {
-        when(comandaRepository.findById(10L)).thenReturn(Optional.of(abertaComanda()));
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(abertaComanda()));
         when(pdvService.requireOpenSession(1L)).thenReturn(openSession());
         when(estoqueUseCase.resolveSaleInfo("CIGARRO-01")).thenReturn(
                 new EstoqueUseCase.CatalogSaleInfo("Cigarro", ESSENCIA, false, false, null));
@@ -419,7 +772,7 @@ class ComandaServiceTest {
 
     @Test
     void addItem_refusesSessionModeOnProductThatIsNotASession() {
-        when(comandaRepository.findById(10L)).thenReturn(Optional.of(abertaComanda()));
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(abertaComanda()));
         when(pdvService.requireOpenSession(1L)).thenReturn(openSession());
         when(estoqueUseCase.resolveSaleInfo("ESS-MENTA")).thenReturn(
                 new EstoqueUseCase.CatalogSaleInfo("Essência Menta", ESSENCIA, true, false, null));
@@ -433,7 +786,7 @@ class ComandaServiceTest {
     /** Sem preço de open rosh não há fallback para o preço do sabor — recusa. */
     @Test
     void addItem_refusesOpenRoshOnProductWithoutOpenRoshPrice() {
-        when(comandaRepository.findById(10L)).thenReturn(Optional.of(abertaComanda()));
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(abertaComanda()));
         when(pdvService.requireOpenSession(1L)).thenReturn(openSession());
         when(estoqueUseCase.resolveSaleInfo("SESS-BLUE")).thenReturn(sessao(null));
 
@@ -445,7 +798,7 @@ class ComandaServiceTest {
 
     @Test
     void addItem_refusesSaborExtraWithoutLinkedItem() {
-        when(comandaRepository.findById(10L)).thenReturn(Optional.of(abertaComanda()));
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(abertaComanda()));
         when(pdvService.requireOpenSession(1L)).thenReturn(openSession());
         when(estoqueUseCase.resolveSaleInfo("SESS-MENTA")).thenReturn(sessao(null));
 
@@ -457,7 +810,7 @@ class ComandaServiceTest {
     /** O id tem que ser de uma linha DESTA comanda — senão uma troca se penduraria na mesa ao lado. */
     @Test
     void addItem_refusesLinkedItemFromAnotherComanda() {
-        when(comandaRepository.findById(10L)).thenReturn(Optional.of(abertaComanda(openRoshLancado())));
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(abertaComanda(openRoshLancado())));
         when(pdvService.requireOpenSession(1L)).thenReturn(openSession());
         when(estoqueUseCase.resolveSaleInfo("SESS-MENTA")).thenReturn(sessao(null));
 
@@ -472,7 +825,7 @@ class ComandaServiceTest {
         ComandaItem normal = ComandaItem.of(55L, "SESS-BLUE", BigDecimal.ONE, new BigDecimal("35.00"),
                 new BigDecimal("12.00"), "Sessão de narguilé", Instant.now(), ConsumptionMode.NORMAL,
                 false, null);
-        when(comandaRepository.findById(10L)).thenReturn(Optional.of(abertaComanda(normal)));
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(abertaComanda(normal)));
         when(pdvService.requireOpenSession(1L)).thenReturn(openSession());
         when(estoqueUseCase.resolveSaleInfo("SESS-MENTA")).thenReturn(sessao(null));
 
@@ -489,7 +842,7 @@ class ComandaServiceTest {
         ComandaItem cortesia = ComandaItem.of(78L, "SESS-MENTA", BigDecimal.ONE, BigDecimal.ZERO,
                 new BigDecimal("12.00"), "Sessão de narguilé", Instant.now(), ConsumptionMode.TROCA,
                 true, 77L);
-        when(comandaRepository.findById(10L))
+        when(comandaRepository.findByIdForUpdate(10L))
                 .thenReturn(Optional.of(abertaComanda(openRoshLancado(), cortesia)));
         when(pdvService.getCurrentSession("caixa1")).thenReturn(openSession());
         when(pdvService.validatePaymentsAndComputeChange(any(), any())).thenReturn(null);
@@ -497,7 +850,7 @@ class ComandaServiceTest {
         when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         Order order = comandaService.closeComanda(10L, List.of(new PaymentCommand(PaymentMethod.DINHEIRO,
-                new BigDecimal("60.00"), null)), "caixa1");
+                new BigDecimal("60.00"), null)), null, false, "caixa1");
 
         assertThat(order.items().get(0).mode()).isEqualTo(ConsumptionMode.OPEN_ROSH);
         assertThat(order.items().get(1).mode()).isEqualTo(ConsumptionMode.TROCA);
@@ -515,14 +868,14 @@ class ComandaServiceTest {
     void closeComanda_creditsTheSessionOfWhoeverCloses() {
         CashRegisterSession outroCaixa = CashRegisterSession.of(2L, "caixa2", Instant.now(),
                 BigDecimal.TEN, "LOJA-01", null, null, null, null, null, CashRegisterSession.Status.OPEN);
-        when(comandaRepository.findById(10L)).thenReturn(Optional.of(abertaComanda(essenciaItem())));
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(abertaComanda(essenciaItem())));
         when(pdvService.getCurrentSession("caixa2")).thenReturn(outroCaixa);
         when(pdvService.validatePaymentsAndComputeChange(any(), any())).thenReturn(null);
         givenOrderPersistenceAssignsId();
         when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         Order order = comandaService.closeComanda(10L, List.of(new PaymentCommand(PaymentMethod.DINHEIRO,
-                new BigDecimal("25.00"), null)), "caixa2");
+                new BigDecimal("25.00"), null)), null, false, "caixa2");
 
         assertThat(order.sessionId()).isEqualTo(2L);
         // O depósito continua sendo o da comanda — é de lá que o estoque saiu, item a item.
@@ -535,11 +888,11 @@ class ComandaServiceTest {
         ComandaItem cortesia = ComandaItem.of(78L, "SESS-MENTA", BigDecimal.ONE, BigDecimal.ZERO,
                 new BigDecimal("12.00"), "Sessão de narguilé", Instant.now(), ConsumptionMode.TROCA,
                 true, null);
-        when(comandaRepository.findById(10L)).thenReturn(Optional.of(abertaComanda(cortesia)));
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(abertaComanda(cortesia)));
         when(pdvService.getCurrentSession("caixa1")).thenReturn(openSession());
 
         assertThatThrownBy(() -> comandaService.closeComanda(10L,
-                List.of(new PaymentCommand(PaymentMethod.DINHEIRO, BigDecimal.TEN, null)), "caixa1"))
+                List.of(new PaymentCommand(PaymentMethod.DINHEIRO, BigDecimal.TEN, null)), null, false, "caixa1"))
                 .isInstanceOf(ComandaOnlyCourtesyException.class);
         verifyNoInteractions(orderRepository);
     }
@@ -554,7 +907,7 @@ class ComandaServiceTest {
     void closeComanda_carriesTheComandaCustomerAndStampsTheCashbackRate() {
         Comanda comMesa = Comanda.of(10L, 1L, "LOJA-01", "Mesa 4", 42L, ComandaStatus.ABERTA,
                 List.of(essenciaItem()), null, "caixa1", Instant.now(), null);
-        when(comandaRepository.findById(10L)).thenReturn(Optional.of(comMesa));
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(comMesa));
         when(pdvService.getCurrentSession("caixa1")).thenReturn(openSession());
         when(pdvService.validatePaymentsAndComputeChange(any(), any())).thenReturn(null);
         when(cashbackUseCase.resolveApplicableRate("ESS-MENTA")).thenReturn(new CashbackRate(1L,
@@ -563,7 +916,7 @@ class ComandaServiceTest {
         when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         Order order = comandaService.closeComanda(10L, List.of(new PaymentCommand(PaymentMethod.DINHEIRO,
-                new BigDecimal("25.00"), null)), "caixa1");
+                new BigDecimal("25.00"), null)), null, false, "caixa1");
 
         assertThat(order.customerId()).isEqualTo(42L);
         assertThat(order.items().get(0).cashbackPercent()).isEqualByComparingTo("3.00");
@@ -577,7 +930,7 @@ class ComandaServiceTest {
     void closeComanda_semTaxaVigente_fechaSemCashback() {
         Comanda comMesa = Comanda.of(10L, 1L, "LOJA-01", "Mesa 4", 42L, ComandaStatus.ABERTA,
                 List.of(essenciaItem()), null, "caixa1", Instant.now(), null);
-        when(comandaRepository.findById(10L)).thenReturn(Optional.of(comMesa));
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(comMesa));
         when(pdvService.getCurrentSession("caixa1")).thenReturn(openSession());
         when(pdvService.validatePaymentsAndComputeChange(any(), any())).thenReturn(null);
         when(cashbackUseCase.resolveApplicableRate("ESS-MENTA")).thenReturn(null);
@@ -585,9 +938,190 @@ class ComandaServiceTest {
         when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         Order order = comandaService.closeComanda(10L, List.of(new PaymentCommand(PaymentMethod.DINHEIRO,
-                new BigDecimal("25.00"), null)), "caixa1");
+                new BigDecimal("25.00"), null)), null, false, "caixa1");
 
         assertThat(order.items().get(0).cashbackPercent()).isNull();
         assertThat(order.totalCashbackEarned()).isEqualByComparingTo("0");
+    }
+
+    // ── PDV-F011 — componentes da sessão (notes) e acréscimo no open rosh ────────────────────
+
+    /**
+     * O acréscimo soma sobre o {@code openRoshPrice} do produto <b>PAI</b> (60), não sobre o preço
+     * da variação do sabor (35). É a armadilha do open rosh um nível acima: somar sobre a variante
+     * daria 50, um número que "parece" maior e passaria despercebido na conferência.
+     */
+    @Test
+    void addItem_surchargeSumsOverParentOpenRoshPriceNotVariantPrice() {
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(abertaComanda()));
+        when(pdvService.requireOpenSession(1L)).thenReturn(openSession());
+        when(estoqueUseCase.resolveSaleInfo("SESS-BLUE")).thenReturn(sessao(new BigDecimal("60.00")));
+        when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Comanda updated = comandaService.addItem(10L, "SESS-BLUE", BigDecimal.ONE,
+                ConsumptionMode.OPEN_ROSH, false, null, null, new BigDecimal("15.00"), "caixa1");
+
+        ComandaItem lancado = updated.items().get(0);
+        assertThat(lancado.unitPrice()).isEqualByComparingTo("75.00");
+        assertThat(lancado.surchargeAmount()).isEqualByComparingTo("15.00");
+        assertThat(lancado.subtotal()).isEqualByComparingTo("75.00");
+        // Acréscimo é margem, não custo: o custo congelado não se mexe.
+        assertThat(lancado.costPrice()).isEqualByComparingTo("12.00");
+    }
+
+    /** O registro do setup é texto opaco e não toca no preço — é o que dá casa à pinça. */
+    @Test
+    void addItem_notesAreStoredVerbatimAndDoNotAffectPrice() {
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(abertaComanda()));
+        when(pdvService.requireOpenSession(1L)).thenReturn(openSession());
+        when(estoqueUseCase.resolveSaleInfo("SESS-BLUE")).thenReturn(sessao(new BigDecimal("60.00")));
+        when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        String setup = "Narguilé grande · Com filtro · Pinça P-02";
+        Comanda updated = comandaService.addItem(10L, "SESS-BLUE", BigDecimal.ONE,
+                ConsumptionMode.OPEN_ROSH, false, null, setup, null, "caixa1");
+
+        assertThat(updated.items().get(0).notes()).isEqualTo(setup);
+        assertThat(updated.items().get(0).unitPrice()).isEqualByComparingTo("60.00");
+        assertThat(updated.items().get(0).surchargeAmount()).isNull();
+    }
+
+    /**
+     * Nota num item comum de catálogo também vale — o narguilé e o filtro são SKU normal, e o setup
+     * é registrado na primeira linha da sessão, seja ela qual for.
+     */
+    @Test
+    void addItem_notesOnPlainCatalogLineStillPreservesCatalogPricing() {
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(abertaComanda()));
+        when(pdvService.requireOpenSession(1L)).thenReturn(openSession());
+        when(estoqueUseCase.resolveSaleInfo("ESS-MENTA"))
+                .thenReturn(new EstoqueUseCase.CatalogSaleInfo("Essência Menta", ESSENCIA));
+        when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Comanda updated = comandaService.addItem(10L, "ESS-MENTA", BigDecimal.ONE, null, false, null,
+                "Pinça P-07", null, "caixa1");
+
+        assertThat(updated.items().get(0).notes()).isEqualTo("Pinça P-07");
+        assertThat(updated.items().get(0).unitPrice()).isEqualByComparingTo("25.00");
+        assertThat(updated.items().get(0).mode()).isEqualTo(ConsumptionMode.NORMAL);
+    }
+
+    /** Recusa em vez de truncar: truncado, o operador não fica sabendo que perdeu o registro. */
+    @Test
+    void addItem_refusesNotesAboveTheColumnLimit() {
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(abertaComanda()));
+        when(pdvService.requireOpenSession(1L)).thenReturn(openSession());
+        when(estoqueUseCase.resolveSaleInfo("SESS-BLUE")).thenReturn(sessao(new BigDecimal("60.00")));
+
+        String longa = "x".repeat(ComandaItem.NOTES_MAX_LENGTH + 1);
+        assertThatThrownBy(() -> comandaService.addItem(10L, "SESS-BLUE", BigDecimal.ONE,
+                ConsumptionMode.OPEN_ROSH, false, null, longa, null, "caixa1"))
+                .isInstanceOf(NotesTooLongException.class);
+
+        verify(estoqueUseCase, never()).adjustStock(any(), any(), any(), any(), any(), any());
+        verify(comandaRepository, never()).save(any());
+    }
+
+    /** Exatamente no limite passa — o teto é inclusivo. */
+    @Test
+    void addItem_acceptsNotesExactlyAtTheLimit() {
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(abertaComanda()));
+        when(pdvService.requireOpenSession(1L)).thenReturn(openSession());
+        when(estoqueUseCase.resolveSaleInfo("SESS-BLUE")).thenReturn(sessao(new BigDecimal("60.00")));
+        when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        String noLimite = "x".repeat(ComandaItem.NOTES_MAX_LENGTH);
+        Comanda updated = comandaService.addItem(10L, "SESS-BLUE", BigDecimal.ONE,
+                ConsumptionMode.OPEN_ROSH, false, null, noLimite, null, "caixa1");
+
+        assertThat(updated.items().get(0).notes()).hasSize(ComandaItem.NOTES_MAX_LENGTH);
+    }
+
+    /** Negativo é desconto entrando pela porta dos fundos — sem teto e sem PDV_SALE_DISCOUNT. */
+    @Test
+    void addItem_refusesNegativeSurcharge() {
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(abertaComanda()));
+        when(pdvService.requireOpenSession(1L)).thenReturn(openSession());
+        when(estoqueUseCase.resolveSaleInfo("SESS-BLUE")).thenReturn(sessao(new BigDecimal("60.00")));
+
+        assertThatThrownBy(() -> comandaService.addItem(10L, "SESS-BLUE", BigDecimal.ONE,
+                ConsumptionMode.OPEN_ROSH, false, null, null, new BigDecimal("-5.00"), "caixa1"))
+                .isInstanceOf(SurchargeInvalidException.class);
+
+        verify(estoqueUseCase, never()).adjustStock(any(), any(), any(), any(), any(), any());
+    }
+
+    /** Uma linha que o cliente não paga não pode ter valor extra cobrado. Contradição, não borda. */
+    @Test
+    void addItem_refusesSurchargeOnCourtesyLine() {
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(abertaComanda(openRoshLancado())));
+        when(pdvService.requireOpenSession(1L)).thenReturn(openSession());
+        when(estoqueUseCase.resolveSaleInfo("SESS-MENTA")).thenReturn(sessao(new BigDecimal("60.00")));
+
+        assertThatThrownBy(() -> comandaService.addItem(10L, "SESS-MENTA", BigDecimal.ONE,
+                ConsumptionMode.TROCA, false, 77L, null, new BigDecimal("10.00"), "caixa1"))
+                .isInstanceOf(SurchargeOnCourtesyException.class);
+    }
+
+    /**
+     * Fora de {@code OPEN_ROSH} a diferença do sabor caro já mora no pricing da variante. A ordem
+     * das checagens importa: {@code TROCA} é cortesia E não-open-rosh ao mesmo tempo, e o que o
+     * operador precisa ouvir ali é "o cliente não paga esta linha" — por isso o teste acima cobra
+     * {@code SURCHARGE_ON_COURTESY} e este, com uma linha cobrada, cobra o outro código.
+     */
+    @Test
+    void addItem_refusesSurchargeOutsideOpenRosh() {
+        ComandaItem primeira = ComandaItem.of(55L, "SESS-BLUE", BigDecimal.ONE, new BigDecimal("35.00"),
+                new BigDecimal("12.00"), "Sessão de narguilé", Instant.now(), ConsumptionMode.NORMAL,
+                false, null);
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(abertaComanda(primeira)));
+        when(pdvService.requireOpenSession(1L)).thenReturn(openSession());
+        when(estoqueUseCase.resolveSaleInfo("SESS-MENTA")).thenReturn(sessao(null));
+
+        assertThatThrownBy(() -> comandaService.addItem(10L, "SESS-MENTA", BigDecimal.ONE,
+                ConsumptionMode.SABOR_EXTRA, false, 55L, null, new BigDecimal("10.00"), "caixa1"))
+                .isInstanceOf(SurchargeNotApplicableException.class);
+    }
+
+    /** Zero é o mesmo que não mandar: no-op não aciona recusa nem em modo comum. */
+    @Test
+    void addItem_zeroSurchargeIsANoOpAndPassesInAnyMode() {
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(abertaComanda()));
+        when(pdvService.requireOpenSession(1L)).thenReturn(openSession());
+        when(estoqueUseCase.resolveSaleInfo("ESS-MENTA"))
+                .thenReturn(new EstoqueUseCase.CatalogSaleInfo("Essência Menta", ESSENCIA));
+        when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Comanda updated = comandaService.addItem(10L, "ESS-MENTA", BigDecimal.ONE, null, false, null,
+                null, BigDecimal.ZERO, "caixa1");
+
+        assertThat(updated.items().get(0).unitPrice()).isEqualByComparingTo("25.00");
+    }
+
+    /**
+     * Os dois campos atravessam o fechamento. Sem isso, a tela de Vendas &gt; Pedidos não responde
+     * "qual pinça saiu com aquela mesa" — pergunta que só é feita depois de a mesa fechar.
+     */
+    @Test
+    void closeComanda_carriesNotesAndSurchargeIntoTheOrderItem() {
+        ComandaItem comSetup = ComandaItem.of(88L, "SESS-BLUE", BigDecimal.ONE, new BigDecimal("75.00"),
+                new BigDecimal("12.00"), "Sessão de narguilé", Instant.now(), ConsumptionMode.OPEN_ROSH,
+                false, null, "Narguilé grande · Pinça P-02", new BigDecimal("15.00"));
+        Comanda comMesa = Comanda.of(10L, 1L, "LOJA-01", "Mesa 4", null, ComandaStatus.ABERTA,
+                List.of(comSetup), null, "caixa1", Instant.now(), null);
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(comMesa));
+        when(pdvService.getCurrentSession("caixa1")).thenReturn(openSession());
+        when(pdvService.validatePaymentsAndComputeChange(any(), any())).thenReturn(null);
+        when(cashbackUseCase.resolveApplicableRate("SESS-BLUE")).thenReturn(null);
+        givenOrderPersistenceAssignsId();
+        when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Order order = comandaService.closeComanda(10L, List.of(new PaymentCommand(PaymentMethod.DINHEIRO,
+                new BigDecimal("75.00"), null)), null, false, "caixa1");
+
+        assertThat(order.items().get(0).notes()).isEqualTo("Narguilé grande · Pinça P-02");
+        assertThat(order.items().get(0).surchargeAmount()).isEqualByComparingTo("15.00");
+        // O unitPrice do pedido é o total já somado — é ele que faz o subtotal fechar.
+        assertThat(order.items().get(0).unitPrice()).isEqualByComparingTo("75.00");
     }
 }

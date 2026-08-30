@@ -1,7 +1,9 @@
 package com.cernecommerce.adapter.out.persistence.repository;
 
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.pedido.Order;
+import com.cernecommerce.core.domain.model.pedido.OrderItem;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -13,6 +15,11 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
 /**
@@ -75,6 +82,31 @@ class PedidoRepositoryPostgresIT {
         assertThatCode(() -> orderRepository
                 .findAll(null, null, null, null, java.time.Instant.now().plusSeconds(60), 0, 20))
                 .doesNotThrowAnyException();
+    }
+
+    /**
+     * PED-C002 — a segunda fase do ID-first é uma forma de consulta nova neste caminho
+     * ({@code SELECT DISTINCT ... LEFT JOIN FETCH ... WHERE id IN :ids ORDER BY}), e os outros
+     * testes deste arquivo rodam contra base vazia, onde ela nem chega a ser emitida (a guarda de
+     * página vazia a evita). Este é o único que a exercita <b>com dados</b> no dialeto real.
+     */
+    @Test
+    void findAll_withOrders_batchFetchesItemsOnRealPostgres() {
+        Order salvo = orderRepository.save(
+                Order.openBalcao(1L, "LOJA-01", null, List.of(OrderItem.fromCatalog("CARV-001",
+                                new BigDecimal("2.000"),
+                                Pricing.of(new BigDecimal("18.00"), null, new BigDecimal("22.00")), null)))
+                        .concluded(orderRepository.nextOrderNumber(), null, Instant.now()));
+
+        PageResult<Order> page = orderRepository.findAll(null, null, null, null, null, 0, 20);
+
+        assertThat(page.content()).isNotEmpty();
+        assertThat(page.content()).anySatisfy(o -> {
+            assertThat(o.id()).isEqualTo(salvo.id());
+            // O ponto: os itens vieram no fetch em lote, não numa consulta por pedido.
+            assertThat(o.items()).singleElement().satisfies(
+                    i -> assertThat(i.unitPrice()).isEqualByComparingTo("22.00"));
+        });
     }
 
     /**

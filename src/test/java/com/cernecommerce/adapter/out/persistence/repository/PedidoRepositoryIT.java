@@ -8,6 +8,8 @@ import com.cernecommerce.core.domain.model.pedido.OrderStatus;
 import com.cernecommerce.core.domain.model.pedido.SalesChannel;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import org.hibernate.SessionFactory;
+import org.hibernate.stat.Statistics;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -16,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -167,6 +170,140 @@ class PedidoRepositoryIT {
         flushAndClear();
 
         assertThat(orderRepository.findBySessionId(999L, 0, 20).content()).isEmpty();
+    }
+
+    // ── N+1 da listagem (PED-C002) ───────────────────────────────────────────────────────────
+
+    /**
+     * Conta as consultas emitidas por uma leitura, com o {@code Statistics} do Hibernate.
+     *
+     * <p>O contador é global à {@code SessionFactory} e a estatística fica desligada por padrão: o
+     * helper liga, mede e devolve o estado como estava, porque o contexto do Spring é compartilhado
+     * com o resto da suíte.</p>
+     */
+    private long countQueries(Runnable leitura) {
+        Statistics stats = em.getEntityManagerFactory().unwrap(SessionFactory.class).getStatistics();
+        boolean estavaLigada = stats.isStatisticsEnabled();
+        stats.setStatisticsEnabled(true);
+        try {
+            flushAndClear();
+            stats.clear();
+            leitura.run();
+            return stats.getPrepareStatementCount();
+        } finally {
+            stats.setStatisticsEnabled(estavaLigada);
+        }
+    }
+
+    /**
+     * PED-C002 — a prova de que o N+1 morreu em {@code GET /orders}: <b>o número de consultas não
+     * cresce com o tamanho da página</b>.
+     *
+     * <p>Antes, {@code toDomain} tocava a coleção {@code LAZY} de cada pedido e a listagem pagava
+     * uma consulta por pedido — até 101 numa página de 100, no endpoint de pedidos do
+     * administrador. Agora são três fixas: count, página e o {@code JOIN FETCH} dos itens.</p>
+     *
+     * <p>Comparar duas cardinalidades, em vez de fixar um número absoluto, é a única afirmação
+     * honesta: os itens estariam acessíveis nos dois desenhos, já que a leitura acontece dentro da
+     * transação — o que distingue um do outro é exatamente o crescimento.</p>
+     */
+    @Test
+    void findAll_doesNotScaleQueriesWithThePageSize() {
+        orderRepository.save(concludedBalcao(twoCharcoals(null)));
+        long comUmPedido = countQueries(() -> orderRepository.findAll(null, null, null, null, null, 0, 20));
+
+        for (int i = 0; i < 5; i++) {
+            orderRepository.save(concludedBalcao(twoCharcoals(null)));
+        }
+        long comSeisPedidos = countQueries(() -> orderRepository.findAll(null, null, null, null, null, 0, 20));
+
+        assertThat(comSeisPedidos)
+                .as("sextuplicar os pedidos da página não pode mudar o número de consultas")
+                .isEqualTo(comUmPedido);
+    }
+
+    @Test
+    void findBySessionId_doesNotScaleQueriesWithThePageSize() {
+        orderRepository.save(concludedBalcao(twoCharcoals(null)));
+        long comUmPedido = countQueries(() -> orderRepository.findBySessionId(1L, 0, 20));
+
+        for (int i = 0; i < 5; i++) {
+            orderRepository.save(concludedBalcao(twoCharcoals(null)));
+        }
+        long comSeisPedidos = countQueries(() -> orderRepository.findBySessionId(1L, 0, 20));
+
+        assertThat(comSeisPedidos).isEqualTo(comUmPedido);
+    }
+
+    /** O fetch em lote não pode custar os itens: eles têm que vir carregados e completos. */
+    @Test
+    void findAll_stillLoadsEveryItemOfEveryOrder() {
+        orderRepository.save(concludedBalcao(twoCharcoals(new BigDecimal("4.00"))));
+        orderRepository.save(concludedBalcao(twoCharcoals(null)));
+        flushAndClear();
+
+        PageResult<Order> page = orderRepository.findAll(null, null, null, null, null, 0, 20);
+
+        assertThat(page.content()).hasSizeGreaterThanOrEqualTo(2);
+        assertThat(page.content()).allSatisfy(o -> {
+            assertThat(o.items()).isNotEmpty();
+            assertThat(o.items()).allSatisfy(i -> assertThat(i.unitPrice()).isNotNull());
+        });
+    }
+
+    /** A ordem é `id DESC` nas duas fases — o `JOIN FETCH` não pode embaralhar a página. */
+    @Test
+    void findAll_keepsTheMostRecentFirstAfterTheBatchFetch() {
+        orderRepository.save(concludedBalcao(twoCharcoals(null)));
+        Order segundo = orderRepository.save(concludedBalcao(twoCharcoals(null)));
+        Order terceiro = orderRepository.save(concludedBalcao(twoCharcoals(null)));
+        flushAndClear();
+
+        List<Long> ids = orderRepository.findAll(null, null, null, null, null, 0, 20)
+                .content().stream().map(Order::id).toList();
+
+        assertThat(ids).startsWith(terceiro.id(), segundo.id());
+        assertThat(ids).isSortedAccordingTo(Comparator.reverseOrder());
+    }
+
+    /**
+     * A ordem dos itens <b>dentro</b> de cada pedido é a de lançamento (`id ASC`), e não o que o
+     * banco quiser devolver: {@code OrderEntity.items} não tem {@code @OrderBy}, e trazendo vários
+     * pedidos num join só a ordem passaria a depender de como o banco intercala as linhas.
+     */
+    @Test
+    void findAll_keepsItemsInLaunchOrderWithinEachOrder() {
+        List<OrderItem> tres = List.of(
+                OrderItem.fromCatalog("CARV-001", BigDecimal.ONE, carvao(), null),
+                OrderItem.fromCatalog("CARV-002", BigDecimal.ONE, carvao(), null),
+                OrderItem.fromCatalog("CARV-003", BigDecimal.ONE, carvao(), null));
+        Order saved = orderRepository.save(concludedBalcao(tres));
+        flushAndClear();
+
+        Order listado = orderRepository.findAll(null, null, null, null, null, 0, 20)
+                .content().stream().filter(o -> o.id().equals(saved.id())).findFirst().orElseThrow();
+
+        assertThat(listado.items()).extracting(OrderItem::sku)
+                .containsExactly("CARV-001", "CARV-002", "CARV-003");
+        assertThat(listado.items()).extracting(OrderItem::id)
+                .isSortedAccordingTo(Comparator.naturalOrder());
+    }
+
+    /** Página além do fim devolve vazio sem emitir o `IN ()` da segunda fase. */
+    @Test
+    void findAll_pastTheLastPage_returnsEmptyWithoutFailing() {
+        orderRepository.save(concludedBalcao(twoCharcoals(null)));
+        flushAndClear();
+
+        PageResult<Order> vazia = orderRepository.findAll(null, null, null, null, null, 99, 20);
+
+        assertThat(vazia.content()).isEmpty();
+        assertThat(vazia.totalElements()).isGreaterThan(0L);
+    }
+
+    @Test
+    void findBySessionId_withNoOrders_returnsEmptyWithoutFailing() {
+        assertThat(orderRepository.findBySessionId(888L, 0, 20).content()).isEmpty();
     }
 
     // ── Filtros de GET /orders (regressão do bug de tipagem de from/to nulos) ─────────────────

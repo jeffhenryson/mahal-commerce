@@ -1,6 +1,7 @@
 package com.cernecommerce.core.domain.model.pedido;
 
 import com.cernecommerce.core.domain.exception.pedido.ProductNotPricedException;
+import com.cernecommerce.core.domain.exception.pedido.ItemDiscountExceedsGrossException;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
 import org.junit.jupiter.api.Test;
 
@@ -134,7 +135,24 @@ class OrderItemTest {
 
     @Test
     void rejectsDiscountGreaterThanGross() {
+        // PDV-C016 — a regra é a mesma de sempre; o que mudou foi o TIPO. Vindo por fromCatalog o
+        // valor veio do cliente HTTP, e IllegalArgumentException vira um 400 genérico que descarta
+        // a mensagem — indistinguível de qualquer corpo malformado.
         assertThatThrownBy(() -> OrderItem.fromCatalog("CARV-001", TWO, carvao(), new BigDecimal("44.01")))
+                .isInstanceOf(ItemDiscountExceedsGrossException.class)
+                .hasMessageContaining("CARV-001");
+    }
+
+    /**
+     * PDV-C016 — a invariante do record continua de pé, para o caminho de <b>reconstituição</b>:
+     * {@code of} lê de persistência, e ali um desconto acima do bruto é dado corrompido ou erro de
+     * programação, não payload de cliente. É a rede de segurança que a exceção tipada não
+     * substitui.
+     */
+    @Test
+    void of_stillRejectsDiscountGreaterThanGrossAsAnInvariant() {
+        assertThatThrownBy(() -> OrderItem.of(1L, "CARV-001", TWO, new BigDecimal("22.00"),
+                new BigDecimal("18.00"), new BigDecimal("44.01"), null, "Carvão"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("discountAmount");
     }

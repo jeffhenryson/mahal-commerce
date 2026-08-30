@@ -1,5 +1,6 @@
 package com.cernecommerce.core.domain.model.pdv;
 
+import com.cernecommerce.core.domain.model.pedido.ConsumptionMode;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -17,6 +18,104 @@ class ComandaTest {
 
     private static Comanda open() {
         return Comanda.open(1L, "LOJA-01", "Mesa 4", "caixa1");
+    }
+
+    /** Linha de sessão com id fixo, para poder pendurar outras nela. */
+    private static ComandaItem linha(Long id, String sku, String unitPrice, ConsumptionMode mode,
+            boolean courtesy, Long linkedItemId) {
+        return ComandaItem.of(id, sku, BigDecimal.ONE, new BigDecimal(unitPrice), new BigDecimal("5.00"),
+                sku, Instant.now(), mode, courtesy, linkedItemId);
+    }
+
+    /** Open rosh #1 com duas trocas penduradas (#2, #3) e uma linha comum solta (#4). */
+    private static Comanda comOpenRoshEDuasTrocas() {
+        return Comanda.of(10L, 1L, "LOJA-01", "Mesa 4", null, ComandaStatus.ABERTA, List.of(
+                linha(1L, "SESS-BLUE", "60.00", ConsumptionMode.OPEN_ROSH, false, null),
+                linha(2L, "ESS-UVA", "0.00", ConsumptionMode.TROCA, true, 1L),
+                linha(3L, "ESS-MENTA", "0.00", ConsumptionMode.TROCA, true, 1L),
+                linha(4L, "BEB-COLA", "12.00", ConsumptionMode.NORMAL, false, null)),
+                null, "caixa1", Instant.now(), null);
+    }
+
+    // ── Remoção de item (PDV-F012) ───────────────────────────────────────────────────────────
+
+    @Test
+    void withRemovedItem_dropsTheLineAndTheTrocasHangingOnIt() {
+        Comanda result = comOpenRoshEDuasTrocas().withRemovedItem(1L);
+
+        // Só a linha comum sobra — a sessão e as duas trocas dela saíram juntas.
+        assertThat(result.items()).extracting(ComandaItem::id).containsExactly(4L);
+        assertThat(result.runningTotal()).isEqualByComparingTo("12.00");
+    }
+
+    /** A troca não existe sem a sessão: deixá-la para trás apontaria para um id que sumiu. */
+    @Test
+    void itemsRemovedWith_listsTheLineAndItsTrocas() {
+        assertThat(comOpenRoshEDuasTrocas().itemsRemovedWith(1L))
+                .extracting(ComandaItem::id).containsExactly(1L, 2L, 3L);
+    }
+
+    @Test
+    void withRemovedItem_removingALeafLineTouchesNothingElse() {
+        Comanda result = comOpenRoshEDuasTrocas().withRemovedItem(4L);
+
+        assertThat(result.items()).extracting(ComandaItem::id).containsExactly(1L, 2L, 3L);
+    }
+
+    /** Remover só a troca é legítimo — ela é a folha, não arrasta ninguém. */
+    @Test
+    void withRemovedItem_removingOnlyOneTrocaKeepsTheSessionAndTheOther() {
+        Comanda result = comOpenRoshEDuasTrocas().withRemovedItem(2L);
+
+        assertThat(result.items()).extracting(ComandaItem::id).containsExactly(1L, 3L, 4L);
+    }
+
+    /**
+     * {@code SABOR_EXTRA} é linha própria e pode estar cobrada. O domínio o expõe para o service
+     * barrar a remoção — arrastá-lo tiraria valor da conta sem ninguém pedir.
+     */
+    @Test
+    void chargedChildrenOf_findsSaborExtraButNotTroca() {
+        Comanda comanda = Comanda.of(10L, 1L, "LOJA-01", "Mesa 4", null, ComandaStatus.ABERTA, List.of(
+                linha(1L, "SESS-BLUE", "60.00", ConsumptionMode.OPEN_ROSH, false, null),
+                linha(2L, "ESS-UVA", "0.00", ConsumptionMode.TROCA, true, 1L),
+                linha(3L, "SESS-MANGA", "35.00", ConsumptionMode.SABOR_EXTRA, false, 1L)),
+                null, "caixa1", Instant.now(), null);
+
+        assertThat(comanda.chargedChildrenOf(1L)).extracting(ComandaItem::id).containsExactly(3L);
+        assertThat(comanda.chargedChildrenOf(2L)).isEmpty();
+    }
+
+    @Test
+    void withRemovedItem_refusesAnItemThatIsNotInThisComanda() {
+        assertThatThrownBy(() -> comOpenRoshEDuasTrocas().withRemovedItem(999L))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("não pertence");
+    }
+
+    @Test
+    void withRemovedItem_refusesNullItemId() {
+        assertThatThrownBy(() -> comOpenRoshEDuasTrocas().withRemovedItem(null))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    /** Rede de segurança do domínio: linha de mesa fechada é histórico de um pedido já pago. */
+    @Test
+    void withRemovedItem_refusesOnAComandaThatIsNotOpen() {
+        Comanda fechada = comOpenRoshEDuasTrocas().closed(500L, Instant.now());
+
+        assertThatThrownBy(() -> fechada.withRemovedItem(1L))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    /** Remover a última linha deixa a comanda vazia, que é estado legítimo — é como ela nasce. */
+    @Test
+    void withRemovedItem_canEmptyTheComanda() {
+        Comanda umaLinha = Comanda.of(10L, 1L, "LOJA-01", "Mesa 4", null, ComandaStatus.ABERTA,
+                List.of(linha(1L, "BEB-COLA", "12.00", ConsumptionMode.NORMAL, false, null)),
+                null, "caixa1", Instant.now(), null);
+
+        assertThat(umaLinha.withRemovedItem(1L).items()).isEmpty();
     }
 
     // ── Abertura ─────────────────────────────────────────────────────────────────────────────

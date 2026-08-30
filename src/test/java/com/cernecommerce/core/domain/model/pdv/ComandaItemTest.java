@@ -81,7 +81,7 @@ class ComandaItemTest {
     @Test
     void forSession_takesUnitPriceFromTheCallerButCostFromTheCatalog() {
         ComandaItem item = ComandaItem.forSession("SESS-BLUE", BigDecimal.ONE, new BigDecimal("60.00"),
-                PRICED, "Sessão Blueberry", ConsumptionMode.OPEN_ROSH, false, null);
+                PRICED, "Sessão Blueberry", ConsumptionMode.OPEN_ROSH, false, null, null, null);
 
         assertThat(item.unitPrice()).isEqualByComparingTo("60.00");
         assertThat(item.costPrice()).isEqualByComparingTo("10.00");
@@ -97,7 +97,7 @@ class ComandaItemTest {
     @Test
     void forSession_courtesyIsFreeForTheCustomerButNotForTheMargin() {
         ComandaItem cortesia = ComandaItem.forSession("SESS-UVA", BigDecimal.ONE, BigDecimal.ZERO,
-                PRICED, "Sessão Uva", ConsumptionMode.SABOR_EXTRA, true, 7L);
+                PRICED, "Sessão Uva", ConsumptionMode.SABOR_EXTRA, true, 7L, null, null);
 
         assertThat(cortesia.unitPrice()).isEqualByComparingTo("0");
         assertThat(cortesia.subtotal()).isEqualByComparingTo("0.00");
@@ -110,7 +110,7 @@ class ComandaItemTest {
     @Test
     void forSession_rejectsUnpricedProductEvenForACourtesyLine() {
         assertThatThrownBy(() -> ComandaItem.forSession("SEM-PRECO", BigDecimal.ONE, BigDecimal.ZERO,
-                Pricing.empty(), null, ConsumptionMode.TROCA, true, 7L))
+                Pricing.empty(), null, ConsumptionMode.TROCA, true, 7L, null, null))
                 .isInstanceOf(ProductNotPricedException.class);
     }
 
@@ -136,5 +136,86 @@ class ComandaItemTest {
                 new BigDecimal("10.00"), "Essência Menta", Instant.now(), null, false, null);
 
         assertThat(legado.mode()).isEqualTo(ConsumptionMode.NORMAL);
+    }
+
+    // ── PDV-F011 ─────────────────────────────────────────────────────────────────────────────
+
+    /**
+     * O acréscimo chega JÁ SOMADO em unitPrice e é guardado à parte só para o relatório separar as
+     * parcelas depois — não dá para reconstruí-lo do total. Mesma lógica de
+     * {@code OrderItem.discountAmount} ser campo próprio em vez de virar um preço menor.
+     */
+    @Test
+    void forSession_keepsSurchargeAsItsOwnFieldWhileUnitPriceIsAlreadyTheSum() {
+        ComandaItem item = ComandaItem.forSession("SESS-BLUE", BigDecimal.ONE, new BigDecimal("75.00"),
+                PRICED, "Sessão Blueberry", ConsumptionMode.OPEN_ROSH, false, null,
+                "Narguilé grande · Pinça P-02", new BigDecimal("15.00"));
+
+        assertThat(item.unitPrice()).isEqualByComparingTo("75.00");
+        assertThat(item.surchargeAmount()).isEqualByComparingTo("15.00");
+        assertThat(item.subtotal()).isEqualByComparingTo("75.00");
+        assertThat(item.notes()).isEqualTo("Narguilé grande · Pinça P-02");
+        // Acréscimo é margem, não custo.
+        assertThat(item.costPrice()).isEqualByComparingTo("10.00");
+    }
+
+    /** Espelha ck_comanda_item_surcharge_not_on_courtesy: linha que não se paga não se acresce. */
+    @Test
+    void surchargeIsRejectedOnACourtesyLine() {
+        assertThatThrownBy(() -> ComandaItem.of(1L, "SESS-UVA", BigDecimal.ONE, BigDecimal.ZERO,
+                new BigDecimal("10.00"), "Sessão Uva", Instant.now(), ConsumptionMode.TROCA, true, 7L,
+                null, new BigDecimal("10.00")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("cortesia");
+    }
+
+    /** Espelha ck_comanda_item_surcharge_only_open_rosh. */
+    @Test
+    void surchargeIsRejectedOutsideOpenRosh() {
+        assertThatThrownBy(() -> ComandaItem.of(1L, "SESS-UVA", BigDecimal.ONE, new BigDecimal("45.00"),
+                new BigDecimal("10.00"), "Sessão Uva", Instant.now(), ConsumptionMode.SABOR_EXTRA, false,
+                7L, null, new BigDecimal("10.00")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("OPEN_ROSH");
+    }
+
+    /** Espelha ck_comanda_item_surcharge_non_negative. */
+    @Test
+    void surchargeCannotBeNegative() {
+        assertThatThrownBy(() -> ComandaItem.of(1L, "SESS-BLUE", BigDecimal.ONE, new BigDecimal("60.00"),
+                new BigDecimal("10.00"), "Sessão Blueberry", Instant.now(), ConsumptionMode.OPEN_ROSH,
+                false, null, null, new BigDecimal("-1.00")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("negativo");
+    }
+
+    /** Zero não é acréscimo: passa em qualquer modo, sem acionar nenhuma das duas invariantes. */
+    @Test
+    void zeroSurchargeIsAllowedAnywhere() {
+        ComandaItem item = ComandaItem.of(1L, "ESS-MENTA", BigDecimal.ONE, new BigDecimal("25.00"),
+                new BigDecimal("10.00"), "Essência Menta", Instant.now(), ConsumptionMode.NORMAL, false,
+                null, null, BigDecimal.ZERO);
+
+        assertThat(item.surchargeAmount()).isEqualByComparingTo("0");
+    }
+
+    @Test
+    void notesAboveTheColumnLimitAreRejected() {
+        String longa = "x".repeat(ComandaItem.NOTES_MAX_LENGTH + 1);
+        assertThatThrownBy(() -> ComandaItem.of(1L, "ESS-MENTA", BigDecimal.ONE, new BigDecimal("25.00"),
+                new BigDecimal("10.00"), "Essência Menta", Instant.now(), ConsumptionMode.NORMAL, false,
+                null, longa, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(String.valueOf(ComandaItem.NOTES_MAX_LENGTH));
+    }
+
+    /** Linha anterior à V116 lê os dois como null — que é a verdade, e não "não teve". */
+    @Test
+    void legacyLineReadsNotesAndSurchargeAsNull() {
+        ComandaItem legado = ComandaItem.of(1L, "ESS-MENTA", BigDecimal.ONE, new BigDecimal("25.00"),
+                new BigDecimal("10.00"), "Essência Menta", Instant.now());
+
+        assertThat(legado.notes()).isNull();
+        assertThat(legado.surchargeAmount()).isNull();
     }
 }
