@@ -155,6 +155,11 @@ def generate_sql():
                 stock_qty = random.randint(15, 120)
                 barcode = f"789{sku_counter:011d}"
                 
+                available_for_table = cat_name not in ["Cigarros", "Isqueiros"]
+                session_product = cat_name in ["Essências", "Narguilés"]
+                sessions_per_unit = 5 if cat_name == "Essências" else (10 if cat_name == "Narguilés" else None)
+                open_rosh_price = 25.00 if cat_name == "Essências" else (35.00 if cat_name == "Narguilés" else None)
+
                 products.append({
                     "sku": sku,
                     "name": name,
@@ -166,7 +171,11 @@ def generate_sql():
                     "markup": markup,
                     "stock_qty": stock_qty,
                     "barcode": barcode,
-                    "type": "SIMPLES"
+                    "type": "SIMPLES",
+                    "available_for_table": available_for_table,
+                    "session_product": session_product,
+                    "sessions_per_unit": sessions_per_unit,
+                    "open_rosh_price": open_rosh_price
                 })
 
     random.seed(2026)
@@ -179,10 +188,14 @@ def generate_sql():
         name_esc = p['name'].replace("'", "''")
         cat_esc = p['cat_name'].replace("'", "''")
         brand_esc = p['brand'].replace("'", "''")
+        avail_table = "true" if p['available_for_table'] else "false"
+        sess_prod = "true" if p['session_product'] else "false"
+        sess_unit = str(p['sessions_per_unit']) if p['sessions_per_unit'] is not None else "NULL"
+        open_rosh = f"{p['open_rosh_price']:.2f}" if p['open_rosh_price'] is not None else "NULL"
         
         sql.append(
-            f"INSERT INTO product (sku, name, category, category_id, brand, sale_price, cost_price, markup_percent, type, unit, active, visible_in_pos, visible_in_marketplace, barcode) "
-            f"VALUES ('{p['sku']}', '{name_esc}', '{cat_esc}', {p['cat_id']}, '{brand_esc}', {p['sale_price']}, {p['cost_price']}, {p['markup']}, 'SIMPLES', 'UN', true, true, true, '{p['barcode']}');"
+            f"INSERT INTO product (sku, name, category, category_id, brand, sale_price, cost_price, markup_percent, type, unit, active, visible_in_pos, visible_in_marketplace, barcode, available_for_table, session_product, sessions_per_unit, open_rosh_price) "
+            f"VALUES ('{p['sku']}', '{name_esc}', '{cat_esc}', {p['cat_id']}, '{brand_esc}', {p['sale_price']}, {p['cost_price']}, {p['markup']}, 'SIMPLES', 'UN', true, true, true, '{p['barcode']}', {avail_table}, {sess_prod}, {sess_unit}, {open_rosh});"
         )
         
         sql.append(
@@ -245,10 +258,11 @@ def generate_sql():
         cat_id = cat_id_map.get(main_cat_name, 1)
         kit_name_esc = kit_name.replace("'", "''")
         main_cat_esc = main_cat_name.replace("'", "''")
+        avail_table = "true" if main_cat_name not in ["Cigarros", "Isqueiros"] else "false"
         
         sql.append(
-            f"INSERT INTO product (sku, name, category, category_id, brand, sale_price, cost_price, markup_percent, type, unit, active, visible_in_pos, visible_in_marketplace, kit_component_eligible) "
-            f"VALUES ('{kit_sku}', '{kit_name_esc}', '{main_cat_esc}', {cat_id}, 'Mahal', {kit_sale_price}, {kit_cost_price}, {kit_markup}, 'KIT', 'UN', true, true, true, false);"
+            f"INSERT INTO product (sku, name, category, category_id, brand, sale_price, cost_price, markup_percent, type, unit, active, visible_in_pos, visible_in_marketplace, kit_component_eligible, available_for_table, session_product, sessions_per_unit, open_rosh_price) "
+            f"VALUES ('{kit_sku}', '{kit_name_esc}', '{main_cat_esc}', {cat_id}, 'Mahal', {kit_sale_price}, {kit_cost_price}, {kit_markup}, 'KIT', 'UN', true, true, true, false, {avail_table}, false, NULL, NULL);"
         )
         
         sql.append(

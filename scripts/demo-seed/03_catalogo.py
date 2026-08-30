@@ -139,6 +139,10 @@ def build_products(rng: random.Random, cat_id_map):
         markup = round(((float(price) - float(cost)) / float(cost)) * 100, 4) if cost else 50.0
         on_sale = rng.random() < 0.15
         original_price = money(float(price) / 0.85) if on_sale else None
+        available_for_table = cat_name not in ["Cigarros", "Isqueiros"]
+        session_product = cat_name in ["Essências", "Narguilés"]
+        sessions_per_unit = 5 if cat_name == "Essências" else (10 if cat_name == "Narguilés" else None)
+        open_rosh_price = 25.00 if cat_name == "Essências" else (35.00 if cat_name == "Narguilés" else None)
         products.append(
             {
                 "sku": sku,
@@ -156,6 +160,10 @@ def build_products(rng: random.Random, cat_id_map):
                 "visible_in_marketplace": rng.random() > 0.08,
                 "type": "SIMPLES",
                 "kit_component_eligible": False,
+                "available_for_table": available_for_table,
+                "session_product": session_product,
+                "sessions_per_unit": sessions_per_unit,
+                "open_rosh_price": open_rosh_price,
             }
         )
     return products
@@ -247,23 +255,27 @@ def main():
         statements.append(
             "INSERT INTO product (sku, name, category, category_id, brand, sale_price, cost_price, "
             "markup_percent, original_price, on_sale, type, unit, status, active, visible_in_pos, "
-            "visible_in_marketplace, barcode, kit_component_eligible) VALUES ("
+            "visible_in_marketplace, barcode, kit_component_eligible, available_for_table, "
+            "session_product, sessions_per_unit, open_rosh_price) VALUES ("
             f"{sqs(p['sku'])}, {sqs(p['name'])}, {sqs(p['category'])}, {p['category_id']}, "
             f"{sqs(p['brand'])}, {sqn(p['sale_price'])}, {sqn(p['cost_price'])}, {sqn(p['markup_percent'])}, "
             f"{sqn(p['original_price'])}, {sqb(p['on_sale'])}, 'SIMPLES', 'UN', 'ATIVO', TRUE, "
             f"{sqb(p['visible_in_pos'])}, {sqb(p['visible_in_marketplace'])}, {sqs(p['barcode'])}, "
-            f"{sqb(p['kit_component_eligible'])});"
+            f"{sqb(p['kit_component_eligible'])}, {sqb(p['available_for_table'])}, "
+            f"{sqb(p['session_product'])}, {sqn(p['sessions_per_unit'])}, {sqn(p['open_rosh_price'])});"
         )
     statements.append("")
 
     for k in kits:
+        avail_table = k["category"] not in ["Cigarros", "Isqueiros"]
         statements.append(
             "INSERT INTO product (sku, name, category, category_id, brand, sale_price, cost_price, "
             "markup_percent, type, unit, status, active, visible_in_pos, visible_in_marketplace, "
-            "kit_component_eligible) VALUES ("
+            "kit_component_eligible, available_for_table, session_product, sessions_per_unit, "
+            "open_rosh_price) VALUES ("
             f"{sqs(k['sku'])}, {sqs(k['name'])}, {sqs(k['category'])}, {k['category_id']}, "
             f"{sqs(k['brand'])}, {sqn(k['sale_price'])}, {sqn(k['cost_price'])}, {sqn(k['markup_percent'])}, "
-            f"'KIT', 'UN', 'ATIVO', TRUE, TRUE, TRUE, FALSE);"
+            f"'KIT', 'UN', 'ATIVO', TRUE, TRUE, TRUE, FALSE, {sqb(avail_table)}, FALSE, NULL, NULL);"
         )
         for comp in k["components"]:
             statements.append(
