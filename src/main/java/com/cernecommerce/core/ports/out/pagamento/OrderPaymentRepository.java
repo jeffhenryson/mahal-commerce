@@ -31,6 +31,18 @@ public interface OrderPaymentRepository {
     BigDecimal sumCapturedAmountBySessionIdAndMethod(Long sessionId, PaymentMethod method);
 
     /**
+     * Soma dos pagamentos {@code REFUNDED} de um método, entre os pedidos da sessão — o que
+     * <b>saiu</b> da gaveta por estorno (PDV-C018). Zero quando não houve nenhum, nunca
+     * {@code null}.
+     *
+     * <p>Precisa existir como consulta própria justamente por causa da regra append-only descrita
+     * acima: o estorno é uma linha nova e a {@code CAPTURED} original permanece, então
+     * {@link #sumCapturedAmountBySessionIdAndMethod} sozinha descreve tudo que entrou e nada do
+     * que voltou.</p>
+     */
+    BigDecimal sumRefundedAmountBySessionIdAndMethod(Long sessionId, PaymentMethod method);
+
+    /**
      * Pagamento pelo identificador do gateway (ECM-F004) — usado pelo webhook para checar
      * idempotência antes de processar uma notificação.
      */

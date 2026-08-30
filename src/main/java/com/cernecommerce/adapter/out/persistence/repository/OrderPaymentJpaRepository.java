@@ -35,4 +35,24 @@ public interface OrderPaymentJpaRepository extends JpaRepository<OrderPaymentEnt
             """)
     BigDecimal sumCapturedAmountBySessionIdAndMethod(@Param("sessionId") Long sessionId,
             @Param("method") String method);
+
+    /**
+     * Espelho da soma acima, para o que <b>saiu</b> da gaveta em estorno (PDV-C018).
+     *
+     * <p>Existe porque o ledger é append-only: {@code OrderPayment.refunded} grava uma linha nova
+     * {@code REFUNDED} e <b>deixa a {@code CAPTURED} original de pé</b> — que é o desenho certo
+     * para o histórico, e exatamente por isso a soma de capturados sozinha não descreve a gaveta.
+     * Sem esta subtração, estornar uma venda em dinheiro devolve a cédula ao cliente e o esperado
+     * do fechamento continua contando-a.</p>
+     */
+    @Query("""
+            SELECT COALESCE(SUM(p.amount), 0)
+            FROM OrderPaymentEntity p, OrderEntity o
+            WHERE p.orderId = o.id
+              AND o.sessionId = :sessionId
+              AND p.status = 'REFUNDED'
+              AND p.method = :method
+            """)
+    BigDecimal sumRefundedAmountBySessionIdAndMethod(@Param("sessionId") Long sessionId,
+            @Param("method") String method);
 }

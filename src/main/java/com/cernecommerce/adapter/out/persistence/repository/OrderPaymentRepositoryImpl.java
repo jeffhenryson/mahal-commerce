@@ -55,6 +55,13 @@ public class OrderPaymentRepositoryImpl implements OrderPaymentRepository {
 
     @Override
     @Transactional(readOnly = true)
+    public BigDecimal sumRefundedAmountBySessionIdAndMethod(Long sessionId, PaymentMethod method) {
+        BigDecimal sum = orderPaymentJpaRepository.sumRefundedAmountBySessionIdAndMethod(sessionId, method.name());
+        return sum == null ? BigDecimal.ZERO : sum;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public Optional<OrderPayment> findByGatewayRef(String gatewayRef) {
         return orderPaymentJpaRepository.findByGatewayRef(gatewayRef).map(this::toDomain);
     }

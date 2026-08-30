@@ -119,4 +119,22 @@ public record OrderPayment(Long id, Long orderId, PaymentMethod method, BigDecim
         return new OrderPayment(id, orderId, method, amount, PaymentStatus.CAPTURED, installments,
                 gatewayRef, capturedAt, capturedAt, createdAt);
     }
+
+    /**
+     * Encerra uma cobrança {@link PaymentStatus#PENDING} que nunca vai ser confirmada (PDV-C015) —
+     * o pedido montado no app e pago no balcão. Atualiza a MESMA linha, como
+     * {@link #confirmCaptured}, e pela mesma razão de fundo: <b>nenhum dinheiro se moveu</b>.
+     *
+     * <p>A regra append-only do ledger existe para movimento de dinheiro — captura e estorno são
+     * eventos, e evento não se apaga. Uma cobrança em aberto não é um evento, é um estado; e uma
+     * linha {@code CANCELLED} nova ao lado da {@code PENDING} deixaria a {@code PENDING} de pé,
+     * que é exatamente o que este método existe para não deixar.</p>
+     */
+    public OrderPayment cancelled() {
+        if (status != PaymentStatus.PENDING) {
+            throw new IllegalArgumentException("só se cancela uma cobrança PENDING");
+        }
+        return new OrderPayment(id, orderId, method, amount, PaymentStatus.CANCELLED, installments,
+                gatewayRef, authorizedAt, null, createdAt);
+    }
 }

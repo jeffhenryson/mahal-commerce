@@ -15,5 +15,16 @@ public enum PaymentStatus {
     /** Dinheiro efetivamente recebido/confirmado. */
     CAPTURED,
     REFUNDED,
-    FAILED
+    FAILED,
+    /**
+     * Cobrança encerrada sem nunca ter recebido dinheiro (PDV-C015) — o caso do pedido montado no
+     * app e pago no balcão: a cobrança de gateway criada no checkout não vai ser confirmada por
+     * webhook nenhum, e deixá-la {@link #PENDING} para sempre descreveria uma cobrança em aberto
+     * que não existe.
+     *
+     * <p>Não é {@link #FAILED}: ali o gateway recusou, e é assim que a linha aparece numa
+     * investigação de pagamento. Não é {@link #REFUNDED}: estorno é dinheiro que entrou e voltou.
+     * Aqui o dinheiro nunca passou por este caminho.</p>
+     */
+    CANCELLED
 }
