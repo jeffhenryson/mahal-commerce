@@ -6,6 +6,7 @@ import com.cernecommerce.core.domain.model.pdv.CashRegisterSession;
 import com.cernecommerce.core.ports.out.pdv.CashRegisterRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,10 +22,21 @@ public class CashRegisterRepositoryImpl implements CashRegisterRepository {
         this.cashRegisterSessionJpaRepository = cashRegisterSessionJpaRepository;
     }
 
+    /**
+     * PDV-C013 — {@code PageRequest.of(page, size)} vinha <b>sem {@code Sort}</b>. Paginação sem
+     * {@code ORDER BY} não tem ordem determinística: o Postgres pode devolver a mesma sessão em
+     * duas páginas e omitir outra, e o cliente nunca saberia. É a mesma armadilha que EST-C012
+     * corrigiu no ledger de estoque.
+     *
+     * <p>Ordena por {@code id DESC} — chave única e monotônica, então o desempate é dispensável
+     * (ao contrário do ledger, onde {@code created_at} repetia dentro da mesma transação). Mais
+     * recentes primeiro, como {@code /pdv/sessions/&#123;id&#125;/sales} e a listagem de mesas.</p>
+     */
     @Override
     @Transactional(readOnly = true)
     public PageResult<CashRegisterSession> findAll(int page, int size) {
-        Page<CashRegisterSessionEntity> result = cashRegisterSessionJpaRepository.findAll(PageRequest.of(page, size));
+        Page<CashRegisterSessionEntity> result = cashRegisterSessionJpaRepository
+                .findAll(PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "id")));
         return new PageResult<>(result.getContent().stream().map(this::toDomain).toList(),
                 page, size, result.getTotalElements(), result.getTotalPages());
     }

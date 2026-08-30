@@ -261,12 +261,16 @@ class CoreBeanConfig {
             CashMovementRepository cashMovementRepository, OrderRepository orderRepository,
             OrderPaymentRepository orderPaymentRepository, EstoqueUseCase estoqueUseCase,
             CashbackUseCase cashbackUseCase,
+            // PDV-C005 — só para barrar o fechamento de caixa com mesa aberta. É o port, e não o
+            // ComandaService: aquele já depende deste, e a seta contrária fecharia um ciclo.
+            ComandaRepository comandaRepository,
             // Teto de desconto por pedido (PDV-F004). Acima dele, 409 em vez de um segundo nível de
             // permissão — dois níveis só criariam a tentação de distribuir o maior. Migra para
             // system_config junto com o painel de configuração.
             @Value("${pdv.sale.max-discount-percent:10}") BigDecimal maxDiscountPercent) {
         return new PdvService(cashRegisterRepository, cashMovementRepository, orderRepository,
-                orderPaymentRepository, estoqueUseCase, cashbackUseCase, maxDiscountPercent);
+                orderPaymentRepository, estoqueUseCase, cashbackUseCase, comandaRepository,
+                maxDiscountPercent);
     }
 
     @Bean
@@ -277,9 +281,13 @@ class CoreBeanConfig {
     @Bean
     ComandaUseCase comandaUseCase(ComandaRepository comandaRepository, EstoqueUseCase estoqueUseCase,
             OrderRepository orderRepository, OrderPaymentRepository orderPaymentRepository,
-            CashbackUseCase cashbackUseCase, PdvService pdvService) {
+            CashbackUseCase cashbackUseCase, PdvService pdvService,
+            // PDV-F015 — os 10% do garçom. Configuração e não constante porque é o costume do
+            // salão, não uma lei; zero desliga a cobrança sem mexer em código. Migra para
+            // system_config junto com o teto de desconto, quando o painel existir.
+            @Value("${pdv.comanda.service-fee-percent:10}") BigDecimal serviceFeePercent) {
         return new ComandaService(comandaRepository, estoqueUseCase, orderRepository,
-                orderPaymentRepository, cashbackUseCase, pdvService);
+                orderPaymentRepository, cashbackUseCase, pdvService, serviceFeePercent);
     }
 
     @Bean

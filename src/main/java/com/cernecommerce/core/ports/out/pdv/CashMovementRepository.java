@@ -1,9 +1,9 @@
 package com.cernecommerce.core.ports.out.pdv;
 
+import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.pdv.CashMovement;
 
 import java.math.BigDecimal;
-import java.util.List;
 
 /**
  * Port de saída para o ledger de movimentos de caixa (PDV-F002).
@@ -16,8 +16,8 @@ public interface CashMovementRepository {
 
     CashMovement save(CashMovement movement);
 
-    /** Movimentos da sessão, na ordem em que aconteceram. */
-    List<CashMovement> findBySessionId(Long sessionId);
+    /** Movimentos da sessão, na ordem em que aconteceram. Paginado desde PDV-C012. */
+    PageResult<CashMovement> findBySessionId(Long sessionId, int page, int size);
 
     /**
      * Efeito líquido dos movimentos no saldo da gaveta: {@code suprimentos − sangrias}.

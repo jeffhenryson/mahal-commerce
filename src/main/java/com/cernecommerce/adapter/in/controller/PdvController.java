@@ -6,6 +6,7 @@ import com.cernecommerce.adapter.in.dtos.request.CashMovementRequest;
 import com.cernecommerce.adapter.in.dtos.request.CloseCashRegisterSessionRequest;
 import com.cernecommerce.adapter.in.dtos.request.OpenCashRegisterSessionRequest;
 import com.cernecommerce.adapter.in.dtos.request.SaleRequest;
+import com.cernecommerce.adapter.in.dtos.request.SettleOnlineOrderRequest;
 import com.cernecommerce.adapter.in.dtos.response.CashMovementResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.CashRegisterSessionResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.OrderResponseDTO;
@@ -155,12 +156,20 @@ public class PdvController {
         return ResponseEntity.status(201).body(cashRegisterConverter.toResponse(movement));
     }
 
-    @Operation(summary = "Lista os movimentos de caixa da sessão")
+    @Operation(summary = "Lista os movimentos de caixa da sessão",
+            description = "Paginado desde PDV-C012 — a rota devolvia a List inteira, sem teto, "
+                    + "contra o resto do módulo. Ordem de lançamento (id crescente), que é a ordem "
+                    + "em que os movimentos aconteceram.")
     @GetMapping("/sessions/{id}/movements")
     @PreAuthorize("hasAuthority('PDV_READ')")
-    public ResponseEntity<List<CashMovementResponseDTO>> listCashMovements(@PathVariable("id") Long sessionId) {
-        return ResponseEntity.ok(
-                cashRegisterConverter.toMovementResponses(pdvUseCase.listCashMovements(sessionId)));
+    public ResponseEntity<PageResult<CashMovementResponseDTO>> listCashMovements(
+            @PathVariable("id") Long sessionId,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "50") @Min(1) @Max(100) int size) {
+        PageResult<CashMovement> result = pdvUseCase.listCashMovements(sessionId, page, size);
+        return ResponseEntity.ok(new PageResult<>(
+                cashRegisterConverter.toMovementResponses(result.content()),
+                result.page(), result.size(), result.totalElements(), result.totalPages()));
     }
 
     @Operation(summary = "Fecha o caixa confrontando o contado com o esperado",
@@ -301,18 +310,24 @@ public class PdvController {
     @Operation(summary = "Liquida no balcão um pedido feito no aplicativo",
             description = "Recebe o pagamento, consome a reserva de estoque e conclui. O canal "
                     + "continua MARKETPLACE — o que muda é a sessão de caixa que passa a responder "
-                    + "pelo dinheiro recebido.")
+                    + "pelo dinheiro recebido. **PDV-C015: a rota passou a exigir corpo** — o "
+                    + "pagamento recebido é registrado como em qualquer outra venda, e a cobrança "
+                    + "de gateway aberta no checkout é encerrada. `payments` tem que somar "
+                    + "EXATAMENTE o líquido: pedido de marketplace não tem onde guardar troco.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Liquidado", content = @Content(schema = @Schema(implementation = OrderResponseDTO.class))),
+            @ApiResponse(responseCode = "400", description = "Pagamento insuficiente, ou acima do líquido (aqui não há troco)", content = @Content),
             @ApiResponse(responseCode = "403", description = "A sessão é de outro operador", content = @Content),
             @ApiResponse(responseCode = "404", description = "Sessão ou pedido não encontrado", content = @Content),
-            @ApiResponse(responseCode = "409", description = "Sessão encerrada, ou pedido que não está aguardando pagamento", content = @Content)
+            @ApiResponse(responseCode = "409", description = "Sessão encerrada, pedido que não está aguardando pagamento, ou pagamento não-dinheiro acima do total", content = @Content)
     })
     @PostMapping("/sessions/{id}/orders/{orderId}/settle")
     @PreAuthorize("hasAuthority('PDV_SALE_MANAGE')")
     public ResponseEntity<OrderResponseDTO> settleOnlineOrder(@PathVariable("id") Long sessionId,
-            @PathVariable("orderId") Long orderId, Authentication authentication) {
-        Order order = pdvUseCase.settleOnlineOrder(sessionId, orderId, authentication.getName());
+            @PathVariable("orderId") Long orderId,
+            @Valid @RequestBody SettleOnlineOrderRequest request, Authentication authentication) {
+        Order order = pdvUseCase.settleOnlineOrder(sessionId, orderId,
+                orderConverter.toPaymentCommands(request.getPayments()), authentication.getName());
         publisher.publishEvent(AuditEvent.of(EventType.STOCK_MOVEMENT_REGISTERED, authentication.getName(),
                 Map.of("origin", "PDV_SETTLE_ONLINE",
                         "sessionId", sessionId,

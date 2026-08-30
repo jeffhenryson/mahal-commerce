@@ -1,16 +1,23 @@
 package com.cernecommerce.adapter.out.persistence.repository;
 
 import com.cernecommerce.adapter.out.persistence.entity.CashMovementEntity;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
-import java.util.List;
 
 public interface CashMovementJpaRepository extends JpaRepository<CashMovementEntity, Long> {
 
-    List<CashMovementEntity> findBySessionIdOrderByIdAsc(Long sessionId);
+    /**
+     * Ordem por {@code id}, não por {@code createdAt}: o ledger é append-only e a chave é
+     * monotônica, enquanto vários movimentos da mesma transação compartilham o timestamp — a mesma
+     * armadilha de ordenação instável que EST-C012 corrigiu no ledger de estoque. Paginado desde
+     * PDV-C012.
+     */
+    Page<CashMovementEntity> findBySessionIdOrderByIdAsc(Long sessionId, Pageable pageable);
 
     /**
      * Efeito líquido na gaveta. O {@code CASE} aplica o sinal do tipo — a coluna guarda sempre

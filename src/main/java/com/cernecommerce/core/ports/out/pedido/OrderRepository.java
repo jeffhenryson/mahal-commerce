@@ -50,6 +50,18 @@ public interface OrderRepository {
     BigDecimal sumConcludedNetAmountBySessionId(Long sessionId);
 
     /**
+     * Troco devolvido pelos pedidos da sessão — o dinheiro que saiu da gaveta na própria venda
+     * (PDV-C017).
+     *
+     * <p>É a contrapartida obrigatória de somar pagamento em {@code DINHEIRO} pelo valor
+     * <b>entregue</b> pelo cliente. Ver o javadoc da query em {@code OrderJpaRepository} para o
+     * porquê de não haver filtro de status.</p>
+     *
+     * @return zero quando nenhuma venda deu troco — nunca {@code null}
+     */
+    BigDecimal sumChangeAmountBySessionId(Long sessionId);
+
+    /**
      * Próximo número de pedido, de sequência dedicada.
      *
      * <p>Não deriva do id: {@code BIGSERIAL} deixa buracos quando uma transação faz rollback, e

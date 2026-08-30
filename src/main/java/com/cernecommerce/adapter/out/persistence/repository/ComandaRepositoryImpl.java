@@ -2,14 +2,18 @@ package com.cernecommerce.adapter.out.persistence.repository;
 
 import com.cernecommerce.adapter.out.persistence.entity.ComandaEntity;
 import com.cernecommerce.adapter.out.persistence.entity.ComandaItemEntity;
+import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.pdv.Comanda;
 import com.cernecommerce.core.domain.model.pdv.ComandaItem;
 import com.cernecommerce.core.domain.model.pdv.ComandaStatus;
 import com.cernecommerce.core.domain.model.pedido.ConsumptionMode;
 import com.cernecommerce.core.ports.out.pdv.ComandaRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -32,12 +36,40 @@ public class ComandaRepositoryImpl implements ComandaRepository {
         return comandaJpaRepository.findById(id).map(this::toDomain);
     }
 
+    /**
+     * PDV-C008 — leitura travada, obrigatória em todo caminho que muda a comanda. Sem
+     * {@code readOnly}: um SELECT FOR UPDATE dentro de transação marcada como somente-leitura é
+     * contraditório, e alguns drivers a rejeitam.
+     */
+    @Override
+    public Optional<Comanda> findByIdForUpdate(Long id) {
+        return comandaJpaRepository.findByIdForUpdate(id).map(this::toDomain);
+    }
+
+    /**
+     * PDV-C009 — ID-first + JOIN FETCH, o padrão de {@code docs/persistence.md}: a primeira consulta
+     * pagina os ids, a segunda traz as comandas da página com os itens de uma vez. Antes eram
+     * {@code 1 + N} consultas, uma por mesa aberta, porque {@code toDomain} toca a coleção
+     * {@code LAZY}.
+     */
     @Override
     @Transactional(readOnly = true)
-    public List<Comanda> findOpenBySessionId(Long sessionId) {
-        return comandaJpaRepository
-                .findBySessionIdAndStatusOrderByIdDesc(sessionId, ComandaStatus.ABERTA.name())
+    public PageResult<Comanda> findOpen(Long sessionId, String warehouseCode, int page, int size) {
+        Page<Long> idPage = comandaJpaRepository.findOpenIds(ComandaStatus.ABERTA.name(), sessionId,
+                warehouseCode, PageRequest.of(page, size));
+        // Sem esta guarda o `IN :ids` sairia vazio — desnecessário, e nem todo banco o aceita.
+        if (idPage.isEmpty()) {
+            return new PageResult<>(List.of(), page, size, idPage.getTotalElements(), idPage.getTotalPages());
+        }
+        List<Comanda> content = comandaJpaRepository.findAllByIdsWithItems(idPage.getContent())
                 .stream().map(this::toDomain).toList();
+        return new PageResult<>(content, page, size, idPage.getTotalElements(), idPage.getTotalPages());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<Long> findOpenIdsBySessionId(Long sessionId) {
+        return comandaJpaRepository.findOpenIdsBySessionId(sessionId, ComandaStatus.ABERTA.name());
     }
 
     @Override
@@ -64,8 +96,21 @@ public class ComandaRepositoryImpl implements ComandaRepository {
         Map<Long, ComandaItem> incoming = comanda.items().stream()
                 .filter(item -> item.id() != null)
                 .collect(Collectors.toMap(ComandaItem::id, Function.identity()));
-        // Nada remove item de comanda hoje; o orphanRemoval fica correto se o endpoint aparecer.
-        entity.getItems().removeIf(e -> e.getId() != null && !incoming.containsKey(e.getId()));
+        // PDV-F012 — a remoção de linha existe desde `DELETE /pdv/comandas/{id}/items/{itemId}`, e
+        // a ORDEM em que as órfãs saem importa: `linked_item_id` é FK auto-referente (V114), e
+        // apagar a linha PAI antes da TROCA que aponta para ela viola a constraint. Removendo em
+        // ordem DECRESCENTE de id, a filha sempre sai primeiro — o domínio garante `id do pai < id
+        // da filha`, porque `resolveLinkedItem` exige que a linha de origem já exista na comanda no
+        // momento do lançamento.
+        //
+        // ⚠️ Nenhum teste pega isto: `linkedItemId` é mapeado como coluna Long simples, não
+        // @ManyToOne, então o schema de `ddl-auto` (H2, perfil dev das ITs) NÃO tem a FK — só o
+        // Postgres real, via migration. A correção é por construção, não por cobertura.
+        List<ComandaItemEntity> orfas = entity.getItems().stream()
+                .filter(e -> e.getId() != null && !incoming.containsKey(e.getId()))
+                .sorted(Comparator.comparing(ComandaItemEntity::getId).reversed())
+                .toList();
+        orfas.forEach(entity.getItems()::remove);
 
         Map<Long, ComandaItemEntity> persisted = entity.getItems().stream()
                 .filter(e -> e.getId() != null)
@@ -86,6 +131,8 @@ public class ComandaRepositoryImpl implements ComandaRepository {
             itemEntity.setMode(item.mode().name());
             itemEntity.setCourtesy(item.courtesy());
             itemEntity.setLinkedItemId(item.linkedItemId());
+            itemEntity.setNotes(item.notes());
+            itemEntity.setSurchargeAmount(item.surchargeAmount());
         }
         return toDomain(comandaJpaRepository.save(entity));
     }
@@ -103,6 +150,6 @@ public class ComandaRepositoryImpl implements ComandaRepository {
                 // Dado legado (linha anterior a PDV-F010) lê como NORMAL — o DEFAULT da migration
                 // cobre as linhas já gravadas, e este null-check cobre carga direta.
                 e.getMode() == null ? ConsumptionMode.NORMAL : ConsumptionMode.valueOf(e.getMode()),
-                e.isCourtesy(), e.getLinkedItemId());
+                e.isCourtesy(), e.getLinkedItemId(), e.getNotes(), e.getSurchargeAmount());
     }
 }

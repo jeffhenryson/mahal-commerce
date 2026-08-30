@@ -61,8 +61,8 @@ public interface PdvUseCase {
     CashMovement registerCashMovement(Long sessionId, CashMovementType type, BigDecimal amount,
             String reason, String username);
 
-    /** Movimentos de uma sessão, na ordem em que aconteceram. */
-    List<CashMovement> listCashMovements(Long sessionId);
+    /** Movimentos de uma sessão, na ordem em que aconteceram. Paginado desde PDV-C012. */
+    PageResult<CashMovement> listCashMovements(Long sessionId, int page, int size);
 
     /**
      * Fecha o caixa confrontando o contado com o esperado.
@@ -166,14 +166,28 @@ public interface PdvUseCase {
      * <b>consome a reserva</b> em vez de dar baixa nova — dar baixa aqui debitaria a mercadoria duas
      * vezes.</p>
      *
+     * <p><b>O pagamento recebido é registrado</b> (PDV-C015), como em qualquer outro recebimento do
+     * módulo: sem isso o dinheiro entrava na gaveta e o ledger não sabia, e o fechamento daquele
+     * caixa acusava sobra sem dono. A cobrança de gateway aberta no checkout é encerrada na mesma
+     * transação — pago no balcão, nenhum webhook vai confirmá-la.</p>
+     *
+     * <p><b>Valor exato, sem troco:</b> o canal permanece {@code MARKETPLACE} e {@code Order} não
+     * admite {@code changeAmount} ali. O operador lança o que fica na gaveta.</p>
+     *
+     * @param payments pelo menos uma linha, mesmo shape da venda de balcão — várias linhas =
+     *        pagamento dividido
      * @throws com.cernecommerce.core.domain.exception.pedido.OrderNotFoundException se o pedido não
      *         existir
      * @throws com.cernecommerce.core.domain.exception.pedido.InvalidOrderStatusTransitionException
      *         se o pedido não estiver aguardando pagamento
      * @throws com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionNotOwnedException
      *         se a sessão não pertencer a quem está liquidando
+     * @throws com.cernecommerce.core.domain.exception.pagamento.InsufficientPaymentException
+     *         se a soma dos pagamentos não cobrir o líquido do pedido
+     * @throws com.cernecommerce.core.domain.exception.pagamento.ChangeNotSupportedException
+     *         se a soma passar do líquido — aqui não há onde guardar troco
      */
-    Order settleOnlineOrder(Long sessionId, Long orderId, String username);
+    Order settleOnlineOrder(Long sessionId, Long orderId, List<PaymentCommand> payments, String username);
 
     /**
      * O que o chamador informa por item de venda: <b>não</b> inclui preço.

@@ -1,9 +1,11 @@
 package com.cernecommerce.core.service;
 
+import com.cernecommerce.core.domain.exception.pagamento.ChangeNotSupportedException;
 import com.cernecommerce.core.domain.exception.pagamento.InsufficientPaymentException;
 import com.cernecommerce.core.domain.exception.pagamento.PaymentExceedsOrderTotalException;
 import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionAlreadyOpenException;
 import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionClosedException;
+import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionHasOpenComandasException;
 import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionNotFoundException;
 import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionNotOwnedException;
 import com.cernecommerce.core.domain.exception.pdv.NoOpenCashRegisterSessionException;
@@ -15,6 +17,7 @@ import com.cernecommerce.core.domain.model.cashback.CashbackRate;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.pagamento.OrderPayment;
 import com.cernecommerce.core.domain.model.pagamento.PaymentMethod;
+import com.cernecommerce.core.domain.model.pagamento.PaymentStatus;
 import com.cernecommerce.core.domain.model.pdv.CashMovement;
 import com.cernecommerce.core.domain.model.pdv.CashMovementType;
 import com.cernecommerce.core.domain.model.pdv.CashRegisterSession;
@@ -28,6 +31,7 @@ import com.cernecommerce.core.ports.in.PdvUseCase;
 import com.cernecommerce.core.ports.out.pagamento.OrderPaymentRepository;
 import com.cernecommerce.core.ports.out.pdv.CashMovementRepository;
 import com.cernecommerce.core.ports.out.pdv.CashRegisterRepository;
+import com.cernecommerce.core.ports.out.pdv.ComandaRepository;
 import com.cernecommerce.core.ports.out.pedido.OrderRepository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -44,6 +48,12 @@ public class PdvService implements PdvUseCase {
     private final OrderPaymentRepository orderPaymentRepository;
     private final EstoqueUseCase estoqueUseCase;
     private final CashbackUseCase cashbackUseCase;
+    /**
+     * PDV-C005 — só para barrar o fechamento com mesa aberta. É o <b>port</b>, não o
+     * {@code ComandaService}: este service já é dependência daquele, e inverter a seta criaria um
+     * ciclo de beans.
+     */
+    private final ComandaRepository comandaRepository;
 
     /** Teto de desconto por pedido, em percentual sobre o bruto. */
     private final BigDecimal maxDiscountPercent;
@@ -51,13 +61,15 @@ public class PdvService implements PdvUseCase {
     public PdvService(CashRegisterRepository cashRegisterRepository,
             CashMovementRepository cashMovementRepository, OrderRepository orderRepository,
             OrderPaymentRepository orderPaymentRepository, EstoqueUseCase estoqueUseCase,
-            CashbackUseCase cashbackUseCase, BigDecimal maxDiscountPercent) {
+            CashbackUseCase cashbackUseCase, ComandaRepository comandaRepository,
+            BigDecimal maxDiscountPercent) {
         this.cashRegisterRepository = cashRegisterRepository;
         this.cashMovementRepository = cashMovementRepository;
         this.orderRepository = orderRepository;
         this.orderPaymentRepository = orderPaymentRepository;
         this.estoqueUseCase = estoqueUseCase;
         this.cashbackUseCase = cashbackUseCase;
+        this.comandaRepository = comandaRepository;
         this.maxDiscountPercent = maxDiscountPercent;
     }
 
@@ -109,9 +121,9 @@ public class PdvService implements PdvUseCase {
 
     @Override
     @Transactional(readOnly = true)
-    public List<CashMovement> listCashMovements(Long sessionId) {
+    public PageResult<CashMovement> listCashMovements(Long sessionId, int page, int size) {
         getSession(sessionId);
-        return cashMovementRepository.findBySessionId(sessionId);
+        return cashMovementRepository.findBySessionId(sessionId, page, size);
     }
 
     @Override
@@ -124,12 +136,42 @@ public class PdvService implements PdvUseCase {
         // Fechar NÃO exige ser o dono: a conferência costuma ser do gerente, e é por isso que
         // PDV_SESSION_CLOSE existe separada de PDV_SESSION_MANAGE.
         //
+        // PDV-C005: mas mesa aberta barra o fechamento, e esta é a única regra do ciclo de caixa
+        // que BLOQUEIA em vez de apenas registrar. A assimetria é deliberada. Divergência de
+        // contagem não bloqueia porque é um achado — o dinheiro já é o que é, e esconder a
+        // diferença seria pior. Mesa aberta é o contrário: é uma porta que ainda dá para fechar
+        // agora e não dará mais depois. ComandaService.addItem e cancelComanda exigem a sessão de
+        // origem ABERTA, então uma comanda que sobreviva a este fechamento passa a responder 409
+        // CASH_REGISTER_SESSION_CLOSED para sempre — a mesa congela, e o estoque já debitado item
+        // a item fica sem nenhum caminho de devolução. Até 2026-08-28 a regra existia só no
+        // cliente (frontend-admin-prod), e o servidor aceitava.
+        List<Long> openComandaIds = comandaRepository.findOpenIdsBySessionId(sessionId);
+        if (!openComandaIds.isEmpty()) {
+            throw new CashRegisterSessionHasOpenComandasException(sessionId, openComandaIds);
+        }
+        //
         // PDV-F006: só DINHEIRO entra na conferência da gaveta. Débito, crédito e PIX não passam
         // pela mão do operador — eles se conferem contra o extrato da adquirente, não contra o
         // contado aqui. Somar tudo (como antes de order_payment existir) faria o fechamento
         // acusar sobra sempre que houvesse venda no cartão.
+        //
+        // PDV-C017/C018: e o esperado tem que contar o que SAIU, não só o que entrou. Até aqui a
+        // fórmula somava entradas e nada mais, e as duas saídas em espécie ficavam de fora:
+        //
+        //   • o TROCO (PDV-C017). `order_payment.amount` em DINHEIRO é o valor ENTREGUE pelo
+        //     cliente, não o retido — é assim que validatePaymentsAndComputeChange deriva o troco,
+        //     e é o valor inteiro que o cliente estendeu que vira a linha de pagamento. A cédula
+        //     do troco volta para a mão dele na mesma hora. Sem subtrair, toda venda em dinheiro
+        //     com troco inflava o esperado exatamente pelo troco, e o operador honesto fechava o
+        //     turno acusando uma FALTA que era só aritmética — todo dia, em toda venda quebrada.
+        //   • o ESTORNO (PDV-C018). O ledger é append-only de propósito: refundOrder grava uma
+        //     linha REFUNDED nova e deixa a CAPTURED original de pé, que é o desenho certo para o
+        //     histórico. A consequência é que a soma dos capturados descreve tudo que entrou e
+        //     nada do que voltou; a cédula devolvida ao cliente continuava contada na gaveta.
         BigDecimal expected = session.openingAmount()
                 .add(orderPaymentRepository.sumCapturedAmountBySessionIdAndMethod(sessionId, PaymentMethod.DINHEIRO))
+                .subtract(orderPaymentRepository.sumRefundedAmountBySessionIdAndMethod(sessionId, PaymentMethod.DINHEIRO))
+                .subtract(orderRepository.sumChangeAmountBySessionId(sessionId))
                 .add(cashMovementRepository.sumSignedAmountBySessionId(sessionId));
 
         // Divergência não bloqueia — é o achado do fechamento, como no balanço de inventário.
@@ -272,9 +314,24 @@ public class PdvService implements PdvUseCase {
 
     @Override
     @Transactional
-    public Order settleOnlineOrder(Long sessionId, Long orderId, String username) {
+    public Order settleOnlineOrder(Long sessionId, Long orderId, List<PaymentCommand> payments,
+            String username) {
         CashRegisterSession session = requireOwnOpenSession(sessionId, username);
         Order order = getOrder(orderId);
+
+        // PDV-C015 — o pagamento é validado ANTES de consumir a reserva, mesma ordem de
+        // registerSale: um pagamento recusado não deveria custar uma reserva consumida que só o
+        // rollback desfaz.
+        //
+        // Valor EXATO, sem troco: o canal continua MARKETPLACE e Order recusa changeAmount
+        // positivo ali (ck_sales_order_change_amount_by_channel). Aceitar o excedente sem ter onde
+        // gravá-lo faria a linha de pagamento afirmar que entrou na gaveta mais do que ficou — o
+        // mesmo defeito que PDV-C017 acabou de tirar do fechamento, entrando de novo por outra
+        // porta. Ver ChangeNotSupportedException.
+        BigDecimal change = validatePaymentsAndComputeChange(payments, order.netAmount());
+        if (change != null && change.signum() > 0) {
+            throw new ChangeNotSupportedException(order.netAmount().add(change), order.netAmount());
+        }
 
         // A reserva já segurou a mercadoria desde o checkout: consumi-la converte o reservado em
         // saída real. Chamar adjustStock(SAIDA) aqui debitaria o estoque duas vezes.
@@ -286,8 +343,39 @@ public class PdvService implements PdvUseCase {
         Order saved = orderRepository.save(order
                 .withSession(session.id())
                 .concluded(orderRepository.nextOrderNumber(), null, Instant.now()));
+
+        // PDV-C015 — o que faltava: até aqui a liquidação era o ÚNICO caminho de recebimento do
+        // projeto que não gravava linha de pagamento. O dinheiro entrava na gaveta e o ledger não
+        // sabia: closeSession soma order_payment, então o esperado não contava esta cédula e o
+        // fechamento acusava SOBRA sem dono; /payment-totals não via o valor; e o comprovante saía
+        // com a lista de pagamentos vazia.
+        for (PaymentCommand payment : payments) {
+            orderPaymentRepository.save(OrderPayment.captured(saved.id(), payment.method(),
+                    payment.amount(), payment.installments()));
+        }
+        // E a cobrança de gateway aberta no checkout (ShopService grava uma PENDING/GATEWAY_PIX em
+        // todo pedido de marketplace) é encerrada: pago no balcão, nenhum webhook vai confirmá-la,
+        // e deixá-la PENDING para sempre descreveria uma cobrança em aberto que não existe.
+        cancelPendingGatewayCharges(saved.id());
+
         cashbackUseCase.recordEarnedForOrder(saved);
         return saved;
+    }
+
+    /**
+     * Encerra as cobranças ainda {@code PENDING} do pedido (PDV-C015).
+     *
+     * <p>Atualiza a própria linha em vez de acrescentar uma — ver o javadoc de
+     * {@link OrderPayment#cancelled()}: uma linha nova ao lado deixaria a {@code PENDING} de pé,
+     * que é o que este passo existe para não deixar. Só {@code PENDING} é tocada; captura e
+     * estorno são eventos de dinheiro e continuam intocáveis.</p>
+     */
+    private void cancelPendingGatewayCharges(Long orderId) {
+        for (OrderPayment payment : orderPaymentRepository.findByOrderId(orderId)) {
+            if (payment.status() == PaymentStatus.PENDING) {
+                orderPaymentRepository.save(payment.cancelled());
+            }
+        }
     }
 
     // ── Apoio ────────────────────────────────────────────────────────────────────────────────

@@ -89,6 +89,9 @@ import com.cernecommerce.core.domain.exception.crm.DuplicateTagNameException;
 import com.cernecommerce.core.domain.exception.crm.TagNotFoundException;
 import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionAlreadyOpenException;
 import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionClosedException;
+import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionHasOpenComandasException;
+import com.cernecommerce.core.domain.exception.pagamento.ChangeNotSupportedException;
+import com.cernecommerce.core.domain.exception.pdv.DiscountExceedsBillException;
 import com.cernecommerce.core.domain.exception.pagamento.InsufficientPaymentException;
 import com.cernecommerce.core.domain.exception.pagamento.PaymentExceedsOrderTotalException;
 import com.cernecommerce.core.domain.exception.pagamento.PaymentGatewayException;
@@ -108,9 +111,18 @@ import com.cernecommerce.core.domain.exception.pdv.LinkedItemRequiredException;
 import com.cernecommerce.core.domain.exception.pdv.NotASessionProductException;
 import com.cernecommerce.core.domain.exception.pdv.NotAnOpenRoshException;
 import com.cernecommerce.core.domain.exception.pdv.NotAvailableForTableException;
+import com.cernecommerce.core.domain.exception.pdv.NotesTooLongException;
 import com.cernecommerce.core.domain.exception.pdv.OpenRoshNotPricedException;
+import com.cernecommerce.core.domain.exception.pdv.SurchargeInvalidException;
+import com.cernecommerce.core.domain.exception.pdv.ComandaDiscountNotAllowedException;
+import com.cernecommerce.core.domain.exception.pdv.ComandaItemNotFoundException;
+import com.cernecommerce.core.domain.exception.pdv.LinkedItemIsChargedException;
+import com.cernecommerce.core.domain.exception.pdv.SurchargeNotAllowedException;
+import com.cernecommerce.core.domain.exception.pdv.SurchargeNotApplicableException;
+import com.cernecommerce.core.domain.exception.pdv.SurchargeOnCourtesyException;
 import com.cernecommerce.core.domain.exception.pdv.NoOpenCashRegisterSessionException;
 import com.cernecommerce.core.domain.exception.pedido.DiscountLimitExceededException;
+import com.cernecommerce.core.domain.exception.pedido.ItemDiscountExceedsGrossException;
 import com.cernecommerce.core.domain.exception.pedido.InvalidOrderStatusTransitionException;
 import com.cernecommerce.core.domain.exception.pedido.InvalidReportPeriodException;
 import com.cernecommerce.core.domain.exception.pedido.OrderNotFoundException;
@@ -898,6 +910,78 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.CONFLICT, ex.getMessage(), "NOT_AN_OPEN_ROSH", req);
     }
 
+    /**
+     * PDV-C005 — fechamento de caixa com mesa ainda aberta. 409 e não 400: o corpo do request está
+     * correto, o que impede é o estado do salão. Única regra do ciclo de caixa que bloqueia em vez
+     * de apenas registrar — divergência de contagem é um achado, mesa aberta é uma porta que não
+     * dará mais para fechar depois.
+     */
+    @ExceptionHandler(CashRegisterSessionHasOpenComandasException.class)
+    public ResponseEntity<ApiError> handleSessionHasOpenComandas(
+            CashRegisterSessionHasOpenComandasException ex, HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "SESSION_HAS_OPEN_COMANDAS", req);
+    }
+
+    /**
+     * PDV-F011 — acréscimo sem {@code PDV_COMANDA_SURCHARGE}. 403 pela simetria com
+     * {@code COURTESY_NOT_ALLOWED}: se lançar linha a zero tem dono, subir o preço à mão também tem.
+     */
+    @ExceptionHandler(ComandaItemNotFoundException.class)
+    public ResponseEntity<ApiError> handleComandaItemNotFound(ComandaItemNotFoundException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.NOT_FOUND, ex.getMessage(), "COMANDA_ITEM_NOT_FOUND", req);
+    }
+
+    /** PDV-F012 — a troca é arrastada; o sabor extra, por ser cobrado, barra a remoção. */
+    @ExceptionHandler(LinkedItemIsChargedException.class)
+    public ResponseEntity<ApiError> handleLinkedItemIsCharged(LinkedItemIsChargedException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "LINKED_ITEM_IS_CHARGED", req);
+    }
+
+    /** PDV-F014 — irmão de COURTESY_NOT_ALLOWED e SURCHARGE_NOT_ALLOWED: abater tem dono. */
+    @ExceptionHandler(ComandaDiscountNotAllowedException.class)
+    public ResponseEntity<ApiError> handleComandaDiscountNotAllowed(ComandaDiscountNotAllowedException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.FORBIDDEN, ex.getMessage(), "COMANDA_DISCOUNT_NOT_ALLOWED", req);
+    }
+
+    @ExceptionHandler(SurchargeNotAllowedException.class)
+    public ResponseEntity<ApiError> handleSurchargeNotAllowed(SurchargeNotAllowedException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.FORBIDDEN, ex.getMessage(), "SURCHARGE_NOT_ALLOWED", req);
+    }
+
+    /** PDV-F011 — acréscimo numa linha que o cliente não paga. Contradição, não caso de borda. */
+    @ExceptionHandler(SurchargeOnCourtesyException.class)
+    public ResponseEntity<ApiError> handleSurchargeOnCourtesy(SurchargeOnCourtesyException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "SURCHARGE_ON_COURTESY", req);
+    }
+
+    /**
+     * PDV-F011 — acréscimo fora de {@code OPEN_ROSH}. Nos demais modos a diferença do sabor caro já
+     * mora no {@code pricing} da variante, e aceitar aqui criaria dois lugares para o mesmo preço.
+     */
+    @ExceptionHandler(SurchargeNotApplicableException.class)
+    public ResponseEntity<ApiError> handleSurchargeNotApplicable(SurchargeNotApplicableException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "SURCHARGE_NOT_APPLICABLE", req);
+    }
+
+    /** PDV-F011 — acréscimo negativo, que seria um desconto entrando pela porta errada. */
+    @ExceptionHandler(SurchargeInvalidException.class)
+    public ResponseEntity<ApiError> handleSurchargeInvalid(SurchargeInvalidException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "SURCHARGE_INVALID", req);
+    }
+
+    /** PDV-F011 — nota acima do limite. Recusa em vez de truncar, para o operador saber. */
+    @ExceptionHandler(NotesTooLongException.class)
+    public ResponseEntity<ApiError> handleNotesTooLong(NotesTooLongException ex, HttpServletRequest req) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "NOTES_TOO_LONG", req);
+    }
+
     /** PDV-F010 — SKU sem disponibilidade para mesa lançado numa comanda. */
     @ExceptionHandler(NotAvailableForTableException.class)
     public ResponseEntity<ApiError> handleNotAvailableForTable(NotAvailableForTableException ex,
@@ -919,10 +1003,37 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.CONFLICT, ex.getMessage(), "DISCOUNT_LIMIT_EXCEEDED", req);
     }
 
+    /**
+     * PDV-C016: mesma família de DISCOUNT_LIMIT_EXCEEDED — o valor é sintaticamente válido e
+     * conflita com o estado do agregado (a conta), não com o formato. 409, como o teto.
+     */
+    @ExceptionHandler(DiscountExceedsBillException.class)
+    public ResponseEntity<ApiError> handleDiscountExceedsBill(DiscountExceedsBillException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "DISCOUNT_EXCEEDS_BILL", req);
+    }
+
+    /** PDV-C016: desconto de linha acima do bruto dela. Mesma família, mesmo 409. */
+    @ExceptionHandler(ItemDiscountExceedsGrossException.class)
+    public ResponseEntity<ApiError> handleItemDiscountExceedsGross(ItemDiscountExceedsGrossException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "ITEM_DISCOUNT_EXCEEDS_GROSS", req);
+    }
+
     /** PDV-F006: mesma família de INSUFFICIENT_STOCK — o request está bem formado, faltou dinheiro. */
     @ExceptionHandler(InsufficientPaymentException.class)
     public ResponseEntity<ApiError> handleInsufficientPayment(InsufficientPaymentException ex, HttpServletRequest req) {
         return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "INSUFFICIENT_PAYMENT", req);
+    }
+
+    /**
+     * PDV-C015: o excedente é do cliente, não do servidor — 400, como INSUFFICIENT_PAYMENT, que é
+     * o mesmo erro pelo outro lado. Não é 409: não há regra de negócio em conflito, o valor
+     * simplesmente não pode ser representado neste canal.
+     */
+    @ExceptionHandler(ChangeNotSupportedException.class)
+    public ResponseEntity<ApiError> handleChangeNotSupported(ChangeNotSupportedException ex, HttpServletRequest req) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "CHANGE_NOT_SUPPORTED", req);
     }
 
     /** PDV-F006: mesma família de DISCOUNT_LIMIT_EXCEEDED — conflita com uma regra de negócio, não é malformado. */

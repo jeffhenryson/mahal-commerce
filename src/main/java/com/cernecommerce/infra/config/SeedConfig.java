@@ -46,6 +46,11 @@ public class SeedConfig {
         "FINANCEIRO_READ", "FINANCEIRO_CASH_FLOW_MANAGE", "LOGISTICA_READ",
         "PDV_READ", "PDV_SALE_MANAGE", "PDV_SALE_DISCOUNT",
         "PDV_SESSION_MANAGE", "PDV_SESSION_CLOSE", "PDV_COMANDA_MANAGE", "PDV_COMANDA_COURTESY",
+        // PDV-F011 — como a COURTESY, só no admin: acréscimo manual é decisão da casa (V117).
+        "PDV_COMANDA_SURCHARGE",
+        // PDV-F014 — mesma família: abater da conta no fechamento da mesa é alçada, não operação
+        // de turno (V119). Separada de PDV_SALE_DISCOUNT, que é a alçada do balcão.
+        "PDV_COMANDA_DISCOUNT",
         "ORDER_READ", "ORDER_FULFILL", "ORDER_CANCEL", "ORDER_REFUND"
     };
 

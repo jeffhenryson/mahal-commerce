@@ -66,6 +66,10 @@ public class OrderDTOConverter {
         dto.setDiscountAmount(order.discountAmount());
         dto.setCashbackRedeemed(order.cashbackRedeemed());
         dto.setNetAmount(order.netAmount());
+        // PDV-F015 — os dois lado a lado de propósito: netAmount é o que a loja vendeu,
+        // totalPayable é o que o cliente pagou. Fora da mesa coincidem.
+        dto.setServiceFeeAmount(order.serviceFeeAmount());
+        dto.setTotalPayable(order.totalPayable());
         dto.setChangeAmount(order.changeAmount());
         dto.setCancelReason(order.cancelReason());
         dto.setCreatedAt(order.createdAt());
@@ -133,6 +137,10 @@ public class OrderDTOConverter {
         dto.setGrossAmount(order.grossAmount());
         dto.setDiscountAmount(order.discountAmount());
         dto.setNetAmount(order.netAmount());
+        // PDV-F015 — os dois lado a lado de propósito: netAmount é o que a loja vendeu,
+        // totalPayable é o que o cliente pagou. Fora da mesa coincidem.
+        dto.setServiceFeeAmount(order.serviceFeeAmount());
+        dto.setTotalPayable(order.totalPayable());
         dto.setChangeAmount(order.changeAmount());
         dto.setPayments(payments.stream().map(this::toResponse).toList());
         return dto;
@@ -166,6 +174,10 @@ public class OrderDTOConverter {
         dto.setDiscountAmount(order.discountAmount());
         dto.setCashbackRedeemed(order.cashbackRedeemed());
         dto.setNetAmount(order.netAmount());
+        // PDV-F015 — os dois lado a lado de propósito: netAmount é o que a loja vendeu,
+        // totalPayable é o que o cliente pagou. Fora da mesa coincidem.
+        dto.setServiceFeeAmount(order.serviceFeeAmount());
+        dto.setTotalPayable(order.totalPayable());
         dto.setChangeAmount(order.changeAmount());
         dto.setMarginAmount(totalMargin(order));
         dto.setCancelReason(order.cancelReason());
@@ -202,8 +214,10 @@ public class OrderDTOConverter {
         dto.setMarginAmount(item.marginAmount());
         dto.setCashbackPercent(item.cashbackPercent());
         dto.setCashbackAmount(item.cashbackAmount());
-        dto.setMode(item.mode().name());
+        dto.setMode(item.mode());
         dto.setCourtesy(item.courtesy());
+        dto.setNotes(item.notes());
+        dto.setSurchargeAmount(item.surchargeAmount());
         return dto;
     }
 

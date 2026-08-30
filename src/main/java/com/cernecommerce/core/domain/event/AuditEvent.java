@@ -60,6 +60,14 @@ public record AuditEvent(EventType type, String username, Instant timestamp, Map
         CUSTOMER_LIST_EXPORTED,
         // PDV — ciclo de caixa
         CASH_SESSION_OPENED, CASH_SESSION_CLOSED, CASH_MOVEMENT_REGISTERED,
+        // PDV — comanda de mesa (PDV-C014). Até aqui a comanda inteira andava pendurada em
+        // STOCK_MOVEMENT_REGISTERED, discriminada por `origin`. No lançamento e no cancelamento
+        // isso era ao menos fiel (o estoque de fato se move); no FECHAMENTO não era — closeComanda
+        // não toca em saldo, e o evento entrava na trilha de movimentação de estoque descrevendo
+        // algo que não aconteceu. Abrir mesa, por sua vez, não deixava rastro nenhum, ao contrário
+        // de abrir caixa. O rastro item a item continua onde sempre esteve: em stock_movement.
+        COMANDA_OPENED, COMANDA_CLOSED, COMANDA_CANCELLED,
+        COMANDA_ITEM_ADDED, COMANDA_ITEM_REMOVED,
         // Pedido
         ORDER_STATUS_CHANGED, ORDER_CANCELLED, ORDER_REFUNDED,
         // Cashback (CRM-F003)

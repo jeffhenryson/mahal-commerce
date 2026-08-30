@@ -7,9 +7,13 @@ import com.cernecommerce.adapter.in.dtos.request.CloseComandaRequest;
 import com.cernecommerce.adapter.in.dtos.request.OpenComandaRequest;
 import com.cernecommerce.adapter.in.dtos.response.ComandaResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.OrderResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.ServiceFeeResponseDTO;
 import com.cernecommerce.core.domain.event.AuditEvent;
 import com.cernecommerce.core.domain.event.AuditEvent.EventType;
+import com.cernecommerce.core.domain.exception.pdv.ComandaDiscountNotAllowedException;
 import com.cernecommerce.core.domain.exception.pdv.CourtesyNotAllowedException;
+import com.cernecommerce.core.domain.exception.pdv.SurchargeNotAllowedException;
+import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.pdv.Comanda;
 import com.cernecommerce.core.domain.model.pedido.ConsumptionMode;
@@ -25,17 +29,23 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal;
 import java.net.URI;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Supplier;
 
 /**
  * Controller de <b>comanda de mesa</b> (PDV-F009), separado de {@link PdvController}: o PDV
@@ -46,6 +56,9 @@ import java.util.Objects;
 @RequestMapping("/pdv/comandas")
 @Tag(name = "PDV (Comanda de Mesa)", description = "Pedidos incrementais numa sessão de caixa aberta por horas")
 @SecurityRequirement(name = "bearerAuth")
+// PDV-C011/C012 — sem @Validated as constraints de parâmetro de query (@Min/@Max abaixo) não são
+// aplicadas. PdvController já o tinha; este ficou de fora desde PDV-F009.
+@Validated
 public class PdvComandaController {
 
     /**
@@ -54,6 +67,20 @@ public class PdvComandaController {
      * Spring Security.
      */
     private static final String COURTESY_AUTHORITY = "PDV_COMANDA_COURTESY";
+
+    /**
+     * PDV-F011 — a simetria de {@link #COURTESY_AUTHORITY}, na direção oposta: se lançar linha a
+     * zero é um desconto de 100% e tem dono, subir o preço à mão também tem. Checada aqui pelo
+     * mesmo motivo — o núcleo não conhece Spring Security.
+     */
+    private static final String SURCHARGE_AUTHORITY = "PDV_COMANDA_SURCHARGE";
+
+    /**
+     * PDV-F014 — abater da conta no fechamento tem dono, como lançar a zero (cortesia) e subir o
+     * preço (acréscimo). Permissão de <b>mesa</b>, separada de {@code PDV_SALE_DISCOUNT}: alçada de
+     * salão e alçada de caixa são concedidas a pessoas diferentes. O teto, esse, é compartilhado.
+     */
+    private static final String COMANDA_DISCOUNT_AUTHORITY = "PDV_COMANDA_DISCOUNT";
 
     private final ComandaUseCase comandaUseCase;
     private final ComandaDTOConverter comandaConverter;
@@ -97,11 +124,70 @@ public class PdvComandaController {
         if (!isCourtesy) {
             return;
         }
+        requireAuthority(COURTESY_AUTHORITY, authentication,
+                () -> new CourtesyNotAllowedException(authentication.getName()));
+    }
+
+    /**
+     * Ver {@link #SURCHARGE_AUTHORITY}. Só acréscimo <b>positivo</b> exige a permissão: zero e
+     * nulo são a mesma coisa — um no-op — e cobrar permissão por um no-op só produziria 403
+     * inexplicável. Mesmo critério de {@code requireDiscountAuthority} em {@code PdvController},
+     * que também olha o valor e não a presença do campo.
+     *
+     * <p>Acréscimo <b>negativo</b> de propósito não cai aqui: ele segue para o service e volta como
+     * {@code 400 SURCHARGE_INVALID}, que é a resposta certa. Um 403 ali diria ao operador que o
+     * problema é de permissão quando o problema é o número.</p>
+     */
+    private void requireSurchargeAuthority(BigDecimal surchargeAmount, Authentication authentication) {
+        if (surchargeAmount == null || surchargeAmount.signum() <= 0) {
+            return;
+        }
+        requireAuthority(SURCHARGE_AUTHORITY, authentication,
+                () -> new SurchargeNotAllowedException(authentication.getName()));
+    }
+
+    /**
+     * Ver {@link #COMANDA_DISCOUNT_AUTHORITY}. Só desconto <b>positivo</b> exige a permissão, mesmo
+     * critério de {@code requireSurchargeAuthority} e de {@code requireDiscountAuthority} no
+     * balcão: zero e nulo são um no-op, e cobrar permissão por um no-op só produziria 403
+     * inexplicável em todo fechamento comum.
+     */
+    private void requireComandaDiscountAuthority(BigDecimal discountAmount, Authentication authentication) {
+        if (discountAmount == null || discountAmount.signum() <= 0) {
+            return;
+        }
+        requireAuthority(COMANDA_DISCOUNT_AUTHORITY, authentication,
+                () -> new ComandaDiscountNotAllowedException(authentication.getName()));
+    }
+
+    /**
+     * Payload de auditoria da comanda (PDV-C014), sempre com o {@code comandaId} na frente — é a
+     * chave por onde alguém procura a mesa depois de um fechamento estranho.
+     *
+     * <p><b>Tolera valores nulos, e é por isso que existe em vez de um {@code Map.of} direto:</b>
+     * {@code Map.of} lança {@code NullPointerException} em valor nulo, e um payload de auditoria
+     * não pode ser capaz de derrubar a requisição que ele apenas descreve. Campo nulo é simplesmente
+     * omitido — ausência não carrega informação nenhuma na trilha.</p>
+     */
+    private static Map<String, Object> auditPayload(Long comandaId, Object... keyValuePairs) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("comandaId", comandaId);
+        for (int i = 0; i + 1 < keyValuePairs.length; i += 2) {
+            Object value = keyValuePairs[i + 1];
+            if (value != null) {
+                payload.put((String) keyValuePairs[i], value);
+            }
+        }
+        return payload;
+    }
+
+    private void requireAuthority(String authority, Authentication authentication,
+            Supplier<RuntimeException> onDenied) {
         boolean allowed = authentication.getAuthorities().stream()
                 .map(GrantedAuthority::getAuthority)
-                .anyMatch(COURTESY_AUTHORITY::equals);
+                .anyMatch(authority::equals);
         if (!allowed) {
-            throw new CourtesyNotAllowedException(authentication.getName());
+            throw onDenied.get();
         }
     }
 
@@ -121,6 +207,13 @@ public class PdvComandaController {
             @Valid @RequestBody OpenComandaRequest request, Authentication authentication) {
         Comanda comanda = comandaUseCase.openComanda(sessionId, request.getTableOrCustomerLabel(),
                 request.getCustomerId(), authentication.getName());
+        // PDV-C014 — abrir mesa não deixava rastro nenhum, ao contrário de abrir caixa
+        // (CASH_SESSION_OPENED). É o evento que responde "quem abriu a Mesa 4, e quando".
+        publisher.publishEvent(AuditEvent.of(EventType.COMANDA_OPENED, authentication.getName(),
+                auditPayload(comanda.id(),
+                        "sessionId", sessionId,
+                        "warehouseCode", comanda.warehouseCode(),
+                        "tableOrCustomerLabel", comanda.tableOrCustomerLabel())));
         ComandaResponseDTO dto = comandaConverter.toResponse(comanda);
         enrichCustomerNames(List.of(dto));
         return ResponseEntity.created(URI.create("/pdv/comandas/" + comanda.id())).body(dto);
@@ -133,11 +226,14 @@ public class PdvComandaController {
                     + "(não o da variação), e cortesia/TROCA gravam zero — sempre com o custo "
                     + "congelado normalmente, para a margem mostrar o prejuízo real da promo. "
                     + "Cortesia exige PDV_COMANDA_COURTESY. A mesa pode ser operada por quem não é "
-                    + "dono do caixa que a abriu.")
+                    + "dono do caixa que a abriu. PDV-F011: aceita notes (registro do setup da "
+                    + "mesa, texto opaco sem efeito em preço) e surchargeAmount (acréscimo somado "
+                    + "ao openRoshPrice do produto PAI, só em OPEN_ROSH, exigindo "
+                    + "PDV_COMANDA_SURCHARGE).")
     @ApiResponses({
             @ApiResponse(responseCode = "201", description = "Lançado", content = @Content(schema = @Schema(implementation = ComandaResponseDTO.class))),
-            @ApiResponse(responseCode = "400", description = "Saldo insuficiente, SKU sem disponibilidade para mesa (NOT_AVAILABLE_FOR_TABLE), modo de sessão em SKU comum (NOT_A_SESSION_PRODUCT), open rosh sem preço (OPEN_ROSH_NOT_PRICED) ou linha de origem ausente (LINKED_ITEM_REQUIRED)", content = @Content),
-            @ApiResponse(responseCode = "403", description = "Cortesia sem PDV_COMANDA_COURTESY (COURTESY_NOT_ALLOWED)", content = @Content),
+            @ApiResponse(responseCode = "400", description = "Saldo insuficiente, SKU sem disponibilidade para mesa (NOT_AVAILABLE_FOR_TABLE), modo de sessão em SKU comum (NOT_A_SESSION_PRODUCT), open rosh sem preço (OPEN_ROSH_NOT_PRICED), linha de origem ausente (LINKED_ITEM_REQUIRED), nota acima de 200 caracteres (NOTES_TOO_LONG), acréscimo negativo (SURCHARGE_INVALID), em cortesia (SURCHARGE_ON_COURTESY) ou fora de OPEN_ROSH (SURCHARGE_NOT_APPLICABLE)", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Cortesia sem PDV_COMANDA_COURTESY (COURTESY_NOT_ALLOWED) ou acréscimo sem PDV_COMANDA_SURCHARGE (SURCHARGE_NOT_ALLOWED)", content = @Content),
             @ApiResponse(responseCode = "404", description = "Comanda ou SKU não encontrado", content = @Content),
             @ApiResponse(responseCode = "409", description = "Comanda não está aberta, produto sem preço, sessão de caixa encerrada, ou troca sobre linha que não é open rosh (NOT_AN_OPEN_ROSH)", content = @Content)
     })
@@ -146,12 +242,15 @@ public class PdvComandaController {
     public ResponseEntity<ComandaResponseDTO> addItem(@PathVariable("id") Long comandaId,
             @Valid @RequestBody AddComandaItemRequest request, Authentication authentication) {
         requireCourtesyAuthority(request.getCourtesy(), request.getMode(), authentication);
+        requireSurchargeAuthority(request.getSurchargeAmount(), authentication);
         Comanda comanda = comandaUseCase.addItem(comandaId, request.getSku(), request.getQuantity(),
                 request.getMode(), Boolean.TRUE.equals(request.getCourtesy()), request.getLinkedItemId(),
-                authentication.getName());
-        publisher.publishEvent(AuditEvent.of(EventType.STOCK_MOVEMENT_REGISTERED, authentication.getName(),
-                Map.of("origin", "PDV_COMANDA_ITEM",
-                        "comandaId", comandaId,
+                request.getNotes(), request.getSurchargeAmount(), authentication.getName());
+        // PDV-C014 — tipo próprio, no lugar do STOCK_MOVEMENT_REGISTERED emprestado. O estoque de
+        // fato se move aqui, mas quem audita uma mesa procura pela mesa, não pelo ledger — e o
+        // rastro item a item continua em stock_movement, que não mudou.
+        publisher.publishEvent(AuditEvent.of(EventType.COMANDA_ITEM_ADDED, authentication.getName(),
+                auditPayload(comandaId,
                         "warehouseCode", comanda.warehouseCode(),
                         "type", MovementType.SAIDA.name(),
                         "sku", request.getSku(),
@@ -164,6 +263,37 @@ public class PdvComandaController {
         return ResponseEntity.status(201).body(dto);
     }
 
+    @Operation(summary = "Remove uma linha da comanda aberta, devolvendo o estoque dela",
+            description = "PDV-F012 — até aqui um lançamento errado só saía cancelando a comanda "
+                    + "INTEIRA, o que devolve tudo ao estoque, encerra a mesa e obriga a relançar "
+                    + "item a item um consumo que continua acontecendo. As linhas TROCA penduradas "
+                    + "nesta saem JUNTO: são cortesia e não existem sem o consumo livre que as "
+                    + "originou. Já um SABOR_EXTRA pendurado BARRA a remoção (409 "
+                    + "LINKED_ITEM_IS_CHARGED) em vez de ser arrastado — é linha própria e pode "
+                    + "estar sendo cobrada, e apagá-la em cascata tiraria valor da conta sem o "
+                    + "operador pedir. Cada linha removida gera uma ENTRADA de estoque, o mesmo "
+                    + "padrão do cancelamento. Reusa PDV_COMANDA_MANAGE: quem já pode cancelar a "
+                    + "mesa inteira não precisa de permissão maior para remover uma linha dela.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Removida, com a comanda atualizada", content = @Content(schema = @Schema(implementation = ComandaResponseDTO.class))),
+            @ApiResponse(responseCode = "404", description = "Comanda ou item não encontrado (COMANDA_ITEM_NOT_FOUND)", content = @Content),
+            @ApiResponse(responseCode = "409", description = "Comanda não está aberta, sessão de caixa encerrada, ou a linha tem SABOR_EXTRA pendurado (LINKED_ITEM_IS_CHARGED)", content = @Content)
+    })
+    @DeleteMapping("/{id}/items/{itemId}")
+    @PreAuthorize("hasAuthority('PDV_COMANDA_MANAGE')")
+    public ResponseEntity<ComandaResponseDTO> removeItem(@PathVariable("id") Long comandaId,
+            @PathVariable("itemId") Long itemId, Authentication authentication) {
+        Comanda comanda = comandaUseCase.removeItem(comandaId, itemId, authentication.getName());
+        publisher.publishEvent(AuditEvent.of(EventType.COMANDA_ITEM_REMOVED, authentication.getName(),
+                auditPayload(comandaId,
+                        "itemId", itemId,
+                        "warehouseCode", comanda.warehouseCode(),
+                        "type", MovementType.ENTRADA.name())));
+        ComandaResponseDTO dto = comandaConverter.toResponse(comanda);
+        enrichCustomerNames(List.of(dto));
+        return ResponseEntity.ok(dto);
+    }
+
     @Operation(summary = "Consulta uma comanda, com o total corrente")
     @GetMapping("/{id}")
     @PreAuthorize("hasAuthority('PDV_READ')")
@@ -173,12 +303,26 @@ public class PdvComandaController {
         return ResponseEntity.ok(dto);
     }
 
-    @Operation(summary = "Lista as comandas abertas de uma sessão — as \"mesas ocupadas\"")
+    @Operation(summary = "Lista as comandas abertas — as \"mesas ocupadas\"",
+            description = "Sem sessionId a listagem é da LOJA INTEIRA, não de um caixa (PDV-C007): a "
+                    + "decisão do dono é caixa por atendente, mesas compartilhadas, e quem assume o "
+                    + "posto do colega precisa ver o salão todo. Era isso que obrigava o cliente a "
+                    + "listar as sessões abertas e disparar uma chamada por sessão. Não há filtro "
+                    + "por status da sessão porque não é preciso: desde PDV-C005 o caixa não fecha "
+                    + "com mesa aberta, então comanda ABERTA já implica sessão OPEN.")
     @GetMapping
     @PreAuthorize("hasAuthority('PDV_READ')")
-    public ResponseEntity<List<ComandaResponseDTO>> listOpenComandas(@RequestParam Long sessionId) {
-        return ResponseEntity.ok(
-                enrichCustomerNames(comandaConverter.toResponse(comandaUseCase.listOpenComandas(sessionId))));
+    public ResponseEntity<PageResult<ComandaResponseDTO>> listOpenComandas(
+            @RequestParam(required = false) Long sessionId,
+            @RequestParam(required = false) String warehouseCode,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "50") @Min(1) @Max(100) int size) {
+        PageResult<Comanda> result = comandaUseCase.listOpenComandas(sessionId, warehouseCode, page, size);
+        // enrichCustomerNames roda uma vez sobre a página inteira, não por mesa: é o que impede a
+        // listagem da loja de pagar uma consulta de CRM por comanda.
+        List<ComandaResponseDTO> content = enrichCustomerNames(comandaConverter.toResponse(result.content()));
+        return ResponseEntity.ok(new PageResult<>(content, result.page(), result.size(),
+                result.totalElements(), result.totalPages()));
     }
 
     @Operation(summary = "Fecha a comanda, convertendo os itens acumulados num pedido concluído",
@@ -189,34 +333,59 @@ public class PdvComandaController {
                     + "MESA (o canal é imutável), carregando comandaId, tableLabel e o cliente da "
                     + "mesa. Qualquer atendente com PDV_COMANDA_MANAGE pode fechar, e o pedido "
                     + "entra na sessão de caixa de QUEM FECHA — o dinheiro pertence à gaveta que o "
-                    + "recebeu.")
+                    + "recebeu. PDV-F014: discountAmount abate a CONTA INTEIRA e é rateado entre as "
+                    + "linhas pelo servidor (exige PDV_COMANDA_DISCOUNT, teto "
+                    + "pdv.sale.max-discount-percent). PDV-F015: a taxa de serviço vem APLICADA POR "
+                    + "PADRÃO sobre o líquido — applyServiceFee=false é o cliente recusando — e é "
+                    + "gravada fora do netAmount, que continua sendo só a receita da mercadoria. O "
+                    + "pagamento é validado contra netAmount + taxa.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Fechada", content = @Content(schema = @Schema(implementation = OrderResponseDTO.class))),
             @ApiResponse(responseCode = "400", description = "Pagamento insuficiente", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Desconto sem PDV_COMANDA_DISCOUNT (COMANDA_DISCOUNT_NOT_ALLOWED)", content = @Content),
             @ApiResponse(responseCode = "404", description = "Comanda não encontrada", content = @Content),
-            @ApiResponse(responseCode = "409", description = "Comanda não está aberta, sem itens (COMANDA_EMPTY), só com cortesias (COMANDA_ONLY_COURTESY), quem fecha não tem caixa aberto, ou pagamento não-dinheiro acima do total", content = @Content)
+            @ApiResponse(responseCode = "409", description = "Comanda não está aberta, sem itens (COMANDA_EMPTY), só com cortesias (COMANDA_ONLY_COURTESY), quem fecha não tem caixa aberto, desconto acima do teto (DISCOUNT_LIMIT_EXCEEDED), ou pagamento não-dinheiro acima do total", content = @Content)
     })
     @PostMapping("/{id}/close")
     @PreAuthorize("hasAuthority('PDV_COMANDA_MANAGE')")
     public ResponseEntity<OrderResponseDTO> closeComanda(@PathVariable("id") Long comandaId,
             @Valid @RequestBody CloseComandaRequest request, Authentication authentication) {
+        requireComandaDiscountAuthority(request.getDiscountAmount(), authentication);
         List<PaymentCommand> payments = request.getPayments().stream()
                 .map(p -> new PaymentCommand(
                         com.cernecommerce.core.domain.model.pagamento.PaymentMethod.valueOf(p.getMethod()),
                         p.getAmount(), p.getInstallments()))
                 .toList();
-        Order order = comandaUseCase.closeComanda(comandaId, payments, authentication.getName());
-        publisher.publishEvent(AuditEvent.of(EventType.STOCK_MOVEMENT_REGISTERED, authentication.getName(),
-                Map.of("origin", "PDV_COMANDA_CLOSE",
-                        "comandaId", comandaId,
+        Order order = comandaUseCase.closeComanda(comandaId, payments, request.getDiscountAmount(),
+                request.isServiceFeeApplied(), authentication.getName());
+        // PDV-C014 — era o pior dos três: STOCK_MOVEMENT_REGISTERED num caminho que NÃO move
+        // estoque nenhum (o débito aconteceu item a item, no lançamento). O evento entrava na
+        // trilha de movimentação descrevendo algo que não aconteceu.
+        publisher.publishEvent(AuditEvent.of(EventType.COMANDA_CLOSED, authentication.getName(),
+                auditPayload(comandaId,
+                        "orderId", order.id(),
                         "orderNumber", order.orderNumber(),
-                        "warehouseCode", order.warehouseCode())));
+                        "warehouseCode", order.warehouseCode(),
+                        "netAmount", order.netAmount(),
+                        "serviceFeeAmount", order.serviceFeeAmount(),
+                        "discountAmount", order.discountAmount())));
         if (order.totalCashbackEarned().signum() > 0) {
             publisher.publishEvent(AuditEvent.of(EventType.CASHBACK_EARNED, authentication.getName(),
                     Map.of("orderId", order.id(), "orderNumber", order.orderNumber(),
                             "amount", order.totalCashbackEarned())));
         }
         return ResponseEntity.ok(orderConverter.toResponse(order));
+    }
+
+    @Operation(summary = "Percentual da taxa de serviço vigente",
+            description = "PDV-F015 — para a tela mostrar quanto será cobrado ANTES de fechar, e "
+                    + "para o cliente poder recusar com o número na mão. A taxa é aplicada por "
+                    + "padrão: sem esta consulta, a única forma de saber o valor seria fechar a "
+                    + "conta, que é tarde demais. Zero significa que a casa não cobra taxa.")
+    @GetMapping("/service-fee")
+    @PreAuthorize("hasAuthority('PDV_READ')")
+    public ResponseEntity<ServiceFeeResponseDTO> getServiceFee() {
+        return ResponseEntity.ok(new ServiceFeeResponseDTO(comandaUseCase.getServiceFeePercent()));
     }
 
     @Operation(summary = "Abandona a comanda sem cobrança, devolvendo ao estoque cada item já lançado")
@@ -230,11 +399,11 @@ public class PdvComandaController {
     public ResponseEntity<ComandaResponseDTO> cancelComanda(@PathVariable("id") Long comandaId,
             Authentication authentication) {
         Comanda comanda = comandaUseCase.cancelComanda(comandaId, authentication.getName());
-        publisher.publishEvent(AuditEvent.of(EventType.STOCK_MOVEMENT_REGISTERED, authentication.getName(),
-                Map.of("origin", "PDV_COMANDA_CANCEL",
-                        "comandaId", comandaId,
+        publisher.publishEvent(AuditEvent.of(EventType.COMANDA_CANCELLED, authentication.getName(),
+                auditPayload(comandaId,
                         "warehouseCode", comanda.warehouseCode(),
-                        "type", MovementType.ENTRADA.name())));
+                        "type", MovementType.ENTRADA.name(),
+                        "itemCount", comanda.items().size())));
         return ResponseEntity.ok(comandaConverter.toResponse(comanda));
     }
 }

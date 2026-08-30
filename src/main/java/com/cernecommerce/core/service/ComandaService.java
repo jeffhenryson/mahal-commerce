@@ -1,14 +1,22 @@
 package com.cernecommerce.core.service;
 
 import com.cernecommerce.core.domain.exception.pdv.ComandaEmptyException;
+import com.cernecommerce.core.domain.exception.pdv.ComandaItemNotFoundException;
 import com.cernecommerce.core.domain.exception.pdv.ComandaNotFoundException;
 import com.cernecommerce.core.domain.exception.pdv.ComandaNotOpenException;
 import com.cernecommerce.core.domain.exception.pdv.ComandaOnlyCourtesyException;
+import com.cernecommerce.core.domain.exception.pdv.DiscountExceedsBillException;
+import com.cernecommerce.core.domain.exception.pdv.LinkedItemIsChargedException;
 import com.cernecommerce.core.domain.exception.pdv.LinkedItemRequiredException;
 import com.cernecommerce.core.domain.exception.pdv.NotASessionProductException;
 import com.cernecommerce.core.domain.exception.pdv.NotAnOpenRoshException;
 import com.cernecommerce.core.domain.exception.pdv.NotAvailableForTableException;
+import com.cernecommerce.core.domain.exception.pdv.NotesTooLongException;
 import com.cernecommerce.core.domain.exception.pdv.OpenRoshNotPricedException;
+import com.cernecommerce.core.domain.exception.pdv.SurchargeInvalidException;
+import com.cernecommerce.core.domain.exception.pdv.SurchargeNotApplicableException;
+import com.cernecommerce.core.domain.exception.pdv.SurchargeOnCourtesyException;
+import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.cashback.CashbackRate;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.pagamento.OrderPayment;
@@ -17,6 +25,7 @@ import com.cernecommerce.core.domain.model.pdv.Comanda;
 import com.cernecommerce.core.domain.model.pdv.ComandaItem;
 import com.cernecommerce.core.domain.model.pdv.ComandaStatus;
 import com.cernecommerce.core.domain.model.pedido.ConsumptionMode;
+import com.cernecommerce.core.domain.model.pedido.DiscountProration;
 import com.cernecommerce.core.domain.model.pedido.Order;
 import com.cernecommerce.core.domain.model.pedido.OrderItem;
 import com.cernecommerce.core.ports.in.CashbackUseCase;
@@ -62,6 +71,19 @@ import java.util.List;
  * conferência física — a cédula está na gaveta de quem recebeu — e é o que impede o pedido de cair
  * numa sessão que o colega já encerrou.</p>
  *
+ * <h2>Mesa compartilhada exige trava na leitura (PDV-C008)</h2>
+ * <p>Abrir a mesa para qualquer atendente teve um preço que só aparece sob concorrência: lançar,
+ * fechar e cancelar <b>decidem sobre o estado que leram</b> — {@code requireOpen} é a decisão — e
+ * duas dessas decisões tomadas em paralelo sobre a mesma comanda se contradizem. B fecha e gera o
+ * pedido; a leitura de A continua dizendo ABERTA, e o item de A entra numa mesa cujo pedido já foi
+ * pago. O estoque saiu no commit do {@code addItem}, e ninguém é cobrado por ele.</p>
+ *
+ * <p>Por isso os três caminhos passam por {@code getComandaForUpdate}, e só a consulta de tela
+ * continua lendo sem trava. <b>Um {@code @Version} não resolveria:</b> a versão otimista só colide
+ * quando o UPDATE é emitido, e o Hibernate compara o agregado com o snapshot que ele mesmo
+ * carregou — regravar estado velho por cima não conta como alteração, nenhum UPDATE sai, nenhuma
+ * colisão aparece. A corrida é sobre a leitura, e é lá que a trava tem que estar.</p>
+ *
  * <h2>Reaproveita {@code PdvService}, não duplica</h2>
  * <p>Posse de sessão e validação de pagamento/troco são as mesmas regras da venda de balcão — a de
  * troco em pagamento dividido, em particular, já foi endurecida uma vez (mais estrita que o
@@ -81,15 +103,27 @@ public class ComandaService implements ComandaUseCase {
     private final CashbackUseCase cashbackUseCase;
     private final PdvService pdvService;
 
+    /**
+     * PDV-F015 — percentual da taxa de serviço, no molde de {@code pdv.sale.max-discount-percent}.
+     * Configuração e não constante porque 10% é o costume do salão, não uma lei.
+     */
+    private final BigDecimal serviceFeePercent;
+
     public ComandaService(ComandaRepository comandaRepository, EstoqueUseCase estoqueUseCase,
             OrderRepository orderRepository, OrderPaymentRepository orderPaymentRepository,
-            CashbackUseCase cashbackUseCase, PdvService pdvService) {
+            CashbackUseCase cashbackUseCase, PdvService pdvService, BigDecimal serviceFeePercent) {
         this.comandaRepository = comandaRepository;
         this.estoqueUseCase = estoqueUseCase;
         this.orderRepository = orderRepository;
         this.orderPaymentRepository = orderPaymentRepository;
         this.cashbackUseCase = cashbackUseCase;
         this.pdvService = pdvService;
+        this.serviceFeePercent = serviceFeePercent == null ? BigDecimal.ZERO : serviceFeePercent;
+    }
+
+    @Override
+    public BigDecimal getServiceFeePercent() {
+        return serviceFeePercent;
     }
 
     @Override
@@ -106,8 +140,10 @@ public class ComandaService implements ComandaUseCase {
     @Override
     @Transactional
     public Comanda addItem(Long comandaId, String sku, BigDecimal quantity, ConsumptionMode mode,
-            boolean courtesy, Long linkedItemId, String username) {
-        Comanda comanda = getComanda(comandaId);
+            boolean courtesy, Long linkedItemId, String notes, BigDecimal surchargeAmount, String username) {
+        // PDV-C008: leitura TRAVADA. Toda decisão abaixo — inclusive o requireOpen — é tomada
+        // sobre este estado, e sem a trava o atendente A decidiria sobre uma mesa que B já fechou.
+        Comanda comanda = getComandaForUpdate(comandaId);
         // PDV-F010: mesa é do salão, não do operador — ver PdvService.requireOpenSession.
         pdvService.requireOpenSession(comanda.sessionId());
         requireOpen(comanda);
@@ -126,13 +162,20 @@ public class ComandaService implements ComandaUseCase {
         if (resolvedMode.isSessionMode() && !saleInfo.sessionProduct()) {
             throw new NotASessionProductException(sku, resolvedMode.name());
         }
+        validateNotes(notes);
+        validateSurcharge(surchargeAmount, resolvedMode, resolvedCourtesy);
         Long resolvedLink = resolveLinkedItem(comanda, resolvedMode, linkedItemId);
 
-        ComandaItem item = resolvedMode == ConsumptionMode.NORMAL && !resolvedCourtesy
+        // PDV-F011 — uma linha com nota ou acréscimo nunca é "item comum": fromCatalog resolveria
+        // o preço pelo SKU e não teria onde guardar os dois campos.
+        boolean plainCatalogLine = resolvedMode == ConsumptionMode.NORMAL && !resolvedCourtesy
+                && notes == null && !hasSurcharge(surchargeAmount);
+        ComandaItem item = plainCatalogLine
                 ? ComandaItem.fromCatalog(sku, quantity, saleInfo.pricing(), saleInfo.productName())
                 : ComandaItem.forSession(sku, quantity,
-                        resolveUnitPrice(sku, resolvedMode, resolvedCourtesy, saleInfo), saleInfo.pricing(),
-                        saleInfo.productName(), resolvedMode, resolvedCourtesy, resolvedLink);
+                        resolveUnitPrice(sku, resolvedMode, resolvedCourtesy, surchargeAmount, saleInfo),
+                        saleInfo.pricing(), saleInfo.productName(), resolvedMode, resolvedCourtesy,
+                        resolvedLink, notes, surchargeAmount);
 
         // Debita agora, não no fechamento — ver a nota de classe sobre não-atomicidade. Cortesia
         // baixa estoque igual: o cliente não paga, mas a essência saiu.
@@ -151,7 +194,7 @@ public class ComandaService implements ComandaUseCase {
      * O SKU está ali para saber qual essência sair do estoque, não para precificar.</p>
      */
     private BigDecimal resolveUnitPrice(String sku, ConsumptionMode mode, boolean courtesy,
-            EstoqueUseCase.CatalogSaleInfo saleInfo) {
+            BigDecimal surchargeAmount, EstoqueUseCase.CatalogSaleInfo saleInfo) {
         if (courtesy) {
             return BigDecimal.ZERO;
         }
@@ -159,10 +202,57 @@ public class ComandaService implements ComandaUseCase {
             if (saleInfo.openRoshPrice() == null || saleInfo.openRoshPrice().signum() <= 0) {
                 throw new OpenRoshNotPricedException(sku);
             }
-            return saleInfo.openRoshPrice();
+            // PDV-F011 — o acréscimo soma sobre o openRoshPrice do PAI, nunca sobre o preço da
+            // variação do sabor. É a mesma armadilha do open rosh, um nível acima: quem somasse
+            // sobre a variante cobraria a base errada e o erro passaria despercebido, porque o
+            // total continuaria "parecendo" maior.
+            return hasSurcharge(surchargeAmount)
+                    ? saleInfo.openRoshPrice().add(surchargeAmount)
+                    : saleInfo.openRoshPrice();
         }
         // NORMAL e SABOR_EXTRA cobram o preço da variação do sabor, como qualquer item de catálogo.
         return saleInfo.pricing().effectivePrice();
+    }
+
+    private static boolean hasSurcharge(BigDecimal surchargeAmount) {
+        return surchargeAmount != null && surchargeAmount.signum() > 0;
+    }
+
+    /**
+     * PDV-F011 — recusar em vez de truncar. Truncado, o operador não fica sabendo que perdeu parte
+     * do registro, e o registro é justamente onde mora qual pinça saiu com aquela mesa.
+     */
+    private void validateNotes(String notes) {
+        if (notes != null && notes.length() > ComandaItem.NOTES_MAX_LENGTH) {
+            throw new NotesTooLongException(notes.length(), ComandaItem.NOTES_MAX_LENGTH);
+        }
+    }
+
+    /**
+     * PDV-F011 — as três recusas do acréscimo, cada uma com código próprio para a tela explicar o
+     * motivo certo.
+     *
+     * <p>A ordem importa: cortesia é checada <b>antes</b> do modo porque {@code TROCA} é as duas
+     * coisas ao mesmo tempo (cortesia e não-{@code OPEN_ROSH}), e o que o operador precisa ouvir
+     * ali é "esta linha o cliente não paga", não "modo errado".</p>
+     */
+    private void validateSurcharge(BigDecimal surchargeAmount, ConsumptionMode mode, boolean courtesy) {
+        if (surchargeAmount == null) {
+            return;
+        }
+        if (surchargeAmount.signum() < 0) {
+            throw new SurchargeInvalidException(surchargeAmount);
+        }
+        if (surchargeAmount.signum() == 0) {
+            // Zero é o mesmo que não mandar: não vale acionar recusa nem permissão por um no-op.
+            return;
+        }
+        if (courtesy) {
+            throw new SurchargeOnCourtesyException(surchargeAmount);
+        }
+        if (mode != ConsumptionMode.OPEN_ROSH) {
+            throw new SurchargeNotApplicableException(mode.name());
+        }
     }
 
     /**
@@ -189,22 +279,77 @@ public class ComandaService implements ComandaUseCase {
     }
 
     @Override
+    @Transactional
+    public Comanda removeItem(Long comandaId, Long itemId, String username) {
+        // PDV-C008 — quarto caminho de mutação, e portanto quarta leitura travada. Sem ela,
+        // remover e fechar em paralelo devolveriam ao estoque um item que o outro caminho acabou
+        // de cobrar no pedido.
+        Comanda comanda = getComandaForUpdate(comandaId);
+        // PDV-F010: mesa compartilhada — ver PdvService.requireOpenSession. Mesmo critério de
+        // addItem e cancelComanda: a sessão de ORIGEM tem que estar aberta, porque é o depósito
+        // dela que recebe a devolução.
+        pdvService.requireOpenSession(comanda.sessionId());
+        requireOpen(comanda);
+
+        ComandaItem alvo = comanda.items().stream()
+                .filter(i -> itemId != null && itemId.equals(i.id()))
+                .findFirst()
+                .orElseThrow(() -> new ComandaItemNotFoundException(itemId, comandaId));
+
+        // A troca sai junto (é cortesia e não existe sem a sessão); o sabor extra barra, porque
+        // pode estar cobrado — ver o javadoc de Comanda.withRemovedItem.
+        List<ComandaItem> cobradasPenduradas = comanda.chargedChildrenOf(itemId);
+        if (!cobradasPenduradas.isEmpty()) {
+            throw new LinkedItemIsChargedException(itemId,
+                    cobradasPenduradas.stream().map(ComandaItem::id).toList());
+        }
+
+        // Captura ANTES de remover: depois da remoção a comanda não sabe mais quais linhas saíram,
+        // e são elas que precisam ter o estoque devolvido.
+        List<ComandaItem> removidas = comanda.itemsRemovedWith(itemId);
+        Comanda semItem = comanda.withRemovedItem(itemId);
+
+        // Devolve o que cada linha removida havia debitado — mesma ENTRADA de cancelComanda. A
+        // cortesia também volta: ela não foi cobrada, mas a essência tinha saído do estoque.
+        for (ComandaItem removida : removidas) {
+            estoqueUseCase.adjustStock(removida.sku(), comanda.warehouseCode(), MovementType.ENTRADA,
+                    removida.quantity(), "Remoção de item da comanda #" + comandaId, username);
+        }
+        // Sem checagem de "última linha": comanda vazia é estado legítimo — é como ela nasce, e o
+        // COMANDA_EMPTY do fechamento já barra fechá-la assim.
+        return comandaRepository.save(semItem);
+    }
+
+    @Override
     @Transactional(readOnly = true)
     public Comanda getComanda(Long comandaId) {
         return comandaRepository.findById(comandaId)
                 .orElseThrow(() -> new ComandaNotFoundException(comandaId));
     }
 
+    /**
+     * PDV-C008 — leitura travada para os três caminhos que mudam a comanda. A consulta de tela
+     * (`GET /pdv/comandas/{id}`) continua usando {@link #getComanda}: travar linha para exibir
+     * seguraria a mesa enquanto alguém apenas olha.
+     */
+    private Comanda getComandaForUpdate(Long comandaId) {
+        return comandaRepository.findByIdForUpdate(comandaId)
+                .orElseThrow(() -> new ComandaNotFoundException(comandaId));
+    }
+
     @Override
     @Transactional(readOnly = true)
-    public List<Comanda> listOpenComandas(Long sessionId) {
-        return comandaRepository.findOpenBySessionId(sessionId);
+    public PageResult<Comanda> listOpenComandas(Long sessionId, String warehouseCode, int page, int size) {
+        return comandaRepository.findOpen(sessionId, warehouseCode, page, size);
     }
 
     @Override
     @Transactional
-    public Order closeComanda(Long comandaId, List<PaymentCommand> payments, String username) {
-        Comanda comanda = getComanda(comandaId);
+    public Order closeComanda(Long comandaId, List<PaymentCommand> payments, BigDecimal discountAmount,
+            boolean applyServiceFee, String username) {
+        // PDV-C008 — ver getComandaForUpdate. É aqui que a trava mais importa: sem ela, dois
+        // fechamentos concorrentes da mesma mesa gerariam dois pedidos concluídos dos mesmos itens.
+        Comanda comanda = getComandaForUpdate(comandaId);
         requireOpen(comanda);
         if (comanda.items().isEmpty()) {
             throw new ComandaEmptyException(comandaId);
@@ -221,14 +366,37 @@ public class ComandaService implements ComandaUseCase {
             throw new ComandaOnlyCourtesyException(comandaId);
         }
 
+        // PDV-F014 — o desconto é pedido sobre a conta ("tira 20 reais"), mas o modelo guarda
+        // desconto POR ITEM: Order.discountAmount é a soma dos itens, e é sobre o líquido de cada
+        // item que o cashback é creditado e a margem calculada. Ratear é o que impede a casa de
+        // pagar cashback sobre dinheiro que não recebeu e de ver margem cheia numa venda abatida.
+        // A cortesia absorve zero por construção — a proporção de uma linha de valor zero é zero.
+        List<BigDecimal> lineAmounts = comanda.items().stream().map(ComandaItem::subtotal).toList();
+        // PDV-C016 — desconto maior que a conta é recusado AQUI, com código próprio. distribute()
+        // já recusava (não há como ratear um abatimento maior que a soma das linhas sem violar a
+        // invariante de OrderItem), mas com IllegalArgumentException, que o handler global achata
+        // num 400 genérico. E o problema maior é a ORDEM: o rateio roda ANTES de
+        // requireDiscountWithinLimit, então o desconto absurdo nunca chegava ao
+        // 409 DISCOUNT_LIMIT_EXCEEDED que a tela já trata — pedir 11% dava um erro acionável,
+        // pedir o dobro da conta dava "Requisição inválida". A checagem fica no service e não
+        // dentro de distribute: aquela é função pura de aritmética, e o vocabulário de erro do PDV
+        // não é dela.
+        if (discountAmount != null && discountAmount.signum() > 0) {
+            BigDecimal billAmount = lineAmounts.stream().reduce(BigDecimal.ZERO, BigDecimal::add);
+            if (discountAmount.compareTo(billAmount) > 0) {
+                throw new DiscountExceedsBillException(comandaId, discountAmount, billAmount);
+            }
+        }
+        List<BigDecimal> lineDiscounts = DiscountProration.distribute(lineAmounts, discountAmount);
+
         // Cada ComandaItem já tem preço e custo congelados no lançamento — vira OrderItem por
         // reconstituição (of), NUNCA por fromCatalog de novo: reprecificar aqui repreçaria em
         // silêncio itens que o cliente já consumiu, se o catálogo mudou nas horas em que a
         // comanda ficou aberta. Com o open rosh isso ficou ainda mais crítico: fromCatalog
         // resolveria pelo SKU da variação e cobraria o preço do sabor no lugar do valor fixo.
-        // Sem desconto por item nesta entrega (fora de escopo do PDV-F009).
         List<OrderItem> orderItems = new ArrayList<>(comanda.items().size());
-        for (ComandaItem item : comanda.items()) {
+        for (int i = 0; i < comanda.items().size(); i++) {
+            ComandaItem item = comanda.items().get(i);
             // CRM-F003, mesma regra do balcão (PdvService.registerSale): a taxa vigente é resolvida
             // e CARIMBADA no pedido, para mudar a taxa amanhã não reescrever o cashback de hoje.
             // Sem isto o cliente vinculado na abertura chega ao pedido e não ganha nada — o
@@ -236,9 +404,12 @@ public class ComandaService implements ComandaUseCase {
             // lançar. Cortesia não precisa de exceção: o ganho é sobre o líquido, e o líquido dela
             // é zero por construção.
             CashbackRate rate = cashbackUseCase.resolveApplicableRate(item.sku());
+            // PDV-F011: notes e surchargeAmount atravessam junto com mode/courtesy. A nota porque
+            // "qual pinça saiu com aquela mesa" é pergunta feita DEPOIS do fechamento; o acréscimo
+            // porque não dá para reconstruí-lo do unitPrice, que já é a soma.
             orderItems.add(OrderItem.of(null, item.sku(), item.quantity(), item.unitPrice(), item.costPrice(),
-                    BigDecimal.ZERO, rate == null ? null : rate.percent(), item.productName(), item.mode(),
-                    item.courtesy()));
+                    lineDiscounts.get(i), rate == null ? null : rate.percent(), item.productName(), item.mode(),
+                    item.courtesy(), item.notes(), item.surchargeAmount()));
         }
 
         // O canal é imutável: o pedido da mesa precisa NASCER MESA, não virar depois. O depósito
@@ -246,7 +417,21 @@ public class ComandaService implements ComandaUseCase {
         // fecha é de outra gaveta.
         Order order = Order.openMesa(receivingSession.id(), comanda.warehouseCode(), comanda.customerId(),
                 comandaId, comanda.tableOrCustomerLabel(), orderItems);
-        BigDecimal changeAmount = pdvService.validatePaymentsAndComputeChange(payments, order.netAmount());
+        // Mesmo teto do balcão, e de propósito: o limite é política comercial da casa, não
+        // característica do canal. Checado DEPOIS de montar o pedido porque a regra é percentual
+        // sobre o bruto, e é o pedido que sabe o bruto.
+        pdvService.requireDiscountWithinLimit(order);
+
+        // PDV-F015 — a taxa entra por último, sobre o LÍQUIDO: os 10% incidem sobre o que o cliente
+        // de fato vai pagar pela mercadoria, não sobre o valor antes do abatimento. Cobrar serviço
+        // sobre um desconto que a casa acabou de conceder seria devolver parte dele com a outra mão.
+        if (applyServiceFee) {
+            order = order.withServiceFeeOf(serviceFeePercent);
+        }
+
+        // Valida contra totalPayable, não contra netAmount: o cliente paga a mercadoria MAIS a
+        // taxa, e o troco sai dessa conta. É o único lugar do módulo em que os dois números diferem.
+        BigDecimal changeAmount = pdvService.validatePaymentsAndComputeChange(payments, order.totalPayable());
 
         // Sem novo adjustStock aqui: o estoque já saiu item a item em addItem.
         Order saved = orderRepository.save(
@@ -264,7 +449,9 @@ public class ComandaService implements ComandaUseCase {
     @Override
     @Transactional
     public Comanda cancelComanda(Long comandaId, String username) {
-        Comanda comanda = getComanda(comandaId);
+        // PDV-C008 — ver getComandaForUpdate. Sem a trava, cancelar e fechar em paralelo
+        // devolveriam o estoque de itens que o outro caminho acabou de cobrar.
+        Comanda comanda = getComandaForUpdate(comandaId);
         // PDV-F010: mesa compartilhada — ver PdvService.requireOpenSession.
         pdvService.requireOpenSession(comanda.sessionId());
         requireOpen(comanda);

@@ -40,9 +40,11 @@ public class ComandaDTOConverter {
         dto.setCostPrice(item.costPrice());
         dto.setSubtotal(item.subtotal());
         dto.setAddedAt(item.addedAt());
-        dto.setMode(item.mode().name());
+        dto.setMode(item.mode());
         dto.setCourtesy(item.courtesy());
         dto.setLinkedItemId(item.linkedItemId());
+        dto.setNotes(item.notes());
+        dto.setSurchargeAmount(item.surchargeAmount());
         return dto;
     }
 }
