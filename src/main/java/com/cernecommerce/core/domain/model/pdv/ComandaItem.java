@@ -30,7 +30,12 @@ public record ComandaItem(
         Instant addedAt,
         ConsumptionMode mode,
         boolean courtesy,
-        Long linkedItemId) {
+        Long linkedItemId,
+        String notes,
+        BigDecimal surchargeAmount) {
+
+    /** Limite de {@link #notes}, casado com {@code comanda_item.notes VARCHAR(200)}. */
+    public static final int NOTES_MAX_LENGTH = 200;
 
     public ComandaItem {
         if (sku == null || sku.isBlank()) {
@@ -60,6 +65,26 @@ public record ComandaItem(
             throw new IllegalArgumentException(
                     "linkedItemId só faz sentido em SABOR_EXTRA ou TROCA: mode=" + mode);
         }
+        // PDV-F011 — as três invariantes do acréscimo, espelhando os CHECKs da V116. O service
+        // recusa cada uma com um código de erro próprio antes de chegar aqui; estas são a rede de
+        // baixo, para nenhum caminho novo montar a linha por engano.
+        if (surchargeAmount != null && surchargeAmount.signum() < 0) {
+            throw new IllegalArgumentException("surchargeAmount não pode ser negativo: " + surchargeAmount);
+        }
+        if (surchargeAmount != null && surchargeAmount.signum() > 0) {
+            if (courtesy) {
+                throw new IllegalArgumentException(
+                        "linha de cortesia não pode ter acréscimo: o cliente não paga a linha");
+            }
+            if (mode != ConsumptionMode.OPEN_ROSH) {
+                throw new IllegalArgumentException(
+                        "acréscimo só existe em OPEN_ROSH: mode=" + mode);
+            }
+        }
+        if (notes != null && notes.length() > NOTES_MAX_LENGTH) {
+            throw new IllegalArgumentException(
+                    "notes excede " + NOTES_MAX_LENGTH + " caracteres: " + notes.length());
+        }
     }
 
     /**
@@ -73,7 +98,7 @@ public record ComandaItem(
             throw new ProductNotPricedException(sku);
         }
         return new ComandaItem(null, sku, quantity, pricing.effectivePrice(), pricing.costPrice(),
-                productName, Instant.now(), ConsumptionMode.NORMAL, false, null);
+                productName, Instant.now(), ConsumptionMode.NORMAL, false, null, null, null);
     }
 
     /**
@@ -87,17 +112,25 @@ public record ComandaItem(
      * cortesia: é ele que faz a margem do pedido mostrar o prejuízo real da promo, e um custo nulo
      * ali mentiria sobre a pergunta de negócio por trás do open rosh.</p>
      *
-     * @param unitPrice já resolvido pelo chamador segundo o modo — ver {@code ComandaService.addItem}.
+     * <p>PDV-F011: {@code surchargeAmount} chega <b>já somado</b> dentro de {@code unitPrice} e é
+     * guardado à parte só para o relatório conseguir separar as duas parcelas depois — a mesma
+     * razão pela qual {@code OrderItem.discountAmount} é campo próprio em vez de virar um preço
+     * menor. O {@code costPrice} <b>não</b> muda com o acréscimo: acréscimo é margem, não custo, e
+     * é essa diferença que faz a margem responder "o open rosh está dando lucro?".</p>
+     *
+     * @param unitPrice já resolvido pelo chamador segundo o modo, acréscimo incluído — ver
+     *        {@code ComandaService.addItem}.
      * @throws ProductNotPricedException se o produto não tem custo/preço conhecido no catálogo. A
      *         checagem continua valendo mesmo em cortesia, justamente para não gravar custo nulo.
      */
     public static ComandaItem forSession(String sku, BigDecimal quantity, BigDecimal unitPrice, Pricing pricing,
-            String productName, ConsumptionMode mode, boolean courtesy, Long linkedItemId) {
+            String productName, ConsumptionMode mode, boolean courtesy, Long linkedItemId, String notes,
+            BigDecimal surchargeAmount) {
         if (pricing == null || !pricing.isPriced()) {
             throw new ProductNotPricedException(sku);
         }
         return new ComandaItem(null, sku, quantity, unitPrice, pricing.costPrice(), productName,
-                Instant.now(), mode, courtesy, linkedItemId);
+                Instant.now(), mode, courtesy, linkedItemId, notes, surchargeAmount);
     }
 
     /** Reconstitui um item a partir de persistência. */
@@ -111,8 +144,19 @@ public record ComandaItem(
     public static ComandaItem of(Long id, String sku, BigDecimal quantity, BigDecimal unitPrice,
             BigDecimal costPrice, String productName, Instant addedAt, ConsumptionMode mode, boolean courtesy,
             Long linkedItemId) {
+        return of(id, sku, quantity, unitPrice, costPrice, productName, addedAt, mode, courtesy, linkedItemId,
+                null, null);
+    }
+
+    /**
+     * Reconstitui um item a partir de persistência, com o setup da mesa e o acréscimo (PDV-F011).
+     * Linha anterior à V116 lê os dois como {@code null} — que é a verdade, e não "não teve".
+     */
+    public static ComandaItem of(Long id, String sku, BigDecimal quantity, BigDecimal unitPrice,
+            BigDecimal costPrice, String productName, Instant addedAt, ConsumptionMode mode, boolean courtesy,
+            Long linkedItemId, String notes, BigDecimal surchargeAmount) {
         return new ComandaItem(id, sku, quantity, unitPrice, costPrice, productName, addedAt, mode, courtesy,
-                linkedItemId);
+                linkedItemId, notes, surchargeAmount);
     }
 
     /** {@code quantity * unitPrice}. */

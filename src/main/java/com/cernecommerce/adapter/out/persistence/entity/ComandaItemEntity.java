@@ -62,4 +62,16 @@ public class ComandaItemEntity {
     // Liga o segundo sabor (ou a troca) à linha de origem, na mesma comanda.
     @Column(name = "linked_item_id")
     private Long linkedItemId;
+
+    // PDV-F011 — registro livre do setup da mesa (narguilé, filtro, qual pinça). Texto opaco: o
+    // servidor grava e devolve, nunca interpreta. É o que dá casa à pinça, que não pode virar
+    // cortesia — cortesia baixa estoque, e a pinça não é consumida.
+    @Column(length = 200)
+    private String notes;
+
+    // PDV-F011 — parcela de unit_price que veio de acréscimo manual no open rosh. Guardada à parte
+    // porque não dá para reconstruí-la do unit_price, que já é a soma; mesma razão de
+    // discount_amount ser campo próprio em order_item em vez de virar um preço menor.
+    @Column(name = "surcharge_amount", precision = 14, scale = 2)
+    private BigDecimal surchargeAmount;
 }
