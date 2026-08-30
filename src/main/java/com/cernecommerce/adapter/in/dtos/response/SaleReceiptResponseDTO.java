@@ -32,5 +32,16 @@ public class SaleReceiptResponseDTO {
     @Schema(description = "Troco devolvido, se houve.")
     private BigDecimal changeAmount;
 
+    @Schema(description = "Taxa de serviço da mesa (PDV-F015). FORA do netAmount de propósito: o "
+            + "líquido é a receita da mercadoria, a taxa é repasse ao garçom — somá-la ali inflaria "
+            + "receita e margem. Zero em toda venda que não veio de mesa.")
+    private BigDecimal serviceFeeAmount;
+
+    @Schema(description = "O que o cliente efetivamente paga: netAmount + serviceFeeAmount "
+            + "(PDV-F015). É contra este valor que o pagamento é validado e o troco calculado. "
+            + "Fora da mesa coincide com netAmount, porque a taxa é zero.")
+    private BigDecimal totalPayable;
+
+
     private List<OrderPaymentResponseDTO> payments;
 }

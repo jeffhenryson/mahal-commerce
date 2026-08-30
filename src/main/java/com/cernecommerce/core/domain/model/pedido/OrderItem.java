@@ -1,5 +1,6 @@
 package com.cernecommerce.core.domain.model.pedido;
 
+import com.cernecommerce.core.domain.exception.pedido.ItemDiscountExceedsGrossException;
 import com.cernecommerce.core.domain.exception.pedido.ProductNotPricedException;
 import com.cernecommerce.core.domain.model.Money;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
@@ -44,7 +45,9 @@ public record OrderItem(
         BigDecimal cashbackPercent,
         String productName,
         ConsumptionMode mode,
-        boolean courtesy) {
+        boolean courtesy,
+        String notes,
+        BigDecimal surchargeAmount) {
 
     public OrderItem {
         if (sku == null || sku.isBlank()) {
@@ -72,6 +75,11 @@ public record OrderItem(
         if (cashbackPercent != null
                 && (cashbackPercent.signum() < 0 || cashbackPercent.compareTo(Money.HUNDRED) > 0)) {
             throw new IllegalArgumentException("cashbackPercent deve estar entre 0 e 100");
+        }
+        // PDV-F011 — o acréscimo já está dentro de unitPrice; aqui ele é o registro da parcela.
+        // Negativo seria um desconto entrando sem passar por discountAmount nem pelo teto.
+        if (surchargeAmount != null && surchargeAmount.signum() < 0) {
+            throw new IllegalArgumentException("surchargeAmount não pode ser negativo");
         }
     }
 
@@ -106,8 +114,20 @@ public record OrderItem(
         if (pricing == null || !pricing.isPriced()) {
             throw new ProductNotPricedException(sku);
         }
+        // PDV-C016 — a mesma regra do compact constructor, recusada aqui com exceção TIPADA.
+        // Este é o caminho de entrada: o discountAmount vem do cliente HTTP, e a invariante do
+        // record sobe como IllegalArgumentException, que o handler global achata num 400 genérico
+        // (BAD_REQUEST, "Requisição inválida") descartando a mensagem — a mesma resposta de
+        // qualquer corpo malformado. A checagem do record continua onde está: ela é a rede contra
+        // erro de programação e contra dado corrompido, não a validação da borda.
+        if (discountAmount != null && quantity != null && discountAmount.signum() > 0) {
+            BigDecimal gross = quantity.multiply(pricing.effectivePrice());
+            if (discountAmount.compareTo(gross) > 0) {
+                throw new ItemDiscountExceedsGrossException(sku, discountAmount, gross);
+            }
+        }
         return new OrderItem(null, sku, quantity, pricing.effectivePrice(), pricing.costPrice(),
-                discountAmount, null, productName, ConsumptionMode.NORMAL, false);
+                discountAmount, null, productName, ConsumptionMode.NORMAL, false, null, null);
     }
 
     /**
@@ -137,20 +157,35 @@ public record OrderItem(
     public static OrderItem of(Long id, String sku, BigDecimal quantity, BigDecimal unitPrice,
             BigDecimal costPrice, BigDecimal discountAmount, BigDecimal cashbackPercent, String productName,
             ConsumptionMode mode, boolean courtesy) {
+        return of(id, sku, quantity, unitPrice, costPrice, discountAmount, cashbackPercent, productName, mode,
+                courtesy, null, null);
+    }
+
+    /**
+     * Reconstitui um item carregando também o setup da mesa e o acréscimo do open rosh (PDV-F011).
+     *
+     * <p>Os dois atravessam o fechamento da comanda pela mesma razão que obrigou {@code mode} e
+     * {@code courtesy} a atravessarem: a pergunta <i>"qual pinça saiu com aquela mesa"</i> é feita
+     * <b>depois</b> de a mesa ter fechado, e a parcela de acréscimo não pode ser reconstruída a
+     * partir do {@code unitPrice} — ele já é a soma. Nulos em toda venda que não veio de mesa.</p>
+     */
+    public static OrderItem of(Long id, String sku, BigDecimal quantity, BigDecimal unitPrice,
+            BigDecimal costPrice, BigDecimal discountAmount, BigDecimal cashbackPercent, String productName,
+            ConsumptionMode mode, boolean courtesy, String notes, BigDecimal surchargeAmount) {
         return new OrderItem(id, sku, quantity, unitPrice, costPrice, discountAmount, cashbackPercent, productName,
-                mode, courtesy);
+                mode, courtesy, notes, surchargeAmount);
     }
 
     /** Carimba a taxa de cashback vigente. Cópia — o item permanece imutável. */
     public OrderItem withCashbackPercent(BigDecimal newCashbackPercent) {
         return new OrderItem(id, sku, quantity, unitPrice, costPrice, discountAmount, newCashbackPercent, productName,
-                mode, courtesy);
+                mode, courtesy, notes, surchargeAmount);
     }
 
     /** Concede desconto neste item. Cópia — o item permanece imutável. */
     public OrderItem withDiscount(BigDecimal newDiscountAmount) {
         return new OrderItem(id, sku, quantity, unitPrice, costPrice, newDiscountAmount, cashbackPercent, productName,
-                mode, courtesy);
+                mode, courtesy, notes, surchargeAmount);
     }
 
     /**

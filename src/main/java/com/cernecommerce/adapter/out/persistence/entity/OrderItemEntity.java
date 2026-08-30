@@ -62,4 +62,13 @@ public class OrderItemEntity {
 
     @Column(nullable = false)
     private boolean courtesy;
+
+    // PDV-F011 — notes e surcharge_amount atravessam o fechamento pela mesma razão que mode e
+    // courtesy: a pergunta "qual pinça saiu com aquela mesa" é feita depois de a mesa ter fechado.
+    // Nulos em toda venda que não veio de mesa.
+    @Column(length = 200)
+    private String notes;
+
+    @Column(name = "surcharge_amount", precision = 14, scale = 2)
+    private BigDecimal surchargeAmount;
 }

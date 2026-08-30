@@ -63,6 +63,12 @@ public class OrderEntity {
     @Column(name = "cancel_reason", length = 255)
     private String cancelReason;
 
+    // PDV-F015 — taxa de serviço, os 10% do garçom. Coluna PRÓPRIA, fora de net_amount, porque o
+    // líquido é somado como receita em quatro agregações e a gorjeta é repassada, não faturada.
+    // Só existe em channel = MESA (CHECK ck_sales_order_service_fee_only_mesa).
+    @Column(name = "service_fee_amount", nullable = false, precision = 14, scale = 2)
+    private BigDecimal serviceFeeAmount = BigDecimal.ZERO;
+
     // PDV-F010 — origem de mesa. Só preenchidos em channel = MESA (CHECK ck_sales_order_mesa_origin).
     // comanda_id é redundante com comanda.order_id, que aponta de volta: a redundância evita join
     // reverso em toda página de Vendas > Pedidos.
@@ -116,7 +122,12 @@ public class OrderEntity {
     @Column(nullable = false)
     private Long version;
 
+    // @OrderBy porque o pedido é lido na ordem de lançamento — é assim que o comprovante imprime.
+    // Sem isto a ordem é o que o banco quiser devolver: invisível enquanto cada pedido vinha de uma
+    // consulta própria, e dependente da intercalação do join desde que PED-C002 passou a trazer
+    // vários de uma vez. Mesmo padrão de ComandaEntity.items.
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    @OrderBy("id ASC")
     @ToString.Exclude
     private List<OrderItemEntity> items = new ArrayList<>();
 }

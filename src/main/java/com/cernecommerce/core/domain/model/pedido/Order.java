@@ -64,7 +64,8 @@ public record Order(
         Instant deliveredAt,
         long version,
         Long comandaId,
-        String tableLabel) {
+        String tableLabel,
+        BigDecimal serviceFeeAmount) {
 
     public Order {
         if (channel == null) {
@@ -111,7 +112,21 @@ public record Order(
         discountAmount = requireNonNegative(discountAmount, "discountAmount");
         cashbackRedeemed = requireNonNegative(cashbackRedeemed, "cashbackRedeemed");
         netAmount = requireNonNegative(netAmount, "netAmount");
+        serviceFeeAmount = requireNonNegative(serviceFeeAmount, "serviceFeeAmount");
 
+        // PDV-F015: os 10% do garçom são serviço de mesa, e só existem onde há mesa. No balcão não
+        // há o que cobrar — mesma razão pela qual comandaId/tableLabel também são exclusivos de
+        // MESA. O CHECK do schema espelha esta regra, para sobreviver a carga direta.
+        if (channel != SalesChannel.MESA && serviceFeeAmount.signum() > 0) {
+            throw new IllegalArgumentException(
+                    "serviceFeeAmount só existe em pedido de MESA: channel=" + channel);
+        }
+
+        // A taxa fica DE FORA do netAmount de propósito (PDV-F015). O líquido é o valor da
+        // mercadoria depois dos abatimentos, e é ele que quatro agregações somam como receita
+        // (findRevenueTotals, por canal, por dia, e o total da sessão). A gorjeta é do garçom, não
+        // da casa: somá-la ali inflaria receita e margem com dinheiro que a loja apenas repassa.
+        // O que o cliente paga é totalPayable(), e é contra ele que o pagamento é validado.
         BigDecimal expectedNet = grossAmount.subtract(discountAmount).subtract(cashbackRedeemed);
         if (netAmount.compareTo(expectedNet) != 0) {
             throw new IllegalArgumentException("netAmount deve ser grossAmount - discountAmount - cashbackRedeemed: "
@@ -167,7 +182,8 @@ public record Order(
         Totals totals = Totals.from(items);
         return new Order(null, null, SalesChannel.BALCAO, OrderStatus.CRIADO, customerId, sessionId,
                 warehouseCode, items, totals.gross(), totals.discount(), BigDecimal.ZERO, totals.net(),
-                null, null, Instant.now(), null, null, null, null, null, null, null, null, 0L, null, null);
+                null, null, Instant.now(), null, null, null, null, null, null, null, null, 0L, null, null,
+                BigDecimal.ZERO);
     }
 
     /**
@@ -194,7 +210,7 @@ public record Order(
         return new Order(null, null, SalesChannel.MESA, OrderStatus.CRIADO, customerId, sessionId,
                 warehouseCode, items, totals.gross(), totals.discount(), BigDecimal.ZERO, totals.net(),
                 null, null, Instant.now(), null, null, null, null, null, null, null, null, 0L,
-                comandaId, tableLabel);
+                comandaId, tableLabel, BigDecimal.ZERO);
     }
 
     /**
@@ -205,7 +221,8 @@ public record Order(
         Totals totals = Totals.from(items);
         return new Order(null, null, SalesChannel.MARKETPLACE, OrderStatus.AGUARDANDO_PAGAMENTO, customerId,
                 null, warehouseCode, items, totals.gross(), totals.discount(), BigDecimal.ZERO, totals.net(),
-                null, null, Instant.now(), null, null, null, null, null, null, null, null, 0L, null, null);
+                null, null, Instant.now(), null, null, null, null, null, null, null, null, 0L, null, null,
+                BigDecimal.ZERO);
     }
 
     /**
@@ -256,9 +273,9 @@ public record Order(
     }
 
     /**
-     * Reconstitui um pedido a partir de persistência — forma canônica <b>com</b> a origem de mesa
-     * (PDV-F010). {@code comandaId}/{@code tableLabel} são nulos em todo canal que não é
-     * {@code MESA}, e é por isso que a forma anterior continua valendo para balcão e marketplace.
+     * Reconstitui um pedido a partir de persistência — forma <b>com</b> a origem de mesa
+     * (PDV-F010) e <b>sem</b> taxa de serviço (dado anterior a PDV-F015, lê como zero: nenhum
+     * pedido gravado antes daquela entrega cobrou taxa).
      */
     public static Order of(Long id, String orderNumber, SalesChannel channel, OrderStatus status,
             Long customerId, Long sessionId, String warehouseCode, List<OrderItem> items,
@@ -267,10 +284,27 @@ public record Order(
             Instant paidAt, Instant concludedAt, Instant cancelledAt, Instant refundedAt, Instant reservedAt,
             Instant separatedAt, Instant shippedAt, Instant deliveredAt, long version, Long comandaId,
             String tableLabel) {
+        return of(id, orderNumber, channel, status, customerId, sessionId, warehouseCode, items,
+                grossAmount, discountAmount, cashbackRedeemed, netAmount, changeAmount, cancelReason,
+                createdAt, paidAt, concludedAt, cancelledAt, refundedAt, reservedAt, separatedAt, shippedAt,
+                deliveredAt, version, comandaId, tableLabel, BigDecimal.ZERO);
+    }
+
+    /**
+     * Reconstitui um pedido a partir de persistência — forma canônica, com a taxa de serviço
+     * (PDV-F015).
+     */
+    public static Order of(Long id, String orderNumber, SalesChannel channel, OrderStatus status,
+            Long customerId, Long sessionId, String warehouseCode, List<OrderItem> items,
+            BigDecimal grossAmount, BigDecimal discountAmount, BigDecimal cashbackRedeemed,
+            BigDecimal netAmount, BigDecimal changeAmount, String cancelReason, Instant createdAt,
+            Instant paidAt, Instant concludedAt, Instant cancelledAt, Instant refundedAt, Instant reservedAt,
+            Instant separatedAt, Instant shippedAt, Instant deliveredAt, long version, Long comandaId,
+            String tableLabel, BigDecimal serviceFeeAmount) {
         return new Order(id, orderNumber, channel, status, customerId, sessionId, warehouseCode, items,
                 grossAmount, discountAmount, cashbackRedeemed, netAmount, changeAmount, cancelReason,
                 createdAt, paidAt, concludedAt, cancelledAt, refundedAt, reservedAt, separatedAt, shippedAt,
-                deliveredAt, version, comandaId, tableLabel);
+                deliveredAt, version, comandaId, tableLabel, serviceFeeAmount);
     }
 
     /**
@@ -288,7 +322,7 @@ public record Order(
         return new Order(id, orderNumber, channel, OrderStatus.CONCLUIDO, customerId, sessionId,
                 warehouseCode, items, grossAmount, discountAmount, cashbackRedeemed, netAmount,
                 changeAmount, cancelReason, createdAt, paidAt == null ? concludedAt : paidAt,
-                concludedAt, null, null, reservedAt, separatedAt, shippedAt, deliveredAt, version, comandaId, tableLabel);
+                concludedAt, null, null, reservedAt, separatedAt, shippedAt, deliveredAt, version, comandaId, tableLabel, serviceFeeAmount);
     }
 
     /**
@@ -312,7 +346,7 @@ public record Order(
         return new Order(id, orderNumber, channel, OrderStatus.RESERVADO, customerId, sessionId,
                 warehouseCode, items, grossAmount, discountAmount, cashbackRedeemed, netAmount,
                 changeAmount, cancelReason, createdAt, paidAt == null ? reservedAt : paidAt,
-                null, null, null, reservedAt, separatedAt, shippedAt, deliveredAt, version, comandaId, tableLabel);
+                null, null, null, reservedAt, separatedAt, shippedAt, deliveredAt, version, comandaId, tableLabel, serviceFeeAmount);
     }
 
     /**
@@ -327,7 +361,7 @@ public record Order(
         return new Order(id, orderNumber, channel, OrderStatus.CONCLUIDO, customerId, sessionId,
                 warehouseCode, items, grossAmount, discountAmount, cashbackRedeemed, netAmount,
                 changeAmount, cancelReason, createdAt, paidAt, concludedAt, null, null, reservedAt,
-                separatedAt, shippedAt, deliveredAt, version, comandaId, tableLabel);
+                separatedAt, shippedAt, deliveredAt, version, comandaId, tableLabel, serviceFeeAmount);
     }
 
     /** Marca o pagamento como confirmado — caminho do marketplace, disparado pelo webhook. */
@@ -336,7 +370,7 @@ public record Order(
         return new Order(id, orderNumber, channel, OrderStatus.PAGO, customerId, sessionId, warehouseCode,
                 items, grossAmount, discountAmount, cashbackRedeemed, netAmount, changeAmount, cancelReason,
                 createdAt, paidAt, concludedAt, null, null, reservedAt, separatedAt, shippedAt, deliveredAt,
-                version, comandaId, tableLabel);
+                version, comandaId, tableLabel, serviceFeeAmount);
     }
 
     /**
@@ -353,7 +387,7 @@ public record Order(
         return new Order(id, orderNumber, channel, newStatus, customerId, sessionId, warehouseCode, items,
                 grossAmount, discountAmount, cashbackRedeemed, netAmount, changeAmount, cancelReason,
                 createdAt, paidAt, concludedAt, null, null, reservedAt, newSeparatedAt, newShippedAt,
-                newDeliveredAt, version, comandaId, tableLabel);
+                newDeliveredAt, version, comandaId, tableLabel, serviceFeeAmount);
     }
 
     /**
@@ -370,7 +404,7 @@ public record Order(
         return new Order(id, orderNumber, channel, OrderStatus.CANCELADO, customerId, sessionId,
                 warehouseCode, items, grossAmount, discountAmount, cashbackRedeemed, netAmount,
                 changeAmount, reason, createdAt, paidAt, concludedAt, cancelledAt, null, reservedAt,
-                separatedAt, shippedAt, deliveredAt, version, comandaId, tableLabel);
+                separatedAt, shippedAt, deliveredAt, version, comandaId, tableLabel, serviceFeeAmount);
     }
 
     /**
@@ -386,7 +420,7 @@ public record Order(
         return new Order(id, orderNumber, channel, OrderStatus.REEMBOLSADO, customerId, sessionId,
                 warehouseCode, items, grossAmount, discountAmount, cashbackRedeemed, netAmount,
                 changeAmount, reason, createdAt, paidAt, concludedAt, null, refundedAt, reservedAt,
-                separatedAt, shippedAt, deliveredAt, version, comandaId, tableLabel);
+                separatedAt, shippedAt, deliveredAt, version, comandaId, tableLabel, serviceFeeAmount);
     }
 
     /**
@@ -401,7 +435,7 @@ public record Order(
         return new Order(id, orderNumber, channel, status, customerId, sessionId, warehouseCode, items,
                 grossAmount, discountAmount, value, newNet, changeAmount, cancelReason, createdAt,
                 paidAt, concludedAt, cancelledAt, refundedAt, reservedAt, separatedAt, shippedAt,
-                deliveredAt, version, comandaId, tableLabel);
+                deliveredAt, version, comandaId, tableLabel, serviceFeeAmount);
     }
 
     /**
@@ -424,7 +458,7 @@ public record Order(
         return new Order(id, orderNumber, channel, status, customerId, newSessionId, warehouseCode,
                 items, grossAmount, discountAmount, cashbackRedeemed, netAmount, changeAmount,
                 cancelReason, createdAt, paidAt, concludedAt, cancelledAt, refundedAt, reservedAt,
-                separatedAt, shippedAt, deliveredAt, version, comandaId, tableLabel);
+                separatedAt, shippedAt, deliveredAt, version, comandaId, tableLabel, serviceFeeAmount);
     }
 
     /** Vincula o pedido a um cliente identificado depois da montagem — o "CPF na nota?" do balcão. */
@@ -432,7 +466,44 @@ public record Order(
         return new Order(id, orderNumber, channel, status, newCustomerId, sessionId, warehouseCode, items,
                 grossAmount, discountAmount, cashbackRedeemed, netAmount, changeAmount, cancelReason,
                 createdAt, paidAt, concludedAt, cancelledAt, refundedAt, reservedAt, separatedAt, shippedAt,
-                deliveredAt, version, comandaId, tableLabel);
+                deliveredAt, version, comandaId, tableLabel, serviceFeeAmount);
+    }
+
+    /**
+     * O que o cliente efetivamente paga: {@link #netAmount} <b>mais</b> a taxa de serviço
+     * (PDV-F015).
+     *
+     * <p>É contra este valor — e não contra o líquido — que o pagamento é validado e o troco
+     * calculado. A distinção existe porque os dois números respondem a perguntas diferentes:
+     * {@code netAmount} é quanto a loja vendeu, {@code totalPayable} é quanto entrou na gaveta.
+     * Fora da mesa os dois coincidem sempre, porque a taxa é zero.</p>
+     */
+    public BigDecimal totalPayable() {
+        return netAmount.add(serviceFeeAmount);
+    }
+
+    /**
+     * Aplica a taxa de serviço como um percentual sobre o líquido (PDV-F015).
+     *
+     * <p>O cálculo mora aqui, e não no service, porque a taxa é uma regra do pedido: a base é o
+     * líquido — depois do desconto, portanto —, e deixar a conta do lado de fora abriria caminho
+     * para o valor chegar pronto do cliente HTTP, que é exatamente o que este módulo não faz com
+     * dinheiro desde PDV-F004.</p>
+     *
+     * <p>Percentual zero (ou nulo) devolve o pedido intacto em vez de carimbar um zero — não é a
+     * mesma coisa que uma taxa de R$ 0,00 recusada pelo cliente, mas o resultado gravado é o
+     * mesmo, e não vale um campo a mais para distinguir.</p>
+     */
+    public Order withServiceFeeOf(BigDecimal percent) {
+        if (percent == null || percent.signum() <= 0) {
+            return this;
+        }
+        BigDecimal fee = netAmount.multiply(percent)
+                .divide(BigDecimal.valueOf(100), 2, java.math.RoundingMode.HALF_UP);
+        return new Order(id, orderNumber, channel, status, customerId, sessionId, warehouseCode, items,
+                grossAmount, discountAmount, cashbackRedeemed, netAmount, changeAmount, cancelReason,
+                createdAt, paidAt, concludedAt, cancelledAt, refundedAt, reservedAt, separatedAt, shippedAt,
+                deliveredAt, version, comandaId, tableLabel, fee);
     }
 
     /** Soma do cashback gerado por todos os itens; ignora itens sem taxa carimbada. */
