@@ -1,5 +1,6 @@
 package com.cernecommerce.core.domain.model.pdv;
 
+import com.cernecommerce.core.domain.model.pedido.ConsumptionMode;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -130,6 +131,66 @@ public record Comanda(
         newItems.add(item);
         return new Comanda(id, sessionId, warehouseCode, tableOrCustomerLabel, customerId, status, newItems, orderId,
                 openedBy, openedAt, closedAt);
+    }
+
+    /**
+     * Remove uma linha da comanda aberta e, junto com ela, as {@code TROCA} penduradas nela
+     * (PDV-F012). Cópia — a comanda permanece imutável.
+     *
+     * <p><b>A cascata da troca não é conveniência, é consistência.</b> {@code linked_item_id} é uma
+     * FK auto-referente: deixar a filha para trás produziria uma linha apontando para um id que não
+     * existe mais. E a {@code TROCA} não tem existência própria — ela é a troca de sabor <i>de</i>
+     * um consumo livre, sempre cortesia, sempre de valor zero. Sem a sessão que a originou, ela não
+     * significa nada.</p>
+     *
+     * <p><b>O {@code SABOR_EXTRA} é o contrário, e por isso não é arrastado:</b> é linha própria e
+     * <b>pode estar sendo cobrada</b> (o segundo sabor de um duplo sem promo). Apagá-lo em silêncio
+     * tiraria dinheiro da conta sem o operador ter pedido. Quem decide sobre uma linha cobrada é
+     * quem opera o caixa — o service recusa e manda removê-la explicitamente antes.</p>
+     *
+     * @return a comanda sem a linha e sem as trocas dela
+     * @throws IllegalStateException se a comanda não estiver {@code ABERTA} — rede de segurança do
+     *         domínio, como em {@link #withAddedItem}
+     * @throws IllegalArgumentException se o item não estiver nesta comanda
+     */
+    public Comanda withRemovedItem(Long itemId) {
+        requireOpen();
+        if (itemId == null) {
+            throw new IllegalArgumentException("itemId é obrigatório para remover linha da comanda");
+        }
+        boolean exists = items.stream().anyMatch(i -> itemId.equals(i.id()));
+        if (!exists) {
+            throw new IllegalArgumentException("item " + itemId + " não pertence à comanda " + id);
+        }
+        List<ComandaItem> newItems = new ArrayList<>(items.stream()
+                .filter(i -> !itemId.equals(i.id()))
+                .filter(i -> !(itemId.equals(i.linkedItemId()) && i.mode() == ConsumptionMode.TROCA))
+                .toList());
+        return new Comanda(id, sessionId, warehouseCode, tableOrCustomerLabel, customerId, status, newItems, orderId,
+                openedBy, openedAt, closedAt);
+    }
+
+    /**
+     * As linhas que {@link #withRemovedItem} levaria junto — as {@code TROCA} penduradas nesta.
+     *
+     * <p>Existe separada porque o service precisa saber <b>quais</b> saíram para devolver o estoque
+     * de cada uma: a comanda depois da remoção não tem mais essa informação.</p>
+     */
+    public List<ComandaItem> itemsRemovedWith(Long itemId) {
+        return items.stream()
+                .filter(i -> itemId.equals(i.id())
+                        || (itemId.equals(i.linkedItemId()) && i.mode() == ConsumptionMode.TROCA))
+                .toList();
+    }
+
+    /**
+     * Linhas <b>cobradas</b> penduradas nesta — os {@code SABOR_EXTRA}. Não são arrastadas pela
+     * remoção; a existência delas a impede. Ver {@link #withRemovedItem}.
+     */
+    public List<ComandaItem> chargedChildrenOf(Long itemId) {
+        return items.stream()
+                .filter(i -> itemId.equals(i.linkedItemId()) && i.mode() != ConsumptionMode.TROCA)
+                .toList();
     }
 
     /**
