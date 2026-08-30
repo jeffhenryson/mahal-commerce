@@ -685,6 +685,9 @@ Um único `JOIN FETCH` traz usuários, roles e permissões em uma só query. O `
 | `RoleRepositoryImpl.findAll()` | `findAllIds()` → `findAllWithPermissionsByIdIn()` |
 | `RoleRepositoryImpl.findByNameContaining()` | `findIdsByNameContaining()` → `findAllWithPermissionsByIdIn()` |
 | `ProductRepositoryImpl.findAll()` | `findAllIds()` → `findAllByIdsWithVariants()` (JOIN FETCH em `variants` e `variants.attributes`) |
+| `OrderRepositoryImpl.findAll()` / `findBySessionId()` | página resolvida sem fetch → `findAllByIdsWithItems()` (JOIN FETCH em `items`) — PED-C002. A fase 1 aqui é a própria consulta paginada (`Specification` ou método derivado), que já não tocava a coleção: só a fase 2 foi acrescentada |
+| `ComandaRepositoryImpl.findOpen()` | `findOpenIds()` → `findAllByIdsWithItems()` (JOIN FETCH em `items`) — PDV-C009 |
+| `StockCountRepositoryImpl.findByWarehouseId()` | `findIdsByWarehouseId()` → `findAllByIdsWithItems()` |
 
 ### `findFiltered` e a Criteria API
 

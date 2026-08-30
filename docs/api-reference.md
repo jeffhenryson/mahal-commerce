@@ -1414,6 +1414,10 @@ estoque só é debitado/creditado aqui, nunca no preview.
 
 ### GET /pdv/sessions — Permissão: PDV_READ
 
+Paginado (`page` ≥ 0, `size` 1–100), **das mais recentes para as mais antigas**. A ordenação entrou
+em PDV-C013: antes a consulta paginava sem `ORDER BY`, e a mesma sessão podia aparecer em duas
+páginas enquanto outra sumia.
+
 Lista sessões de caixa paginadas (`page` ≥ 0, `size` entre 1 e 100 — default 0/20). Retorna
 `PageResult<CashRegisterSessionResponseDTO>` (era o record de domínio até PDV-C002).
 
@@ -1453,7 +1457,12 @@ Exige sessão aberta **e do próprio operador**.
 
 ### GET /pdv/sessions/{id}/movements — Permissão: PDV_READ
 
-Lista os movimentos da sessão, na ordem em que aconteceram.
+`PageResult<CashMovementResponseDTO>` dos movimentos da sessão, na ordem em que aconteceram
+(`id` crescente). Parâmetros `page` (≥ 0, default 0) e `size` (1–100, default 50); fora da faixa é
+`400 VALIDATION_ERROR`.
+
+> **Contrato alterado em PDV-C012** (2026-08-30): devolvia a lista na raiz do corpo e passa a
+> devolver `PageResult` — os itens saíram da raiz para `content`.
 
 ### POST /pdv/sessions/{id}/close — Permissão: PDV_SESSION_CLOSE
 
@@ -1483,13 +1492,36 @@ chega à loja para retirar e pagar um pedido montado no app.
 
 ### POST /pdv/sessions/{id}/orders/{orderId}/settle — Permissão: PDV_SALE_MANAGE
 
+> **Contrato alterado em PDV-C015.** A rota **não tinha corpo** e passou a exigir `payments`, o
+> mesmo shape de `POST /pdv/sessions/{id}/sales`. Ela concluía o pedido sem registrar como o
+> dinheiro entrou — era o único caminho de recebimento do projeto fora do ledger de pagamento, e o
+> fechamento daquele caixa acusava sobra sem dono.
+
 Liquida no balcão um pedido feito no aplicativo: **consome a reserva** de estoque (não dá baixa
-nova, que debitaria duas vezes), vincula o pedido à sessão de caixa e conclui, emitindo o
-`orderNumber`.
+nova, que debitaria duas vezes), **registra o pagamento recebido**, vincula o pedido à sessão de
+caixa e conclui, emitindo o `orderNumber`.
 
 O `channel` **continua `MARKETPLACE`** — foi o site que gerou a venda, e é assim que ela tem que
 aparecer no relatório de conversão. O que muda é o `sessionId`, que passa a apontar para o caixa que
 recebeu o dinheiro.
+
+**Valor exato, sem troco.** Justamente porque o canal continua `MARKETPLACE`, o pedido não admite
+`changeAmount` (`ck_sales_order_change_amount_by_channel`) — a tela lança o que **fica na gaveta**,
+não a cédula entregue. Excedente responde `400 CHANGE_NOT_SUPPORTED`.
+
+A cobrança de gateway que o checkout deixou aberta (`PENDING`/`GATEWAY_PIX`) é **encerrada** como
+`CANCELLED`: pago no balcão, nenhum webhook vai confirmá-la.
+
+```json
+{
+  "payments": [                    // obrigatório, não vazio; várias linhas = pagamento dividido
+    { "method": "DINHEIRO", "amount": 44.00 }
+  ]
+}
+// Response 200 → OrderResponseDTO
+// 400 INSUFFICIENT_PAYMENT (a soma não cobre o líquido)
+// 400 CHANGE_NOT_SUPPORTED (a soma passa do líquido — aqui não há troco)
+```
 
 `403 SESSION_NOT_OWNED` / `404` / `409 INVALID_STATUS_TRANSITION` se o pedido não estiver aguardando
 pagamento.
@@ -1512,6 +1544,7 @@ pagamento.
 // 403 desconto > 0 sem PDV_SALE_DISCOUNT
 // 404 CASH_REGISTER_SESSION_NOT_FOUND / 404 PRODUCT_NOT_FOUND
 // 409 CASH_REGISTER_SESSION_CLOSED / 409 PRODUCT_NOT_PRICED / 409 DISCOUNT_LIMIT_EXCEEDED
+// 409 ITEM_DISCOUNT_EXCEEDS_GROSS (desconto da linha acima do bruto dela — PDV-C016; antes era um 400 genérico)
 ```
 
 Registra a venda e **dá baixa automática no estoque na mesma transação**: cada item gera um
@@ -1581,6 +1614,9 @@ lançado**, não no fechamento — ver a nota de limitação conhecida no README
 
 ### POST /pdv/comandas?sessionId= — Permissão: PDV_COMANDA_MANAGE
 
+`tableOrCustomerLabel` é obrigatório e tem no máximo **100 caracteres** (PDV-C011) — acima disso é
+`400`, não o `500` que a violação da coluna produzia antes.
+
 ```json
 { "tableOrCustomerLabel": "Mesa 4" }
 ```
@@ -1596,15 +1632,68 @@ Preço e custo vêm do catálogo, igual à venda de balcão. `201` com a comanda
 (`runningTotal` recalculado). `400 INSUFFICIENT_STOCK`; `403 SESSION_NOT_OWNED`;
 `404 COMANDA_NOT_FOUND`/`PRODUCT_NOT_FOUND`; `409 COMANDA_NOT_OPEN`/`PRODUCT_NOT_PRICED`.
 
+### DELETE /pdv/comandas/{id}/items/{itemId} — Permissão: PDV_COMANDA_MANAGE
+
+Remove uma linha da comanda aberta e devolve ao estoque o que ela debitou (`ENTRADA`), mantendo a
+mesa aberta (PDV-F012). Devolve a `ComandaResponseDTO` atualizada.
+
+**As linhas `TROCA` penduradas nesta saem junto** — são cortesia e não existem sem o consumo livre
+que as originou. Já um `SABOR_EXTRA` pendurado **barra** a remoção: é linha própria e pode estar
+sendo cobrada, e apagá-la em cascata tiraria valor da conta sem o operador pedir.
+
+| Erro | HTTP | Código |
+|---|---|---|
+| Linha inexistente, ou de outra comanda | 404 | `COMANDA_ITEM_NOT_FOUND` |
+| Há `SABOR_EXTRA` pendurado na linha | 409 | `LINKED_ITEM_IS_CHARGED` |
+| Comanda já fechada ou cancelada | 409 | `COMANDA_NOT_OPEN` |
+
+Reusa `PDV_COMANDA_MANAGE` sem permissão nova: quem já pode cancelar a mesa inteira não precisa de
+alçada maior para remover uma linha dela.
+
 ### GET /pdv/comandas/{id} — Permissão: PDV_READ
 
 `ComandaResponseDTO`, com os itens lançados e o `runningTotal`. `404 COMANDA_NOT_FOUND`.
 
-### GET /pdv/comandas?sessionId= — Permissão: PDV_READ
+### GET /pdv/comandas — Permissão: PDV_READ
 
-Lista de `ComandaResponseDTO` das comandas `ABERTA` da sessão — as "mesas ocupadas".
+`PageResult<ComandaResponseDTO>` das comandas `ABERTA` — as "mesas ocupadas".
 
-### POST /pdv/comandas/{id}/close — Permissão: PDV_COMANDA_MANAGE
+| Parâmetro | Obrigatório | Descrição |
+|---|---|---|
+| `sessionId` | não | Restringe a um caixa. **Sem ele a listagem é da loja inteira** (PDV-C007) |
+| `warehouseCode` | não | Restringe a um depósito |
+| `page` | não | ≥ 0, default 0 |
+| `size` | não | 1–100, default 50 |
+
+`sessionId` era obrigatório, e era isso que obrigava o cliente a listar as sessões, filtrar as
+`OPEN` e disparar **uma chamada por sessão** para remontar o salão — a decisão do dono é *caixa por
+atendente, mesas compartilhadas*. Não há filtro por status da sessão de caixa porque não é preciso:
+desde PDV-C005 o caixa não fecha com mesa aberta, então comanda `ABERTA` já implica sessão `OPEN`.
+Continua **sem checagem de posse**.
+
+> **Contrato alterado em PDV-C007/C012** (2026-08-30): devolvia a lista na raiz do corpo e passa a
+> devolver `PageResult` — os itens saíram da raiz para `content`. `size` fora da faixa é
+> `400 VALIDATION_ERROR`.
+
+### GET /pdv/comandas/service-fee — Permissão: PDV_READ
+
+`{ "percent": 10 }` — a taxa de serviço vigente (PDV-F015). Existe porque a taxa é aplicada por
+padrão no fechamento: sem consultá-la antes, a única forma de saber quanto será cobrado seria fechar
+a conta. Zero significa que a casa não cobra.
+
+### POST /pdv/comandas/{id}/close — Permissão: PDV_COMANDA_MANAGE (+ PDV_COMANDA_DISCOUNT se discountAmount > 0)
+
+Dois campos opcionais além dos pagamentos:
+
+| Campo | Default | Descrição |
+|---|---|---|
+| `discountAmount` | `0` | PDV-F014 — abatimento sobre a **conta inteira**, rateado pelo servidor entre as linhas proporcionalmente ao valor de cada uma. Exige `PDV_COMANDA_DISCOUNT` (403 `COMANDA_DISCOUNT_NOT_ALLOWED`) e respeita o mesmo teto do balcão (409 `DISCOUNT_LIMIT_EXCEEDED`). Maior que o total da conta é 409 `DISCOUNT_EXCEEDS_BILL` (PDV-C016; antes caía no 400 genérico, **sem** chegar ao 409 do teto). Não confundir com `surchargeAmount`, que é acréscimo **por linha** no open rosh |
+| `applyServiceFee` | `true` | PDV-F015 — taxa de serviço. Vem **aplicada por omissão**, porque é o padrão do salão; `false` é o cliente recusando |
+
+**O pagamento é validado contra `netAmount + serviceFeeAmount`**, não contra o líquido. A resposta
+traz os dois números separados: `netAmount` é o que a loja vendeu, `totalPayable` é o que o cliente
+pagou. A taxa fica **fora** do líquido de propósito — o líquido é a receita da casa, a taxa é
+repasse ao garçom, e somá-la ali inflaria receita e margem.
 
 ```json
 { "payments": [{ "method": "DINHEIRO", "amount": 50.00 }] }
