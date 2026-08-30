@@ -18,6 +18,29 @@ public interface OrderJpaRepository extends JpaRepository<OrderEntity, Long>,
     Page<OrderEntity> findBySessionIdOrderByIdDesc(Long sessionId, Pageable pageable);
 
     /**
+     * Segunda fase do padrão ID-first (PED-C002): carrega os pedidos da página com os itens numa
+     * consulta só.
+     *
+     * <p>Sem isto, {@code OrderRepositoryImpl.toDomain} toca a coleção {@code LAZY} de cada pedido
+     * e a listagem paga <b>uma consulta por pedido</b> — até 101 numa página de 100, no endpoint de
+     * pedidos do administrador. Não dá para resolver com {@code JOIN FETCH} na própria consulta
+     * paginada: misturar {@code LIMIT}/{@code OFFSET} com fetch de coleção pagina as linhas do
+     * produto cartesiano, não os pedidos.</p>
+     *
+     * <p>{@code ORDER BY o.id DESC} casa com a ordenação das duas chamadoras
+     * ({@code findAll} usa {@code Sort.by(DESC, "id")}, {@code findBySessionIdOrderByIdDesc} já é
+     * DESC), então a ordem da página é preservada sem o chamador precisar reordenar.</p>
+     *
+     * <p>A ordem dos <b>itens dentro</b> de cada pedido vem do {@code @OrderBy("id ASC")} de
+     * {@code OrderEntity.items}, não daqui: ordenar por um alias de fetch join no {@code ORDER BY}
+     * da própria consulta é HQL inválido, e o {@code @OrderBy} ainda tem a vantagem de valer para
+     * <b>todo</b> caminho de leitura da coleção, não só para esta consulta.</p>
+     */
+    @Query("SELECT DISTINCT o FROM OrderEntity o LEFT JOIN FETCH o.items "
+            + "WHERE o.id IN :ids ORDER BY o.id DESC")
+    List<OrderEntity> findAllByIdsWithItems(@Param("ids") List<Long> ids);
+
+    /**
      * Próximo número da sequência dedicada de numeração de pedido.
      *
      * <p>{@code nextval} é nativo porque a sequência não pertence a nenhuma entidade — ela existe
@@ -36,6 +59,30 @@ public interface OrderJpaRepository extends JpaRepository<OrderEntity, Long>,
             WHERE o.sessionId = :sessionId AND o.status = 'CONCLUIDO'
             """)
     BigDecimal sumConcludedNetAmountBySessionId(@Param("sessionId") Long sessionId);
+
+    /**
+     * Troco devolvido pela sessão (PDV-C017) — o dinheiro que <b>saiu</b> da gaveta na própria
+     * venda.
+     *
+     * <p>Existe porque {@code order_payment.amount} em {@code DINHEIRO} é o valor <b>entregue</b>
+     * pelo cliente, não o retido: {@code PdvService.validatePaymentsAndComputeChange} deriva o
+     * troco de {@code total pago − líquido}, e é a soma dos entregues que a conferência da gaveta
+     * usa. Sem esta subtração, toda venda em dinheiro com troco infla o esperado exatamente pelo
+     * troco, e o fechamento acusa uma falta que é só aritmética.
+     *
+     * <p><b>Sem filtro de status, de propósito.</b> O troco saiu da gaveta no instante da venda e
+     * não volta: pedido {@code RESERVADO} ainda não retirado já devolveu troco, e pedido
+     * {@code REEMBOLSADO} devolve ao cliente o valor <i>entregue</i> (é o {@code amount} da linha
+     * {@code CAPTURED} que {@code OrderPayment.refunded} espelha), de modo que o troco continua
+     * fora da gaveta dos dois lados da conta. Filtrar por {@code CONCLUIDO} devolveria o troco ao
+     * esperado no instante em que a venda fosse reembolsada.</p>
+     */
+    @Query("""
+            SELECT COALESCE(SUM(o.changeAmount), 0)
+            FROM OrderEntity o
+            WHERE o.sessionId = :sessionId AND o.changeAmount IS NOT NULL
+            """)
+    BigDecimal sumChangeAmountBySessionId(@Param("sessionId") Long sessionId);
 
     // findFiltered virou Specification (ver OrderRepositoryImpl.findAll): o padrão
     // "(:from IS NULL OR o.createdAt >= :from)" fazia o Postgres real recusar inferir o tipo do

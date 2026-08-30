@@ -63,6 +63,7 @@ public class OrderRepositoryImpl implements OrderRepository {
         entity.setDeliveredAt(order.deliveredAt());
         entity.setComandaId(order.comandaId());
         entity.setTableLabel(order.tableLabel());
+        entity.setServiceFeeAmount(order.serviceFeeAmount());
 
         // Os itens são reescritos por inteiro: o pedido é imutável depois de concluído, então este
         // caminho só é exercitado antes da conclusão. orphanRemoval limpa os antigos.
@@ -79,6 +80,8 @@ public class OrderRepositoryImpl implements OrderRepository {
             itemEntity.setProductName(item.productName());
             itemEntity.setMode(item.mode().name());
             itemEntity.setCourtesy(item.courtesy());
+            itemEntity.setNotes(item.notes());
+            itemEntity.setSurchargeAmount(item.surchargeAmount());
             entity.getItems().add(itemEntity);
         }
         return toDomain(orderJpaRepository.save(entity));
@@ -93,10 +96,34 @@ public class OrderRepositoryImpl implements OrderRepository {
     @Override
     @Transactional(readOnly = true)
     public PageResult<Order> findBySessionId(Long sessionId, int page, int size) {
-        Page<OrderEntity> result = orderJpaRepository
-                .findBySessionIdOrderByIdDesc(sessionId, PageRequest.of(page, size));
-        return new PageResult<>(result.getContent().stream().map(this::toDomain).toList(),
-                page, size, result.getTotalElements(), result.getTotalPages());
+        return withItems(orderJpaRepository
+                .findBySessionIdOrderByIdDesc(sessionId, PageRequest.of(page, size)), page, size);
+    }
+
+    /**
+     * Segunda fase do ID-first (PED-C002): recebe a página já resolvida — <b>sem</b> ter tocado a
+     * coleção de itens — e carrega os itens de todos os pedidos dela numa consulta só.
+     *
+     * <p>Existe compartilhada porque {@code findAll} e {@code findBySessionId} fazem exatamente a
+     * mesma coisa depois de obterem sua {@code Page}: o que difere entre as duas é só como a página
+     * é filtrada. Antes desta correção, ambas mapeavam direto com {@code toDomain}, que toca
+     * {@code e.getItems()} e disparava uma consulta por pedido.</p>
+     *
+     * <p>A ordenação vem do {@code ORDER BY o.id DESC} da própria consulta de fetch, que casa com a
+     * ordem das duas chamadoras — ver o javadoc de {@code findAllByIdsWithItems}.</p>
+     */
+    private PageResult<Order> withItems(Page<OrderEntity> pageResult, int page, int size) {
+        List<Long> ids = pageResult.getContent().stream().map(OrderEntity::getId).toList();
+        // Página vazia não emite o `IN ()`: é desnecessário, e nem todo banco o aceita. Mesma
+        // guarda de ComandaRepositoryImpl.findOpen.
+        if (ids.isEmpty()) {
+            return new PageResult<>(List.of(), page, size,
+                    pageResult.getTotalElements(), pageResult.getTotalPages());
+        }
+        List<Order> content = orderJpaRepository.findAllByIdsWithItems(ids).stream()
+                .map(this::toDomain).toList();
+        return new PageResult<>(content, page, size,
+                pageResult.getTotalElements(), pageResult.getTotalPages());
     }
 
     /**
@@ -122,16 +149,23 @@ public class OrderRepositoryImpl implements OrderRepository {
             if (to         != null) predicates.add(cb.lessThanOrEqualTo(root.get("createdAt"), to));
             return cb.and(predicates.toArray(new Predicate[0]));
         };
-        Page<OrderEntity> result = orderJpaRepository.findAll(spec,
-                PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "id")));
-        return new PageResult<>(result.getContent().stream().map(this::toDomain).toList(),
-                page, size, result.getTotalElements(), result.getTotalPages());
+        // A Specification resolve só QUAIS pedidos entram na página, sem tocar a coleção de itens;
+        // quem os carrega é o withItems, numa consulta só (PED-C002).
+        return withItems(orderJpaRepository.findAll(spec,
+                PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "id"))), page, size);
     }
 
     @Override
     @Transactional(readOnly = true)
     public BigDecimal sumConcludedNetAmountBySessionId(Long sessionId) {
         BigDecimal sum = orderJpaRepository.sumConcludedNetAmountBySessionId(sessionId);
+        return sum == null ? BigDecimal.ZERO : sum;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public BigDecimal sumChangeAmountBySessionId(Long sessionId) {
+        BigDecimal sum = orderJpaRepository.sumChangeAmountBySessionId(sessionId);
         return sum == null ? BigDecimal.ZERO : sum;
     }
 
@@ -149,13 +183,16 @@ public class OrderRepositoryImpl implements OrderRepository {
                 e.getChangeAmount(), e.getCancelReason(), e.getCreatedAt(), e.getPaidAt(),
                 e.getConcludedAt(), e.getCancelledAt(), e.getRefundedAt(), e.getReservedAt(),
                 e.getSeparatedAt(), e.getShippedAt(), e.getDeliveredAt(),
-                e.getVersion() == null ? 0L : e.getVersion(), e.getComandaId(), e.getTableLabel());
+                e.getVersion() == null ? 0L : e.getVersion(), e.getComandaId(), e.getTableLabel(),
+                // Pedido anterior a PDV-F015 lê como zero: o DEFAULT da V118 cobre as linhas já
+                // gravadas, e este null-check cobre carga direta.
+                e.getServiceFeeAmount() == null ? java.math.BigDecimal.ZERO : e.getServiceFeeAmount());
     }
 
     private OrderItem toDomain(OrderItemEntity e) {
         return OrderItem.of(e.getId(), e.getSku(), e.getQuantity(), e.getUnitPrice(), e.getCostPrice(),
                 e.getDiscountAmount(), e.getCashbackPercent(), e.getProductName(),
                 e.getMode() == null ? ConsumptionMode.NORMAL : ConsumptionMode.valueOf(e.getMode()),
-                e.isCourtesy());
+                e.isCourtesy(), e.getNotes(), e.getSurchargeAmount());
     }
 }
