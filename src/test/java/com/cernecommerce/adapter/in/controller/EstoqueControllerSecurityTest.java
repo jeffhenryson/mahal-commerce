@@ -342,7 +342,12 @@ public class EstoqueControllerSecurityTest {
                 .andExpect(status().isForbidden());
     }
 
-    /** Ler o ledger expõe quem movimentou o quê, então exige STOCK_MANAGE — não basta WAREHOUSE_READ. */
+    /**
+     * EST-C015 — depois que a leitura do ledger passou a aceitar {@code ESTOQUE_PRODUCT_READ}, este
+     * caso continua 403, e continua certo: {@code WAREHOUSE_READ} não é nenhuma das duas
+     * autoridades aceitas. Quem enxerga depósito não enxerga, por tabela, o histórico de quem
+     * movimentou o quê — para isso é preciso ler o catálogo ou movimentar saldo.
+     */
     @Test
     void list_movements_with_warehouse_read_only_returns_403() throws Exception {
         mockMvc.perform(get("/estoque/movements")
@@ -352,6 +357,22 @@ public class EstoqueControllerSecurityTest {
                         new SimpleGrantedAuthority("ROLE_ADMIN"),
                         new SimpleGrantedAuthority("ESTOQUE_WAREHOUSE_READ"))))
                 .andExpect(status().isForbidden());
+    }
+
+    /**
+     * EST-C015 — o caso que a correção existe para permitir. {@code ESTOQUE_PRODUCT_READ} sozinho,
+     * sem {@code STOCK_MANAGE}, é exatamente o recorte do {@code ROLE_ATENDENTE}
+     * ({@code SeedConfig.ATENDENTE_PERMISSIONS}): quem opera o PDV e a mesa lê o ledger. Antes
+     * disto o operador tomava 403 e o interceptor do admin o expulsava para /access-denied.
+     */
+    @Test
+    void list_movements_with_product_read_returns_200() throws Exception {
+        mockMvc.perform(get("/estoque/movements")
+                .param("sku", "NARG-001")
+                .with(user("bob").authorities(
+                        new SimpleGrantedAuthority("ROLE_ATENDENTE"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_READ"))))
+                .andExpect(status().isOk());
     }
 
     @Test
@@ -1581,5 +1602,123 @@ public class EstoqueControllerSecurityTest {
                         new SimpleGrantedAuthority("ROLE_ADMIN"),
                         new SimpleGrantedAuthority("ESTOQUE_PRODUCT_MANAGE"))))
                 .andExpect(status().isForbidden());
+    }
+
+    // ── Conversão atômica entre SKUs (EST-F025) ──────────────────────────────────────────────
+
+    /**
+     * Converter altera saldo dos dois lados, então é escrita: exige {@code STOCK_MANAGE} como o
+     * {@code POST /estoque/movements}, e não a permissão de leitura que EST-C015 liberou para o
+     * histórico. Na prática significa que o {@code ROLE_ATENDENTE} lê o ledger mas não converte.
+     */
+    @Test
+    void convert_stock_with_product_read_only_returns_403() throws Exception {
+        mockMvc.perform(post("/estoque/conversions")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"fromSku\":\"ESS-LATA\",\"toSku\":\"SESS-BLUE\",\"fromQuantity\":1,"
+                        + "\"toQuantity\":5,\"warehouseCode\":\"LOJA-01\",\"reason\":\"Fracionamento\"}")
+                .with(user("bob").authorities(
+                        new SimpleGrantedAuthority("ROLE_ATENDENTE"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_READ"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void convert_stock_without_auth_returns_401() throws Exception {
+        mockMvc.perform(post("/estoque/conversions")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"fromSku\":\"ESS-LATA\",\"toSku\":\"SESS-BLUE\",\"fromQuantity\":1,"
+                        + "\"toQuantity\":5,\"warehouseCode\":\"LOJA-01\",\"reason\":\"Fracionamento\"}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    // ── Curva ABC (EST-F011) ─────────────────────────────────────────────────────────────────
+
+    /** É leitura: a mesma régua que EST-C015 estabeleceu para o ledger. */
+    @Test
+    void abc_analysis_with_product_read_returns_200() throws Exception {
+        mockMvc.perform(get("/estoque/analytics/abc")
+                .param("from", "2026-08-01T00:00:00Z")
+                .param("to", "2026-08-31T23:59:59Z")
+                .with(user("bob").authorities(
+                        new SimpleGrantedAuthority("ROLE_ATENDENTE"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_READ"))))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void abc_analysis_with_user_role_only_returns_403() throws Exception {
+        mockMvc.perform(get("/estoque/analytics/abc")
+                .param("from", "2026-08-01T00:00:00Z")
+                .param("to", "2026-08-31T23:59:59Z")
+                .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isForbidden());
+    }
+
+    // ── Lata aberta (EST-F027) ───────────────────────────────────────────────────────────────
+
+    /**
+     * Ler as latas é leitura de catálogo — mesma régua de EST-C015 para o ledger. O atendente
+     * também alcança, porque é a tela de sessão dele que mostra o "3 de 5". O 404 é do depósito
+     * que não existe na base de teste: o que este caso afirma é que o RBAC deixou passar.
+     */
+    @Test
+    void open_packages_with_product_read_reaches_the_route() throws Exception {
+        mockMvc.perform(get("/estoque/open-packages")
+                .param("warehouseCode", "LOJA-01")
+                .with(user("bob").authorities(
+                        new SimpleGrantedAuthority("ROLE_ATENDENTE"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_READ"))))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void open_packages_with_user_role_only_returns_403() throws Exception {
+        mockMvc.perform(get("/estoque/open-packages")
+                .param("warehouseCode", "LOJA-01")
+                .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isForbidden());
+    }
+
+    /**
+     * "Repor essência" baixa estoque, mas quem repõe é o <b>atendente</b>, que tem
+     * PDV_COMANDA_MANAGE e não ESTOQUE_STOCK_MANAGE. Exigir só a segunda tornaria o botão
+     * inalcançável justamente para quem aperta.
+     */
+    @Test
+    void replace_open_package_with_comanda_manage_reaches_the_route() throws Exception {
+        mockMvc.perform(post("/estoque/open-packages/ESSE-BLUE/replace")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"warehouseCode\":\"LOJA-01\"}")
+                .with(user("atendente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ATENDENTE"),
+                        new SimpleGrantedAuthority("PDV_COMANDA_MANAGE"))))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void replace_open_package_with_user_role_only_returns_403() throws Exception {
+        mockMvc.perform(post("/estoque/open-packages/ESSE-BLUE/replace")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"warehouseCode\":\"LOJA-01\"}")
+                .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isForbidden());
+    }
+
+    // ── Exclusão de rascunho (EST-F026) ──────────────────────────────────────────────────────
+
+    @Test
+    void delete_product_with_product_read_only_returns_403() throws Exception {
+        mockMvc.perform(delete("/estoque/products/SKU-DRAFT")
+                .with(user("bob").authorities(
+                        new SimpleGrantedAuthority("ROLE_USER"),
+                        new SimpleGrantedAuthority("ESTOQUE_PRODUCT_READ"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void delete_product_without_auth_returns_401() throws Exception {
+        mockMvc.perform(delete("/estoque/products/SKU-DRAFT"))
+                .andExpect(status().isUnauthorized());
     }
 }

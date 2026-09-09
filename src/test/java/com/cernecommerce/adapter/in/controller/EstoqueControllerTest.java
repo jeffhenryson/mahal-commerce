@@ -33,6 +33,8 @@ import com.cernecommerce.core.domain.exception.estoque.LotExpiryDateMismatchExce
 import com.cernecommerce.core.domain.exception.estoque.MissingLotInfoException;
 import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.ProductVariantNotFoundException;
+import com.cernecommerce.core.domain.exception.estoque.ReservedStockException;
+import com.cernecommerce.core.domain.exception.estoque.SameSkuConversionException;
 import com.cernecommerce.core.domain.exception.estoque.UnexpectedLotInfoException;
 import com.cernecommerce.core.domain.exception.estoque.UnexpectedUnitCostException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountAlreadyOpenException;
@@ -42,6 +44,8 @@ import com.cernecommerce.core.domain.exception.estoque.StockReservationNotFoundE
 import com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.SortDirection;
+import com.cernecommerce.core.domain.model.estoque.AbcClass;
+import com.cernecommerce.core.domain.model.estoque.AbcAnalysis;
 import com.cernecommerce.core.domain.model.estoque.ProductFilter;
 import com.cernecommerce.core.domain.model.estoque.ProductSortField;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
@@ -70,6 +74,7 @@ import com.cernecommerce.core.domain.model.estoque.StockMovement;
 import com.cernecommerce.core.domain.model.estoque.StockReservation;
 import com.cernecommerce.core.domain.model.estoque.Warehouse;
 import com.cernecommerce.core.domain.model.estoque.WarehouseType;
+import com.cernecommerce.core.domain.event.AuditEvent;
 import com.cernecommerce.core.ports.in.EstoqueUseCase;
 import com.cernecommerce.core.ports.in.ProductImageUseCase;
 import com.cernecommerce.infra.handler.GlobalExceptionHandler;
@@ -94,6 +99,8 @@ public class EstoqueControllerTest {
     private MockMvc mockMvc;
     private EstoqueUseCase estoqueUseCase;
     private ProductImageUseCase productImageUseCase;
+    /** Campo, e não variável local, desde EST-F025: há teste que verifica o evento publicado. */
+    private ApplicationEventPublisher publisher;
 
     private static final UsernamePasswordAuthenticationToken AUTH =
             new UsernamePasswordAuthenticationToken("admin", null, List.of());
@@ -102,7 +109,7 @@ public class EstoqueControllerTest {
     void setup() {
         estoqueUseCase = mock(EstoqueUseCase.class);
         productImageUseCase = mock(ProductImageUseCase.class);
-        ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
+        publisher = mock(ApplicationEventPublisher.class);
         com.cernecommerce.core.ports.in.ComprasUseCase comprasUseCase =
                 mock(com.cernecommerce.core.ports.in.ComprasUseCase.class);
         mockMvc = MockMvcBuilders
@@ -721,6 +728,128 @@ public class EstoqueControllerTest {
                                 + "\"quantity\":5.000,\"reason\":\"Venda\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errorCode").value("INSUFFICIENT_STOCK"));
+    }
+
+    /**
+     * EST-C016 — o par de {@code INSUFFICIENT_STOCK}. Aqui o físico BASTARIA (10 na prateleira
+     * para uma saída de 5), mas 8 estão reservados para um pedido online e o disponível é 2.
+     * Antes deste handler a exceção caía no fallback e virava 500, escondendo do operador
+     * justamente a informação que resolve o caso — quanto está reservado, e para quê.
+     */
+    @Test
+    void registerMovement_reservedStock_returns_400() throws Exception {
+        when(estoqueUseCase.adjustStock(eq("NARG-001"), eq("LOJA-01"), eq(MovementType.SAIDA), any(), any(), any()))
+                .thenThrow(new ReservedStockException("NARG-001", 1L, new BigDecimal("10.000"),
+                        new BigDecimal("8.000"), new BigDecimal("5.000")));
+
+        mockMvc.perform(post("/estoque/movements")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sku\":\"NARG-001\",\"warehouseCode\":\"LOJA-01\",\"type\":\"SAIDA\","
+                                + "\"quantity\":5.000,\"reason\":\"Venda\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("RESERVED_STOCK"))
+                // A mensagem do domínio tem que sobreviver: é ela que diz quanto está reservado.
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("reservado 8.000")));
+    }
+
+    // ── Curva ABC (EST-F011) ─────────────────────────────────────────────────────────────────
+
+    @Test
+    void abcAnalysis_returns_200_withClassifiedLines() throws Exception {
+        when(estoqueUseCase.findAbcAnalysis(any(), any(), any())).thenReturn(List.of(
+                new AbcAnalysis.AbcEntry("ESS-CARA", "Essência Cara", new BigDecimal("2"),
+                        new BigDecimal("900.00"), new BigDecimal("90.00"), AbcClass.A, new BigDecimal("0.20")),
+                new AbcAnalysis.AbcEntry("CARVAO", "Carvão", new BigDecimal("100"),
+                        new BigDecimal("100.00"), new BigDecimal("100.00"), AbcClass.C, null)));
+
+        mockMvc.perform(get("/estoque/analytics/abc")
+                        .principal(AUTH)
+                        .param("from", "2026-08-01T00:00:00Z")
+                        .param("to", "2026-08-31T23:59:59Z"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].sku").value("ESS-CARA"))
+                .andExpect(jsonPath("$[0].abcClass").value("A"))
+                .andExpect(jsonPath("$[0].cumulativePercent").value(90.00))
+                // Saldo zero devolve giro nulo, não um número enorme.
+                .andExpect(jsonPath("$[1].abcClass").value("C"))
+                .andExpect(jsonPath("$[1].turnover").doesNotExist());
+    }
+
+    @Test
+    void abcAnalysis_withoutPeriod_returns_400() throws Exception {
+        mockMvc.perform(get("/estoque/analytics/abc").principal(AUTH))
+                .andExpect(status().isBadRequest());
+    }
+
+    // ── Conversão atômica entre SKUs (EST-F025) ──────────────────────────────────────────────
+
+    @Test
+    void convertStock_returns_201_withBothBalances() throws Exception {
+        StockBalance from = StockBalance.of(1L, "ESS-LATA", 1L, new BigDecimal("2.000"), 1L);
+        StockBalance to = StockBalance.of(2L, "SESS-BLUE", 1L, new BigDecimal("5.000"), 1L);
+        when(estoqueUseCase.convertStock(eq("ESS-LATA"), eq("SESS-BLUE"), any(), any(), eq("LOJA-01"),
+                any(), any())).thenReturn(new EstoqueUseCase.StockConversionResult(from, to));
+
+        mockMvc.perform(post("/estoque/conversions")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"fromSku\":\"ESS-LATA\",\"toSku\":\"SESS-BLUE\",\"fromQuantity\":1.000,"
+                                + "\"toQuantity\":5.000,\"warehouseCode\":\"LOJA-01\",\"reason\":\"Fracionamento\"}"))
+                .andExpect(status().isCreated())
+                // As duas pontas na resposta: é a pergunta que o operador faz ao converter.
+                .andExpect(jsonPath("$.from.sku").value("ESS-LATA"))
+                .andExpect(jsonPath("$.from.quantity").value(2.000))
+                .andExpect(jsonPath("$.to.sku").value("SESS-BLUE"))
+                .andExpect(jsonPath("$.to.quantity").value(5.000));
+    }
+
+    @Test
+    void convertStock_withSameSkuOnBothSides_returns_400() throws Exception {
+        when(estoqueUseCase.convertStock(eq("ESS-LATA"), eq("ESS-LATA"), any(), any(), any(), any(), any()))
+                .thenThrow(new SameSkuConversionException("ESS-LATA"));
+
+        mockMvc.perform(post("/estoque/conversions")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"fromSku\":\"ESS-LATA\",\"toSku\":\"ESS-LATA\",\"fromQuantity\":1.000,"
+                                + "\"toQuantity\":5.000,\"warehouseCode\":\"LOJA-01\",\"reason\":\"Fracionamento\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("SAME_SKU_CONVERSION"));
+    }
+
+    /** Sem saldo na origem o erro é o mesmo de qualquer saída — e nada do destino foi criado. */
+    @Test
+    void convertStock_withInsufficientSourceBalance_returns_400() throws Exception {
+        when(estoqueUseCase.convertStock(any(), any(), any(), any(), any(), any(), any()))
+                .thenThrow(new InsufficientStockException("ESS-LATA", 1L, BigDecimal.ZERO, BigDecimal.ONE));
+
+        mockMvc.perform(post("/estoque/conversions")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"fromSku\":\"ESS-LATA\",\"toSku\":\"SESS-BLUE\",\"fromQuantity\":1.000,"
+                                + "\"toQuantity\":5.000,\"warehouseCode\":\"LOJA-01\",\"reason\":\"Fracionamento\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("INSUFFICIENT_STOCK"));
+    }
+
+    /** Um evento para o ato, não um por movimento — ver o comentário no controller. */
+    @Test
+    void convertStock_publishesASingleStockConvertedEvent() throws Exception {
+        StockBalance from = StockBalance.of(1L, "ESS-LATA", 1L, new BigDecimal("2.000"), 1L);
+        StockBalance to = StockBalance.of(2L, "SESS-BLUE", 1L, new BigDecimal("5.000"), 1L);
+        when(estoqueUseCase.convertStock(any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(new EstoqueUseCase.StockConversionResult(from, to));
+
+        mockMvc.perform(post("/estoque/conversions")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"fromSku\":\"ESS-LATA\",\"toSku\":\"SESS-BLUE\",\"fromQuantity\":1.000,"
+                                + "\"toQuantity\":5.000,\"warehouseCode\":\"LOJA-01\",\"reason\":\"Fracionamento\"}"))
+                .andExpect(status().isCreated());
+
+        verify(publisher, times(1)).publishEvent(argThat((Object e) ->
+                e instanceof AuditEvent audit && audit.type() == AuditEvent.EventType.STOCK_CONVERTED));
     }
 
     @Test
@@ -2573,5 +2702,46 @@ public class EstoqueControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.category").value("Narguilé"))
                 .andExpect(jsonPath("$.categoryId").value(7));
+    }
+
+    // ── PLAT-C049 · método não suportado ─────────────────────────────────────────────────────
+
+    /**
+     * {@code POST} numa rota que só tem {@code GET} respondia <b>500 INTERNAL_ERROR</b>, com
+     * stacktrace em {@code log.error}: {@code HttpRequestMethodNotSupportedException} não tinha
+     * handler e caía no catch-all. Isso conta erro de cliente como falha de servidor no
+     * monitoramento — foi o que levou o QA a caçar defeito num endpoint que não existe.
+     */
+    @Test
+    void metodoNaoSuportado_responde405ComAllow_eNao500() throws Exception {
+        mockMvc.perform(post("/estoque/summary").principal(AUTH))
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(header().string("Allow", org.hamcrest.Matchers.containsString("GET")))
+                .andExpect(jsonPath("$.errorCode").value("METHOD_NOT_ALLOWED"));
+    }
+
+    // ── EST-F026 · exclusão de rascunho ──────────────────────────────────────────────────────
+
+    @Test
+    void deleteProduct_responde204_ePublicaAuditoria() throws Exception {
+        when(estoqueUseCase.findProductBySku("SKU-DRAFT")).thenReturn(product("SKU-DRAFT"));
+
+        mockMvc.perform(delete("/estoque/products/SKU-DRAFT").principal(AUTH))
+                .andExpect(status().isNoContent());
+
+        verify(estoqueUseCase).deleteProduct("SKU-DRAFT");
+    }
+
+    /** O 409 tem que instruir: a mensagem do domínio aponta o caminho do active:false. */
+    @Test
+    void deleteProduct_comProdutoPublicado_responde409ComOCaminhoCerto() throws Exception {
+        when(estoqueUseCase.findProductBySku("SKU-001")).thenReturn(product("SKU-001"));
+        doThrow(new com.cernecommerce.core.domain.exception.estoque.ProductNotDraftException("SKU-001"))
+                .when(estoqueUseCase).deleteProduct("SKU-001");
+
+        mockMvc.perform(delete("/estoque/products/SKU-001").principal(AUTH))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.errorCode").value("PRODUCT_NOT_DRAFT"))
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("active")));
     }
 }

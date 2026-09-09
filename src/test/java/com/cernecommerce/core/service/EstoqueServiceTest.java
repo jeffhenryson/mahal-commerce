@@ -12,7 +12,12 @@ import com.cernecommerce.core.domain.exception.estoque.DuplicateWarehouseCodeExc
 import com.cernecommerce.core.domain.exception.estoque.InactiveProductException;
 import com.cernecommerce.core.domain.exception.estoque.InactiveWarehouseException;
 import com.cernecommerce.core.domain.exception.estoque.InsufficientStockException;
+import com.cernecommerce.core.domain.exception.estoque.NotAPackagedSessionProductException;
+import com.cernecommerce.core.domain.exception.estoque.OpenPackageNotFoundException;
+import com.cernecommerce.core.domain.exception.estoque.ProductHasStockHistoryException;
+import com.cernecommerce.core.domain.exception.estoque.ProductNotDraftException;
 import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
+import com.cernecommerce.core.domain.exception.estoque.SameSkuConversionException;
 import com.cernecommerce.core.domain.exception.estoque.ProductVariantNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountAlreadyOpenException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountNotFoundException;
@@ -48,6 +53,8 @@ import com.cernecommerce.core.domain.model.estoque.KitComponent;
 import com.cernecommerce.core.domain.model.estoque.LotIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.OrphanSku;
+import com.cernecommerce.core.domain.model.estoque.OpenPackage;
+import com.cernecommerce.core.domain.model.estoque.OpenPackageCloseReason;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.Category;
@@ -72,6 +79,7 @@ import com.cernecommerce.core.domain.model.estoque.StockReservation;
 import com.cernecommerce.core.domain.model.estoque.Warehouse;
 import com.cernecommerce.core.domain.model.estoque.WarehouseType;
 import com.cernecommerce.core.domain.model.notification.NotificationType;
+import com.cernecommerce.core.ports.in.EstoqueUseCase;
 import com.cernecommerce.core.ports.in.NotificationUseCase;
 import com.cernecommerce.core.ports.in.EstoqueUseCase.CatalogSaleInfo;
 import com.cernecommerce.core.ports.in.EstoqueUseCase.InitialStockCommand;
@@ -136,6 +144,7 @@ class EstoqueServiceTest {
     @Mock com.cernecommerce.core.ports.out.estoque.BrandRepository brandRepository;
     @Mock com.cernecommerce.core.ports.out.estoque.AttributeTypeRepository attributeTypeRepository;
     @Mock com.cernecommerce.core.ports.out.estoque.ReplenishmentListRepository replenishmentListRepository;
+    @Mock com.cernecommerce.core.ports.out.estoque.OpenPackageRepository openPackageRepository;
 
     /** Mesmo default de {@code estoque.reservation.default-ttl} em {@code CoreBeanConfig}. */
     private static final Duration RESERVATION_TTL = Duration.ofMinutes(30);
@@ -160,7 +169,7 @@ class EstoqueServiceTest {
                 stockMovementRepository, reorderPointRepository, stockIntegrityRepository, stockCountRepository,
                 stockReservationRepository, notificationUseCase, userRepository, immediateExecutor,
                 RESERVATION_TTL, kitComponentRepository, stockLotRepository, systemConfigPort, categoryRepository,
-                brandRepository, attributeTypeRepository, replenishmentListRepository);
+                brandRepository, attributeTypeRepository, replenishmentListRepository, openPackageRepository);
         lenient().when(reorderPointRepository.findBySkuAndWarehouseId(any(), any())).thenReturn(Optional.empty());
         // Padrão dos testes: o SKU existe no catálogo, que é a pré-condição das movimentações.
         // Os testes de createProduct e os de SKU desconhecido sobrescrevem este stub.
@@ -4259,5 +4268,319 @@ class EstoqueServiceTest {
         assertThat(info.availableForTable()).isTrue();
         assertThat(info.sessionProduct()).isTrue();
         assertThat(info.openRoshPrice()).isEqualByComparingTo("60.00");
+    }
+
+    // ── Conversão atômica entre SKUs (EST-F025) ──────────────────────────────────────────────
+
+    /** 1 lata sai, 5 sessões entram — o caso do lounge, numa transação só. */
+    @Test
+    void convertStock_movesBalanceFromOneSkuToAnother() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("ESS-LATA", 1L))
+                .thenReturn(Optional.of(StockBalance.of(10L, "ESS-LATA", 1L, new BigDecimal("3.000"), 1L)));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("SESS-BLUE", 1L)).thenReturn(Optional.empty());
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        EstoqueUseCase.StockConversionResult result = estoqueService.convertStock("ESS-LATA", "SESS-BLUE",
+                new BigDecimal("1.000"), new BigDecimal("5.000"), "LOJA-01", "Fracionamento", "gerente");
+
+        assertThat(result.from().quantity()).isEqualByComparingTo("2.000");
+        assertThat(result.to().quantity()).isEqualByComparingTo("5.000");
+    }
+
+    /** O ledger precisa mostrar que as duas linhas foram o mesmo ato — daí o reason cruzado. */
+    @Test
+    void convertStock_writesBothSidesOfTheLedgerPointingAtEachOther() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("ESS-LATA", 1L))
+                .thenReturn(Optional.of(StockBalance.of(10L, "ESS-LATA", 1L, new BigDecimal("3.000"), 1L)));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("SESS-BLUE", 1L)).thenReturn(Optional.empty());
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        estoqueService.convertStock("ESS-LATA", "SESS-BLUE", new BigDecimal("1.000"),
+                new BigDecimal("5.000"), "LOJA-01", "Fracionamento", "gerente");
+
+        verify(stockMovementRepository).save(argThat(m -> m.type() == MovementType.SAIDA
+                && m.sku().equals("ESS-LATA") && m.reason().contains("SESS-BLUE")));
+        verify(stockMovementRepository).save(argThat(m -> m.type() == MovementType.ENTRADA
+                && m.sku().equals("SESS-BLUE") && m.reason().contains("ESS-LATA")));
+    }
+
+    /**
+     * <b>A prova da atomicidade, e o motivo da feature.</b> Sem saldo na origem, a entrada do destino
+     * não pode existir — é exatamente o que os dois {@code POST /estoque/movements} soltos não
+     * garantiam. Só o saldo lido é gravado; nenhum {@code save} sai daqui.
+     */
+    @Test
+    void convertStock_withInsufficientSourceBalance_neverCreatesTheDestinationEntry() {
+        Warehouse warehouse = Warehouse.of(1L, "LOJA-01", "Loja Centro", WarehouseType.LOJA_FISICA, true);
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(warehouse));
+        when(stockBalanceRepository.findBySkuAndWarehouseId("ESS-LATA", 1L))
+                .thenReturn(Optional.of(StockBalance.of(10L, "ESS-LATA", 1L, BigDecimal.ZERO, 1L)));
+
+        assertThatThrownBy(() -> estoqueService.convertStock("ESS-LATA", "SESS-BLUE",
+                new BigDecimal("1.000"), new BigDecimal("5.000"), "LOJA-01", "Fracionamento", "gerente"))
+                .isInstanceOf(InsufficientStockException.class);
+
+        verify(stockBalanceRepository, never()).save(any());
+        verify(stockMovementRepository, never()).save(any());
+    }
+
+    /** Converter um SKU nele mesmo é um par de linhas que se anula — recusado antes de tocar o saldo. */
+    @Test
+    void convertStock_withTheSameSkuOnBothSides_isRejectedBeforeAnyWrite() {
+        assertThatThrownBy(() -> estoqueService.convertStock("ESS-LATA", "ESS-LATA",
+                new BigDecimal("1.000"), new BigDecimal("5.000"), "LOJA-01", "Fracionamento", "gerente"))
+                .isInstanceOf(SameSkuConversionException.class);
+
+        verifyNoInteractions(stockMovementRepository);
+        verify(stockBalanceRepository, never()).save(any());
+    }
+
+    // ── Lata aberta (EST-F027) ───────────────────────────────────────────────────────────────
+    //
+    // Stub por teste, e não num helper compartilhado: MockitoExtension roda em STRICT_STUBS, e um
+    // helper que preparasse o saldo para todos derrubaria justamente o caso que prova a feature —
+    // o da sessão que NÃO toca o estoque.
+
+    private Product essenciaDeSessao(Integer sessionsPerUnit) {
+        Product produto = Product.of(1L, "ESSE-BLUE", "Zgy Blueberry", "essencia", true, List.of())
+                .withPricing(Pricing.of(new BigDecimal("10.00"), null, new BigDecimal("25.00")))
+                .withAvailableForTable(true)
+                .withSessionProduct(true);
+        return sessionsPerUnit == null ? produto : produto.withSessionsPerUnit(sessionsPerUnit);
+    }
+
+    private OpenPackage lataAberta(int usos) {
+        OpenPackage lata = OpenPackage.open("ESSE-BLUE", 1L, 5, "atendente", Instant.now());
+        return usos == 0 ? lata : lata.withUses(usos);
+    }
+
+    private void comSaldoDeEssencia(String saldo) {
+        when(stockBalanceRepository.findBySkuAndWarehouseId("ESSE-BLUE", 1L))
+                .thenReturn(Optional.of(StockBalance.of(10L, "ESSE-BLUE", 1L, new BigDecimal(saldo), 1L)));
+    }
+
+    /**
+     * <b>O bug que a feature corrige.</b> Sem lata, cada sessão baixava uma lata inteira — medido
+     * no QA de 06/09/2026: 50 → 49 numa sessão só. Aqui a primeira sessão tira UMA unidade da
+     * prateleira, e é a abertura da lata que a tira, não a sessão.
+     */
+    @Test
+    void consumeSession_abreALata_baixandoUmaUnicaUnidade() {
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(LOJA));
+        when(productRepository.findByAnySku("ESSE-BLUE")).thenReturn(Optional.of(essenciaDeSessao(5)));
+        when(openPackageRepository.findOpen("ESSE-BLUE", 1L)).thenReturn(Optional.empty());
+        comSaldoDeEssencia("50.000");
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(openPackageRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        OpenPackage lata = estoqueService.consumeSession("ESSE-BLUE", "LOJA-01", BigDecimal.ONE, "atendente");
+
+        assertThat(lata.uses()).isEqualTo(1);
+        assertThat(lata.sessionsPerUnit()).isEqualTo(5);
+        verify(stockMovementRepository).save(argThat(m -> m.type() == MovementType.SAIDA
+                && m.sku().equals("ESSE-BLUE")
+                && m.quantity().compareTo(BigDecimal.ONE) == 0
+                && m.reason().contains("Abertura de lata")));
+    }
+
+    /**
+     * A prova do outro lado: com lata aberta e ainda com folga, <b>nenhuma</b> unidade sai do
+     * saldo. É esta linha que faz cinco sessões consumirem uma lata em vez de cinco.
+     */
+    @Test
+    void consumeSession_comLataAberta_naoTocaOEstoque() {
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(LOJA));
+        when(productRepository.findByAnySku("ESSE-BLUE")).thenReturn(Optional.of(essenciaDeSessao(5)));
+        when(openPackageRepository.findOpen("ESSE-BLUE", 1L)).thenReturn(Optional.of(lataAberta(2)));
+        when(openPackageRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        OpenPackage lata = estoqueService.consumeSession("ESSE-BLUE", "LOJA-01", BigDecimal.ONE, "atendente");
+
+        assertThat(lata.uses()).isEqualTo(3);
+        verifyNoInteractions(stockMovementRepository);
+        verify(stockBalanceRepository, never()).save(any());
+    }
+
+    /** Lata esgotada é fechada como EXHAUSTED e a sessão seguinte abre outra — aí sim baixa 1. */
+    @Test
+    void consumeSession_comLataEsgotada_fechaAVelhaEAbreOutra() {
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(LOJA));
+        when(productRepository.findByAnySku("ESSE-BLUE")).thenReturn(Optional.of(essenciaDeSessao(5)));
+        when(openPackageRepository.findOpen("ESSE-BLUE", 1L)).thenReturn(Optional.of(lataAberta(5)));
+        comSaldoDeEssencia("49.000");
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(openPackageRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        OpenPackage nova = estoqueService.consumeSession("ESSE-BLUE", "LOJA-01", BigDecimal.ONE, "atendente");
+
+        assertThat(nova.uses()).isEqualTo(1);
+        verify(openPackageRepository).save(argThat(p ->
+                p.closeReason() == OpenPackageCloseReason.EXHAUSTED && p.uses() == 5));
+        verify(stockMovementRepository).save(argThat(m -> m.type() == MovementType.SAIDA));
+    }
+
+    /**
+     * Produto de sessão <b>sem</b> sessionsPerUnit continua baixando unidade pelo caminho antigo —
+     * é o que torna a adoção da lata uma escolha por item de catálogo, e não uma virada de chave.
+     */
+    @Test
+    void consumeSession_comProdutoSemSessionsPerUnit_eRecusado() {
+        when(productRepository.findByAnySku("ESSE-BLUE")).thenReturn(Optional.of(essenciaDeSessao(null)));
+
+        assertThatThrownBy(() -> estoqueService.consumeSession("ESSE-BLUE", "LOJA-01",
+                BigDecimal.ONE, "atendente"))
+                .isInstanceOf(NotAPackagedSessionProductException.class);
+
+        verifyNoInteractions(stockMovementRepository);
+        verifyNoInteractions(openPackageRepository);
+    }
+
+    /** Sem saldo para abrir a lata, a sessão não acontece — é o InsufficientStock de sempre. */
+    @Test
+    void consumeSession_semSaldoParaAbrir_falha() {
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(LOJA));
+        when(productRepository.findByAnySku("ESSE-BLUE")).thenReturn(Optional.of(essenciaDeSessao(5)));
+        when(openPackageRepository.findOpen("ESSE-BLUE", 1L)).thenReturn(Optional.empty());
+        comSaldoDeEssencia("0.000");
+
+        assertThatThrownBy(() -> estoqueService.consumeSession("ESSE-BLUE", "LOJA-01",
+                BigDecimal.ONE, "atendente"))
+                .isInstanceOf(InsufficientStockException.class);
+
+        verify(openPackageRepository, never()).save(any());
+    }
+
+    /**
+     * "Repor essência": a lata velha fecha como REPLACED com a sobra registrada, e a nova baixa
+     * uma unidade. A sobra <b>não</b> vira ajuste de perda — a unidade já tinha saído do saldo na
+     * abertura, e medir o resto seria inventar um número que ninguém mediu.
+     */
+    @Test
+    void replaceOpenPackage_fechaAVelhaComSobra_eBaixaUmaUnidadeNaNova() {
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(LOJA));
+        when(productRepository.findByAnySku("ESSE-BLUE")).thenReturn(Optional.of(essenciaDeSessao(5)));
+        when(openPackageRepository.findOpen("ESSE-BLUE", 1L)).thenReturn(Optional.of(lataAberta(2)));
+        comSaldoDeEssencia("49.000");
+        when(stockBalanceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(openPackageRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        OpenPackage nova = estoqueService.replaceOpenPackage("ESSE-BLUE", "LOJA-01", "atendente");
+
+        assertThat(nova.uses()).isZero();
+        verify(openPackageRepository).save(argThat(p ->
+                p.closeReason() == OpenPackageCloseReason.REPLACED && p.uses() == 2));
+        // Um único movimento sai daqui, o da lata nova: a sobra não gera ajuste.
+        verify(stockMovementRepository, times(1)).save(argThat(m -> m.type() == MovementType.SAIDA
+                && m.quantity().compareTo(BigDecimal.ONE) == 0));
+    }
+
+    /**
+     * Sem saldo para a lata nova, a antiga <b>continua aberta</b> — o atendente segue com o que
+     * tem na mão em vez de ficar sem lata nenhuma no sistema. É por isso que a abertura vem antes
+     * do fechamento.
+     */
+    @Test
+    void replaceOpenPackage_semSaldo_naoFechaALataAtual() {
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(LOJA));
+        when(productRepository.findByAnySku("ESSE-BLUE")).thenReturn(Optional.of(essenciaDeSessao(5)));
+        when(openPackageRepository.findOpen("ESSE-BLUE", 1L)).thenReturn(Optional.of(lataAberta(2)));
+        comSaldoDeEssencia("0.000");
+
+        assertThatThrownBy(() -> estoqueService.replaceOpenPackage("ESSE-BLUE", "LOJA-01", "atendente"))
+                .isInstanceOf(InsufficientStockException.class);
+
+        verify(openPackageRepository, never()).save(any());
+    }
+
+    /**
+     * Cancelamento de comanda: o contador volta, o estoque <b>não</b>. Devolver unidade aqui
+     * inventaria saldo — a essência já foi queimada e não voltou para a prateleira.
+     */
+    @Test
+    void releaseSession_decrementaOContador_semDevolverUnidade() {
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(LOJA));
+        when(openPackageRepository.findOpen("ESSE-BLUE", 1L)).thenReturn(Optional.of(lataAberta(3)));
+        when(openPackageRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        estoqueService.releaseSession("ESSE-BLUE", "LOJA-01", BigDecimal.ONE);
+
+        verify(openPackageRepository).save(argThat(p -> p.uses() == 2));
+        verifyNoInteractions(stockMovementRepository);
+    }
+
+    /** Lata já reposta entre o lançamento e o cancelamento: nada a desfazer, e não é erro. */
+    @Test
+    void releaseSession_semLataAberta_naoFazNada() {
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(LOJA));
+        when(openPackageRepository.findOpen("ESSE-BLUE", 1L)).thenReturn(Optional.empty());
+
+        estoqueService.releaseSession("ESSE-BLUE", "LOJA-01", BigDecimal.ONE);
+
+        verify(openPackageRepository, never()).save(any());
+        verifyNoInteractions(stockMovementRepository);
+    }
+
+    /** 404 é "abra uma, é só lançar a sessão" — distinto do 400 de produto que não usa lata. */
+    @Test
+    void findOpenPackage_semLataAberta_lanca404() {
+        when(warehouseRepository.findByCode("LOJA-01")).thenReturn(Optional.of(LOJA));
+        when(openPackageRepository.findOpen("ESSE-BLUE", 1L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.findOpenPackage("ESSE-BLUE", "LOJA-01"))
+                .isInstanceOf(OpenPackageNotFoundException.class);
+    }
+
+    // ── Exclusão de rascunho (EST-F026) ──────────────────────────────────────────────────────
+
+    @Test
+    void deleteProduct_apagaORascunhoSemHistorico() {
+        Product rascunho = Product.of(1L, "SKU-DRAFT", "Rascunho", "essencia", true, List.of())
+                .withStatus(ProductStatus.RASCUNHO);
+        when(productRepository.findBySku("SKU-DRAFT")).thenReturn(Optional.of(rascunho));
+        when(stockBalanceRepository.existsBySku("SKU-DRAFT")).thenReturn(false);
+        when(stockMovementRepository.existsBySku("SKU-DRAFT")).thenReturn(false);
+
+        estoqueService.deleteProduct("SKU-DRAFT");
+
+        verify(productRepository).deleteBySku("SKU-DRAFT");
+    }
+
+    /** Produto publicado não é excluível — o caminho continua sendo active:false. */
+    @Test
+    void deleteProduct_comProdutoAtivo_eRecusado() {
+        Product ativo = Product.of(1L, "SKU-001", "Produto", "essencia", true, List.of());
+        when(productRepository.findBySku("SKU-001")).thenReturn(Optional.of(ativo));
+
+        assertThatThrownBy(() -> estoqueService.deleteProduct("SKU-001"))
+                .isInstanceOf(ProductNotDraftException.class);
+
+        verify(productRepository, never()).deleteBySku(any());
+    }
+
+    /** Rascunho que chegou a movimentar estoque tem histórico que ficaria órfão (EST-C011). */
+    @Test
+    void deleteProduct_comMovimentacaoGravada_eRecusado() {
+        Product rascunho = Product.of(1L, "SKU-DRAFT", "Rascunho", "essencia", true, List.of())
+                .withStatus(ProductStatus.RASCUNHO);
+        when(productRepository.findBySku("SKU-DRAFT")).thenReturn(Optional.of(rascunho));
+        when(stockBalanceRepository.existsBySku("SKU-DRAFT")).thenReturn(false);
+        when(stockMovementRepository.existsBySku("SKU-DRAFT")).thenReturn(true);
+
+        assertThatThrownBy(() -> estoqueService.deleteProduct("SKU-DRAFT"))
+                .isInstanceOf(ProductHasStockHistoryException.class);
+
+        verify(productRepository, never()).deleteBySku(any());
+    }
+
+    @Test
+    void deleteProduct_comSkuInexistente_lanca404() {
+        when(productRepository.findBySku("SUMIU")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> estoqueService.deleteProduct("SUMIU"))
+                .isInstanceOf(ProductNotFoundException.class);
     }
 }

@@ -171,4 +171,11 @@ public interface ProductRepository {
      * o teto de 5 rascunhos no servidor antes de gravar.
      */
     long countByStatus(ProductStatus status);
+
+    /**
+     * Apaga de fato o produto e a grade dele (EST-F026). Só é chamado para rascunho sem histórico
+     * de estoque — a checagem mora em {@code EstoqueService.deleteProduct}, porque é regra de
+     * domínio, não do adapter.
+     */
+    void deleteBySku(String sku);
 }

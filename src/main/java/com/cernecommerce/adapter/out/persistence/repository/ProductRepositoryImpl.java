@@ -247,6 +247,14 @@ public class ProductRepositoryImpl implements ProductRepository {
     }
 
     @Override
+    @Transactional
+    public void deleteBySku(String sku) {
+        // Variações, atributos e componentes de kit saem por cascade/orphanRemoval do agregado,
+        // como já acontece quando a coleção é reescrita em save.
+        productJpaRepository.findBySku(sku).ifPresent(productJpaRepository::delete);
+    }
+
+    @Override
     @Transactional(readOnly = true)
     public PageResult<Product> findAllActiveAndPriced(int page, int size, Boolean onSale, Long categoryId) {
         Page<Long> idPage = productJpaRepository.findActivePricedIds(

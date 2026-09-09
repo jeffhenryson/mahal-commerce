@@ -64,6 +64,13 @@ public interface ProductJpaRepository extends JpaRepository<ProductEntity, Long>
      * <p>{@code search} chega já em minúsculas e com os {@code %} aplicados pelo adapter, e cobre
      * nome e SKU — é o mesmo campo de busca único da tela do admin.</p>
      *
+     * <p><b>EST-C020:</b> {@code unaccent} entra nos <b>dois</b> lados da comparação. Só na coluna
+     * resolveria "carvao" achar "Carvão" e deixaria "Carvão" digitado sem achar "carvao" gravado —
+     * e a base tem as duas grafias. {@code category} e {@code brand} continuam fora: são igualdade
+     * exata contra valor escolhido numa lista, não texto digitado. A função é registrada por
+     * {@code UnaccentFunctionContributor} e existe nos dois bancos (extensão no Postgres, alias no
+     * H2 do perfil dev).</p>
+     *
      * <p>Padrão ID-first, como toda paginação do módulo: pagina só os ids e o fetch das variações
      * vem depois, por {@code findAllByIdsWithVariants} — {@code LIMIT}/{@code OFFSET} junto de
      * {@code JOIN FETCH} de coleção é o bug clássico de paginação com JPA. Substituiu o antigo
@@ -71,7 +78,9 @@ public interface ProductJpaRepository extends JpaRepository<ProductEntity, Long>
      */
     @Query("""
             SELECT p.id FROM ProductEntity p
-            WHERE (:search   IS NULL OR LOWER(p.name) LIKE :search OR LOWER(p.sku) LIKE :search)
+            WHERE (:search   IS NULL
+                     OR unaccent(LOWER(p.name)) LIKE unaccent(:search)
+                     OR unaccent(LOWER(p.sku))  LIKE unaccent(:search))
               AND (:category IS NULL OR LOWER(p.category) = :category)
               AND (:brand    IS NULL OR LOWER(p.brand)    = :brand)
               AND (:active   IS NULL OR p.active = :active)
