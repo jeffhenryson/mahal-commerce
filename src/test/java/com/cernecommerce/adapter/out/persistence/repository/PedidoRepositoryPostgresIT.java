@@ -58,6 +58,11 @@ class PedidoRepositoryPostgresIT {
         r.add("spring.flyway.enabled", () -> "true");
         r.add("spring.jpa.hibernate.ddl-auto", () -> "none");
         r.add("management.health.redis.enabled", () -> "false");
+        // O perfil `dev` traz spring.sql.init.mode=always apontando para db/dev/dev-schema.sql,
+        // que desde a EST-C020 contém `CREATE ALIAS ... FOR "..H2Unaccent.unaccent"` — sintaxe de
+        // H2, que o Postgres recusa e que derrubaria o contexto antes do primeiro teste. Aqui o
+        // schema vem do Flyway, ligado logo acima; o arquivo de dev não tem nada a acrescentar.
+        r.add("spring.sql.init.mode", () -> "never");
     }
 
     @Autowired OrderRepositoryImpl orderRepository;
