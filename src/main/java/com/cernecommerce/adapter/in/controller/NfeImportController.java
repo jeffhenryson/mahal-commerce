@@ -78,7 +78,9 @@ public class NfeImportController {
         try {
             bytes = (file == null || file.isEmpty()) ? new byte[0] : file.getBytes();
         } catch (IOException e) {
-            throw new MalformedNfeXmlException(e.getMessage());
+            // EST-C021 — falha de leitura do upload, não do conteúdo; a mensagem do IOException é
+            // do servidor de aplicação e não diz nada ao operador.
+            throw MalformedNfeXmlException.fromParser(e);
         }
         if (bytes.length == 0) {
             throw new MalformedNfeXmlException("arquivo vazio");
