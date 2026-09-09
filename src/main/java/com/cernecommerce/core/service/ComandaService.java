@@ -3,10 +3,14 @@ package com.cernecommerce.core.service;
 import com.cernecommerce.core.domain.exception.pdv.ComandaEmptyException;
 import com.cernecommerce.core.domain.exception.pdv.ComandaItemNotFoundException;
 import com.cernecommerce.core.domain.exception.pdv.ComandaNotFoundException;
+import com.cernecommerce.core.domain.exception.pdv.ComandaMergeNotAllowedException;
+import com.cernecommerce.core.domain.exception.pdv.ComandaPartiallyClosedException;
 import com.cernecommerce.core.domain.exception.pdv.ComandaNotOpenException;
 import com.cernecommerce.core.domain.exception.pdv.ComandaOnlyCourtesyException;
 import com.cernecommerce.core.domain.exception.pdv.DiscountExceedsBillException;
 import com.cernecommerce.core.domain.exception.pdv.LinkedItemIsChargedException;
+import com.cernecommerce.core.domain.exception.pdv.ItemNotOpenInComandaException;
+import com.cernecommerce.core.domain.exception.pdv.LinkedItemMustCloseTogetherException;
 import com.cernecommerce.core.domain.exception.pdv.LinkedItemRequiredException;
 import com.cernecommerce.core.domain.exception.pdv.NotASessionProductException;
 import com.cernecommerce.core.domain.exception.pdv.NotAnOpenRoshException;
@@ -19,6 +23,7 @@ import com.cernecommerce.core.domain.exception.pdv.SurchargeOnCourtesyException;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.cashback.CashbackRate;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
+import com.cernecommerce.core.domain.model.estoque.OpenPackage;
 import com.cernecommerce.core.domain.model.pagamento.OrderPayment;
 import com.cernecommerce.core.domain.model.pdv.CashRegisterSession;
 import com.cernecommerce.core.domain.model.pdv.Comanda;
@@ -27,20 +32,27 @@ import com.cernecommerce.core.domain.model.pdv.ComandaStatus;
 import com.cernecommerce.core.domain.model.pedido.ConsumptionMode;
 import com.cernecommerce.core.domain.model.pedido.DiscountProration;
 import com.cernecommerce.core.domain.model.pedido.Order;
+import com.cernecommerce.core.domain.model.notification.NotificationType;
 import com.cernecommerce.core.domain.model.pedido.OrderItem;
 import com.cernecommerce.core.ports.in.CashbackUseCase;
 import com.cernecommerce.core.ports.in.ComandaUseCase;
 import com.cernecommerce.core.ports.in.EstoqueUseCase;
+import com.cernecommerce.core.ports.in.NotificationUseCase;
 import com.cernecommerce.core.ports.in.PdvUseCase.PaymentCommand;
 import com.cernecommerce.core.ports.out.pagamento.OrderPaymentRepository;
 import com.cernecommerce.core.ports.out.pdv.ComandaRepository;
 import com.cernecommerce.core.ports.out.pedido.OrderRepository;
+import com.cernecommerce.core.ports.out.user.UserRepository;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Comanda de mesa (PDV-F009): pedidos incrementais de uma sessão de caixa aberta por horas — o
@@ -103,6 +115,13 @@ public class ComandaService implements ComandaUseCase {
     private final CashbackUseCase cashbackUseCase;
     private final PdvService pdvService;
 
+    /** Quem pode agir sobre uma mesa é quem recebe o aviso de que existe uma esquecida. */
+    private static final String COMANDA_MANAGE_PERMISSION = "PDV_COMANDA_MANAGE";
+
+    /** PDV-F013 — destinatários do alerta de mesa esquecida e o canal por onde ele sai. */
+    private final NotificationUseCase notificationUseCase;
+    private final UserRepository userRepository;
+
     /**
      * PDV-F015 — percentual da taxa de serviço, no molde de {@code pdv.sale.max-discount-percent}.
      * Configuração e não constante porque 10% é o costume do salão, não uma lei.
@@ -111,13 +130,17 @@ public class ComandaService implements ComandaUseCase {
 
     public ComandaService(ComandaRepository comandaRepository, EstoqueUseCase estoqueUseCase,
             OrderRepository orderRepository, OrderPaymentRepository orderPaymentRepository,
-            CashbackUseCase cashbackUseCase, PdvService pdvService, BigDecimal serviceFeePercent) {
+            CashbackUseCase cashbackUseCase, PdvService pdvService,
+            NotificationUseCase notificationUseCase, UserRepository userRepository,
+            BigDecimal serviceFeePercent) {
         this.comandaRepository = comandaRepository;
         this.estoqueUseCase = estoqueUseCase;
         this.orderRepository = orderRepository;
         this.orderPaymentRepository = orderPaymentRepository;
         this.cashbackUseCase = cashbackUseCase;
         this.pdvService = pdvService;
+        this.notificationUseCase = notificationUseCase;
+        this.userRepository = userRepository;
         this.serviceFeePercent = serviceFeePercent == null ? BigDecimal.ZERO : serviceFeePercent;
     }
 
@@ -162,6 +185,14 @@ public class ComandaService implements ComandaUseCase {
         if (resolvedMode.isSessionMode() && !saleInfo.sessionProduct()) {
             throw new NotASessionProductException(sku, resolvedMode.name());
         }
+        // PDV-C020 — kit não pode ser sessão. Ele não tem saldo próprio: explode em componentes na
+        // baixa (EST-F015), e não há como um kit ser "a lata" que o contador de EST-F027 controla.
+        // O QA de 06/09/2026 achou kits oferecidos como sabor no dialog de sessão, a R$ 95 —
+        // desencontro de dados que o filtro do cliente não pegava porque não olhava o tipo. O
+        // frontend corrigiu o filtro; esta é a guarda que impede a combinação chegar ao estoque.
+        if (resolvedMode.isSessionMode() && saleInfo.kit()) {
+            throw new NotASessionProductException(sku, resolvedMode.name());
+        }
         validateNotes(notes);
         validateSurcharge(surchargeAmount, resolvedMode, resolvedCourtesy);
         Long resolvedLink = resolveLinkedItem(comanda, resolvedMode, linkedItemId);
@@ -179,8 +210,23 @@ public class ComandaService implements ComandaUseCase {
 
         // Debita agora, não no fechamento — ver a nota de classe sobre não-atomicidade. Cortesia
         // baixa estoque igual: o cliente não paga, mas a essência saiu.
-        estoqueUseCase.adjustStock(sku, comanda.warehouseCode(), MovementType.SAIDA, quantity,
-                "Comanda #" + comandaId, username);
+        //
+        // EST-F027 — dois caminhos, e a escolha é do PRODUTO, não do modo. Essência marcada como
+        // produto de sessão com sessionsPerUnit declarado consome USO de uma lata aberta; a lata
+        // inteira só sai do saldo quando é aberta. Antes disto, toda sessão baixava uma lata: com
+        // sessionsPerUnit = 5, o estoque sumia cinco vezes mais rápido que a realidade.
+        //
+        // O critério é o produto porque NORMAL também é sessão quando o SKU é a essência — foi
+        // exatamente o caso medido no QA (50 → 49 numa sessão simples). Produto sem
+        // sessionsPerUnit segue baixando unidade, o que torna a adoção uma escolha por item de
+        // catálogo em vez de uma virada de chave para a casa inteira.
+        if (saleInfo.consumesOpenPackage()) {
+            OpenPackage lata = estoqueUseCase.consumeSession(sku, comanda.warehouseCode(), quantity, username);
+            item = item.withPackageCounter(lata.uses(), lata.sessionsPerUnit());
+        } else {
+            estoqueUseCase.adjustStock(sku, comanda.warehouseCode(), MovementType.SAIDA, quantity,
+                    "Comanda #" + comandaId, username);
+        }
 
         return comandaRepository.save(comanda.withAddedItem(item));
     }
@@ -312,8 +358,7 @@ public class ComandaService implements ComandaUseCase {
         // Devolve o que cada linha removida havia debitado — mesma ENTRADA de cancelComanda. A
         // cortesia também volta: ela não foi cobrada, mas a essência tinha saído do estoque.
         for (ComandaItem removida : removidas) {
-            estoqueUseCase.adjustStock(removida.sku(), comanda.warehouseCode(), MovementType.ENTRADA,
-                    removida.quantity(), "Remoção de item da comanda #" + comandaId, username);
+            undoStock(removida, comanda.warehouseCode(), "Remoção de item da comanda #" + comandaId, username);
         }
         // Sem checagem de "última linha": comanda vazia é estado legítimo — é como ela nasce, e o
         // COMANDA_EMPTY do fechamento já barra fechá-la assim.
@@ -346,14 +391,22 @@ public class ComandaService implements ComandaUseCase {
     @Override
     @Transactional
     public Order closeComanda(Long comandaId, List<PaymentCommand> payments, BigDecimal discountAmount,
-            boolean applyServiceFee, String username) {
+            boolean applyServiceFee, List<Long> itemIds, String username) {
         // PDV-C008 — ver getComandaForUpdate. É aqui que a trava mais importa: sem ela, dois
         // fechamentos concorrentes da mesma mesa gerariam dois pedidos concluídos dos mesmos itens.
         Comanda comanda = getComandaForUpdate(comandaId);
         requireOpen(comanda);
-        if (comanda.items().isEmpty()) {
+        // PDV-F017 — "vazia" passou a significar "sem linha em aberto". Uma comanda cujas linhas já
+        // foram todas cobradas em fechamentos parciais não deveria nem chegar aqui (o último
+        // fechamento a encerra), mas a checagem é a rede de segurança.
+        if (comanda.openItems().isEmpty()) {
             throw new ComandaEmptyException(comandaId);
         }
+        // O escopo deste fechamento: as linhas escolhidas, ou todas as abertas quando o cliente não
+        // escolhe. Daqui para baixo NADA olha comanda.items() de novo — desconto, taxa, pagamento e
+        // cashback são todos sobre o escopo, e misturar as duas leituras é o erro que faria o
+        // cliente da primeira conta pagar o consumo da mesa inteira.
+        List<ComandaItem> escopo = resolveClosingScope(comanda, itemIds);
         // PDV-F010, decisão do dono: quando B fecha a mesa aberta por A, o pedido entra na gaveta
         // de B — o dinheiro pertence a quem o recebeu, e é a conferência de B que precisa fechar no
         // fim do turno. Também é o que impede o pedido de cair numa sessão que A já encerrou.
@@ -362,7 +415,7 @@ public class ComandaService implements ComandaUseCase {
         // Comanda só de cortesias não fecha — irmã de COMANDA_EMPTY. Pelo desenho da feature a
         // cortesia é sempre acessória de uma sessão paga, então total zero aqui é erro de
         // lançamento, e fechá-lo geraria um pedido concluído de R$ 0 que ninguém revisaria.
-        if (comanda.items().stream().allMatch(ComandaItem::courtesy)) {
+        if (escopo.stream().allMatch(ComandaItem::courtesy)) {
             throw new ComandaOnlyCourtesyException(comandaId);
         }
 
@@ -371,7 +424,7 @@ public class ComandaService implements ComandaUseCase {
         // item que o cashback é creditado e a margem calculada. Ratear é o que impede a casa de
         // pagar cashback sobre dinheiro que não recebeu e de ver margem cheia numa venda abatida.
         // A cortesia absorve zero por construção — a proporção de uma linha de valor zero é zero.
-        List<BigDecimal> lineAmounts = comanda.items().stream().map(ComandaItem::subtotal).toList();
+        List<BigDecimal> lineAmounts = escopo.stream().map(ComandaItem::subtotal).toList();
         // PDV-C016 — desconto maior que a conta é recusado AQUI, com código próprio. distribute()
         // já recusava (não há como ratear um abatimento maior que a soma das linhas sem violar a
         // invariante de OrderItem), mas com IllegalArgumentException, que o handler global achata
@@ -394,9 +447,9 @@ public class ComandaService implements ComandaUseCase {
         // silêncio itens que o cliente já consumiu, se o catálogo mudou nas horas em que a
         // comanda ficou aberta. Com o open rosh isso ficou ainda mais crítico: fromCatalog
         // resolveria pelo SKU da variação e cobraria o preço do sabor no lugar do valor fixo.
-        List<OrderItem> orderItems = new ArrayList<>(comanda.items().size());
-        for (int i = 0; i < comanda.items().size(); i++) {
-            ComandaItem item = comanda.items().get(i);
+        List<OrderItem> orderItems = new ArrayList<>(escopo.size());
+        for (int i = 0; i < escopo.size(); i++) {
+            ComandaItem item = escopo.get(i);
             // CRM-F003, mesma regra do balcão (PdvService.registerSale): a taxa vigente é resolvida
             // e CARIMBADA no pedido, para mudar a taxa amanhã não reescrever o cashback de hoje.
             // Sem isto o cliente vinculado na abertura chega ao pedido e não ganha nada — o
@@ -442,8 +495,55 @@ public class ComandaService implements ComandaUseCase {
         }
         cashbackUseCase.recordEarnedForOrder(saved);
 
-        comandaRepository.save(comanda.closed(saved.id(), Instant.now()));
+        // PDV-F017 — marca as linhas cobradas e só ENCERRA a mesa quando não sobra nenhuma aberta.
+        // Enquanto sobra, a comanda continua ABERTA com order_id nulo, que é exatamente o que o
+        // ck_comanda_status_consistency da V104 exige — por isso a conta dividida não precisou de
+        // status novo nem de migration no cabeçalho.
+        Comanda cobrada = comanda.withItemsClosedIn(saved.id(),
+                escopo.stream().map(ComandaItem::id).toList());
+        comandaRepository.save(cobrada.isFullyCharged()
+                ? cobrada.closed(saved.id(), Instant.now())
+                : cobrada);
         return saved;
+    }
+
+    /**
+     * As linhas que este fechamento cobra (PDV-F017): as escolhidas, ou todas as abertas quando
+     * {@code itemIds} vem nulo/vazio — o caminho de sempre, que precisa continuar idêntico.
+     *
+     * <p>A validação de vínculo é o que impede a conta dividida de partir um consumo ao meio: um
+     * {@code OPEN_ROSH} e as {@code TROCA}/{@code SABOR_EXTRA} pendurados nele saem juntos ou não
+     * saem. Checa nos dois sentidos porque as duas seleções erradas são igualmente fáceis de fazer
+     * na tela — marcar a troca sem a sessão, ou a sessão sem a troca.</p>
+     */
+    private List<ComandaItem> resolveClosingScope(Comanda comanda, List<Long> itemIds) {
+        List<ComandaItem> abertas = comanda.openItems();
+        if (itemIds == null || itemIds.isEmpty()) {
+            return abertas;
+        }
+        Set<Long> escolhidos = new LinkedHashSet<>(itemIds);
+        Set<Long> abertosIds = abertas.stream().map(ComandaItem::id).collect(Collectors.toSet());
+        List<Long> invalidos = escolhidos.stream().filter(id -> !abertosIds.contains(id)).toList();
+        if (!invalidos.isEmpty()) {
+            throw new ItemNotOpenInComandaException(comanda.id(), invalidos);
+        }
+
+        List<Long> faltando = new ArrayList<>();
+        for (ComandaItem item : abertas) {
+            boolean dentro = escolhidos.contains(item.id());
+            // Filha dentro exige o pai dentro.
+            if (dentro && item.linkedItemId() != null && !escolhidos.contains(item.linkedItemId())) {
+                faltando.add(item.linkedItemId());
+            }
+            // Pai dentro exige toda filha ainda aberta dentro.
+            if (!dentro && item.linkedItemId() != null && escolhidos.contains(item.linkedItemId())) {
+                faltando.add(item.id());
+            }
+        }
+        if (!faltando.isEmpty()) {
+            throw new LinkedItemMustCloseTogetherException(comanda.id(), faltando.stream().distinct().toList());
+        }
+        return abertas.stream().filter(i -> escolhidos.contains(i.id())).toList();
     }
 
     @Override
@@ -458,10 +558,153 @@ public class ComandaService implements ComandaUseCase {
 
         // Devolve cada item já debitado — mesmo padrão de OrderService.refundOrder.
         for (ComandaItem item : comanda.items()) {
-            estoqueUseCase.adjustStock(item.sku(), comanda.warehouseCode(), MovementType.ENTRADA,
-                    item.quantity(), "Cancelamento de comanda #" + comandaId, username);
+            undoStock(item, comanda.warehouseCode(), "Cancelamento de comanda #" + comandaId, username);
         }
         return comandaRepository.save(comanda.cancelled(Instant.now()));
+    }
+
+    /**
+     * Desfaz a baixa de estoque de uma linha — remoção de item e cancelamento de comanda.
+     *
+     * <p><b>Linha de lata NÃO devolve unidade</b> (EST-F027), e essa assimetria é o desenho, não um
+     * caso esquecido: a essência já foi queimada e não voltou para a prateleira. Uma {@code ENTRADA}
+     * aqui inventaria saldo — trocaria um erro visível (a mesa cancelada) por um invisível (o saldo
+     * mentindo para cima, que só apareceria no próximo balanço sem ninguém saber de onde veio). O
+     * que se desfaz é a contagem de usos.</p>
+     *
+     * <p>Quem decide é a própria linha, por {@code consumedPackage()}, e não uma releitura do
+     * catálogo: o produto pode ter deixado de ser vendido por sessão desde o lançamento, e o
+     * desfazimento tem que espelhar o que de fato aconteceu, não o cadastro de hoje.</p>
+     */
+    private void undoStock(ComandaItem item, String warehouseCode, String reason, String username) {
+        if (item.consumedPackage()) {
+            estoqueUseCase.releaseSession(item.sku(), warehouseCode, item.quantity());
+        } else {
+            estoqueUseCase.adjustStock(item.sku(), warehouseCode, MovementType.ENTRADA,
+                    item.quantity(), reason, username);
+        }
+    }
+
+    /** PDV-F016 — trocar de mesa é renomear. Ver {@link ComandaUseCase#renameComanda}. */
+    @Override
+    @Transactional
+    public Comanda renameComanda(Long comandaId, String newLabel, String username) {
+        Comanda comanda = getComandaForUpdate(comandaId);
+        pdvService.requireOpenSession(comanda.sessionId());
+        requireOpen(comanda);
+        return comandaRepository.save(comanda.withLabel(newLabel));
+    }
+
+    /**
+     * PDV-F016 — juntar duas mesas. Ver {@link ComandaUseCase#mergeComanda} para o desenho.
+     *
+     * <p>As duas comandas são travadas <b>em ordem crescente de id</b>, e não na ordem em que o
+     * cliente as mandou. Duas junções simultâneas em sentidos opostos (A→B e B→A) travariam uma a
+     * linha que a outra espera — o deadlock clássico de duas travas sem ordem canônica. Ordenar por
+     * id elimina o ciclo por construção.</p>
+     */
+    @Override
+    @Transactional
+    public Comanda mergeComanda(Long fromComandaId, Long toComandaId, String username) {
+        if (fromComandaId == null || fromComandaId.equals(toComandaId)) {
+            throw new ComandaMergeNotAllowedException("Origem e destino precisam ser comandas distintas.");
+        }
+        // Ordem canônica das travas — ver o javadoc acima. As comandas são lidas JÁ travadas: a
+        // decisão de mesclar é tomada sobre o estado que a trava garante que ninguém muda.
+        Comanda origem;
+        Comanda destino;
+        if (fromComandaId < toComandaId) {
+            origem = getComandaForUpdate(fromComandaId);
+            destino = getComandaForUpdate(toComandaId);
+        } else {
+            destino = getComandaForUpdate(toComandaId);
+            origem = getComandaForUpdate(fromComandaId);
+        }
+        requireOpen(origem);
+        requireOpen(destino);
+
+        if (!origem.warehouseCode().equals(destino.warehouseCode())) {
+            throw new ComandaMergeNotAllowedException("As mesas são de depósitos diferentes: "
+                    + origem.warehouseCode() + " e " + destino.warehouseCode()
+                    + ". O estoque de cada linha saiu do depósito da comanda que a recebeu.");
+        }
+        // PDV-F017 — linha já cobrada tem um pedido apontando para ESTA comanda; mover o resto
+        // partiria a conta entre duas mesas e o recibo já entregue deixaria de bater.
+        if (origem.items().stream().anyMatch(i -> !i.isOpen())) {
+            throw new ComandaPartiallyClosedException(fromComandaId);
+        }
+
+        // Reatribuição por FK, preservando ids — é o que mantém linkedItemId válido. Ver o javadoc
+        // de ComandaRepository.moveOpenItems.
+        comandaRepository.moveOpenItems(fromComandaId, toComandaId);
+
+        // Sem adjustStock: a mercadoria não voltou para a prateleira, mudou de conta. CANCELADA é o
+        // único estado terminal sem pedido que o ck_comanda_status_consistency da V104 aceita; o que
+        // distingue este cancelamento de um abandono é o evento COMANDA_MERGED na trilha.
+        comandaRepository.save(origem.cancelled(Instant.now()));
+        return getComanda(toComandaId);
+    }
+
+    /**
+     * PDV-F013 — a varredura de mesa esquecida. Ver o javadoc de
+     * {@link ComandaUseCase#sweepStaleComandas} para o porquê de só a comanda <b>vazia</b> ser
+     * cancelada, e de esta ser a única operação de comanda que não exige caixa aberto.
+     */
+    @Override
+    @Transactional
+    public StaleComandaSweepResult sweepStaleComandas(int staleHours, int batchSize) {
+        Instant cutoff = Instant.now().minus(staleHours, ChronoUnit.HOURS);
+        List<Long> candidates = comandaRepository.findOpenIdsOlderThan(cutoff, batchSize);
+
+        int cancelled = 0;
+        List<Comanda> withConsumption = new ArrayList<>();
+        for (Long id : candidates) {
+            // Mesma trava de addItem/close/cancel (PDV-C008). Sem ela a varredura poderia cancelar
+            // uma mesa no instante em que um atendente lança o primeiro item nela — e o item cairia
+            // numa comanda já CANCELADA, com o estoque debitado e ninguém para cobrar. Com a trava o
+            // addItem espera e depois falha com ComandaNotOpenException: o operador VÊ o erro.
+            Comanda comanda = comandaRepository.findByIdForUpdate(id).orElse(null);
+            // Entre a consulta e a trava a mesa pode ter sido fechada ou cancelada por alguém.
+            if (comanda == null || !comanda.isOpen()) {
+                continue;
+            }
+            if (comanda.items().isEmpty()) {
+                // Sem adjustStock: não há item, logo não há nada que tenha saído do estoque.
+                comandaRepository.save(comanda.cancelled(Instant.now()));
+                cancelled++;
+            } else {
+                withConsumption.add(comanda);
+            }
+        }
+
+        if (!withConsumption.isEmpty()) {
+            dispatchStaleComandaAlerts(withConsumption, staleHours);
+        }
+        return new StaleComandaSweepResult(cancelled, withConsumption.size());
+    }
+
+    /**
+     * Uma notificação por destinatário listando <b>todas</b> as mesas, não uma por mesa — mesmo
+     * princípio de {@code EstoqueService.notifyIfBelowReorderPoint}: dez mesas esquecidas numa noite
+     * são um aviso, não dez.
+     */
+    private void dispatchStaleComandaAlerts(List<Comanda> comandas, int staleHours) {
+        String title = "Mesa aberta há mais de " + staleHours + "h";
+        StringBuilder body = new StringBuilder(comandas.size() == 1
+                ? "A mesa a seguir está aberta com consumo e não foi fechada:"
+                : comandas.size() + " mesas estão abertas com consumo e não foram fechadas:");
+        comandas.forEach(c -> body.append("\n- ").append(c.tableOrCustomerLabel())
+                .append(" (comanda #").append(c.id()).append("): ")
+                .append(c.items().size()).append(" item(ns), total ").append(c.runningTotal())
+                .append(", aberta em ").append(c.openedAt()));
+        // O estoque destas NÃO foi devolvido de propósito: a essência foi consumida. Quem receber o
+        // aviso decide entre cobrar, fechar como perda ou cancelar assumindo a devolução.
+        body.append("\n\nO estoque destas mesas continua debitado — a varredura não devolve saldo de "
+                + "consumo real. Feche ou cancele cada uma pelo PDV.");
+
+        userRepository.findUsernamesByPermission(COMANDA_MANAGE_PERMISSION)
+                .forEach(username -> notificationUseCase.notify(username, NotificationType.SYSTEM,
+                        title, body.toString()));
     }
 
     private void requireOpen(Comanda comanda) {

@@ -199,8 +199,35 @@ public interface ComandaUseCase {
      * @throws com.cernecommerce.core.domain.exception.pagamento.InsufficientPaymentException se a
      *         soma dos pagamentos não cobrir o total, <b>já com a taxa somada</b>
      */
+    default Order closeComanda(Long comandaId, List<PaymentCommand> payments, BigDecimal discountAmount,
+            boolean applyServiceFee, String username) {
+        return closeComanda(comandaId, payments, discountAmount, applyServiceFee, null, username);
+    }
+
+    /**
+     * Fecha <b>parte</b> da conta (PDV-F017): gera um pedido só com as linhas de {@code itemIds},
+     * marca-as como cobradas e deixa a comanda <b>ABERTA</b> com o restante. Repetido até não sobrar
+     * linha, o último fechamento encerra a mesa. {@code itemIds} nulo ou vazio cobra tudo que está
+     * em aberto — o comportamento de sempre.
+     *
+     * <p>É assim que "cada um paga o que consumiu" existe no modelo. O split que já havia
+     * (PDV-F006) é de <b>forma de pagamento</b>: divide como se paga, não quem paga o quê.</p>
+     *
+     * <p>Desconto, taxa de serviço, troco e cashback incidem sobre <b>o escopo</b>, não sobre a mesa
+     * inteira — cada conta é um pedido completo e independente, e somar a taxa do salão sobre o
+     * consumo alheio seria cobrar duas vezes pelo mesmo serviço.</p>
+     *
+     * <p>Uma seleção não pode separar linhas amarradas por {@code linkedItemId}: um {@code OPEN_ROSH}
+     * e as trocas dele saem na mesma conta ou em nenhuma.</p>
+     *
+     * @param itemIds linhas a cobrar; nulo/vazio cobra todas as abertas
+     * @throws com.cernecommerce.core.domain.exception.pdv.ItemNotOpenInComandaException se algum id
+     *         não for de linha aberta desta comanda
+     * @throws com.cernecommerce.core.domain.exception.pdv.LinkedItemMustCloseTogetherException se a
+     *         seleção separar linhas ligadas
+     */
     Order closeComanda(Long comandaId, List<PaymentCommand> payments, BigDecimal discountAmount,
-            boolean applyServiceFee, String username);
+            boolean applyServiceFee, List<Long> itemIds, String username);
 
     /**
      * Percentual da taxa de serviço vigente (PDV-F015), para a tela mostrar ao operador quanto será
@@ -219,4 +246,72 @@ public interface ComandaUseCase {
      *         estiver fechada ou cancelada
      */
     Comanda cancelComanda(Long comandaId, String username);
+
+    /**
+     * Varre as comandas esquecidas abertas (PDV-F013) — as que passaram de {@code staleHours} sem
+     * serem fechadas nem canceladas.
+     *
+     * <p><b>Cancela apenas as VAZIAS, e essa assimetria é o desenho, não uma etapa faltando.</b>
+     * Cancelar devolve o estoque por {@code ENTRADA}; numa mesa com consumo real a essência já foi
+     * <i>queimada</i> e não voltou para a prateleira, então a devolução automática criaria saldo que
+     * fisicamente não existe. Trocaria um problema visível — a mesa pendurada, que desde PDV-C005
+     * impede o fechamento do caixa — por um invisível: o saldo mentindo para cima, que só apareceria
+     * no próximo balanço, sem ninguém saber de onde veio. Comanda vazia não tem esse dilema: não há
+     * o que devolver, e o único efeito dela é travar o turno.</p>
+     *
+     * <p>As que têm consumo geram <b>uma</b> notificação agregada para quem tem
+     * {@code PDV_COMANDA_MANAGE}, e ficam como estavam. A decisão entre cobrar, fechar como perda ou
+     * cancelar assumindo a devolução é humana — o sistema levanta a mão, não resolve sozinho.</p>
+     *
+     * <p><b>Não exige sessão de caixa aberta</b>, ao contrário de {@link #cancelComanda}. É
+     * deliberado: a comanda mais presa de todas é a órfã de um caixa já fechado (possível para o que
+     * existia antes de PDV-C005), e exigir sessão aberta faria a varredura recusar exatamente o caso
+     * que ela existe para resolver.</p>
+     *
+     * @param staleHours horas desde a abertura a partir das quais a mesa conta como esquecida
+     * @param batchSize teto de comandas examinadas por passada
+     * @return quantas foram canceladas e quantas foram só sinalizadas
+     */
+    /**
+     * Troca o rótulo da mesa (PDV-F016) — o cliente mudou de lugar no salão.
+     *
+     * <p>Antes disto {@code tableOrCustomerLabel} era imutável, e trocar de mesa só era possível
+     * cancelando (o que devolvia tudo ao estoque e encerrava a conta) e relançando item a item.
+     * Nada de físico acontece aqui: itens, depósito e sessão de origem seguem os mesmos.</p>
+     *
+     * @throws com.cernecommerce.core.domain.exception.pdv.ComandaNotOpenException se a comanda não
+     *         estiver aberta
+     */
+    Comanda renameComanda(Long comandaId, String newLabel, String username);
+
+    /**
+     * Junta duas mesas que viraram uma conta só (PDV-F016): as linhas em aberto de
+     * {@code fromComandaId} passam para {@code toComandaId}, e a origem é encerrada.
+     *
+     * <p><b>Nenhum estoque se move.</b> A mercadoria não voltou para a prateleira nem saiu de novo —
+     * ela mudou de conta. Por isso o merge <b>não</b> passa por {@code cancelComanda}, que devolveria
+     * tudo por {@code ENTRADA}: a origem termina {@code CANCELADA} por um caminho próprio, sem tocar
+     * em saldo. O status é o mesmo, o significado não, e é o evento {@code COMANDA_MERGED} que
+     * guarda a diferença na trilha.</p>
+     *
+     * <p>As linhas mantêm os ids ao mudar de comanda, o que preserva os vínculos de
+     * {@code linkedItemId} — um {@code OPEN_ROSH} e as trocas dele chegam juntos e ainda ligados.</p>
+     *
+     * @throws com.cernecommerce.core.domain.exception.pdv.ComandaNotOpenException se qualquer uma
+     *         das duas não estiver aberta
+     * @throws com.cernecommerce.core.domain.exception.pdv.ComandaPartiallyClosedException se a
+     *         origem já teve parte da conta cobrada
+     * @throws com.cernecommerce.core.domain.exception.pdv.ComandaMergeNotAllowedException se for a
+     *         mesma comanda, ou se os depósitos diferirem
+     */
+    Comanda mergeComanda(Long fromComandaId, Long toComandaId, String username);
+
+    StaleComandaSweepResult sweepStaleComandas(int staleHours, int batchSize);
+
+    /**
+     * Resultado de uma passada da varredura: {@code cancelled} são as vazias que foram encerradas,
+     * {@code flagged} as que têm consumo e só entraram no alerta.
+     */
+    record StaleComandaSweepResult(int cancelled, int flagged) {
+    }
 }

@@ -2,6 +2,10 @@ package com.cernecommerce.core.service;
 
 import com.cernecommerce.core.domain.exception.pdv.ComandaEmptyException;
 import com.cernecommerce.core.domain.exception.pdv.ComandaNotFoundException;
+import com.cernecommerce.core.domain.exception.pdv.ItemNotOpenInComandaException;
+import com.cernecommerce.core.domain.exception.pdv.LinkedItemMustCloseTogetherException;
+import com.cernecommerce.core.domain.exception.pdv.ComandaPartiallyClosedException;
+import com.cernecommerce.core.domain.exception.pdv.ComandaMergeNotAllowedException;
 import com.cernecommerce.core.domain.exception.pdv.ComandaNotOpenException;
 import com.cernecommerce.core.domain.exception.pdv.ComandaOnlyCourtesyException;
 import com.cernecommerce.core.domain.exception.pdv.LinkedItemRequiredException;
@@ -15,9 +19,11 @@ import com.cernecommerce.core.domain.exception.pdv.SurchargeNotApplicableExcepti
 import com.cernecommerce.core.domain.exception.pdv.SurchargeOnCourtesyException;
 import com.cernecommerce.core.domain.exception.estoque.InsufficientStockException;
 import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
+import com.cernecommerce.core.domain.model.notification.NotificationType;
 import com.cernecommerce.core.domain.model.cashback.CashbackRate;
 import com.cernecommerce.core.domain.model.cashback.CashbackScope;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
+import com.cernecommerce.core.domain.model.estoque.OpenPackage;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.pagamento.PaymentMethod;
 import com.cernecommerce.core.domain.model.pdv.CashRegisterSession;
@@ -32,21 +38,27 @@ import com.cernecommerce.core.domain.model.pdv.ComandaStatus;
 import com.cernecommerce.core.domain.model.pedido.ConsumptionMode;
 import com.cernecommerce.core.domain.model.pedido.Order;
 import com.cernecommerce.core.domain.model.pedido.SalesChannel;
+import com.cernecommerce.core.ports.in.ComandaUseCase;
+import com.cernecommerce.core.ports.in.NotificationUseCase;
 import com.cernecommerce.core.ports.in.CashbackUseCase;
 import com.cernecommerce.core.ports.in.EstoqueUseCase;
 import com.cernecommerce.core.ports.in.PdvUseCase.PaymentCommand;
+import com.cernecommerce.core.ports.out.user.UserRepository;
 import com.cernecommerce.core.ports.out.pagamento.OrderPaymentRepository;
 import com.cernecommerce.core.ports.out.pdv.ComandaRepository;
 import com.cernecommerce.core.ports.out.pedido.OrderRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Set;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -66,6 +78,8 @@ class ComandaServiceTest {
     @Mock OrderPaymentRepository orderPaymentRepository;
     @Mock CashbackUseCase cashbackUseCase;
     @Mock PdvService pdvService;
+    @Mock NotificationUseCase notificationUseCase;
+    @Mock UserRepository userRepository;
 
     ComandaService comandaService;
 
@@ -75,7 +89,8 @@ class ComandaServiceTest {
     @BeforeEach
     void setUp() {
         comandaService = new ComandaService(comandaRepository, estoqueUseCase, orderRepository,
-                orderPaymentRepository, cashbackUseCase, pdvService, SERVICE_FEE_PERCENT);
+                orderPaymentRepository, cashbackUseCase, pdvService, notificationUseCase, userRepository,
+                SERVICE_FEE_PERCENT);
     }
 
     private CashRegisterSession openSession() {
@@ -1123,5 +1138,446 @@ class ComandaServiceTest {
         assertThat(order.items().get(0).surchargeAmount()).isEqualByComparingTo("15.00");
         // O unitPrice do pedido é o total já somado — é ele que faz o subtotal fechar.
         assertThat(order.items().get(0).unitPrice()).isEqualByComparingTo("75.00");
+    }
+
+    // ── Varredura de mesa esquecida (PDV-F013) ───────────────────────────────────────────────
+
+    /** Comanda velha e sem item nenhum: nada saiu do estoque, então cancelar é seguro. */
+    @Test
+    void sweepStaleComandas_cancelsTheEmptyOnes() {
+        Comanda vazia = staleComanda();
+        when(comandaRepository.findOpenIdsOlderThan(any(Instant.class), eq(200))).thenReturn(List.of(10L));
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(vazia));
+
+        ComandaUseCase.StaleComandaSweepResult result = comandaService.sweepStaleComandas(12, 200);
+
+        assertThat(result.cancelled()).isEqualTo(1);
+        assertThat(result.flagged()).isZero();
+
+        ArgumentCaptor<Comanda> saved = ArgumentCaptor.forClass(Comanda.class);
+        verify(comandaRepository).save(saved.capture());
+        assertThat(saved.getValue().status()).isEqualTo(ComandaStatus.CANCELADA);
+        // Comanda vazia não tem o que devolver — nenhum movimento de estoque pode sair daqui.
+        verifyNoInteractions(estoqueUseCase);
+        // E ninguém precisa ser avisado de uma mesa vazia que o próprio sistema resolveu.
+        verifyNoInteractions(notificationUseCase);
+    }
+
+    /**
+     * <b>O caso que define a feature.</b> Mesa velha COM consumo não é cancelada: a essência já foi
+     * queimada, e uma {@code ENTRADA} automática devolveria ao sistema um saldo que não existe na
+     * prateleira. O sistema levanta a mão e para — cobrar, perder ou cancelar é decisão humana.
+     */
+    @Test
+    void sweepStaleComandas_neverTouchesStockOfAComandaWithConsumption() {
+        Comanda comConsumo = staleComanda(essenciaItem());
+        when(comandaRepository.findOpenIdsOlderThan(any(Instant.class), eq(200))).thenReturn(List.of(10L));
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(comConsumo));
+        when(userRepository.findUsernamesByPermission("PDV_COMANDA_MANAGE")).thenReturn(Set.of("gerente"));
+
+        ComandaUseCase.StaleComandaSweepResult result = comandaService.sweepStaleComandas(12, 200);
+
+        assertThat(result.flagged()).isEqualTo(1);
+        assertThat(result.cancelled()).isZero();
+        // Nem devolução de estoque, nem mudança de status: a mesa fica exatamente como estava.
+        verifyNoInteractions(estoqueUseCase);
+        verify(comandaRepository, never()).save(any());
+        verify(notificationUseCase).notify(eq("gerente"), eq(NotificationType.SYSTEM), anyString(), anyString());
+    }
+
+    /** Um aviso por destinatário listando todas as mesas — não um aviso por mesa. */
+    @Test
+    void sweepStaleComandas_sendsOneAggregatedAlertPerRecipient() {
+        when(comandaRepository.findOpenIdsOlderThan(any(Instant.class), eq(200)))
+                .thenReturn(List.of(10L, 11L));
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(staleComanda(essenciaItem())));
+        when(comandaRepository.findByIdForUpdate(11L)).thenReturn(Optional.of(staleComanda(essenciaItem())));
+        when(userRepository.findUsernamesByPermission("PDV_COMANDA_MANAGE")).thenReturn(Set.of("gerente"));
+
+        ComandaUseCase.StaleComandaSweepResult result = comandaService.sweepStaleComandas(12, 200);
+
+        assertThat(result.flagged()).isEqualTo(2);
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        verify(notificationUseCase, times(1))
+                .notify(eq("gerente"), eq(NotificationType.SYSTEM), anyString(), body.capture());
+        assertThat(body.getValue()).contains("2 mesas");
+        // O aviso precisa dizer que o saldo NÃO foi devolvido, senão quem lê assume que foi.
+        assertThat(body.getValue()).contains("continua debitado");
+    }
+
+    /** Alguém fechou a mesa entre a consulta de ids e a trava: a varredura desiste dela em silêncio. */
+    @Test
+    void sweepStaleComandas_skipsWhatStoppedBeingOpenBeforeTheLock() {
+        Comanda jaCancelada = staleComanda().cancelled(Instant.now());
+        when(comandaRepository.findOpenIdsOlderThan(any(Instant.class), eq(200))).thenReturn(List.of(10L));
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(jaCancelada));
+
+        ComandaUseCase.StaleComandaSweepResult result = comandaService.sweepStaleComandas(12, 200);
+
+        assertThat(result.cancelled()).isZero();
+        assertThat(result.flagged()).isZero();
+        verify(comandaRepository, never()).save(any());
+    }
+
+    /**
+     * A varredura <b>não</b> consulta a sessão de caixa, ao contrário de {@code cancelComanda}. A
+     * comanda mais presa de todas é justamente a órfã de um caixa já fechado — exigir sessão aberta
+     * faria a varredura recusar o caso que ela existe para resolver.
+     */
+    @Test
+    void sweepStaleComandas_doesNotRequireAnOpenCashRegisterSession() {
+        when(comandaRepository.findOpenIdsOlderThan(any(Instant.class), eq(200))).thenReturn(List.of(10L));
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(staleComanda()));
+
+        comandaService.sweepStaleComandas(12, 200);
+
+        verifyNoInteractions(pdvService);
+    }
+
+    /** O corte vira o {@code cutoff} passado ao repositório: 12h atrás, não "agora". */
+    @Test
+    void sweepStaleComandas_cutsByTheConfiguredWindow() {
+        when(comandaRepository.findOpenIdsOlderThan(any(Instant.class), eq(50))).thenReturn(List.of());
+
+        comandaService.sweepStaleComandas(12, 50);
+
+        ArgumentCaptor<Instant> cutoff = ArgumentCaptor.forClass(Instant.class);
+        verify(comandaRepository).findOpenIdsOlderThan(cutoff.capture(), eq(50));
+        assertThat(cutoff.getValue()).isBefore(Instant.now().minus(11, ChronoUnit.HOURS));
+        assertThat(cutoff.getValue()).isAfter(Instant.now().minus(13, ChronoUnit.HOURS));
+    }
+
+    /** Nada esquecido: nem alerta, nem escrita. */
+    @Test
+    void sweepStaleComandas_withNothingStaleDoesNothing() {
+        when(comandaRepository.findOpenIdsOlderThan(any(Instant.class), eq(200))).thenReturn(List.of());
+
+        ComandaUseCase.StaleComandaSweepResult result = comandaService.sweepStaleComandas(12, 200);
+
+        assertThat(result.cancelled()).isZero();
+        assertThat(result.flagged()).isZero();
+        verifyNoInteractions(notificationUseCase);
+        verifyNoInteractions(estoqueUseCase);
+        verify(comandaRepository, never()).save(any());
+    }
+
+    /** Comanda aberta há 13h, o cenário que a varredura de 12h alcança. */
+    private Comanda staleComanda(ComandaItem... items) {
+        Comanda base = abertaComanda(items);
+        return Comanda.of(base.id(), base.sessionId(), base.warehouseCode(), base.tableOrCustomerLabel(),
+                base.customerId(), base.status(), base.items(), base.orderId(), base.openedBy(),
+                Instant.now().minus(13, ChronoUnit.HOURS), base.closedAt());
+    }
+
+    // ── Conta dividida (PDV-F017) ────────────────────────────────────────────────────────────
+
+    /**
+     * <b>O caso que define a feature.</b> Fechar parte da conta gera um pedido só com as linhas
+     * escolhidas e a comanda continua ABERTA com o restante. Se ela fechasse aqui, a mesa cheia
+     * perderia o consumo de quem ainda não pagou.
+     */
+    @Test
+    void closeComanda_withItemIds_chargesOnlyThoseLinesAndKeepsTheComandaOpen() {
+        Comanda comanda = abertaComanda(
+                linha(1L, "ESS-A", "30.00", ConsumptionMode.NORMAL, false, null),
+                linha(2L, "ESS-B", "20.00", ConsumptionMode.NORMAL, false, null));
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(comanda));
+        when(pdvService.getCurrentSession("caixa1")).thenReturn(openSession());
+        when(pdvService.validatePaymentsAndComputeChange(any(), eq(new BigDecimal("30.00")))).thenReturn(null);
+        givenOrderPersistenceAssignsId();
+        when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Order order = comandaService.closeComanda(10L, dinheiro("30.00"), null, false, List.of(1L), "caixa1");
+
+        // Só a linha escolhida entrou no pedido.
+        assertThat(order.items()).hasSize(1);
+        assertThat(order.items().get(0).sku()).isEqualTo("ESS-A");
+        assertThat(order.netAmount()).isEqualByComparingTo("30.00");
+
+        ArgumentCaptor<Comanda> saved = ArgumentCaptor.forClass(Comanda.class);
+        verify(comandaRepository).save(saved.capture());
+        assertThat(saved.getValue().status()).isEqualTo(ComandaStatus.ABERTA);
+        assertThat(saved.getValue().orderId()).isNull();
+        // E o que falta pagar caiu para o valor da linha que sobrou.
+        assertThat(saved.getValue().runningTotal()).isEqualByComparingTo("20.00");
+    }
+
+    /** O último fechamento encerra a mesa — com o pedido que a encerrou no cabeçalho. */
+    @Test
+    void closeComanda_lastPartialCloseFinishesTheComanda() {
+        Comanda comanda = abertaComanda(
+                linha(1L, "ESS-A", "30.00", ConsumptionMode.NORMAL, false, null),
+                linha(2L, "ESS-B", "20.00", ConsumptionMode.NORMAL, false, null))
+                .withItemsClosedIn(499L, List.of(1L));
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(comanda));
+        when(pdvService.getCurrentSession("caixa1")).thenReturn(openSession());
+        when(pdvService.validatePaymentsAndComputeChange(any(), eq(new BigDecimal("20.00")))).thenReturn(null);
+        givenOrderPersistenceAssignsId();
+        when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        comandaService.closeComanda(10L, dinheiro("20.00"), null, false, List.of(2L), "caixa1");
+
+        ArgumentCaptor<Comanda> saved = ArgumentCaptor.forClass(Comanda.class);
+        verify(comandaRepository).save(saved.capture());
+        assertThat(saved.getValue().status()).isEqualTo(ComandaStatus.FECHADA);
+        assertThat(saved.getValue().orderId()).isEqualTo(500L);
+    }
+
+    /** Sem itemIds nada muda: cobra tudo que está aberto, como sempre foi. */
+    @Test
+    void closeComanda_withoutItemIds_stillChargesEverything() {
+        Comanda comanda = abertaComanda(
+                linha(1L, "ESS-A", "30.00", ConsumptionMode.NORMAL, false, null),
+                linha(2L, "ESS-B", "20.00", ConsumptionMode.NORMAL, false, null));
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(comanda));
+        when(pdvService.getCurrentSession("caixa1")).thenReturn(openSession());
+        when(pdvService.validatePaymentsAndComputeChange(any(), eq(new BigDecimal("50.00")))).thenReturn(null);
+        givenOrderPersistenceAssignsId();
+        when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Order order = comandaService.closeComanda(10L, dinheiro("50.00"), null, false, null, "caixa1");
+
+        assertThat(order.items()).hasSize(2);
+        ArgumentCaptor<Comanda> saved = ArgumentCaptor.forClass(Comanda.class);
+        verify(comandaRepository).save(saved.capture());
+        assertThat(saved.getValue().status()).isEqualTo(ComandaStatus.FECHADA);
+    }
+
+    /** O desconto rateia sobre O ESCOPO, não sobre a mesa inteira. */
+    @Test
+    void closeComanda_partialCloseProratesTheDiscountOverTheScopeOnly() {
+        Comanda comanda = abertaComanda(
+                linha(1L, "ESS-A", "30.00", ConsumptionMode.NORMAL, false, null),
+                linha(2L, "ESS-B", "20.00", ConsumptionMode.NORMAL, false, null));
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(comanda));
+        when(pdvService.getCurrentSession("caixa1")).thenReturn(openSession());
+        when(pdvService.validatePaymentsAndComputeChange(any(), eq(new BigDecimal("27.00")))).thenReturn(null);
+        givenOrderPersistenceAssignsId();
+        when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Order order = comandaService.closeComanda(10L, dinheiro("27.00"), new BigDecimal("3.00"),
+                false, List.of(1L), "caixa1");
+
+        // Os 3,00 caíram inteiros na única linha do escopo — não foram divididos com a linha alheia.
+        assertThat(order.items()).hasSize(1);
+        assertThat(order.items().get(0).discountAmount()).isEqualByComparingTo("3.00");
+        assertThat(order.netAmount()).isEqualByComparingTo("27.00");
+    }
+
+    @Test
+    void closeComanda_withAnItemIdThatIsNotOpenHere_isRejected() {
+        Comanda comanda = abertaComanda(linha(1L, "ESS-A", "30.00", ConsumptionMode.NORMAL, false, null));
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(comanda));
+
+        assertThatThrownBy(() -> comandaService.closeComanda(10L, dinheiro("30.00"), null, false,
+                List.of(42L), "caixa1"))
+                .isInstanceOf(ItemNotOpenInComandaException.class);
+
+        verify(orderRepository, never()).save(any());
+    }
+
+    /**
+     * Um OPEN_ROSH e a TROCA dele não vão para contas diferentes: separados, cada metade descreve
+     * um consumo que não aconteceu, e a margem do open rosh sai partida ao meio.
+     */
+    @Test
+    void closeComanda_selectingASessionWithoutItsTrocaIsRejected() {
+        Comanda comanda = comandaComSessaoETroca();
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(comanda));
+
+        assertThatThrownBy(() -> comandaService.closeComanda(10L, dinheiro("60.00"), null, false,
+                List.of(1L), "caixa1"))
+                .isInstanceOf(LinkedItemMustCloseTogetherException.class);
+
+        verify(orderRepository, never()).save(any());
+    }
+
+    @Test
+    void closeComanda_selectingATrocaWithoutItsSessionIsRejected() {
+        Comanda comanda = comandaComSessaoETroca();
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(comanda));
+
+        assertThatThrownBy(() -> comandaService.closeComanda(10L, dinheiro("60.00"), null, false,
+                List.of(2L), "caixa1"))
+                .isInstanceOf(LinkedItemMustCloseTogetherException.class);
+    }
+
+    // ── Transferir e juntar mesas (PDV-F016) ─────────────────────────────────────────────────
+
+    @Test
+    void renameComanda_changesTheLabelWithoutTouchingStock() {
+        Comanda comanda = abertaComanda(essenciaItem());
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(comanda));
+        when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Comanda renomeada = comandaService.renameComanda(10L, "Mesa 7", "caixa1");
+
+        assertThat(renomeada.tableOrCustomerLabel()).isEqualTo("Mesa 7");
+        assertThat(renomeada.items()).hasSize(1);
+        verifyNoInteractions(estoqueUseCase);
+    }
+
+    /**
+     * <b>Nenhum estoque se move numa junção.</b> A mercadoria não voltou para a prateleira nem saiu
+     * de novo — mudou de conta. É o que separa este caminho de {@code cancelComanda}, que devolve
+     * tudo por ENTRADA.
+     */
+    @Test
+    void mergeComanda_movesTheLinesWithoutAnyStockMovement() {
+        Comanda origem = abertaComanda(linha(1L, "ESS-A", "30.00", ConsumptionMode.NORMAL, false, null));
+        Comanda destino = Comanda.of(20L, 1L, "LOJA-01", "Mesa 9", null, ComandaStatus.ABERTA,
+                List.of(), null, "caixa1", Instant.now(), null);
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(origem));
+        when(comandaRepository.findByIdForUpdate(20L)).thenReturn(Optional.of(destino));
+        when(comandaRepository.findById(20L)).thenReturn(Optional.of(destino));
+        when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        comandaService.mergeComanda(10L, 20L, "caixa1");
+
+        verify(comandaRepository).moveOpenItems(10L, 20L);
+        // O ponto: a junção não gera movimento de estoque nenhum.
+        verifyNoInteractions(estoqueUseCase);
+        ArgumentCaptor<Comanda> saved = ArgumentCaptor.forClass(Comanda.class);
+        verify(comandaRepository).save(saved.capture());
+        assertThat(saved.getValue().status()).isEqualTo(ComandaStatus.CANCELADA);
+        assertThat(saved.getValue().id()).isEqualTo(10L);
+    }
+
+    /** Origem com parte da conta já cobrada não pode ser juntada — a conta ficaria partida. */
+    @Test
+    void mergeComanda_isRejectedWhenTheSourceWasPartiallyCharged() {
+        Comanda origem = abertaComanda(
+                linha(1L, "ESS-A", "30.00", ConsumptionMode.NORMAL, false, null),
+                linha(2L, "ESS-B", "20.00", ConsumptionMode.NORMAL, false, null))
+                .withItemsClosedIn(499L, List.of(1L));
+        Comanda destino = Comanda.of(20L, 1L, "LOJA-01", "Mesa 9", null, ComandaStatus.ABERTA,
+                List.of(), null, "caixa1", Instant.now(), null);
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(origem));
+        when(comandaRepository.findByIdForUpdate(20L)).thenReturn(Optional.of(destino));
+
+        assertThatThrownBy(() -> comandaService.mergeComanda(10L, 20L, "caixa1"))
+                .isInstanceOf(ComandaPartiallyClosedException.class);
+
+        verify(comandaRepository, never()).moveOpenItems(any(), any());
+    }
+
+    @Test
+    void mergeComanda_isRejectedAcrossWarehousesAndOntoItself() {
+        Comanda origem = abertaComanda(linha(1L, "ESS-A", "30.00", ConsumptionMode.NORMAL, false, null));
+        Comanda outroDeposito = Comanda.of(20L, 1L, "LOJA-02", "Mesa 9", null, ComandaStatus.ABERTA,
+                List.of(), null, "caixa1", Instant.now(), null);
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(origem));
+        when(comandaRepository.findByIdForUpdate(20L)).thenReturn(Optional.of(outroDeposito));
+
+        assertThatThrownBy(() -> comandaService.mergeComanda(10L, 20L, "caixa1"))
+                .isInstanceOf(ComandaMergeNotAllowedException.class);
+        assertThatThrownBy(() -> comandaService.mergeComanda(10L, 10L, "caixa1"))
+                .isInstanceOf(ComandaMergeNotAllowedException.class);
+    }
+
+    // ── Lata de essência aberta (EST-F027 / PDV-F018) ────────────────────────────────────────
+
+    /** Essência vendida por sessão, com o rendimento declarado: 1 lata = 5 sessões. */
+    private EstoqueUseCase.CatalogSaleInfo essenciaComLata() {
+        return new EstoqueUseCase.CatalogSaleInfo("Zgy Blueberry", ESSENCIA, true, true,
+                new BigDecimal("60.00"), 5, false);
+    }
+
+    /**
+     * <b>O bug que a feature corrige.</b> Cada sessão baixava uma lata inteira — medido no QA de
+     * 06/09/2026, {@code ESSE-ZGY-BLUEBERRY} foi de 50 para 49 numa sessão só. Agora a linha
+     * consome USO, e {@code adjustStock} não é chamado.
+     */
+    @Test
+    void addItem_comEssenciaVendidaPorSessao_consomeUsoDaLataEmVezDeBaixarUnidade() {
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(abertaComanda()));
+        when(pdvService.requireOpenSession(1L)).thenReturn(openSession());
+        when(estoqueUseCase.resolveSaleInfo("ESSE-BLUE")).thenReturn(essenciaComLata());
+        when(estoqueUseCase.consumeSession("ESSE-BLUE", "LOJA-01", BigDecimal.ONE, "caixa1"))
+                .thenReturn(OpenPackage.open("ESSE-BLUE", 1L, 5, "caixa1", Instant.now()).withUses(3));
+        when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Comanda updated = comandaService.addItem(10L, "ESSE-BLUE", BigDecimal.ONE, null, false,
+                null, "caixa1");
+
+        verify(estoqueUseCase, never()).adjustStock(any(), any(), any(), any(), any(), any());
+        // O contador é carimbado na linha: é o "3 de 5" que a tela mostra sem uma segunda chamada.
+        assertThat(updated.items().get(0).packageUses()).isEqualTo(3);
+        assertThat(updated.items().get(0).packageSessionsPerUnit()).isEqualTo(5);
+        assertThat(updated.items().get(0).consumedPackage()).isTrue();
+    }
+
+    /**
+     * Produto de sessão <b>sem</b> {@code sessionsPerUnit} segue baixando unidade. É o que torna a
+     * adoção da lata uma escolha por item de catálogo em vez de uma virada de chave para a casa.
+     */
+    @Test
+    void addItem_comProdutoDeSessaoSemRendimento_mantemABaixaDireta() {
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(abertaComanda()));
+        when(pdvService.requireOpenSession(1L)).thenReturn(openSession());
+        when(estoqueUseCase.resolveSaleInfo("SESS-BLUE")).thenReturn(sessao(new BigDecimal("60.00")));
+        when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Comanda updated = comandaService.addItem(10L, "SESS-BLUE", BigDecimal.ONE, null, false,
+                null, "caixa1");
+
+        verify(estoqueUseCase).adjustStock(eq("SESS-BLUE"), eq("LOJA-01"), eq(MovementType.SAIDA),
+                any(), any(), eq("caixa1"));
+        verify(estoqueUseCase, never()).consumeSession(any(), any(), any(), any());
+        assertThat(updated.items().get(0).consumedPackage()).isFalse();
+    }
+
+    /**
+     * Cancelar a mesa <b>decrementa o contador</b> e não devolve unidade: a essência foi queimada
+     * e não voltou para a prateleira. Uma ENTRADA aqui inventaria saldo que fisicamente não existe.
+     */
+    @Test
+    void cancelComanda_comLinhaDeLata_devolveUsoENaoUnidade() {
+        ComandaItem deLata = ComandaItem.of(1L, "ESSE-BLUE", BigDecimal.ONE, new BigDecimal("25.00"),
+                new BigDecimal("10.00"), "Zgy Blueberry", Instant.now(), ConsumptionMode.NORMAL,
+                false, null, null, null, null, 3, 5);
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(abertaComanda(deLata)));
+        when(pdvService.requireOpenSession(1L)).thenReturn(openSession());
+        when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        comandaService.cancelComanda(10L, "caixa1");
+
+        verify(estoqueUseCase).releaseSession("ESSE-BLUE", "LOJA-01", BigDecimal.ONE);
+        verify(estoqueUseCase, never()).adjustStock(any(), any(), any(), any(), any(), any());
+    }
+
+    /** Linha que baixou unidade continua sendo devolvida por ENTRADA — os dois caminhos coexistem. */
+    @Test
+    void cancelComanda_comLinhaComum_continuaDevolvendoPorEntrada() {
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(
+                abertaComanda(linha(1L, "BEB-COLA", "12.00", ConsumptionMode.NORMAL, false, null))));
+        when(pdvService.requireOpenSession(1L)).thenReturn(openSession());
+        when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        comandaService.cancelComanda(10L, "caixa1");
+
+        verify(estoqueUseCase).adjustStock(eq("BEB-COLA"), eq("LOJA-01"), eq(MovementType.ENTRADA),
+                any(), any(), eq("caixa1"));
+        verify(estoqueUseCase, never()).releaseSession(any(), any(), any());
+    }
+
+    /**
+     * PDV-C020 — kit não pode ser sessão: não tem saldo próprio (explode em componentes) e não há
+     * como ser "a lata" que o contador controla. O QA achou kits oferecidos como sabor, a R$ 95.
+     */
+    @Test
+    void addItem_recusaKitEmModoDeSessao() {
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(abertaComanda()));
+        when(pdvService.requireOpenSession(1L)).thenReturn(openSession());
+        when(estoqueUseCase.resolveSaleInfo("KIT-8019")).thenReturn(
+                new EstoqueUseCase.CatalogSaleInfo("Kit Narguileiro Deluxe", ESSENCIA, true, true,
+                        new BigDecimal("95.00"), null, true));
+
+        assertThatThrownBy(() -> comandaService.addItem(10L, "KIT-8019", BigDecimal.ONE,
+                ConsumptionMode.OPEN_ROSH, false, null, "caixa1"))
+                .isInstanceOf(NotASessionProductException.class);
+
+        verify(estoqueUseCase, never()).adjustStock(any(), any(), any(), any(), any(), any());
+        verify(estoqueUseCase, never()).consumeSession(any(), any(), any(), any());
     }
 }

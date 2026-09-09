@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -427,5 +428,129 @@ class ComandaRepositoryIT {
     @Test
     void findByIdForUpdate_returnsEmptyForAnUnknownId() {
         assertThat(comandaRepository.findByIdForUpdate(999_999L)).isEmpty();
+    }
+
+    // ── Varredura de mesa esquecida (PDV-F013) ───────────────────────────────────────────────
+
+    /**
+     * A consulta que a varredura usa. Exercitada aqui e não só no service porque o filtro é por
+     * {@code openedAt}, coluna que nenhuma outra query deste repositório toca — um erro de
+     * comparação passaria batido na suíte de unidade, que mocka o repositório inteiro.
+     */
+    @Test
+    void findOpenIdsOlderThan_returnsOnlyOpenComandasOpenedBeforeTheCutoff() {
+        Comanda velha = comandaRepository.save(comandaAbertaEm(Instant.now().minus(13, ChronoUnit.HOURS)));
+        Comanda recente = comandaRepository.save(comandaAbertaEm(Instant.now().minus(1, ChronoUnit.HOURS)));
+        flushAndClear();
+
+        List<Long> ids = comandaRepository.findOpenIdsOlderThan(Instant.now().minus(12, ChronoUnit.HOURS), 100);
+
+        assertThat(ids).contains(velha.id());
+        assertThat(ids).doesNotContain(recente.id());
+    }
+
+    /** Mesa velha porém já resolvida não interessa: a varredura só age sobre o que segue ABERTO. */
+    @Test
+    void findOpenIdsOlderThan_ignoresClosedAndCancelledComandas() {
+        Comanda cancelada = comandaRepository.save(
+                comandaAbertaEm(Instant.now().minus(20, ChronoUnit.HOURS)).cancelled(Instant.now()));
+        flushAndClear();
+
+        List<Long> ids = comandaRepository.findOpenIdsOlderThan(Instant.now().minus(12, ChronoUnit.HOURS), 100);
+
+        assertThat(ids).doesNotContain(cancelada.id());
+    }
+
+    /** O teto do lote é respeitado — a varredura processa uma passada por vez. */
+    @Test
+    void findOpenIdsOlderThan_honoursTheBatchLimit() {
+        comandaRepository.save(comandaAbertaEm(Instant.now().minus(30, ChronoUnit.HOURS)));
+        comandaRepository.save(comandaAbertaEm(Instant.now().minus(29, ChronoUnit.HOURS)));
+        comandaRepository.save(comandaAbertaEm(Instant.now().minus(28, ChronoUnit.HOURS)));
+        flushAndClear();
+
+        List<Long> ids = comandaRepository.findOpenIdsOlderThan(Instant.now().minus(12, ChronoUnit.HOURS), 2);
+
+        assertThat(ids).hasSize(2);
+    }
+
+    private static Comanda comandaAbertaEm(Instant openedAt) {
+        return Comanda.of(null, 90L, "LOJA-01", "Mesa esquecida", null, ComandaStatus.ABERTA,
+                List.of(), null, "caixa1", openedAt, null);
+    }
+
+    // ── Conta dividida e junção de mesas (PDV-F017 / PDV-F016) ───────────────────────────────
+
+    @Test
+    void save_roundTripsClosedInOrderId() {
+        Comanda comanda = comandaRepository.save(
+                Comanda.open(80L, "LOJA-01", "Mesa dividida", "caixa1").withAddedItem(essenciaItem()));
+        flushAndClear();
+
+        Comanda carregada = comandaRepository.findById(comanda.id()).orElseThrow();
+        Long itemId = carregada.items().get(0).id();
+        comandaRepository.save(carregada.withItemsClosedIn(777L, List.of(itemId)));
+        flushAndClear();
+
+        Comanda relida = comandaRepository.findById(comanda.id()).orElseThrow();
+        assertThat(relida.items().get(0).closedInOrderId()).isEqualTo(777L);
+        assertThat(relida.openItems()).isEmpty();
+        assertThat(relida.runningTotal()).isEqualByComparingTo("0.00");
+    }
+
+    /**
+     * <b>O teste que justifica o desenho de PDV-F016.</b> Mover as linhas por reatribuição de FK
+     * preserva os ids — e é isso que mantém {@code linkedItemId} apontando para a linha certa. Passar
+     * os itens pelo {@code save} da comanda destino criaria ids novos e a TROCA ficaria órfã.
+     */
+    @Test
+    void moveOpenItems_preservesIdsAndKeepsLinkedItemIdValid() {
+        Comanda origem = comandaRepository.save(
+                Comanda.open(81L, "LOJA-01", "Mesa A", "caixa1")
+                        .withAddedItem(sessionItem("SESS-BLUE", "60.00", ConsumptionMode.OPEN_ROSH, false, null)));
+        flushAndClear();
+        Comanda comSessao = comandaRepository.findById(origem.id()).orElseThrow();
+        Long sessaoId = comSessao.items().get(0).id();
+        comandaRepository.save(comSessao.withAddedItem(
+                sessionItem("ESS-UVA", "0.00", ConsumptionMode.TROCA, true, sessaoId)));
+        flushAndClear();
+
+        Comanda destino = comandaRepository.save(Comanda.open(81L, "LOJA-01", "Mesa B", "caixa1"));
+        flushAndClear();
+
+        int movidos = comandaRepository.moveOpenItems(origem.id(), destino.id());
+        flushAndClear();
+
+        assertThat(movidos).isEqualTo(2);
+        Comanda destinoRelido = comandaRepository.findById(destino.id()).orElseThrow();
+        assertThat(destinoRelido.items()).hasSize(2);
+        // Os ids sobreviveram à mudança de comanda...
+        assertThat(destinoRelido.items()).extracting(ComandaItem::id).contains(sessaoId);
+        // ...e por isso a TROCA continua apontando para a sessão dela.
+        ComandaItem troca = destinoRelido.items().stream()
+                .filter(i -> i.mode() == ConsumptionMode.TROCA).findFirst().orElseThrow();
+        assertThat(troca.linkedItemId()).isEqualTo(sessaoId);
+        assertThat(comandaRepository.findById(origem.id()).orElseThrow().items()).isEmpty();
+    }
+
+    /** Linha já cobrada fica onde está: ela pertence a um pedido que aponta para a comanda de origem. */
+    @Test
+    void moveOpenItems_leavesAlreadyChargedLinesBehind() {
+        Comanda origem = comandaRepository.save(
+                Comanda.open(82L, "LOJA-01", "Mesa A", "caixa1").withAddedItem(essenciaItem()));
+        flushAndClear();
+        Comanda carregada = comandaRepository.findById(origem.id()).orElseThrow();
+        comandaRepository.save(carregada.withItemsClosedIn(888L, List.of(carregada.items().get(0).id())));
+        flushAndClear();
+
+        Comanda destino = comandaRepository.save(Comanda.open(82L, "LOJA-01", "Mesa B", "caixa1"));
+        flushAndClear();
+
+        int movidos = comandaRepository.moveOpenItems(origem.id(), destino.id());
+        flushAndClear();
+
+        assertThat(movidos).isZero();
+        assertThat(comandaRepository.findById(origem.id()).orElseThrow().items()).hasSize(1);
+        assertThat(comandaRepository.findById(destino.id()).orElseThrow().items()).isEmpty();
     }
 }

@@ -13,6 +13,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -70,6 +71,18 @@ public class ComandaRepositoryImpl implements ComandaRepository {
     @Transactional(readOnly = true)
     public List<Long> findOpenIdsBySessionId(Long sessionId) {
         return comandaJpaRepository.findOpenIdsBySessionId(sessionId, ComandaStatus.ABERTA.name());
+    }
+
+    @Override
+    public int moveOpenItems(Long fromComandaId, Long toComandaId) {
+        return comandaJpaRepository.moveOpenItems(fromComandaId, toComandaId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<Long> findOpenIdsOlderThan(Instant cutoff, int limit) {
+        return comandaJpaRepository.findOpenIdsOlderThan(ComandaStatus.ABERTA.name(), cutoff,
+                PageRequest.of(0, limit));
     }
 
     @Override
@@ -133,6 +146,9 @@ public class ComandaRepositoryImpl implements ComandaRepository {
             itemEntity.setLinkedItemId(item.linkedItemId());
             itemEntity.setNotes(item.notes());
             itemEntity.setSurchargeAmount(item.surchargeAmount());
+            itemEntity.setClosedInOrderId(item.closedInOrderId());
+            itemEntity.setPackageUses(item.packageUses());
+            itemEntity.setPackageSessionsPerUnit(item.packageSessionsPerUnit());
         }
         return toDomain(comandaJpaRepository.save(entity));
     }
@@ -150,6 +166,7 @@ public class ComandaRepositoryImpl implements ComandaRepository {
                 // Dado legado (linha anterior a PDV-F010) lê como NORMAL — o DEFAULT da migration
                 // cobre as linhas já gravadas, e este null-check cobre carga direta.
                 e.getMode() == null ? ConsumptionMode.NORMAL : ConsumptionMode.valueOf(e.getMode()),
-                e.isCourtesy(), e.getLinkedItemId(), e.getNotes(), e.getSurchargeAmount());
+                e.isCourtesy(), e.getLinkedItemId(), e.getNotes(), e.getSurchargeAmount(),
+                e.getClosedInOrderId(), e.getPackageUses(), e.getPackageSessionsPerUnit());
     }
 }

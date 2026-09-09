@@ -14,13 +14,19 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.cernecommerce.adapter.in.converter.ComandaDTOConverter;
 import com.cernecommerce.adapter.in.converter.OrderDTOConverter;
+import com.cernecommerce.core.domain.exception.estoque.ReservedStockException;
 import com.cernecommerce.core.domain.exception.pdv.ComandaItemNotFoundException;
+import com.cernecommerce.core.domain.exception.pdv.ItemNotOpenInComandaException;
+import com.cernecommerce.core.domain.exception.pdv.LinkedItemMustCloseTogetherException;
+import com.cernecommerce.core.domain.exception.pdv.ComandaPartiallyClosedException;
+import com.cernecommerce.core.domain.exception.pdv.ComandaMergeNotAllowedException;
 import com.cernecommerce.core.domain.exception.pdv.ComandaNotFoundException;
 import com.cernecommerce.core.domain.exception.pdv.DiscountExceedsBillException;
 import com.cernecommerce.core.domain.exception.pdv.LinkedItemIsChargedException;
@@ -122,6 +128,27 @@ class PdvComandaControllerTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.items[0].sku").value("ESS-MENTA"))
                 .andExpect(jsonPath("$.runningTotal").value(25.00));
+    }
+
+    /**
+     * EST-C016 — o caminho da mesa. Com pool único (um só saldo servindo salão e marketplace),
+     * uma reserva de pedido online derruba o disponível e o {@code adjustStock(SAIDA)} de
+     * {@code addItem} bate nela. Antes do handler o atendente recebia <b>500</b> ao lançar a
+     * essência, sem saber que bastava cancelar a reserva pelo painel para vender.
+     */
+    @Test
+    void addItem_reservedStock_returns_400() throws Exception {
+        when(comandaUseCase.addItem(eq(10L), eq("ESS-MENTA"), any(), any(), eq(false), any(), any(), any(),
+                anyString()))
+                .thenThrow(new ReservedStockException("ESS-MENTA", 1L, new BigDecimal("10.000"),
+                        new BigDecimal("8.000"), new BigDecimal("5.000")));
+
+        mockMvc.perform(post("/pdv/comandas/10/items")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sku\":\"ESS-MENTA\",\"quantity\":5}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("RESERVED_STOCK"));
     }
 
     @Test
@@ -268,7 +295,7 @@ class PdvComandaControllerTest {
      */
     @Test
     void closeComanda_discountGreaterThanTheBill_returns_409_withItsOwnErrorCode() throws Exception {
-        when(comandaUseCase.closeComanda(eq(10L), any(), any(), anyBoolean(), anyString()))
+        when(comandaUseCase.closeComanda(eq(10L), any(), any(), anyBoolean(), any(), anyString()))
                 .thenThrow(new DiscountExceedsBillException(10L, new BigDecimal("150.00"),
                         new BigDecimal("100.00")));
 
@@ -291,13 +318,13 @@ class PdvComandaControllerTest {
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.errorCode").value("COMANDA_DISCOUNT_NOT_ALLOWED"));
 
-        verify(comandaUseCase, never()).closeComanda(any(), any(), any(), anyBoolean(), anyString());
+        verify(comandaUseCase, never()).closeComanda(any(), any(), any(), anyBoolean(), any(), anyString());
     }
 
     /** Fechamento comum não pode exigir a permissão — seria 403 em toda mesa do salão. */
     @Test
     void closeComanda_withoutDiscount_doesNotRequireTheAuthority() throws Exception {
-        when(comandaUseCase.closeComanda(eq(10L), any(), any(), anyBoolean(), anyString()))
+        when(comandaUseCase.closeComanda(eq(10L), any(), any(), anyBoolean(), any(), anyString()))
                 .thenReturn(concludedMesaOrder());
 
         mockMvc.perform(post("/pdv/comandas/10/close")
@@ -310,7 +337,7 @@ class PdvComandaControllerTest {
     /** Desconto zero é um no-op: cobrar permissão por ele só produziria 403 inexplicável. */
     @Test
     void closeComanda_zeroDiscount_doesNotRequireTheAuthority() throws Exception {
-        when(comandaUseCase.closeComanda(eq(10L), any(), any(), anyBoolean(), anyString()))
+        when(comandaUseCase.closeComanda(eq(10L), any(), any(), anyBoolean(), any(), anyString()))
                 .thenReturn(concludedMesaOrder());
 
         mockMvc.perform(post("/pdv/comandas/10/close")
@@ -323,7 +350,7 @@ class PdvComandaControllerTest {
 
     @Test
     void closeComanda_discountWithAuthority_passesItThrough() throws Exception {
-        when(comandaUseCase.closeComanda(eq(10L), any(), any(), anyBoolean(), anyString()))
+        when(comandaUseCase.closeComanda(eq(10L), any(), any(), anyBoolean(), any(), anyString()))
                 .thenReturn(concludedMesaOrder());
 
         mockMvc.perform(post("/pdv/comandas/10/close")
@@ -334,13 +361,13 @@ class PdvComandaControllerTest {
                 .andExpect(status().isOk());
 
         verify(comandaUseCase).closeComanda(eq(10L), any(), eq(new BigDecimal("10.00")), eq(true),
-                anyString());
+                any(), anyString());
     }
 
     /** PDV-F015 — omitir applyServiceFee significa SIM: a taxa é o padrão do salão. */
     @Test
     void closeComanda_omittingApplyServiceFee_appliesTheFee() throws Exception {
-        when(comandaUseCase.closeComanda(eq(10L), any(), any(), anyBoolean(), anyString()))
+        when(comandaUseCase.closeComanda(eq(10L), any(), any(), anyBoolean(), any(), anyString()))
                 .thenReturn(concludedMesaOrder());
 
         mockMvc.perform(post("/pdv/comandas/10/close")
@@ -349,12 +376,12 @@ class PdvComandaControllerTest {
                         .content("{\"payments\":[{\"method\":\"DINHEIRO\",\"amount\":25.00}]}"))
                 .andExpect(status().isOk());
 
-        verify(comandaUseCase).closeComanda(eq(10L), any(), isNull(), eq(true), anyString());
+        verify(comandaUseCase).closeComanda(eq(10L), any(), isNull(), eq(true), any(), anyString());
     }
 
     @Test
     void closeComanda_applyServiceFeeFalse_isTheCustomerRefusing() throws Exception {
-        when(comandaUseCase.closeComanda(eq(10L), any(), any(), anyBoolean(), anyString()))
+        when(comandaUseCase.closeComanda(eq(10L), any(), any(), anyBoolean(), any(), anyString()))
                 .thenReturn(concludedMesaOrder());
 
         mockMvc.perform(post("/pdv/comandas/10/close")
@@ -364,7 +391,7 @@ class PdvComandaControllerTest {
                                 + "\"applyServiceFee\":false}"))
                 .andExpect(status().isOk());
 
-        verify(comandaUseCase).closeComanda(eq(10L), any(), isNull(), eq(false), anyString());
+        verify(comandaUseCase).closeComanda(eq(10L), any(), isNull(), eq(false), any(), anyString());
     }
 
     @Test
@@ -379,7 +406,7 @@ class PdvComandaControllerTest {
     /** A resposta expõe os dois números: o que a loja vendeu e o que o cliente pagou. */
     @Test
     void closeComanda_responseCarriesServiceFeeAndTotalPayable() throws Exception {
-        when(comandaUseCase.closeComanda(eq(10L), any(), any(), anyBoolean(), anyString()))
+        when(comandaUseCase.closeComanda(eq(10L), any(), any(), anyBoolean(), any(), anyString()))
                 .thenReturn(concludedMesaOrder().withServiceFeeOf(new BigDecimal("10")));
 
         mockMvc.perform(post("/pdv/comandas/10/close")
@@ -403,7 +430,7 @@ class PdvComandaControllerTest {
     void closeComanda_whenAnAuditFieldIsNull_stillReturns_200() throws Exception {
         Order semId = concludedMesaOrder();
         assertThat(semId.id()).as("o cenário só vale com orderId nulo").isNull();
-        when(comandaUseCase.closeComanda(eq(10L), any(), any(), anyBoolean(), anyString()))
+        when(comandaUseCase.closeComanda(eq(10L), any(), any(), anyBoolean(), any(), anyString()))
                 .thenReturn(semId);
 
         mockMvc.perform(post("/pdv/comandas/10/close")
@@ -427,7 +454,7 @@ class PdvComandaControllerTest {
                         OrderItem.of(1L, "ESS-MENTA", BigDecimal.ONE, new BigDecimal("25.00"),
                                 new BigDecimal("10.00"), BigDecimal.ZERO, null, "Essência Menta")))
                 .concluded("000001000", null, Instant.now());
-        when(comandaUseCase.closeComanda(eq(10L), any(), any(), anyBoolean(), anyString())).thenReturn(order);
+        when(comandaUseCase.closeComanda(eq(10L), any(), any(), anyBoolean(), any(), anyString())).thenReturn(order);
 
         mockMvc.perform(post("/pdv/comandas/10/close")
                         .principal(AUTH)
@@ -624,5 +651,98 @@ class PdvComandaControllerTest {
                 .andExpect(jsonPath("$.items[0].notes").value("Pinça P-02"))
                 .andExpect(jsonPath("$.items[0].surchargeAmount").value(15.00))
                 .andExpect(jsonPath("$.items[0].unitPrice").value(75.00));
+    }
+
+    // ── Transferir e juntar mesas (PDV-F016) ─────────────────────────────────────────────────
+
+    @Test
+    void renameComanda_returns_200() throws Exception {
+        when(comandaUseCase.renameComanda(eq(10L), eq("Mesa 7"), anyString()))
+                .thenReturn(abertaComanda());
+
+        mockMvc.perform(patch("/pdv/comandas/10")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tableOrCustomerLabel\":\"Mesa 7\"}"))
+                .andExpect(status().isOk());
+
+        verify(comandaUseCase).renameComanda(eq(10L), eq("Mesa 7"), anyString());
+    }
+
+    @Test
+    void mergeComanda_returns_200_withTheTargetComanda() throws Exception {
+        when(comandaUseCase.mergeComanda(eq(10L), eq(20L), anyString())).thenReturn(abertaComanda());
+
+        mockMvc.perform(post("/pdv/comandas/10/merge-into/20").principal(AUTH))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(10));
+
+        verify(comandaUseCase).mergeComanda(eq(10L), eq(20L), anyString());
+    }
+
+    @Test
+    void mergeComanda_whenSourceWasPartiallyCharged_returns_409() throws Exception {
+        when(comandaUseCase.mergeComanda(eq(10L), eq(20L), anyString()))
+                .thenThrow(new ComandaPartiallyClosedException(10L));
+
+        mockMvc.perform(post("/pdv/comandas/10/merge-into/20").principal(AUTH))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.errorCode").value("COMANDA_PARTIALLY_CLOSED"));
+    }
+
+    @Test
+    void mergeComanda_acrossWarehouses_returns_409() throws Exception {
+        when(comandaUseCase.mergeComanda(eq(10L), eq(20L), anyString()))
+                .thenThrow(new ComandaMergeNotAllowedException("depósitos diferentes"));
+
+        mockMvc.perform(post("/pdv/comandas/10/merge-into/20").principal(AUTH))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.errorCode").value("COMANDA_MERGE_NOT_ALLOWED"));
+    }
+
+    // ── Conta dividida (PDV-F017) ────────────────────────────────────────────────────────────
+
+    @Test
+    void closeComanda_forwardsTheSelectedItemIds() throws Exception {
+        when(comandaUseCase.closeComanda(eq(10L), any(), any(), anyBoolean(), any(), anyString()))
+                .thenReturn(concludedMesaOrder());
+
+        mockMvc.perform(post("/pdv/comandas/10/close")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"payments\":[{\"method\":\"DINHEIRO\",\"amount\":30.00}],"
+                                + "\"itemIds\":[3,5]}"))
+                .andExpect(status().isOk());
+
+        verify(comandaUseCase).closeComanda(eq(10L), any(), isNull(), eq(true),
+                eq(List.of(3L, 5L)), anyString());
+    }
+
+    @Test
+    void closeComanda_withAnItemIdThatIsNotOpen_returns_400() throws Exception {
+        when(comandaUseCase.closeComanda(eq(10L), any(), any(), anyBoolean(), any(), anyString()))
+                .thenThrow(new ItemNotOpenInComandaException(10L, List.of(42L)));
+
+        mockMvc.perform(post("/pdv/comandas/10/close")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"payments\":[{\"method\":\"DINHEIRO\",\"amount\":30.00}],"
+                                + "\"itemIds\":[42]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("ITEM_NOT_OPEN_IN_COMANDA"));
+    }
+
+    @Test
+    void closeComanda_selectionThatSplitsLinkedLines_returns_409() throws Exception {
+        when(comandaUseCase.closeComanda(eq(10L), any(), any(), anyBoolean(), any(), anyString()))
+                .thenThrow(new LinkedItemMustCloseTogetherException(10L, List.of(2L)));
+
+        mockMvc.perform(post("/pdv/comandas/10/close")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"payments\":[{\"method\":\"DINHEIRO\",\"amount\":60.00}],"
+                                + "\"itemIds\":[1]}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.errorCode").value("LINKED_ITEM_MUST_CLOSE_TOGETHER"));
     }
 }

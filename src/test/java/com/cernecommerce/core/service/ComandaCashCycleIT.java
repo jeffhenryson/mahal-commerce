@@ -114,7 +114,7 @@ class ComandaCashCycleIT {
         List<PaymentCommand> split = List.of(
                 new PaymentCommand(PaymentMethod.DEBITO, new BigDecimal("30.00"), null),
                 new PaymentCommand(PaymentMethod.DINHEIRO, new BigDecimal("20.00"), null));
-        Order order = comandaUseCase.closeComanda(comanda.id(), split, null, false, operator);
+        Order order = comandaUseCase.closeComanda(comanda.id(), split, null, false, null, operator);
         flushAndClear();
 
         assertThat(order.status()).isEqualTo(OrderStatus.CONCLUIDO);
@@ -200,12 +200,18 @@ class ComandaCashCycleIT {
 
         assertThat(comDuplo.runningTotal()).isEqualByComparingTo("25.00");
         assertThat(comDuplo.items().get(1).linkedItemId()).isEqualTo(sessaoId);
-        // Duas unidades saíram, mesmo com uma delas em cortesia.
+        // EST-F027 — o produto tem sessionsPerUnit = 10, então as duas linhas saem da MESMA lata:
+        // a primeira abre uma (50 → 49) e o sabor extra consome o segundo uso dela, não uma
+        // segunda unidade. A cortesia continua saindo do estoque, só que medida em usos — que é o
+        // ponto do teste. Antes de EST-F027 isto era 48,000, e a essência sumia 10x mais rápido
+        // que a realidade.
         assertThat(estoqueUseCase.getStockBalance(sku, warehouseCode).quantity())
-                .isEqualByComparingTo("48.000");
+                .isEqualByComparingTo("49.000");
+        assertThat(estoqueUseCase.findOpenPackage(sku, warehouseCode).uses()).isEqualTo(2);
 
         Order order = comandaUseCase.closeComanda(comanda.id(),
                 List.of(new PaymentCommand(PaymentMethod.DINHEIRO, new BigDecimal("25.00"), null)), null, false,
+                null,
                 operator);
         flushAndClear();
 
@@ -303,6 +309,7 @@ class ComandaCashCycleIT {
 
         Order order = comandaUseCase.closeComanda(comanda.id(),
                 List.of(new PaymentCommand(PaymentMethod.DINHEIRO, new BigDecimal("75.00"), null)), null, false,
+                null,
                 operator);
         flushAndClear();
 
@@ -346,7 +353,7 @@ class ComandaCashCycleIT {
         // 100,00 − 10,00 = 90,00 de líquido; 10% disso = 9,00; total a pagar 99,00.
         Order order = comandaUseCase.closeComanda(comanda.id(),
                 List.of(new PaymentCommand(PaymentMethod.DINHEIRO, new BigDecimal("100.00"), null)),
-                new BigDecimal("10.00"), true, operator);
+                new BigDecimal("10.00"), true, null, operator);
         flushAndClear();
 
         assertThat(order.status()).isEqualTo(OrderStatus.CONCLUIDO);
@@ -394,7 +401,7 @@ class ComandaCashCycleIT {
         // 100,00 de conta + 10,00 de taxa = 110,00, pagos em dinheiro.
         comandaUseCase.closeComanda(comanda.id(),
                 List.of(new PaymentCommand(PaymentMethod.DINHEIRO, new BigDecimal("110.00"), null)),
-                null, true, operator);
+                null, true, null, operator);
         flushAndClear();
 
         CashRegisterSession fechada = pdvUseCase.closeSession(session.id(), new BigDecimal("110.00"), operator);
@@ -440,7 +447,7 @@ class ComandaCashCycleIT {
         // E ainda fecha normalmente, cobrando só o que sobrou.
         Order order = comandaUseCase.closeComanda(comanda.id(),
                 List.of(new PaymentCommand(PaymentMethod.DINHEIRO, new BigDecimal("25.00"), null)),
-                null, false, operator);
+                null, false, null, operator);
         flushAndClear();
         assertThat(order.netAmount()).isEqualByComparingTo("25.00");
         assertThat(order.items()).hasSize(1);
@@ -475,16 +482,22 @@ class ComandaCashCycleIT {
         comandaUseCase.addItem(comanda.id(), sku, BigDecimal.ONE, ConsumptionMode.TROCA, true,
                 sessaoId, operator);
         flushAndClear();
+        // EST-F027 — mesma leitura do teste do duplo em cortesia: uma lata aberta (50 → 49) e dois
+        // usos gastos nela, não duas unidades.
         assertThat(estoqueUseCase.getStockBalance(sku, warehouseCode).quantity())
-                .isEqualByComparingTo("48.000");
+                .isEqualByComparingTo("49.000");
+        assertThat(estoqueUseCase.findOpenPackage(sku, warehouseCode).uses()).isEqualTo(2);
 
         Comanda depois = comandaUseCase.removeItem(comanda.id(), sessaoId, operator);
         flushAndClear();
 
-        // As duas linhas saíram, e o estoque das duas voltou.
+        // As duas linhas saíram, e o que as duas consumiram voltou. O que volta é a CONTAGEM DE
+        // USOS da lata, não a unidade: a lata está aberta na bancada, e devolvê-la ao saldo
+        // inventaria estoque que não existe. Ver ComandaService.undoStock / releaseSession.
         assertThat(depois.items()).isEmpty();
         assertThat(estoqueUseCase.getStockBalance(sku, warehouseCode).quantity())
-                .isEqualByComparingTo("50.000");
+                .isEqualByComparingTo("49.000");
+        assertThat(estoqueUseCase.findOpenPackage(sku, warehouseCode).uses()).isZero();
     }
 
     private String uniqueCpf() {

@@ -40,4 +40,23 @@ public class ComandaItemResponseDTO {
             + "(PDV-F011). Campo próprio porque unitPrice já é a soma: sem ele não há como "
             + "separar o que era preço-base do que foi cobrado a mais. Nulo na maioria das linhas.")
     private BigDecimal surchargeAmount;
+
+    /**
+     * PDV-F017 — o pedido que já cobrou esta linha numa conta dividida. Nulo é a linha em aberto, e
+     * é a soma delas que o {@code runningTotal} da comanda devolve.
+     */
+    @Schema(description = "Pedido que já cobrou esta linha (conta dividida, PDV-F017). Nulo = ainda "
+            + "em aberto; o runningTotal da comanda soma apenas as linhas nulas.", example = "1042")
+    private Long closedInOrderId;
+
+    @Schema(description = "Qual uso da lata aberta esta linha foi, no instante do lançamento "
+            + "(EST-F027) — com packageSessionsPerUnit, é o \"3 de 5\" da tela, sem uma segunda "
+            + "chamada por linha. Nulo quando a linha baixou uma unidade inteira: produto que não "
+            + "é vendido por sessão, ou sem sessionsPerUnit no cadastro.", example = "3")
+    private Integer packageUses;
+
+    @Schema(description = "Quantas sessões a lata desta linha rendia (EST-F027). Cópia do cadastro "
+            + "no momento da abertura: editar sessionsPerUnit no catálogo não reescreve o "
+            + "histórico.", example = "5")
+    private Integer packageSessionsPerUnit;
 }

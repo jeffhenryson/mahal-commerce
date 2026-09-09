@@ -4,7 +4,10 @@ import com.cernecommerce.core.domain.model.pedido.ConsumptionMode;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Comanda de mesa (PDV-F009): pedidos incrementais acumulados numa sessão de caixa aberta por
@@ -225,9 +228,75 @@ public record Comanda(
                 items, null, openedBy, openedAt, closedAt);
     }
 
-    /** Soma dos subtotais dos itens já lançados. */
+    /**
+     * Soma dos subtotais das linhas <b>ainda não cobradas</b> — o que falta pagar.
+     *
+     * <p>Antes de PDV-F017 era a soma de tudo, e as duas leituras coincidiam porque a conta só podia
+     * ser fechada inteira. Com conta dividida elas divergem, e é esta que a tela precisa: depois de
+     * um fechamento parcial o operador quer ver o saldo restante da mesa, não o total consumido.</p>
+     */
     public BigDecimal runningTotal() {
-        return items.stream().map(ComandaItem::subtotal).reduce(BigDecimal.ZERO, BigDecimal::add);
+        return openItems().stream().map(ComandaItem::subtotal).reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    /** As linhas que nenhum pedido cobrou ainda (PDV-F017). */
+    public List<ComandaItem> openItems() {
+        return items.stream().filter(ComandaItem::isOpen).toList();
+    }
+
+    /** Nenhuma linha em aberto: a mesa foi paga por inteiro, ainda que em várias contas. */
+    public boolean isFullyCharged() {
+        return !items.isEmpty() && openItems().isEmpty();
+    }
+
+    /**
+     * Marca as linhas informadas como cobradas pelo pedido dado (PDV-F017). Cópia — a comanda
+     * permanece imutável.
+     *
+     * <p>Não muda o status: quem decide se a mesa acabou é o service, olhando
+     * {@link #isFullyCharged()} depois desta chamada. Manter as duas coisas separadas é o que deixa
+     * o fechamento parcial caber no {@code ck_comanda_status_consistency} da V104 — enquanto sobra
+     * linha aberta a comanda segue {@code ABERTA} com {@code order_id} nulo, exatamente como o CHECK
+     * exige.</p>
+     *
+     * @throws IllegalStateException se a comanda não estiver {@code ABERTA}
+     * @throws IllegalArgumentException se algum id não pertencer à comanda ou já estiver cobrado
+     */
+    public Comanda withItemsClosedIn(Long chargedInOrderId, List<Long> itemIds) {
+        requireOpen();
+        if (itemIds == null || itemIds.isEmpty()) {
+            throw new IllegalArgumentException("itemIds é obrigatório para fechar linhas da comanda");
+        }
+        Set<Long> alvo = new HashSet<>(itemIds);
+        Set<Long> abertos = openItems().stream().map(ComandaItem::id).collect(Collectors.toSet());
+        if (!abertos.containsAll(alvo)) {
+            throw new IllegalArgumentException(
+                    "itemIds contém linha que não está aberta nesta comanda: " + itemIds);
+        }
+        List<ComandaItem> newItems = items.stream()
+                .map(i -> alvo.contains(i.id()) ? i.closedIn(chargedInOrderId) : i)
+                .toList();
+        // O parâmetro se chama chargedInOrderId, e não orderId, de propósito: o pedido que cobrou as
+        // LINHAS não é o `orderId` da COMANDA, que só existe quando a mesa é encerrada. Nomeá-lo
+        // igual sombreava o componente do record e gravava o pedido no cabeçalho de uma comanda que
+        // segue ABERTA — o compact constructor recusa, e com razão.
+        return new Comanda(id, sessionId, warehouseCode, tableOrCustomerLabel, customerId, status, newItems,
+                orderId, openedBy, openedAt, closedAt);
+    }
+
+    /**
+     * Troca o rótulo da mesa (PDV-F016) — o cliente mudou de lugar no salão. Nada mais muda: os
+     * itens, o depósito e a sessão de origem seguem os mesmos, porque nada de físico aconteceu.
+     *
+     * @throws IllegalStateException se a comanda não estiver {@code ABERTA}
+     */
+    public Comanda withLabel(String newLabel) {
+        requireOpen();
+        if (newLabel == null || newLabel.isBlank()) {
+            throw new IllegalArgumentException("tableOrCustomerLabel é obrigatório");
+        }
+        return new Comanda(id, sessionId, warehouseCode, newLabel, customerId, status, items, orderId,
+                openedBy, openedAt, closedAt);
     }
 
     public boolean isOpen() {

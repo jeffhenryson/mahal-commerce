@@ -4,6 +4,7 @@ import com.cernecommerce.adapter.in.converter.ComandaDTOConverter;
 import com.cernecommerce.adapter.in.converter.OrderDTOConverter;
 import com.cernecommerce.adapter.in.dtos.request.AddComandaItemRequest;
 import com.cernecommerce.adapter.in.dtos.request.CloseComandaRequest;
+import com.cernecommerce.adapter.in.dtos.request.RenameComandaRequest;
 import com.cernecommerce.adapter.in.dtos.request.OpenComandaRequest;
 import com.cernecommerce.adapter.in.dtos.response.ComandaResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.OrderResponseDTO;
@@ -338,13 +339,18 @@ public class PdvComandaController {
                     + "pdv.sale.max-discount-percent). PDV-F015: a taxa de serviço vem APLICADA POR "
                     + "PADRÃO sobre o líquido — applyServiceFee=false é o cliente recusando — e é "
                     + "gravada fora do netAmount, que continua sendo só a receita da mercadoria. O "
-                    + "pagamento é validado contra netAmount + taxa.")
+                    + "pagamento é validado contra netAmount + taxa. PDV-F017: mandando itemIds, "
+                    + "o fechamento cobra SÓ aquelas linhas e a comanda CONTINUA ABERTA com o "
+                    + "restante — é a conta dividida, \"cada um paga o que consumiu\". Desconto, "
+                    + "taxa e troco incidem só sobre o escopo, e o último fechamento encerra a "
+                    + "mesa. Omitir itemIds cobra tudo que está em aberto, como sempre.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Fechada", content = @Content(schema = @Schema(implementation = OrderResponseDTO.class))),
             @ApiResponse(responseCode = "400", description = "Pagamento insuficiente", content = @Content),
             @ApiResponse(responseCode = "403", description = "Desconto sem PDV_COMANDA_DISCOUNT (COMANDA_DISCOUNT_NOT_ALLOWED)", content = @Content),
             @ApiResponse(responseCode = "404", description = "Comanda não encontrada", content = @Content),
-            @ApiResponse(responseCode = "409", description = "Comanda não está aberta, sem itens (COMANDA_EMPTY), só com cortesias (COMANDA_ONLY_COURTESY), quem fecha não tem caixa aberto, desconto acima do teto (DISCOUNT_LIMIT_EXCEEDED), ou pagamento não-dinheiro acima do total", content = @Content)
+            @ApiResponse(responseCode = "400", description = "Linha inexistente ou já cobrada em itemIds (ITEM_NOT_OPEN_IN_COMANDA)", content = @Content),
+            @ApiResponse(responseCode = "409", description = "Comanda não está aberta, sem itens (COMANDA_EMPTY), só com cortesias (COMANDA_ONLY_COURTESY), quem fecha não tem caixa aberto, desconto acima do teto (DISCOUNT_LIMIT_EXCEEDED), pagamento não-dinheiro acima do total, ou seleção que separa linhas ligadas (LINKED_ITEM_MUST_CLOSE_TOGETHER)", content = @Content)
     })
     @PostMapping("/{id}/close")
     @PreAuthorize("hasAuthority('PDV_COMANDA_MANAGE')")
@@ -356,8 +362,10 @@ public class PdvComandaController {
                         com.cernecommerce.core.domain.model.pagamento.PaymentMethod.valueOf(p.getMethod()),
                         p.getAmount(), p.getInstallments()))
                 .toList();
+        // A sobrecarga completa, sempre: as de conveniência de ComandaUseCase são `default` da
+        // interface e perdem a transação quando chamadas pelo proxy (PLAT-C047).
         Order order = comandaUseCase.closeComanda(comandaId, payments, request.getDiscountAmount(),
-                request.isServiceFeeApplied(), authentication.getName());
+                request.isServiceFeeApplied(), request.getItemIds(), authentication.getName());
         // PDV-C014 — era o pior dos três: STOCK_MOVEMENT_REGISTERED num caminho que NÃO move
         // estoque nenhum (o débito aconteceu item a item, no lançamento). O evento entrava na
         // trilha de movimentação descrevendo algo que não aconteceu.
@@ -386,6 +394,58 @@ public class PdvComandaController {
     @PreAuthorize("hasAuthority('PDV_READ')")
     public ResponseEntity<ServiceFeeResponseDTO> getServiceFee() {
         return ResponseEntity.ok(new ServiceFeeResponseDTO(comandaUseCase.getServiceFeePercent()));
+    }
+
+    @Operation(summary = "Troca o rótulo da mesa (PDV-F016)",
+            description = "O cliente mudou de lugar no salão. Nada de físico acontece: itens, "
+                    + "depósito e sessão de origem seguem os mesmos, e nenhum estoque se move. "
+                    + "Antes disto o rótulo era imutável e trocar de mesa só era possível "
+                    + "cancelando a comanda — o que devolvia tudo ao estoque — e relançando item a "
+                    + "item.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Renomeada", content = @Content(schema = @Schema(implementation = ComandaResponseDTO.class))),
+            @ApiResponse(responseCode = "404", description = "Comanda não encontrada", content = @Content),
+            @ApiResponse(responseCode = "409", description = "Comanda não está aberta, ou o caixa de origem está fechado", content = @Content)
+    })
+    @PatchMapping("/{id}")
+    @PreAuthorize("hasAuthority('PDV_COMANDA_MANAGE')")
+    public ResponseEntity<ComandaResponseDTO> renameComanda(@PathVariable("id") Long comandaId,
+            @Valid @RequestBody RenameComandaRequest request, Authentication authentication) {
+        Comanda comanda = comandaUseCase.renameComanda(comandaId, request.getTableOrCustomerLabel(),
+                authentication.getName());
+        publisher.publishEvent(AuditEvent.of(EventType.COMANDA_RENAMED, authentication.getName(),
+                auditPayload(comandaId, "tableOrCustomerLabel", comanda.tableOrCustomerLabel())));
+        ComandaResponseDTO dto = comandaConverter.toResponse(comanda);
+        enrichCustomerNames(List.of(dto));
+        return ResponseEntity.ok(dto);
+    }
+
+    @Operation(summary = "Junta esta mesa em outra, que passa a ter a conta inteira (PDV-F016)",
+            description = "As linhas em aberto desta comanda passam para a de destino e esta é "
+                    + "encerrada. **Nenhum estoque se move**: a mercadoria não voltou para a "
+                    + "prateleira nem saiu de novo, ela mudou de conta — por isso a origem termina "
+                    + "CANCELADA sem a devolução que POST /cancel faria. Os ids das linhas são "
+                    + "preservados, então um OPEN_ROSH e as TROCA dele chegam juntos e ainda "
+                    + "ligados. As duas mesas precisam estar ABERTAS e no mesmo depósito, e a "
+                    + "origem não pode ter tido parte da conta cobrada (PDV-F017).")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Juntadas — devolve a comanda de destino", content = @Content(schema = @Schema(implementation = ComandaResponseDTO.class))),
+            @ApiResponse(responseCode = "404", description = "Comanda de origem ou destino não encontrada", content = @Content),
+            @ApiResponse(responseCode = "409", description = "Alguma das duas não está aberta, depósitos diferentes ou mesma comanda (COMANDA_MERGE_NOT_ALLOWED), ou a origem já teve parte cobrada (COMANDA_PARTIALLY_CLOSED)", content = @Content)
+    })
+    @PostMapping("/{id}/merge-into/{targetId}")
+    @PreAuthorize("hasAuthority('PDV_COMANDA_MANAGE')")
+    public ResponseEntity<ComandaResponseDTO> mergeComanda(@PathVariable("id") Long comandaId,
+            @PathVariable("targetId") Long targetComandaId, Authentication authentication) {
+        Comanda destino = comandaUseCase.mergeComanda(comandaId, targetComandaId, authentication.getName());
+        publisher.publishEvent(AuditEvent.of(EventType.COMANDA_MERGED, authentication.getName(),
+                auditPayload(comandaId,
+                        "targetComandaId", targetComandaId,
+                        "targetLabel", destino.tableOrCustomerLabel(),
+                        "itemCount", destino.items().size())));
+        ComandaResponseDTO dto = comandaConverter.toResponse(destino);
+        enrichCustomerNames(List.of(dto));
+        return ResponseEntity.ok(dto);
     }
 
     @Operation(summary = "Abandona a comanda sem cobrança, devolvendo ao estoque cada item já lançado")

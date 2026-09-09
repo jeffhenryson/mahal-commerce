@@ -32,7 +32,10 @@ public record ComandaItem(
         boolean courtesy,
         Long linkedItemId,
         String notes,
-        BigDecimal surchargeAmount) {
+        BigDecimal surchargeAmount,
+        Long closedInOrderId,
+        Integer packageUses,
+        Integer packageSessionsPerUnit) {
 
     /** Limite de {@link #notes}, casado com {@code comanda_item.notes VARCHAR(200)}. */
     public static final int NOTES_MAX_LENGTH = 200;
@@ -85,6 +88,16 @@ public record ComandaItem(
             throw new IllegalArgumentException(
                     "notes excede " + NOTES_MAX_LENGTH + " caracteres: " + notes.length());
         }
+        // EST-F027 — os dois contadores da lata andam juntos ou não existem. Um sem o outro seria
+        // "3 de ?" na tela, e é o par que diz se esta linha consumiu lata ou baixou unidade —
+        // decisão que o cancelamento precisa tomar meses depois, sem poder reler o catálogo.
+        if ((packageUses == null) != (packageSessionsPerUnit == null)) {
+            throw new IllegalArgumentException("packageUses e packageSessionsPerUnit vêm juntos");
+        }
+        if (packageUses != null && (packageUses <= 0 || packageSessionsPerUnit <= 0)) {
+            throw new IllegalArgumentException(
+                    "contadores da lata têm que ser positivos: " + packageUses + "/" + packageSessionsPerUnit);
+        }
     }
 
     /**
@@ -98,7 +111,7 @@ public record ComandaItem(
             throw new ProductNotPricedException(sku);
         }
         return new ComandaItem(null, sku, quantity, pricing.effectivePrice(), pricing.costPrice(),
-                productName, Instant.now(), ConsumptionMode.NORMAL, false, null, null, null);
+                productName, Instant.now(), ConsumptionMode.NORMAL, false, null, null, null, null, null, null);
     }
 
     /**
@@ -130,7 +143,7 @@ public record ComandaItem(
             throw new ProductNotPricedException(sku);
         }
         return new ComandaItem(null, sku, quantity, unitPrice, pricing.costPrice(), productName,
-                Instant.now(), mode, courtesy, linkedItemId, notes, surchargeAmount);
+                Instant.now(), mode, courtesy, linkedItemId, notes, surchargeAmount, null, null, null);
     }
 
     /** Reconstitui um item a partir de persistência. */
@@ -155,8 +168,79 @@ public record ComandaItem(
     public static ComandaItem of(Long id, String sku, BigDecimal quantity, BigDecimal unitPrice,
             BigDecimal costPrice, String productName, Instant addedAt, ConsumptionMode mode, boolean courtesy,
             Long linkedItemId, String notes, BigDecimal surchargeAmount) {
+        return of(id, sku, quantity, unitPrice, costPrice, productName, addedAt, mode, courtesy,
+                linkedItemId, notes, surchargeAmount, null);
+    }
+
+    /**
+     * Reconstitui um item a partir de persistência, com o pedido que já o cobrou (PDV-F017).
+     * {@code closedInOrderId} nulo é a linha ainda em aberto — o estado de toda linha antes da V121.
+     */
+    public static ComandaItem of(Long id, String sku, BigDecimal quantity, BigDecimal unitPrice,
+            BigDecimal costPrice, String productName, Instant addedAt, ConsumptionMode mode, boolean courtesy,
+            Long linkedItemId, String notes, BigDecimal surchargeAmount, Long closedInOrderId) {
+        return of(id, sku, quantity, unitPrice, costPrice, productName, addedAt, mode, courtesy,
+                linkedItemId, notes, surchargeAmount, closedInOrderId, null, null);
+    }
+
+    /**
+     * Reconstitui um item a partir de persistência, com o contador da lata (EST-F027). Linha
+     * anterior à V124 lê os dois como {@code null} — que é a verdade: ela baixou uma unidade
+     * inteira, e é assim que ela tem que ser desfeita se a mesa for cancelada.
+     */
+    public static ComandaItem of(Long id, String sku, BigDecimal quantity, BigDecimal unitPrice,
+            BigDecimal costPrice, String productName, Instant addedAt, ConsumptionMode mode, boolean courtesy,
+            Long linkedItemId, String notes, BigDecimal surchargeAmount, Long closedInOrderId,
+            Integer packageUses, Integer packageSessionsPerUnit) {
         return new ComandaItem(id, sku, quantity, unitPrice, costPrice, productName, addedAt, mode, courtesy,
-                linkedItemId, notes, surchargeAmount);
+                linkedItemId, notes, surchargeAmount, closedInOrderId, packageUses, packageSessionsPerUnit);
+    }
+
+    /**
+     * A linha ainda não foi cobrada por nenhum pedido (PDV-F017).
+     *
+     * <p>Com conta dividida uma comanda tem linhas em dois estados ao mesmo tempo, e é este
+     * predicado — não o status da comanda — que diz o que ainda falta pagar.</p>
+     */
+    public boolean isOpen() {
+        return closedInOrderId == null;
+    }
+
+    /** Marca a linha como cobrada pelo pedido informado. Cópia — o item permanece imutável. */
+    public ComandaItem closedIn(Long orderId) {
+        if (orderId == null) {
+            throw new IllegalArgumentException("orderId é obrigatório para fechar a linha da comanda");
+        }
+        if (closedInOrderId != null) {
+            throw new IllegalStateException(
+                    "item " + id + " já foi cobrado pelo pedido " + closedInOrderId);
+        }
+        return new ComandaItem(id, sku, quantity, unitPrice, costPrice, productName, addedAt, mode, courtesy,
+                linkedItemId, notes, surchargeAmount, orderId, packageUses, packageSessionsPerUnit);
+    }
+
+    /**
+     * Carimba na linha qual uso da lata ela foi (EST-F027) — "a 3ª de 5".
+     *
+     * <p>É snapshot, não referência: guarda o contador <b>no instante do lançamento</b>, e é o que
+     * permite a tela mostrar "3 de 5" por linha sem uma segunda chamada, e o histórico continuar
+     * verdadeiro depois que a lata for reposta. Também é o que diz, meses depois, que esta linha
+     * consumiu lata e não unidade — informação que o cancelamento precisa e que reler o catálogo
+     * não daria, porque o cadastro pode ter mudado desde então.</p>
+     */
+    public ComandaItem withPackageCounter(int uses, int sessionsPerUnit) {
+        return new ComandaItem(id, sku, quantity, unitPrice, costPrice, productName, addedAt, mode, courtesy,
+                linkedItemId, notes, surchargeAmount, closedInOrderId, uses, sessionsPerUnit);
+    }
+
+    /**
+     * A linha consumiu uso de lata aberta, e não uma unidade do saldo (EST-F027).
+     *
+     * <p>Quem cancela ou remove a linha decide por aqui: lata se desfaz decrementando o contador,
+     * unidade se desfaz com {@code ENTRADA}. Confundir os dois inventa saldo que não existe.</p>
+     */
+    public boolean consumedPackage() {
+        return packageUses != null;
     }
 
     /** {@code quantity * unitPrice}. */

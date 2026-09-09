@@ -45,6 +45,9 @@ public class ComandaDTOConverter {
         dto.setLinkedItemId(item.linkedItemId());
         dto.setNotes(item.notes());
         dto.setSurchargeAmount(item.surchargeAmount());
+        dto.setClosedInOrderId(item.closedInOrderId());
+        dto.setPackageUses(item.packageUses());
+        dto.setPackageSessionsPerUnit(item.packageSessionsPerUnit());
         return dto;
     }
 }

@@ -74,4 +74,28 @@ public class ComandaItemEntity {
     // discount_amount ser campo próprio em order_item em vez de virar um preço menor.
     @Column(name = "surcharge_amount", precision = 14, scale = 2)
     private BigDecimal surchargeAmount;
+
+    /**
+     * PDV-F017 — o pedido que cobrou esta linha. Nulo é a linha em aberto, e é o que a comanda soma
+     * no {@code runningTotal}. Não é FK gerenciada por associação de propósito: a linha aponta para
+     * um pedido, mas o pedido não é dono dela, e um {@code @ManyToOne} traria o agregado de vendas
+     * para dentro do de mesa.
+     */
+    @Column(name = "closed_in_order_id")
+    private Long closedInOrderId;
+
+    /**
+     * EST-F027 — qual uso da lata esta linha foi ("a 3ª de 5"), congelado no lançamento.
+     *
+     * <p>Snapshot, não referência à lata: o histórico continua verdadeiro depois que ela for
+     * reposta, e a tela mostra o contador por linha sem uma segunda chamada. Nulo é a linha que
+     * baixou uma <b>unidade</b> — toda linha anterior à V124, e toda linha de produto que não é
+     * vendido por sessão —, e é essa diferença que o cancelamento consulta para decidir entre
+     * decrementar o contador e devolver unidade ao estoque.</p>
+     */
+    @Column(name = "package_uses")
+    private Integer packageUses;
+
+    @Column(name = "package_sessions_per_unit")
+    private Integer packageSessionsPerUnit;
 }

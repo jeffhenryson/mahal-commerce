@@ -53,5 +53,33 @@ public interface ComandaRepository {
      */
     List<Long> findOpenIdsBySessionId(Long sessionId);
 
+    /**
+     * Ids das comandas <b>ABERTAS há mais tempo que {@code cutoff}</b>, para a varredura de mesa
+     * esquecida (PDV-F013), das mais antigas para as mais novas e no máximo {@code limit}.
+     *
+     * <p>Projeta só o id, como {@link #findOpenIdsBySessionId}: a varredura recarrega cada comanda
+     * <b>com trava</b> antes de decidir sobre ela, então trazer o agregado aqui seria carregar duas
+     * vezes o que vai ser usado uma.</p>
+     *
+     * <p>O corte é por {@code openedAt} e não por "última atividade": não existe carimbo de último
+     * lançamento na comanda, e acrescentá-lo mudaria a tabela por um ganho que a janela de 12h já
+     * cobre — uma mesa que recebeu item às 23h continua com {@code openedAt} da noite anterior, mas
+     * quem a esqueceu aberta a esqueceu de todo jeito.</p>
+     */
+    List<Long> findOpenIdsOlderThan(java.time.Instant cutoff, int limit);
+
+    /**
+     * Reatribui as linhas <b>ainda em aberto</b> de uma comanda para outra (PDV-F016, juntar mesas),
+     * devolvendo quantas moveram.
+     *
+     * <p><b>Por que isto não é feito pelo {@code save}.</b> Passar os itens de A dentro do agregado
+     * de B faria o {@code save} tratá-los como linhas novas — ids novos — e
+     * {@code comanda_item.linked_item_id} é uma FK <b>auto-referente</b> (V114): a {@code TROCA}
+     * passaria a apontar para uma linha que não existe mais. Reatribuindo a FK aqui, os ids são
+     * preservados e o vínculo continua válido sem remapeamento nenhum. O problema desaparece em vez
+     * de ser resolvido.</p>
+     */
+    int moveOpenItems(Long fromComandaId, Long toComandaId);
+
     Comanda save(Comanda comanda);
 }

@@ -293,7 +293,7 @@ class ComandaConcurrencyIT {
         List<PaymentCommand> pagamento =
                 List.of(new PaymentCommand(PaymentMethod.DINHEIRO, new BigDecimal("25.00"), null));
         Outcome outcome = runConcurrently(
-                () -> comandaUseCase.closeComanda(comanda.id(), pagamento, null, false, operator));
+                () -> comandaUseCase.closeComanda(comanda.id(), pagamento, null, false, null, operator));
 
         assertThat(outcome.successes())
                 .as("um único fechamento pode passar — dois pedidos concluídos dos mesmos itens "
@@ -333,7 +333,7 @@ class ComandaConcurrencyIT {
 
         List<Future<?>> futures = List.of(
                 executor.submit(() -> attempt(start, winners,
-                        () -> comandaUseCase.closeComanda(comanda.id(), pagamento, null, false, operator))),
+                        () -> comandaUseCase.closeComanda(comanda.id(), pagamento, null, false, null, operator))),
                 executor.submit(() -> attempt(start, winners,
                         () -> comandaUseCase.cancelComanda(comanda.id(), operator))));
         start.countDown();

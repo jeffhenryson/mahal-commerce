@@ -316,4 +316,22 @@ class PdvComandaControllerSecurityTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.errorCode").value("COMANDA_NOT_FOUND"));
     }
+
+    // ── Transferir e juntar mesas (PDV-F016) ─────────────────────────────────────────────────
+
+    @Test
+    void rename_comanda_without_comanda_manage_returns_403() throws Exception {
+        mockMvc.perform(patch("/pdv/comandas/10")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"tableOrCustomerLabel\":\"Mesa 7\"}")
+                .with(user("bob").authorities(new SimpleGrantedAuthority("PDV_READ"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void merge_comanda_without_comanda_manage_returns_403() throws Exception {
+        mockMvc.perform(post("/pdv/comandas/10/merge-into/20")
+                .with(user("bob").authorities(new SimpleGrantedAuthority("PDV_READ"))))
+                .andExpect(status().isForbidden());
+    }
 }

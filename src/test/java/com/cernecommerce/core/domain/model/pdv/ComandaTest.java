@@ -275,4 +275,93 @@ class ComandaTest {
 
         assertThat(comanda.items()).hasSize(1);
     }
+
+    // ── Conta dividida (PDV-F017) e troca de mesa (PDV-F016) ─────────────────────────────────
+
+    private static Comanda comandaComLinhas(ComandaItem... itens) {
+        Comanda c = open();
+        for (ComandaItem i : itens) {
+            c = c.withAddedItem(i);
+        }
+        return Comanda.of(10L, c.sessionId(), c.warehouseCode(), c.tableOrCustomerLabel(),
+                c.customerId(), c.status(), c.items(), c.orderId(), c.openedBy(), c.openedAt(), c.closedAt());
+    }
+
+    /**
+     * O número que a tela mostra como "falta pagar" — não o total consumido. Antes de PDV-F017 as
+     * duas leituras coincidiam porque a conta só podia ser fechada inteira.
+     */
+    @Test
+    void runningTotal_countsOnlyTheLinesStillOpen() {
+        Comanda comanda = comandaComLinhas(
+                linha(1L, "ESS-A", "30.00", ConsumptionMode.NORMAL, false, null),
+                linha(2L, "ESS-B", "20.00", ConsumptionMode.NORMAL, false, null));
+
+        assertThat(comanda.runningTotal()).isEqualByComparingTo("50.00");
+
+        Comanda parcial = comanda.withItemsClosedIn(99L, List.of(1L));
+
+        assertThat(parcial.runningTotal()).isEqualByComparingTo("20.00");
+        assertThat(parcial.openItems()).hasSize(1);
+        assertThat(parcial.items()).hasSize(2);
+    }
+
+    /** Fechar parte da conta NÃO muda o status: quem encerra a mesa é o service. */
+    @Test
+    void withItemsClosedIn_doesNotChangeTheStatus() {
+        Comanda parcial = comandaComLinhas(
+                linha(1L, "ESS-A", "30.00", ConsumptionMode.NORMAL, false, null),
+                linha(2L, "ESS-B", "20.00", ConsumptionMode.NORMAL, false, null))
+                .withItemsClosedIn(99L, List.of(1L));
+
+        assertThat(parcial.status()).isEqualTo(ComandaStatus.ABERTA);
+        assertThat(parcial.orderId()).isNull();
+        assertThat(parcial.isFullyCharged()).isFalse();
+    }
+
+    @Test
+    void isFullyCharged_onlyWhenNoLineIsOpen() {
+        Comanda comanda = comandaComLinhas(
+                linha(1L, "ESS-A", "30.00", ConsumptionMode.NORMAL, false, null),
+                linha(2L, "ESS-B", "20.00", ConsumptionMode.NORMAL, false, null));
+
+        assertThat(comanda.withItemsClosedIn(99L, List.of(1L)).isFullyCharged()).isFalse();
+        assertThat(comanda.withItemsClosedIn(99L, List.of(1L, 2L)).isFullyCharged()).isTrue();
+        assertThat(comanda.runningTotal()).isEqualByComparingTo("50.00");
+    }
+
+    @Test
+    void withItemsClosedIn_rejectsALineThatIsNotOpenHere() {
+        Comanda comanda = comandaComLinhas(linha(1L, "ESS-A", "30.00", ConsumptionMode.NORMAL, false, null));
+
+        assertThatThrownBy(() -> comanda.withItemsClosedIn(99L, List.of(42L)))
+                .isInstanceOf(IllegalArgumentException.class);
+        // E cobrar duas vezes a mesma linha também não passa.
+        Comanda cobrada = comanda.withItemsClosedIn(99L, List.of(1L));
+        assertThatThrownBy(() -> cobrada.withItemsClosedIn(100L, List.of(1L)))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    /** PDV-F016 — trocar de mesa é só o rótulo; o consumo não se move. */
+    @Test
+    void withLabel_changesOnlyTheLabel() {
+        Comanda comanda = comandaComLinhas(linha(1L, "ESS-A", "30.00", ConsumptionMode.NORMAL, false, null));
+
+        Comanda renomeada = comanda.withLabel("Mesa 7");
+
+        assertThat(renomeada.tableOrCustomerLabel()).isEqualTo("Mesa 7");
+        assertThat(renomeada.items()).hasSize(1);
+        assertThat(renomeada.warehouseCode()).isEqualTo(comanda.warehouseCode());
+        assertThat(renomeada.sessionId()).isEqualTo(comanda.sessionId());
+        assertThat(renomeada.runningTotal()).isEqualByComparingTo("30.00");
+    }
+
+    @Test
+    void withLabel_rejectsBlankAndClosedComanda() {
+        Comanda comanda = comandaComLinhas(linha(1L, "ESS-A", "30.00", ConsumptionMode.NORMAL, false, null));
+
+        assertThatThrownBy(() -> comanda.withLabel("  ")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> comanda.cancelled(Instant.now()).withLabel("Mesa 7"))
+                .isInstanceOf(IllegalStateException.class);
+    }
 }

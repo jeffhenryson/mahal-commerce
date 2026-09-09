@@ -39,6 +39,16 @@ public class CloseComandaRequest {
             defaultValue = "true")
     private Boolean applyServiceFee;
 
+    @Schema(description = "PDV-F017 — conta dividida: ids das linhas que ESTE fechamento cobra. "
+            + "Omitido ou vazio cobra tudo que está em aberto (o comportamento de sempre). Com a "
+            + "lista preenchida, o pedido sai só com essas linhas, elas são marcadas como cobradas "
+            + "e a comanda CONTINUA ABERTA com o restante — repita até não sobrar nada, e o último "
+            + "fechamento encerra a mesa. Desconto, taxa e troco incidem só sobre o escopo. Um "
+            + "OPEN_ROSH e as TROCA/SABOR_EXTRA ligados a ele têm que sair juntos: separar devolve "
+            + "409 LINKED_ITEM_MUST_CLOSE_TOGETHER.",
+            example = "[3, 5, 7]")
+    private List<Long> itemIds;
+
     /** Ausente é "sim": a taxa é o padrão do salão, e omitir não pode significar deixar de cobrar. */
     public boolean isServiceFeeApplied() {
         return applyServiceFee == null || applyServiceFee;

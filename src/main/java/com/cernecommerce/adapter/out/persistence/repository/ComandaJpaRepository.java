@@ -6,9 +6,11 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -63,7 +65,32 @@ public interface ComandaJpaRepository extends JpaRepository<ComandaEntity, Long>
      * <b>status</b> da mesa, e todo caminho de mutação passa por este mesmo id. Duas mesas
      * diferentes seguem em paralelo, que é o comportamento que o salão precisa.</p>
      */
+    /**
+     * Ids das mesas abertas antes de {@code cutoff} — a varredura de comanda esquecida (PDV-F013).
+     *
+     * <p>Ordem <b>crescente</b> de id, ao contrário das outras consultas daqui: a varredura processa
+     * um lote por passada, e começar pelas mais antigas garante que a comanda mais presa sai
+     * primeiro em vez de ficar no fim da fila para sempre.</p>
+     */
+    @Query("SELECT c.id FROM ComandaEntity c "
+            + "WHERE c.status = :status AND c.openedAt < :cutoff ORDER BY c.id ASC")
+    List<Long> findOpenIdsOlderThan(@Param("status") String status, @Param("cutoff") Instant cutoff,
+            Pageable pageable);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT c FROM ComandaEntity c WHERE c.id = :id")
     Optional<ComandaEntity> findByIdForUpdate(@Param("id") Long id);
+
+    /**
+     * Move as linhas em aberto de uma comanda para outra, preservando os ids (PDV-F016) — ver o
+     * javadoc de {@code ComandaRepository.moveOpenItems} para por que a preservação é o ponto todo.
+     *
+     * <p>Linha já cobrada ({@code closed_in_order_id} não nulo) fica onde está: ela pertence a um
+     * pedido que já aponta para a comanda de origem. Na prática o service nem chega aqui nesse caso
+     * — o merge é recusado antes —, mas a cláusula garante que um caminho futuro não a arraste.</p>
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("UPDATE ComandaItemEntity i SET i.comanda.id = :toComandaId "
+            + "WHERE i.comanda.id = :fromComandaId AND i.closedInOrderId IS NULL")
+    int moveOpenItems(@Param("fromComandaId") Long fromComandaId, @Param("toComandaId") Long toComandaId);
 }
