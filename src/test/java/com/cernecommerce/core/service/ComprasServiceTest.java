@@ -1,5 +1,6 @@
 package com.cernecommerce.core.service;
 
+import com.cernecommerce.core.domain.exception.compras.DuplicateSupplierTaxIdException;
 import com.cernecommerce.core.domain.exception.compras.SupplierNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException;
@@ -182,5 +183,88 @@ class ComprasServiceTest {
         assertThatThrownBy(() -> comprasService.receiveGoods(1L, "INEXISTENTE",
                 List.of(new GoodsReceiptItem("NARG-001", BigDecimal.ONE)), "gerente"))
                 .isInstanceOf(WarehouseNotFoundException.class);
+    }
+
+    // ── Cadastro de fornecedor (COM-F001) ────────────────────────────────────────────────────
+
+    /**
+     * O CNPJ é gravado <b>só com dígitos</b>, que é como o XML da NF-e traz o emitente. Sem isso,
+     * o fornecedor cadastrado pela tela com máscara nunca casaria com a nota importada — e a
+     * importação continuaria respondendo 404, que é justamente o que este card veio resolver.
+     */
+    @Test
+    void registerSupplier_normalizaOTaxIdParaSoDigitos() {
+        when(supplierRepository.findByTaxId("12345678000190")).thenReturn(Optional.empty());
+        when(supplierRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Supplier criado = comprasService.registerSupplier("Distribuidora Zomo LTDA",
+                "12.345.678/0001-90", "contato@zomo.com.br");
+
+        assertThat(criado.taxId()).isEqualTo("12345678000190");
+        assertThat(criado.active()).isTrue();
+    }
+
+    /**
+     * A duplicidade é conferida sobre o valor <b>normalizado</b>: com e sem máscara são o mesmo
+     * fornecedor. Comparar o texto cru deixaria a uk_supplier_tax_id passar batido e criaria dois
+     * cadastros para o mesmo CNPJ.
+     */
+    @Test
+    void registerSupplier_recusaOMesmoCnpjComOutraMascara() {
+        when(supplierRepository.findByTaxId("12345678000190")).thenReturn(Optional.of(supplier()));
+
+        assertThatThrownBy(() -> comprasService.registerSupplier("Outro Nome",
+                "12.345.678/0001-90", null))
+                .isInstanceOf(DuplicateSupplierTaxIdException.class);
+
+        verify(supplierRepository, never()).save(any());
+    }
+
+    /** CPF é aceito: produtor rural que emite nota é pessoa física. */
+    @Test
+    void registerSupplier_aceitaCpf() {
+        when(supplierRepository.findByTaxId("12345678901")).thenReturn(Optional.empty());
+        when(supplierRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        assertThat(comprasService.registerSupplier("Sítio do Zé", "123.456.789-01", null).taxId())
+                .isEqualTo("12345678901");
+    }
+
+    @Test
+    void registerSupplier_recusaTaxIdComTamanhoInvalido() {
+        assertThatThrownBy(() -> comprasService.registerSupplier("Fornecedor", "123", null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("taxId");
+
+        verify(supplierRepository, never()).save(any());
+    }
+
+    /** PATCH parcial: campo nulo mantém, e o taxId nunca muda — é a chave da importação de NF-e. */
+    @Test
+    void updateSupplier_mantemOQueNaoVeio_eNuncaTrocaOTaxId() {
+        when(supplierRepository.findById(1L)).thenReturn(Optional.of(supplier()));
+        when(supplierRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Supplier atualizado = comprasService.updateSupplier(1L, "Fornecedor Teste ME", null);
+
+        assertThat(atualizado.legalName()).isEqualTo("Fornecedor Teste ME");
+        assertThat(atualizado.email()).isEqualTo("contato@fornecedor.com");
+        assertThat(atualizado.taxId()).isEqualTo("12345678000190");
+    }
+
+    @Test
+    void setSupplierActive_desativaSemApagar() {
+        when(supplierRepository.findById(1L)).thenReturn(Optional.of(supplier()));
+        when(supplierRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        assertThat(comprasService.setSupplierActive(1L, false).active()).isFalse();
+    }
+
+    @Test
+    void updateSupplier_comIdInexistente_lanca404() {
+        when(supplierRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> comprasService.updateSupplier(99L, "Nome", null))
+                .isInstanceOf(SupplierNotFoundException.class);
     }
 }

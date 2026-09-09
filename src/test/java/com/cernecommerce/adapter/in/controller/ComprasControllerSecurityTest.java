@@ -86,4 +86,64 @@ public class ComprasControllerSecurityTest {
                         new SimpleGrantedAuthority("COMPRAS_RECEIPT_MANAGE"))))
                 .andExpect(status().isNotFound());
     }
+
+    // ── COM-F001 · cadastro de fornecedor ────────────────────────────────────────────────────
+
+    /**
+     * Permissão própria, e não COMPRAS_RECEIPT_MANAGE reaproveitada: receber mercadoria é rotina
+     * de balcão, cadastrar fornecedor grava CNPJ, que é dado de compliance. Quem recebe não
+     * precisa poder cadastrar.
+     */
+    @Test
+    void register_supplier_with_receipt_manage_only_returns_403() throws Exception {
+        mockMvc.perform(post("/compras/suppliers")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"legalName\":\"Distribuidora Zomo LTDA\",\"taxId\":\"12345678000190\"}")
+                .with(user("conferente").authorities(
+                        new SimpleGrantedAuthority("ROLE_USER"),
+                        new SimpleGrantedAuthority("COMPRAS_RECEIPT_MANAGE"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void register_supplier_without_auth_returns_401() throws Exception {
+        mockMvc.perform(post("/compras/suppliers")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"legalName\":\"Distribuidora Zomo LTDA\",\"taxId\":\"12345678000190\"}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void patch_supplier_without_supplier_manage_returns_403() throws Exception {
+        mockMvc.perform(patch("/compras/suppliers/1")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"legalName\":\"Novo Nome\"}")
+                .with(user("bob").authorities(
+                        new SimpleGrantedAuthority("ROLE_USER"),
+                        new SimpleGrantedAuthority("COMPRAS_READ"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void patch_supplier_active_without_supplier_manage_returns_403() throws Exception {
+        mockMvc.perform(patch("/compras/suppliers/1/active")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"active\":false}")
+                .with(user("bob").authorities(
+                        new SimpleGrantedAuthority("ROLE_USER"),
+                        new SimpleGrantedAuthority("COMPRAS_READ"))))
+                .andExpect(status().isForbidden());
+    }
+
+    /** Com a authority certa, a rota é alcançada — o 404 é do id inexistente, não do RBAC. */
+    @Test
+    void patch_supplier_with_supplier_manage_reaches_the_route() throws Exception {
+        mockMvc.perform(patch("/compras/suppliers/999999")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"legalName\":\"Novo Nome\"}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("COMPRAS_SUPPLIER_MANAGE"))))
+                .andExpect(status().isNotFound());
+    }
 }

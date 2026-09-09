@@ -1,5 +1,6 @@
 package com.cernecommerce.core.service;
 
+import com.cernecommerce.core.domain.exception.compras.DuplicateSupplierTaxIdException;
 import com.cernecommerce.core.domain.exception.compras.SupplierNotFoundException;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.compras.GoodsReceipt;
@@ -32,6 +33,35 @@ public class ComprasService implements ComprasUseCase {
     @Transactional(readOnly = true)
     public PageResult<Supplier> listSuppliers(int page, int size) {
         return supplierRepository.findAll(page, size);
+    }
+
+    @Override
+    @Transactional
+    public Supplier registerSupplier(String legalName, String taxId, String email) {
+        // Supplier.create já normaliza o taxId; a busca de duplicidade tem que usar o valor
+        // NORMALIZADO, senão "12.345.678/0001-99" passaria por cima de "12345678000199" e a
+        // uk_supplier_tax_id transformaria o erro do usuário num 409 genérico do driver.
+        Supplier candidate = Supplier.create(legalName, taxId, email);
+        supplierRepository.findByTaxId(candidate.taxId()).ifPresent(existing -> {
+            throw new DuplicateSupplierTaxIdException(candidate.taxId());
+        });
+        return supplierRepository.save(candidate);
+    }
+
+    @Override
+    @Transactional
+    public Supplier updateSupplier(Long id, String legalName, String email) {
+        Supplier current = supplierRepository.findById(id)
+                .orElseThrow(() -> new SupplierNotFoundException(id));
+        return supplierRepository.save(current.updatedWith(legalName, email));
+    }
+
+    @Override
+    @Transactional
+    public Supplier setSupplierActive(Long id, boolean active) {
+        Supplier current = supplierRepository.findById(id)
+                .orElseThrow(() -> new SupplierNotFoundException(id));
+        return supplierRepository.save(current.withActive(active));
     }
 
     @Override

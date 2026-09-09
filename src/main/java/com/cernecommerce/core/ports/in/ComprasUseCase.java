@@ -11,8 +11,9 @@ import java.util.Optional;
 /**
  * Port de entrada do domínio <b>compras</b>.
  *
- * <p>Casos de uso previstos além dos atuais (TODO): {@code registerSupplier},
- * {@code createPurchaseOrder}.</p>
+ * <p>Caso de uso previsto além dos atuais (TODO): {@code createPurchaseOrder} (COM-F002), que
+ * fecharia o ciclo pedido → recebimento — hoje {@link #receiveGoods} registra entrada de
+ * mercadoria sem referenciar um pedido de compra formal.</p>
  */
 public interface ComprasUseCase {
 
@@ -39,4 +40,40 @@ public interface ComprasUseCase {
 
     /** Busca um fornecedor por id — mesmo uso de {@link #findGoodsReceiptById}. */
     Optional<Supplier> findSupplierById(Long id);
+
+    /**
+     * Cadastra um fornecedor (COM-F001).
+     *
+     * <p>Era o pedido nº 1 deste domínio, e travava uma feature <b>já entregue</b>: a importação de
+     * NF-e por XML (EST-F005) responde {@code 404 SUPPLIER_NOT_FOUND_BY_TAX_ID} quando o CNPJ do
+     * emitente não está cadastrado — decisão deliberada, porque {@code taxId} é dado de compliance
+     * e não se cria fornecedor por dedução —, e não havia nenhum caminho pela UI para cadastrá-lo.
+     * O único jeito era {@code INSERT} direto no banco.</p>
+     *
+     * @throws com.cernecommerce.core.domain.exception.compras.DuplicateSupplierTaxIdException se
+     *         já existir fornecedor com o mesmo CNPJ/CPF, comparado <b>já normalizado</b>: com e
+     *         sem máscara são o mesmo fornecedor.
+     */
+    Supplier registerSupplier(String legalName, String taxId, String email);
+
+    /**
+     * Edição parcial do cadastro — campo nulo mantém o valor atual, mesma semântica de
+     * {@code EstoqueUseCase.updateProduct}.
+     *
+     * <p>{@code taxId} fica <b>fora</b> da edição, pelo mesmo motivo que o SKU do produto fica:
+     * ele é a chave pela qual a importação de NF-e encontra o fornecedor, e trocá-lo faria os
+     * recebimentos já registrados apontarem para um CNPJ que nunca os emitiu. Fornecedor com CNPJ
+     * errado se resolve criando o certo e desativando o outro.</p>
+     *
+     * @throws com.cernecommerce.core.domain.exception.compras.SupplierNotFoundException se o id
+     *         não existir.
+     */
+    Supplier updateSupplier(Long id, String legalName, String email);
+
+    /**
+     * Ativa ou desativa o fornecedor. Endpoint próprio, e não um campo do PATCH, pelo mesmo motivo
+     * de {@code PATCH /estoque/products/{sku}/active} (EST-F018): gera evento de auditoria
+     * distinto de uma correção de nome.
+     */
+    Supplier setSupplierActive(Long id, boolean active);
 }

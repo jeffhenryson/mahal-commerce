@@ -69,7 +69,9 @@ public class JdkDomNfeXmlImportAdapter implements NfeXmlImportPort {
         } catch (Exception e) {
             // Qualquer outra falha ao caminhar pelo DOM (tag ausente, número/data inválidos) é o
             // mesmo problema do ponto de vista de quem chama: o XML não tem a estrutura esperada.
-            throw new MalformedNfeXmlException(e.getMessage());
+            // EST-C021 — a mensagem do erro original (tipicamente NumberFormatException, em inglês)
+            // fica na causa, não no corpo da resposta.
+            throw MalformedNfeXmlException.fromParser(e);
         }
     }
 
@@ -127,8 +129,9 @@ public class JdkDomNfeXmlImportAdapter implements NfeXmlImportPort {
         } catch (SAXException | IOException | ParserConfigurationException e) {
             // Mensagem deliberadamente genérica: não confirma a um eventual atacante se o XML foi
             // rejeitado por ser malformado ou por conter uma tentativa de DOCTYPE/entidade externa
-            // — os dois casos caem aqui.
-            throw new MalformedNfeXmlException(e.getMessage());
+            // — os dois casos caem aqui. EST-C021: antes o comentário dizia isso e o código fazia o
+            // contrário, porque e.getMessage() do Xerces nomeia o DOCTYPE bloqueado.
+            throw MalformedNfeXmlException.fromParser(e);
         }
     }
 
