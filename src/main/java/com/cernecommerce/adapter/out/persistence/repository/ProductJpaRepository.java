@@ -71,6 +71,18 @@ public interface ProductJpaRepository extends JpaRepository<ProductEntity, Long>
      * {@code UnaccentFunctionContributor} e existe nos dois bancos (extensão no Postgres, alias no
      * H2 do perfil dev).</p>
      *
+     * <p><b>EST-C024:</b> o {@code CAST(:search AS String)} não é decoração — sem ele o endpoint
+     * inteiro caía em 500. Antes da EST-C020 o parâmetro aparecia como operando de
+     * {@code LIKE :search}, e era dali que o Hibernate inferia que era texto. Envolvido em
+     * {@code unaccent(...)}, que é registrada só com o tipo de retorno, ele perdeu essa âncora: a
+     * outra ocorrência é {@code :search IS NULL}, igualmente sem tipo, então o bind saía como
+     * objeto binário e o Postgres respondia
+     * {@code ERROR: function unaccent(bytea) does not exist}. Falhava na preparação do statement,
+     * portanto para qualquer valor de {@code search} — inclusive nulo, que é o caso da listagem
+     * sem busca. É o mesmo bug de tipagem que o quarto parágrafo acima já registra para
+     * {@code Instant}, agora alcançando {@code String}. O H2 do perfil dev não pega: o alias
+     * recebe {@code Object} e aceita o bind sem reclamar.</p>
+     *
      * <p>Padrão ID-first, como toda paginação do módulo: pagina só os ids e o fetch das variações
      * vem depois, por {@code findAllByIdsWithVariants} — {@code LIMIT}/{@code OFFSET} junto de
      * {@code JOIN FETCH} de coleção é o bug clássico de paginação com JPA. Substituiu o antigo
@@ -79,8 +91,8 @@ public interface ProductJpaRepository extends JpaRepository<ProductEntity, Long>
     @Query("""
             SELECT p.id FROM ProductEntity p
             WHERE (:search   IS NULL
-                     OR unaccent(LOWER(p.name)) LIKE unaccent(:search)
-                     OR unaccent(LOWER(p.sku))  LIKE unaccent(:search))
+                     OR unaccent(LOWER(p.name)) LIKE unaccent(CAST(:search AS String))
+                     OR unaccent(LOWER(p.sku))  LIKE unaccent(CAST(:search AS String)))
               AND (:category IS NULL OR LOWER(p.category) = :category)
               AND (:brand    IS NULL OR LOWER(p.brand)    = :brand)
               AND (:active   IS NULL OR p.active = :active)
