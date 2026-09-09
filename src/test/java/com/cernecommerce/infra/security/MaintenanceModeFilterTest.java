@@ -49,8 +49,28 @@ class MaintenanceModeFilterTest {
 
         mvc.perform(get("/api/users"))
                 .andExpect(status().isServiceUnavailable())
-                .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                // contentTypeCompatibleWith, não contentType: o filtro manda
+                // "application/json;charset=UTF-8" (PLAT-C050) e a comparação exata nunca casaria.
+                // Mesmo matcher de LoginRateLimitingFilterTest para o filtro irmão.
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.errorCode").value("SERVICE_UNAVAILABLE"));
+    }
+
+    /**
+     * PLAT-C050 — o filtro escreve o corpo direto no response com
+     * {@code MediaType.APPLICATION_JSON_VALUE}, que é "application/json" seco, e sem
+     * {@code setCharacterEncoding} o {@code getWriter()} do Tomcat cai no default do container: a
+     * mensagem chegava ao cliente como {@code "Sistema em manuten??o ? tente novamente em breve"}.
+     * Este teste falha se alguém remover o charset do filtro.
+     */
+    @Test
+    void maintenance_on_preservaAcentuacaoNoCorpoDoErro() throws Exception {
+        when(systemConfig.getBoolean("security.maintenance.enabled", false)).thenReturn(true);
+
+        mvc.perform(get("/api/users"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.message")
+                        .value("Sistema em manutenção — tente novamente em breve"));
     }
 
     @Test

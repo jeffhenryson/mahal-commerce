@@ -16,6 +16,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 
 @Component
 public class LoginRateLimitingFilter extends OncePerRequestFilter {
@@ -54,11 +55,11 @@ public class LoginRateLimitingFilter extends OncePerRequestFilter {
             return !path.startsWith("/notifications/preferences/");
         }
 
-        // GET /notifications/stream opens a persistent SSE connection — guard against flood.
-        if ("GET".equalsIgnoreCase(method)) {
-            return !"/notifications/stream".equals(path);
-        }
-
+        // PLAT-C051 — GET /notifications/stream saiu daqui. O limite deste filtro é por IP, e o
+        // stream é o único endpoint autenticado que ele guardava: num salão atrás de um NAT só,
+        // um cliente em laço de reconexão consumia o balde de todo mundo e derrubava a loja
+        // inteira. Agora ele é guardado pelo ResourceRateLimitingFilter, que roda depois da
+        // autenticação e usa o usuário como chave — que é o que se quer limitar aqui.
         if (!"POST".equalsIgnoreCase(method)) return true;
         return !"/auth/login".equals(path)
                 && !"/auth/register".equals(path)
@@ -93,6 +94,12 @@ public class LoginRateLimitingFilter extends OncePerRequestFilter {
             response.setStatus(429);
             response.setHeader("Retry-After", String.valueOf(windowSeconds));
             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+            // PLAT-C050 — o charset é obrigatório aqui: MediaType.APPLICATION_JSON_VALUE é
+            // "application/json" seco, e sem ele o getWriter() do Tomcat cai no default do
+            // container. A mensagem acentuada saía mangled ("Muitas tentativas ? aguarde"), e o
+            // cliente ainda recebia um Content-Type sem charset. Mesmo par setContentType +
+            // setCharacterEncoding de RestAuthenticationEntryPoint e RestAccessDeniedHandler.
+            response.setCharacterEncoding(StandardCharsets.UTF_8.name());
             MAPPER.writeValue(response.getWriter(), error);
             return;
         }

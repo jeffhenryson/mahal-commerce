@@ -69,25 +69,17 @@ class LoginRateLimitingFilterTest {
         verifyNoInteractions(rateLimiter);
     }
 
-    // ── GET /notifications/stream rate-limiting ───────────────────────────────
-
+    /**
+     * PLAT-C051 — o stream saiu deste filtro. O limite daqui é por IP, e num salão atrás de um NAT
+     * só um cliente em laço de reconexão consumia o balde de todos. Quem o guarda agora é o
+     * {@code ResourceRateLimitingFilter}, com chave por usuário (bucket {@code
+     * notifications-stream}), coberto em {@code ResourceRateLimitingFilterTest}.
+     */
     @Test
-    void get_to_sse_stream_within_limit_passes_through() throws Exception {
-        when(rateLimiter.tryConsume(any())).thenReturn(true);
-
+    void get_to_sse_stream_no_longer_rate_limited_by_ip() throws Exception {
         mockMvc.perform(get("/notifications/stream"))
                 .andExpect(status().isOk());
-        verify(rateLimiter).tryConsume(any());
-    }
-
-    @Test
-    void get_to_sse_stream_exceeded_returns_429() throws Exception {
-        when(rateLimiter.tryConsume(any())).thenReturn(false);
-
-        mockMvc.perform(get("/notifications/stream"))
-                .andExpect(status().isTooManyRequests())
-                .andExpect(header().exists("Retry-After"))
-                .andExpect(jsonPath("$.errorCode").value("TOO_MANY_REQUESTS"));
+        verifyNoInteractions(rateLimiter);
     }
 
     @Test
@@ -147,6 +139,22 @@ class LoginRateLimitingFilterTest {
                 .andExpect(header().string("Retry-After", "60"))
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.errorCode").value("TOO_MANY_REQUESTS"));
+    }
+
+    /**
+     * PLAT-C050 — o travessão da mensagem chegava ao cliente como {@code ?}:
+     * {@code "Muitas tentativas ? aguarde antes de tentar novamente"}. O filtro escreve o corpo
+     * direto no response com {@code MediaType.APPLICATION_JSON_VALUE}, que é "application/json"
+     * seco, e sem {@code setCharacterEncoding} o {@code getWriter()} do Tomcat cai no default do
+     * container. Este teste falha se alguém remover o charset.
+     */
+    @Test
+    void login_exceeded_preservaAcentuacaoNoCorpoDoErro() throws Exception {
+        when(rateLimiter.tryConsume(any())).thenReturn(false);
+
+        mockMvc.perform(post("/auth/login").contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.message").value("Muitas tentativas — aguarde antes de tentar novamente"));
     }
 
     @Test

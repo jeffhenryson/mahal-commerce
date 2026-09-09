@@ -38,7 +38,25 @@ public record AuditEvent(EventType type, String username, Instant timestamp, Map
         OAUTH_GOOGLE_LOGIN, OAUTH_GOOGLE_DISABLED_ATTEMPT,
         // Estoque
         PRODUCT_CREATED, WAREHOUSE_CREATED, STOCK_MOVEMENT_REGISTERED, REORDER_POINT_SET,
+        // EST-F025 — a conversão entre SKUs é UM ato do operador que produz DOIS movimentos. Um
+        // STOCK_MOVEMENT_REGISTERED por ponta descreveria uma saída e uma entrada sem relação
+        // aparente, e a trilha perderia justamente o que importa auditar: que foram a mesma decisão.
+        // Mesma lição de PDV-C014, que tirou a comanda do EventType emprestado.
+        STOCK_CONVERTED,
+        // EST-F027 — descartar uma lata pela metade é uma DECISÃO do atendente, e é a única parte
+        // da lata que não aparece em stock_movement: a SAIDA da lata nova está lá, o descarte da
+        // velha não movimenta nada (a unidade já tinha saído do saldo quando foi aberta).
+        OPEN_PACKAGE_REPLACED,
+        // COM-F001 — cadastro de fornecedor é dado de compliance (taxId entra em nota fiscal), e
+        // ativar/desativar tem evento próprio pelo mesmo motivo de PRODUCT_DEACTIVATED: tirar um
+        // fornecedor de circulação é uma decisão, corrigir a razão social dele é uma digitação.
+        SUPPLIER_CREATED, SUPPLIER_UPDATED, SUPPLIER_ACTIVATED, SUPPLIER_DEACTIVATED,
         PRODUCT_UPDATED, PRODUCT_ACTIVATED, PRODUCT_DEACTIVATED, PRODUCT_PRICE_CHANGED,
+        // EST-F026 — distinto de PRODUCT_DEACTIVATED pela mesma razão que aquele é distinto de
+        // PRODUCT_UPDATED: desativar preserva a linha e a trilha, excluir apaga as duas. Só
+        // alcançável para rascunho, e é o único evento do módulo cujo objeto não existe mais
+        // depois dele — daí gravar o nome junto do SKU, que é tudo o que restará.
+        PRODUCT_DELETED,
         WAREHOUSE_UPDATED, WAREHOUSE_ACTIVATED, WAREHOUSE_DEACTIVATED,
         STOCK_COUNT_OPENED, STOCK_COUNT_CLOSED, STOCK_COUNT_CANCELLED, KIT_RECIPE_CHANGED,
         PRODUCT_LOT_TRACKED_ENABLED, PRODUCT_LOT_TRACKED_DISABLED,
@@ -68,6 +86,9 @@ public record AuditEvent(EventType type, String username, Instant timestamp, Map
         // de abrir caixa. O rastro item a item continua onde sempre esteve: em stock_movement.
         COMANDA_OPENED, COMANDA_CLOSED, COMANDA_CANCELLED,
         COMANDA_ITEM_ADDED, COMANDA_ITEM_REMOVED,
+        // PDV-F016. COMANDA_MERGED é o que distingue, na trilha, a origem de uma junção de uma
+        // mesa abandonada: as duas terminam CANCELADA, mas só o abandono devolveu estoque.
+        COMANDA_RENAMED, COMANDA_MERGED,
         // Pedido
         ORDER_STATUS_CHANGED, ORDER_CANCELLED, ORDER_REFUNDED,
         // Cashback (CRM-F003)

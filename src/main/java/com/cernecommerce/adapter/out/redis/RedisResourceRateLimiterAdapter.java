@@ -22,10 +22,15 @@ public class RedisResourceRateLimiterAdapter implements ResourceRateLimiterPort 
     // PLAT-C030 / cobertura de testes de segurança — buckets fixos por recurso sensível.
     // crm-export: exportação de PII é rara e não deve ser repetida em massa por um mesmo usuário.
     // estoque-movements: listagem interna, limite generoso para não atrapalhar uso legítimo do PDV/admin.
+    // notifications-stream: cada abertura de SSE é uma conexão persistente, e o EventSource do
+    //   navegador reconecta sozinho a cada erro. O limite existe para conter o laço de reconexão,
+    //   não o uso normal — um operador abre o stream uma vez por sessão de trabalho. Chave é o
+    //   usuário, não o IP (PLAT-C051): o salão inteiro sai por um NAT só.
     // shop-catalog: endpoint público sem autenticação — chave é o IP, protege contra scraping.
     private static final Map<String, BucketPolicy> POLICIES = Map.of(
             "crm-export", new BucketPolicy(3600, 5),
             "estoque-movements", new BucketPolicy(60, 60),
+            "notifications-stream", new BucketPolicy(60, 30),
             "shop-catalog", new BucketPolicy(60, 120));
 
     // Mesmo script atômico usado em RedisLoginRateLimiterAdapter: adiciona entrada, remove

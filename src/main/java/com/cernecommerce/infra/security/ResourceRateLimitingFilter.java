@@ -16,6 +16,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.security.Principal;
 
 /**
@@ -54,6 +55,7 @@ public class ResourceRateLimitingFilter extends OncePerRequestFilter {
 
         return !"/crm/customers/export".equals(path)
                 && !"/estoque/movements".equals(path)
+                && !"/notifications/stream".equals(path)
                 && !"/shop/catalog".equals(path)
                 && !path.startsWith("/shop/catalog/");
     }
@@ -74,6 +76,12 @@ public class ResourceRateLimitingFilter extends OncePerRequestFilter {
             response.setStatus(429);
             response.setHeader("Retry-After", String.valueOf(ex.retryAfterSeconds()));
             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+            // PLAT-C050 — o charset é obrigatório aqui: MediaType.APPLICATION_JSON_VALUE é
+            // "application/json" seco, e sem ele o getWriter() do Tomcat cai no default do
+            // container. A mensagem acentuada saía mangled ("Muitas tentativas ? aguarde"), e o
+            // cliente ainda recebia um Content-Type sem charset. Mesmo par setContentType +
+            // setCharacterEncoding de RestAuthenticationEntryPoint e RestAccessDeniedHandler.
+            response.setCharacterEncoding(StandardCharsets.UTF_8.name());
             MAPPER.writeValue(response.getWriter(), error);
             return;
         }
@@ -83,6 +91,7 @@ public class ResourceRateLimitingFilter extends OncePerRequestFilter {
     private String bucketFor(String path) {
         if ("/crm/customers/export".equals(path)) return "crm-export";
         if ("/estoque/movements".equals(path)) return "estoque-movements";
+        if ("/notifications/stream".equals(path)) return "notifications-stream";
         return "shop-catalog";
     }
 

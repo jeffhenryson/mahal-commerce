@@ -50,6 +50,10 @@ import com.cernecommerce.core.domain.exception.estoque.DuplicateKitComponentExce
 import com.cernecommerce.core.domain.exception.estoque.CategoryNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateCategoryNameException;
 import com.cernecommerce.core.domain.exception.estoque.ReplenishmentItemNotFoundException;
+import com.cernecommerce.core.domain.exception.estoque.OpenPackageNotFoundException;
+import com.cernecommerce.core.domain.exception.estoque.NotAPackagedSessionProductException;
+import com.cernecommerce.core.domain.exception.estoque.ProductHasStockHistoryException;
+import com.cernecommerce.core.domain.exception.estoque.ProductNotDraftException;
 import com.cernecommerce.core.domain.exception.estoque.VariantHasStockHistoryException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateSkuException;
 import com.cernecommerce.core.domain.exception.estoque.DraftLimitReachedException;
@@ -71,6 +75,8 @@ import com.cernecommerce.core.domain.exception.estoque.LotExpiryDateMismatchExce
 import com.cernecommerce.core.domain.exception.estoque.MissingLotInfoException;
 import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.ProductVariantNotFoundException;
+import com.cernecommerce.core.domain.exception.estoque.ReservedStockException;
+import com.cernecommerce.core.domain.exception.estoque.SameSkuConversionException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountAlreadyOpenException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountNotOpenException;
@@ -97,6 +103,7 @@ import com.cernecommerce.core.domain.exception.pagamento.PaymentExceedsOrderTota
 import com.cernecommerce.core.domain.exception.pagamento.PaymentGatewayException;
 import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionNotFoundException;
 import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionNotOwnedException;
+import com.cernecommerce.core.domain.exception.compras.DuplicateSupplierTaxIdException;
 import com.cernecommerce.core.domain.exception.compras.MalformedNfeXmlException;
 import com.cernecommerce.core.domain.exception.compras.NfeImportAlreadyProcessedException;
 import com.cernecommerce.core.domain.exception.compras.NfeImportNotFoundException;
@@ -117,6 +124,10 @@ import com.cernecommerce.core.domain.exception.pdv.SurchargeInvalidException;
 import com.cernecommerce.core.domain.exception.pdv.ComandaDiscountNotAllowedException;
 import com.cernecommerce.core.domain.exception.pdv.ComandaItemNotFoundException;
 import com.cernecommerce.core.domain.exception.pdv.LinkedItemIsChargedException;
+import com.cernecommerce.core.domain.exception.pdv.LinkedItemMustCloseTogetherException;
+import com.cernecommerce.core.domain.exception.pdv.ComandaMergeNotAllowedException;
+import com.cernecommerce.core.domain.exception.pdv.ComandaPartiallyClosedException;
+import com.cernecommerce.core.domain.exception.pdv.ItemNotOpenInComandaException;
 import com.cernecommerce.core.domain.exception.pdv.SurchargeNotAllowedException;
 import com.cernecommerce.core.domain.exception.pdv.SurchargeNotApplicableException;
 import com.cernecommerce.core.domain.exception.pdv.SurchargeOnCourtesyException;
@@ -139,6 +150,7 @@ import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -151,6 +163,9 @@ import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.validation.FieldError;
 import org.springframework.validation.method.ParameterValidationResult;
+import org.springframework.web.HttpMediaTypeNotAcceptableException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -254,6 +269,39 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiError> handleVariantHasStockHistory(VariantHasStockHistoryException ex,
             HttpServletRequest req) {
         return error(HttpStatus.CONFLICT, ex.getMessage(), "VARIANT_HAS_STOCK_HISTORY", req);
+    }
+
+    /**
+     * EST-F026 — os dois recusam a exclusão de produto por motivos diferentes, e a mensagem do
+     * domínio sobrevive nos dois porque ela é a instrução: uma diz para usar {@code active:false},
+     * a outra diz que há histórico no caminho.
+     */
+    @ExceptionHandler(ProductNotDraftException.class)
+    public ResponseEntity<ApiError> handleProductNotDraft(ProductNotDraftException ex, HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "PRODUCT_NOT_DRAFT", req);
+    }
+
+    @ExceptionHandler(ProductHasStockHistoryException.class)
+    public ResponseEntity<ApiError> handleProductHasStockHistory(ProductHasStockHistoryException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "PRODUCT_HAS_STOCK_HISTORY", req);
+    }
+
+    /**
+     * EST-F027 — os dois são "não achei a lata", mas por motivos que levam o operador a ações
+     * diferentes, e por isso não compartilham código: 404 é "abra uma, é só lançar a sessão"; 400
+     * é cadastro faltando, {@code sessionsPerUnit} em branco no produto.
+     */
+    @ExceptionHandler(OpenPackageNotFoundException.class)
+    public ResponseEntity<ApiError> handleOpenPackageNotFound(OpenPackageNotFoundException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.NOT_FOUND, ex.getMessage(), "OPEN_PACKAGE_NOT_FOUND", req);
+    }
+
+    @ExceptionHandler(NotAPackagedSessionProductException.class)
+    public ResponseEntity<ApiError> handleNotAPackagedSessionProduct(NotAPackagedSessionProductException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "NOT_A_PACKAGED_SESSION_PRODUCT", req);
     }
 
     @ExceptionHandler(ReplenishmentItemNotFoundException.class)
@@ -405,6 +453,25 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "INSUFFICIENT_STOCK", req);
     }
 
+    // EST-C016 — irmã de InsufficientStockException, e a distinção é o ponto: "não tem" e "tem,
+    // mas está reservado para um pedido online" pedem ações diferentes de quem está no balcão ou
+    // na mesa — a segunda tem solução (cancelar a reserva pelo painel e vender). Sem este handler
+    // a exceção caía no fallback de Exception.class e virava 500, descartando justamente a
+    // mensagem que diz quanto está reservado. Contrato já especificado como 400 RESERVED_STOCK em
+    // docs/plano-pdv-marketplace.md.
+    @ExceptionHandler(ReservedStockException.class)
+    public ResponseEntity<ApiError> handleReservedStock(ReservedStockException ex, HttpServletRequest req) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "RESERVED_STOCK", req);
+    }
+
+    // EST-F025 — converter um SKU nele mesmo é saída e entrada que se anulam, deixando duas linhas
+    // no ledger para um movimento que não houve. Quem quer corrigir saldo usa AJUSTE.
+    @ExceptionHandler(SameSkuConversionException.class)
+    public ResponseEntity<ApiError> handleSameSkuConversion(SameSkuConversionException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "SAME_SKU_CONVERSION", req);
+    }
+
     // EST-F008 — lote e validade.
     @ExceptionHandler(MissingLotInfoException.class)
     public ResponseEntity<ApiError> handleMissingLotInfo(MissingLotInfoException ex, HttpServletRequest req) {
@@ -459,9 +526,28 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.CONFLICT, ex.getMessage(), "CASHBACK_RATE_ALREADY_EXISTS", req);
     }
 
+    /**
+     * EST-C021 — o detalhe técnico do parser vai para o log, junto do {@code traceId} que o
+     * {@link ApiError} devolve ao cliente; quem precisa investigar chega nele por ali. O corpo
+     * carrega só a frase acionável, que é o que a tela exibe.
+     */
     @ExceptionHandler(MalformedNfeXmlException.class)
     public ResponseEntity<ApiError> handleMalformedNfeXml(MalformedNfeXmlException ex, HttpServletRequest req) {
+        if (ex.getCause() != null) {
+            log.warn("XML de NF-e rejeitado em {}", req.getRequestURI(), ex.getCause());
+        }
         return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "MALFORMED_NFE_XML", req);
+    }
+
+    /**
+     * COM-F001 — sem este handler a corrida cairia no {@code DATA_INTEGRITY_VIOLATION} genérico da
+     * {@code uk_supplier_tax_id} (V58), e quem cadastra um fornecedor que já existe leria "a
+     * operação conflita com um registro já existente" em vez de ser levado até ele.
+     */
+    @ExceptionHandler(DuplicateSupplierTaxIdException.class)
+    public ResponseEntity<ApiError> handleDuplicateSupplierTaxId(DuplicateSupplierTaxIdException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "SUPPLIER_TAX_ID_ALREADY_EXISTS", req);
     }
 
     @ExceptionHandler(SupplierNotFoundByTaxIdException.class)
@@ -939,6 +1025,35 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.CONFLICT, ex.getMessage(), "LINKED_ITEM_IS_CHARGED", req);
     }
 
+    // PDV-F017 — conta dividida. 400 e não 404: a linha pode existir e já estar paga, e "essa já
+    // foi" é uma resposta diferente de "não achei".
+    @ExceptionHandler(ItemNotOpenInComandaException.class)
+    public ResponseEntity<ApiError> handleItemNotOpenInComanda(ItemNotOpenInComandaException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "ITEM_NOT_OPEN_IN_COMANDA", req);
+    }
+
+    // 409 como o irmão LINKED_ITEM_IS_CHARGED: não é payload malformado, é uma seleção válida que o
+    // estado da comanda recusa — um open rosh e as trocas dele não vão para contas diferentes.
+    @ExceptionHandler(LinkedItemMustCloseTogetherException.class)
+    public ResponseEntity<ApiError> handleLinkedItemMustCloseTogether(
+            LinkedItemMustCloseTogetherException ex, HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "LINKED_ITEM_MUST_CLOSE_TOGETHER", req);
+    }
+
+    // PDV-F016 — juntar mesas. Os dois são 409: o pedido é bem formado, o estado é que recusa.
+    @ExceptionHandler(ComandaPartiallyClosedException.class)
+    public ResponseEntity<ApiError> handleComandaPartiallyClosed(ComandaPartiallyClosedException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "COMANDA_PARTIALLY_CLOSED", req);
+    }
+
+    @ExceptionHandler(ComandaMergeNotAllowedException.class)
+    public ResponseEntity<ApiError> handleComandaMergeNotAllowed(ComandaMergeNotAllowedException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "COMANDA_MERGE_NOT_ALLOWED", req);
+    }
+
     /** PDV-F014 — irmão de COURTESY_NOT_ALLOWED e SURCHARGE_NOT_ALLOWED: abater tem dono. */
     @ExceptionHandler(ComandaDiscountNotAllowedException.class)
     public ResponseEntity<ApiError> handleComandaDiscountNotAllowed(ComandaDiscountNotAllowedException ex,
@@ -1098,6 +1213,54 @@ public class GlobalExceptionHandler {
         log.warn("Violação de integridade em {}", req.getRequestURI(), ex);
         return error(HttpStatus.CONFLICT, "A operação conflita com um registro já existente, tente novamente",
                 "DATA_INTEGRITY_VIOLATION", req);
+    }
+
+    /**
+     * PLAT-C049 — método HTTP não suportado é erro <b>do cliente</b>, e sem este handler caía no
+     * catch-all de {@link Exception}: {@code POST /compras/suppliers} numa rota que só tem
+     * {@code GET} respondia <b>500 INTERNAL_ERROR</b> com stacktrace em {@code log.error}. Isso conta
+     * erro de cliente como falha de servidor no monitoramento e manda quem investiga caçar defeito
+     * onde não há. Mesmo motivo pelo qual {@code HandlerMethodValidationException} e
+     * {@code MissingServletRequestParameterException} ganharam handler acima.
+     *
+     * <p>O header {@code Allow} vai junto porque é o que a especificação de HTTP exige de um 405 —
+     * e é o que diz ao cliente qual é o método certo, em vez de deixá-lo adivinhar.</p>
+     */
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<ApiError> handleMethodNotSupported(HttpRequestMethodNotSupportedException ex,
+            HttpServletRequest req) {
+        log.warn("Método {} não suportado em {}", ex.getMethod(), req.getRequestURI());
+        String[] supported = ex.getSupportedMethods();
+        String message = "Método " + ex.getMethod() + " não é suportado neste recurso"
+                + (supported == null || supported.length == 0
+                        ? "" : ". Métodos aceitos: " + String.join(", ", supported));
+        ResponseEntity.BodyBuilder builder = ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED);
+        if (supported != null && supported.length > 0) {
+            builder.header(HttpHeaders.ALLOW, String.join(", ", supported));
+        }
+        return builder.body(ApiError.of(message, "METHOD_NOT_ALLOWED", req.getRequestURI(),
+                MDC.get("traceId")));
+    }
+
+    /**
+     * Vizinhos do 405 que caíam no mesmo buraco: {@code Content-Type} que o endpoint não consome
+     * (415) e {@code Accept} que ele não produz (406). Os três são erro de cliente e viravam 500.
+     */
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<ApiError> handleMediaTypeNotSupported(HttpMediaTypeNotSupportedException ex,
+            HttpServletRequest req) {
+        log.warn("Content-Type não suportado em {}: {}", req.getRequestURI(), ex.getContentType());
+        return error(HttpStatus.UNSUPPORTED_MEDIA_TYPE,
+                "Formato de conteúdo não suportado neste recurso", "UNSUPPORTED_MEDIA_TYPE", req);
+    }
+
+    @ExceptionHandler(HttpMediaTypeNotAcceptableException.class)
+    public ResponseEntity<ApiError> handleMediaTypeNotAcceptable(HttpMediaTypeNotAcceptableException ex,
+            HttpServletRequest req) {
+        log.warn("Accept não atendido em {}", req.getRequestURI());
+        return error(HttpStatus.NOT_ACCEPTABLE,
+                "Nenhum dos formatos aceitos pelo cliente é produzido por este recurso",
+                "NOT_ACCEPTABLE", req);
     }
 
     @ExceptionHandler(Exception.class)

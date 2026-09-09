@@ -14,6 +14,7 @@ import org.springframework.util.AntPathMatcher;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 
 @Component
 public class MaintenanceModeFilter extends OncePerRequestFilter {
@@ -54,6 +55,12 @@ public class MaintenanceModeFilter extends OncePerRequestFilter {
                     MDC.get("traceId"));
             response.setStatus(503);
             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+            // PLAT-C050 — o charset é obrigatório aqui: MediaType.APPLICATION_JSON_VALUE é
+            // "application/json" seco, e sem ele o getWriter() do Tomcat cai no default do
+            // container. A mensagem acentuada saía mangled ("Muitas tentativas ? aguarde"), e o
+            // cliente ainda recebia um Content-Type sem charset. Mesmo par setContentType +
+            // setCharacterEncoding de RestAuthenticationEntryPoint e RestAccessDeniedHandler.
+            response.setCharacterEncoding(StandardCharsets.UTF_8.name());
             MAPPER.writeValue(response.getWriter(), error);
             return;
         }
