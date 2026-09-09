@@ -1,9 +1,11 @@
 package com.cernecommerce.adapter.in.controller;
 
 import com.cernecommerce.adapter.in.dtos.response.NotificationResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.SseTicketResponseDTO;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.notification.Notification;
 import com.cernecommerce.core.ports.in.NotificationUseCase;
+import com.cernecommerce.core.ports.out.sse.SseTicketPort;
 import com.cernecommerce.adapter.in.sse.SseEmitterRegistry;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -25,12 +27,21 @@ import java.util.Map;
 @Validated
 public class NotificationController {
 
+    /**
+     * Vida do bilhete de SSE. Curta de propósito: ele só precisa sobreviver ao intervalo entre a
+     * resposta do POST e a abertura do EventSource, que é uma ida e volta na mesma página.
+     */
+    static final long TICKET_TTL_SECONDS = 30;
+
     private final NotificationUseCase useCase;
     private final SseEmitterRegistry sseRegistry;
+    private final SseTicketPort sseTickets;
 
-    public NotificationController(NotificationUseCase useCase, SseEmitterRegistry sseRegistry) {
+    public NotificationController(NotificationUseCase useCase, SseEmitterRegistry sseRegistry,
+            SseTicketPort sseTickets) {
         this.useCase = useCase;
         this.sseRegistry = sseRegistry;
+        this.sseTickets = sseTickets;
     }
 
     @Operation(summary = "Lista notificações do usuário autenticado")
@@ -75,7 +86,31 @@ public class NotificationController {
         return ResponseEntity.noContent().build();
     }
 
-    @Operation(summary = "Stream SSE de notificações em tempo real")
+    @Operation(summary = "Emite um bilhete de uso único para abrir o stream SSE (PLAT-C051)",
+            description = "Chamado com o `Authorization: Bearer` normal, devolve um valor opaco "
+                    + "para ser passado como `?ticket=` em `GET /notifications/stream`.\n\n"
+                    + "Existe porque a API `EventSource` do navegador **não envia headers** — sem "
+                    + "isto o stream respondia 401 para todo cliente de navegador, e a notificação "
+                    + "em tempo real não existia. O bilhete não substitui o Bearer: quem consegue "
+                    + "mandar o header (curl, integração servidor-a-servidor) continua abrindo o "
+                    + "stream direto.\n\n"
+                    + "**Não é um token de acesso.** Vale para uma rota, um uso e "
+                    + TICKET_TTL_SECONDS + " segundos — de propósito, porque query string entra em "
+                    + "log de acesso, histórico de proxy e cabeçalho `Referer`, e o access token "
+                    + "vale 15 minutos em toda a API.")
+    @PostMapping("/stream-ticket")
+    public ResponseEntity<SseTicketResponseDTO> issueStreamTicket(Authentication auth) {
+        SseTicketResponseDTO response = new SseTicketResponseDTO();
+        response.setTicket(sseTickets.issue(auth.getName(), TICKET_TTL_SECONDS));
+        response.setExpiresInSeconds(TICKET_TTL_SECONDS);
+        return ResponseEntity.ok(response);
+    }
+
+    @Operation(summary = "Stream SSE de notificações em tempo real",
+            description = "Aceita `Authorization: Bearer` **ou** `?ticket=` emitido por "
+                    + "`POST /notifications/stream-ticket` — o bilhete é o caminho do navegador, "
+                    + "cujo `EventSource` não envia headers (PLAT-C051). O bilhete é consumido na "
+                    + "abertura: cada reconexão precisa de um novo.")
     @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter stream(Authentication auth) {
         SseEmitter emitter = new SseEmitter(Duration.ofMinutes(30).toMillis());

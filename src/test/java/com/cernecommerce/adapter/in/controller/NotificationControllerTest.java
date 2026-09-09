@@ -5,6 +5,7 @@ import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.notification.Notification;
 import com.cernecommerce.core.domain.model.notification.NotificationType;
 import com.cernecommerce.core.ports.in.NotificationUseCase;
+import com.cernecommerce.core.ports.out.sse.SseTicketPort;
 import com.cernecommerce.infra.handler.GlobalExceptionHandler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -27,6 +28,7 @@ public class NotificationControllerTest {
     private MockMvc mockMvc;
     private NotificationUseCase useCase;
     private SseEmitterRegistry sseRegistry;
+    private SseTicketPort sseTickets;
 
     private static final UsernamePasswordAuthenticationToken AUTH =
             new UsernamePasswordAuthenticationToken("alice", null, List.of());
@@ -37,8 +39,9 @@ public class NotificationControllerTest {
     void setup() {
         useCase = mock(NotificationUseCase.class);
         sseRegistry = mock(SseEmitterRegistry.class);
+        sseTickets = mock(SseTicketPort.class);
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new NotificationController(useCase, sseRegistry))
+                .standaloneSetup(new NotificationController(useCase, sseRegistry, sseTickets))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }

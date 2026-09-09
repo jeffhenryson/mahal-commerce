@@ -22,6 +22,7 @@ import com.cernecommerce.infra.security.TraceIdFilter;
 import com.cernecommerce.infra.security.jwt.JwtAuthenticationFilter;
 import com.cernecommerce.infra.security.LoginRateLimitingFilter;
 import com.cernecommerce.infra.security.ResourceRateLimitingFilter;
+import com.cernecommerce.infra.security.SseTicketAuthenticationFilter;
 
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -50,6 +51,7 @@ public class SecurityConfig {
                                            ResourceRateLimitingFilter resourceRateLimitingFilter,
                                            MaintenanceModeFilter maintenanceModeFilter,
                                            TraceIdFilter traceIdFilter,
+                                           SseTicketAuthenticationFilter sseTicketAuthenticationFilter,
                                            @org.springframework.beans.factory.annotation.Value("${security.content-security-policy:}") String cspDirective,
                                            @org.springframework.beans.factory.annotation.Value("${springdoc.swagger-ui.enabled:true}") boolean swaggerEnabled) throws Exception {
         // Convenção de autorização: sempre hasAuthority(), nunca hasRole().
@@ -141,9 +143,16 @@ public class SecurityConfig {
             .addFilterAfter(maintenanceModeFilter, TraceIdFilter.class)
             .addFilterBefore(loginRateLimitingFilter, UsernamePasswordAuthenticationFilter.class)
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
-            // Depois do JWT, não antes: crm-export/estoque-movements usam o usuário autenticado
-            // como chave (request.getUserPrincipal()), que só existe depois que o JWT já rodou.
-            .addFilterAfter(resourceRateLimitingFilter, JwtAuthenticationFilter.class)
+            // PLAT-C051 — depois do JWT, e só age se o contexto ainda estiver vazio: quem consegue
+            // mandar o header Authorization continua autenticando pelo caminho normal. O bilhete é
+            // a saída para o EventSource do navegador, que não envia headers, e vale para uma rota
+            // só (GET /notifications/stream), um uso e alguns segundos.
+            .addFilterAfter(sseTicketAuthenticationFilter, JwtAuthenticationFilter.class)
+            // Depois da autenticação, não antes: crm-export/estoque-movements/notifications-stream
+            // usam o usuário autenticado como chave (request.getUserPrincipal()). Encadeado no
+            // filtro de bilhete, e não no de JWT, porque o stream se autentica naquele — a ordem
+            // entre os dois deixa de depender de qual foi registrado primeiro.
+            .addFilterAfter(resourceRateLimitingFilter, SseTicketAuthenticationFilter.class)
             .cors(Customizer.withDefaults());
         return http.build();
     }

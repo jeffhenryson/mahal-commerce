@@ -87,6 +87,7 @@ import com.cernecommerce.core.ports.out.estoque.StockBalanceRepository;
 import com.cernecommerce.core.ports.out.estoque.StockCountRepository;
 import com.cernecommerce.core.ports.out.estoque.StockIntegrityRepository;
 import com.cernecommerce.core.ports.out.estoque.StockLotRepository;
+import com.cernecommerce.core.ports.out.estoque.OpenPackageRepository;
 import com.cernecommerce.core.ports.out.estoque.StockMovementRepository;
 import com.cernecommerce.core.ports.out.estoque.StockReservationRepository;
 import com.cernecommerce.core.ports.out.estoque.WarehouseRepository;
@@ -282,12 +283,16 @@ class CoreBeanConfig {
     ComandaUseCase comandaUseCase(ComandaRepository comandaRepository, EstoqueUseCase estoqueUseCase,
             OrderRepository orderRepository, OrderPaymentRepository orderPaymentRepository,
             CashbackUseCase cashbackUseCase, PdvService pdvService,
+            // PDV-F013 — a varredura de mesa esquecida avisa quem pode agir sobre ela. Mesmo par
+            // (canal + destinatários por permissão) que EstoqueService usa para o alerta de lote.
+            NotificationUseCase notificationUseCase, UserRepository userRepository,
             // PDV-F015 — os 10% do garçom. Configuração e não constante porque é o costume do
             // salão, não uma lei; zero desliga a cobrança sem mexer em código. Migra para
             // system_config junto com o teto de desconto, quando o painel existir.
             @Value("${pdv.comanda.service-fee-percent:10}") BigDecimal serviceFeePercent) {
         return new ComandaService(comandaRepository, estoqueUseCase, orderRepository,
-                orderPaymentRepository, cashbackUseCase, pdvService, serviceFeePercent);
+                orderPaymentRepository, cashbackUseCase, pdvService, notificationUseCase,
+                userRepository, serviceFeePercent);
     }
 
     @Bean
@@ -303,13 +308,14 @@ class CoreBeanConfig {
             KitComponentRepository kitComponentRepository, StockLotRepository stockLotRepository,
             SystemConfigPort systemConfigPort, CategoryRepository categoryRepository,
             BrandRepository brandRepository, AttributeTypeRepository attributeTypeRepository,
-            ReplenishmentListRepository replenishmentListRepository) {
+            ReplenishmentListRepository replenishmentListRepository,
+            OpenPackageRepository openPackageRepository) {
         return new EstoqueService(productRepository, warehouseRepository, stockBalanceRepository,
                 stockMovementRepository, reorderPointRepository, stockIntegrityRepository,
                 stockCountRepository, stockReservationRepository, notificationUseCase, userRepository,
                 afterCommitExecutor, defaultReservationTtl, kitComponentRepository, stockLotRepository,
                 systemConfigPort, categoryRepository, brandRepository, attributeTypeRepository,
-                replenishmentListRepository);
+                replenishmentListRepository, openPackageRepository);
     }
 
     @Bean
