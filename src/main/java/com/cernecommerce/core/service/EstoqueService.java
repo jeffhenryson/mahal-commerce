@@ -30,6 +30,7 @@ import com.cernecommerce.core.domain.exception.estoque.KitSelfReferenceException
 import com.cernecommerce.core.domain.exception.estoque.LotExpiryDateMismatchException;
 import com.cernecommerce.core.domain.exception.estoque.MissingLotInfoException;
 import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
+import com.cernecommerce.core.domain.exception.estoque.SameSkuConversionException;
 import com.cernecommerce.core.domain.exception.estoque.ProductVariantNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountAlreadyOpenException;
 import com.cernecommerce.core.domain.exception.estoque.StockCountNotFoundException;
@@ -39,9 +40,14 @@ import com.cernecommerce.core.domain.exception.estoque.StockReservationNotActive
 import com.cernecommerce.core.domain.exception.estoque.StockReservationNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.UnexpectedLotInfoException;
 import com.cernecommerce.core.domain.exception.estoque.UnexpectedUnitCostException;
+import com.cernecommerce.core.domain.exception.estoque.NotAPackagedSessionProductException;
+import com.cernecommerce.core.domain.exception.estoque.OpenPackageNotFoundException;
+import com.cernecommerce.core.domain.exception.estoque.ProductHasStockHistoryException;
+import com.cernecommerce.core.domain.exception.estoque.ProductNotDraftException;
 import com.cernecommerce.core.domain.exception.estoque.VariantHasStockHistoryException;
 import com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundException;
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.estoque.AbcAnalysis;
 import com.cernecommerce.core.domain.model.estoque.AttributeType;
 import com.cernecommerce.core.domain.model.estoque.Brand;
 import com.cernecommerce.core.domain.model.estoque.Category;
@@ -55,6 +61,8 @@ import com.cernecommerce.core.domain.model.estoque.LotIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.MeasurementUnit;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.OrphanSku;
+import com.cernecommerce.core.domain.model.estoque.OpenPackage;
+import com.cernecommerce.core.domain.model.estoque.OpenPackageCloseReason;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.SortDirection;
 import com.cernecommerce.core.domain.model.estoque.Product;
@@ -95,6 +103,7 @@ import com.cernecommerce.core.ports.out.estoque.StockBalanceRepository;
 import com.cernecommerce.core.ports.out.estoque.StockCountRepository;
 import com.cernecommerce.core.ports.out.estoque.StockIntegrityRepository;
 import com.cernecommerce.core.ports.out.estoque.StockLotRepository;
+import com.cernecommerce.core.ports.out.estoque.OpenPackageRepository;
 import com.cernecommerce.core.ports.out.estoque.StockMovementRepository;
 import com.cernecommerce.core.ports.out.estoque.StockReservationRepository;
 import com.cernecommerce.core.ports.out.estoque.WarehouseRepository;
@@ -141,6 +150,7 @@ public class EstoqueService implements EstoqueUseCase {
     private final BrandRepository brandRepository;
     private final AttributeTypeRepository attributeTypeRepository;
     private final ReplenishmentListRepository replenishmentListRepository;
+    private final OpenPackageRepository openPackageRepository;
 
     public EstoqueService(ProductRepository productRepository, WarehouseRepository warehouseRepository,
             StockBalanceRepository stockBalanceRepository, StockMovementRepository stockMovementRepository,
@@ -151,7 +161,8 @@ public class EstoqueService implements EstoqueUseCase {
             KitComponentRepository kitComponentRepository, StockLotRepository stockLotRepository,
             SystemConfigPort systemConfigPort, CategoryRepository categoryRepository,
             BrandRepository brandRepository, AttributeTypeRepository attributeTypeRepository,
-            ReplenishmentListRepository replenishmentListRepository) {
+            ReplenishmentListRepository replenishmentListRepository,
+            OpenPackageRepository openPackageRepository) {
         this.stockReservationRepository = stockReservationRepository;
         this.defaultReservationTtl = defaultReservationTtl;
         this.productRepository = productRepository;
@@ -171,6 +182,7 @@ public class EstoqueService implements EstoqueUseCase {
         this.brandRepository = brandRepository;
         this.attributeTypeRepository = attributeTypeRepository;
         this.replenishmentListRepository = replenishmentListRepository;
+        this.openPackageRepository = openPackageRepository;
     }
 
     @Override
@@ -484,6 +496,33 @@ public class EstoqueService implements EstoqueUseCase {
                 .filter(v -> !v.sku().equals(variantSku))
                 .toList();
         return productRepository.save(current.withVariants(remaining));
+    }
+
+    @Override
+    @Transactional
+    public void deleteProduct(String sku) {
+        Product current = productRepository.findBySku(sku)
+                .orElseThrow(() -> new ProductNotFoundException(sku));
+        if (current.status() != ProductStatus.RASCUNHO) {
+            throw new ProductNotDraftException(sku);
+        }
+        // A grade inteira precisa estar limpa, não só o SKU pai: criação atômica com estoque
+        // inicial grava ENTRADA, e um rascunho que chegou a ser movimentado tem histórico que
+        // ficaria órfão — stock_balance/stock_movement referenciam SKU como texto livre, sem FK
+        // (EST-C011). Mesma régua de deleteVariant, aplicada ao agregado.
+        if (hasStockHistory(sku)) {
+            throw new ProductHasStockHistoryException(sku);
+        }
+        for (ProductVariant variant : current.variants()) {
+            if (hasStockHistory(variant.sku())) {
+                throw new ProductHasStockHistoryException(variant.sku());
+            }
+        }
+        productRepository.deleteBySku(sku);
+    }
+
+    private boolean hasStockHistory(String sku) {
+        return stockBalanceRepository.existsBySku(sku) || stockMovementRepository.existsBySku(sku);
     }
 
     // ── Categorias do catálogo ───────────────────────────────────────────────
@@ -824,7 +863,8 @@ public class EstoqueService implements EstoqueUseCase {
         // availableForTable/sessionProduct/openRoshPrice vêm do PAI, mesmo quando o SKU pedido é o
         // de uma variação: disponibilidade na mesa e preço de open rosh não têm versão por sabor.
         return new CatalogSaleInfo(product.name(), pricing, product.availableForTable(),
-                product.sessionProduct(), product.openRoshPrice());
+                product.sessionProduct(), product.openRoshPrice(), product.sessionsPerUnit(),
+                product.isKit());
     }
 
 
@@ -1022,6 +1062,153 @@ public class EstoqueService implements EstoqueUseCase {
     public StockBalance adjustStock(String sku, String warehouseCode, MovementType type, BigDecimal quantity,
             String reason, String username) {
         return adjustStock(sku, warehouseCode, type, quantity, reason, username, null, null);
+    }
+
+    /**
+     * EST-F025 — conversão entre SKUs. Ver o javadoc de {@link EstoqueUseCase#convertStock}.
+     *
+     * <p><b>A SAIDA vem primeiro de propósito.</b> É o lado que pode faltar saldo; falhar antes de
+     * criar a entrada mantém a regra de "valida tudo antes de escrever" que {@code registerSale} e
+     * {@code ComandaService.addItem} já seguem, e deixa o erro apontando para o problema real (não há
+     * lata) em vez de para um estado meio aplicado.</p>
+     *
+     * <p>As duas chamadas a {@link #adjustStock} são <b>autoinvocação do próprio bean</b>: não passam
+     * pelo proxy Spring e por isso correm na MESMA transação aberta aqui, que é exatamente a
+     * atomicidade que esta operação existe para dar. Mesmo idioma, e mesma razão, de
+     * {@link #explodeKitMovement} — parece descuido e não é.</p>
+     *
+     * <p>Nada mais precisa ser validado aqui: existência de SKU e depósito, {@code @Version}, alerta
+     * de reposição, explosão de kit e FEFO já moram dentro de {@code adjustStock}, e cada lado da
+     * conversão passa por todos eles.</p>
+     */
+    /**
+     * EST-F011 — curva ABC. O service faz o mínimo: resolve o depósito, pede as linhas agregadas e
+     * entrega a {@link AbcAnalysis}. A classificação é aritmética pura de domínio, e mantê-la fora
+     * daqui é o que a torna testável sem banco — mesma divisão de {@code DiscountProration}.
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public List<AbcAnalysis.AbcEntry> findAbcAnalysis(String warehouseCode, Instant from, Instant to) {
+        Long warehouseId = warehouseCode == null ? null : requireWarehouse(warehouseCode).id();
+        return AbcAnalysis.classify(stockMovementRepository.findConsumptionByPeriod(warehouseId, from, to));
+    }
+
+    @Override
+    @Transactional
+    public StockConversionResult convertStock(String fromSku, String toSku, BigDecimal fromQuantity,
+            BigDecimal toQuantity, String warehouseCode, String reason, String username) {
+        if (fromSku != null && fromSku.equals(toSku)) {
+            throw new SameSkuConversionException(fromSku);
+        }
+        StockBalance from = adjustStock(fromSku, warehouseCode, MovementType.SAIDA, fromQuantity,
+                "Conversão para " + toSku + " — " + reason, username);
+        StockBalance to = adjustStock(toSku, warehouseCode, MovementType.ENTRADA, toQuantity,
+                "Conversão de " + fromSku + " — " + reason, username);
+        return new StockConversionResult(from, to);
+    }
+
+    // ── Lata aberta (EST-F027) ───────────────────────────────────────────────
+    //
+    // A conversão acima (EST-F025) e a lata resolvem o mesmo problema físico por caminhos
+    // diferentes, e a fronteira precisa ficar escrita para o operador não terminar com duas
+    // verdades sobre a mesma lata: `POST /estoque/conversions` continua sendo a ferramenta
+    // GENÉRICA de reembalagem entre dois SKUs distintos (comprei em fardo, vendo em unidade), e a
+    // lata é o caminho da ESSÊNCIA, onde origem e sessão são o MESMO SKU — o produto de sessão,
+    // com openRoshPrice e sessionsPerUnit próprios. Essência não passa mais pela conversão.
+
+    @Override
+    @Transactional
+    public OpenPackage consumeSession(String sku, String warehouseCode, BigDecimal quantity, String username) {
+        Product product = productRepository.findByAnySku(sku)
+                .orElseThrow(() -> new ProductNotFoundException(sku));
+        if (!product.sessionProduct() || product.sessionsPerUnit() == null || product.sessionsPerUnit() <= 0) {
+            throw new NotAPackagedSessionProductException(sku);
+        }
+        Warehouse warehouse = warehouseRepository.findByCode(warehouseCode)
+                .orElseThrow(() -> new WarehouseNotFoundException(warehouseCode));
+        int sessions = sessionsFor(quantity);
+
+        OpenPackage current = openPackageRepository.findOpen(sku, warehouse.id()).orElse(null);
+        // A lata esgotada continua aberta até a sessão SEGUINTE — é ela que o atendente está
+        // usando até o fim, e é o que permite a tela mostrar "5 de 5". Quem a fecha é este ponto.
+        if (current != null && current.isExhausted()) {
+            openPackageRepository.save(current.closed(OpenPackageCloseReason.EXHAUSTED, Instant.now()));
+            current = null;
+        }
+        if (current == null) {
+            current = openPackage(sku, warehouse, product.sessionsPerUnit(), username);
+        }
+        return openPackageRepository.save(current.withUses(sessions));
+    }
+
+    @Override
+    @Transactional
+    public void releaseSession(String sku, String warehouseCode, BigDecimal quantity) {
+        Warehouse warehouse = warehouseRepository.findByCode(warehouseCode)
+                .orElseThrow(() -> new WarehouseNotFoundException(warehouseCode));
+        openPackageRepository.findOpen(sku, warehouse.id())
+                .ifPresent(open -> openPackageRepository.save(open.withoutUses(sessionsFor(quantity))));
+    }
+
+    @Override
+    @Transactional
+    public OpenPackage replaceOpenPackage(String sku, String warehouseCode, String username) {
+        Product product = productRepository.findByAnySku(sku)
+                .orElseThrow(() -> new ProductNotFoundException(sku));
+        if (!product.sessionProduct() || product.sessionsPerUnit() == null || product.sessionsPerUnit() <= 0) {
+            throw new NotAPackagedSessionProductException(sku);
+        }
+        Warehouse warehouse = warehouseRepository.findByCode(warehouseCode)
+                .orElseThrow(() -> new WarehouseNotFoundException(warehouseCode));
+
+        Optional<OpenPackage> current = openPackageRepository.findOpen(sku, warehouse.id());
+        // A nova é aberta ANTES de fechar a velha, e a ordem importa: abrir baixa estoque e pode
+        // faltar saldo. Falhar depois de fechar deixaria o atendente sem lata nenhuma no sistema,
+        // com uma na mão. Mesma razão pela qual convertStock faz a SAIDA primeiro.
+        OpenPackage replacement = openPackage(sku, warehouse, product.sessionsPerUnit(), username);
+        current.ifPresent(open ->
+                openPackageRepository.save(open.closed(OpenPackageCloseReason.REPLACED, Instant.now())));
+        return openPackageRepository.save(replacement);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<OpenPackage> listOpenPackages(String warehouseCode) {
+        Warehouse warehouse = warehouseRepository.findByCode(warehouseCode)
+                .orElseThrow(() -> new WarehouseNotFoundException(warehouseCode));
+        return openPackageRepository.findAllOpen(warehouse.id());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public OpenPackage findOpenPackage(String sku, String warehouseCode) {
+        Warehouse warehouse = warehouseRepository.findByCode(warehouseCode)
+                .orElseThrow(() -> new WarehouseNotFoundException(warehouseCode));
+        return openPackageRepository.findOpen(sku, warehouse.id())
+                .orElseThrow(() -> new OpenPackageNotFoundException(sku, warehouseCode));
+    }
+
+    /**
+     * Tira uma unidade da prateleira e devolve a lata nova, ainda zerada. A {@code SAIDA} é
+     * autoinvocação do próprio bean — mesma transação, mesmo idioma de {@code convertStock} e
+     * {@code explodeKitMovement} —, então validação de SKU, {@code @Version}, alerta de reposição e
+     * FEFO acontecem normalmente.
+     */
+    private OpenPackage openPackage(String sku, Warehouse warehouse, int sessionsPerUnit, String username) {
+        adjustStock(sku, warehouse.code(), MovementType.SAIDA, BigDecimal.ONE,
+                "Abertura de lata (" + sessionsPerUnit + " sessões)", username);
+        return OpenPackage.open(sku, warehouse.id(), sessionsPerUnit, username, Instant.now());
+    }
+
+    /**
+     * Quantidade de sessões que uma linha consome. Arredonda para <b>cima</b>: não existe meia lata
+     * aberta, e meia sessão gasta um uso inteiro. Piso em 1 para quantidade positiva menor que um.
+     */
+    private static int sessionsFor(BigDecimal quantity) {
+        if (quantity == null || quantity.signum() <= 0) {
+            throw new IllegalArgumentException("quantidade de sessões deve ser maior que zero");
+        }
+        return Math.max(1, quantity.setScale(0, RoundingMode.CEILING).intValueExact());
     }
 
     @Override

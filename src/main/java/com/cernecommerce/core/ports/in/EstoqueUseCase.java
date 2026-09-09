@@ -1,6 +1,7 @@
 package com.cernecommerce.core.ports.in;
 
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.estoque.AbcAnalysis;
 import com.cernecommerce.core.domain.model.estoque.AttributeType;
 import com.cernecommerce.core.domain.model.estoque.Brand;
 import com.cernecommerce.core.domain.model.estoque.Category;
@@ -12,6 +13,7 @@ import com.cernecommerce.core.domain.model.estoque.LotIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.MeasurementUnit;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.OrphanSku;
+import com.cernecommerce.core.domain.model.estoque.OpenPackage;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.SortDirection;
 import com.cernecommerce.core.domain.model.estoque.Product;
@@ -456,6 +458,30 @@ public interface EstoqueUseCase {
      */
     Product deleteVariant(String productSku, String variantSku);
 
+    /**
+     * Descarta um <b>rascunho</b> de produto/kit (EST-F026) — o pedido EST-020 do QA do
+     * {@code frontend-admin-prod}.
+     *
+     * <p>Existe porque o teto de 5 rascunhos (EST-F023) orientava uma ação que o sistema não
+     * oferecia: o 409 diz "publique ou remova um rascunho", e remover não existia.
+     * {@code PATCH .../active} com {@code active:false} <b>não</b> libera a vaga — {@code status} e
+     * {@code active} são eixos independentes —, então a única saída era publicar no catálogo um
+     * produto que o operador não queria publicar. Cinco rascunhos abandonados desligavam o recurso
+     * para o tenant inteiro.</p>
+     *
+     * <p><b>Só rascunho.</b> Produto publicado responde 409 e continua saindo de circulação por
+     * {@code active:false}: exclusão de catálogo deixaria órfão o histórico que referencia o SKU
+     * como texto livre, sem FK (EST-C011).</p>
+     *
+     * @throws com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException se o SKU
+     *         não existir.
+     * @throws com.cernecommerce.core.domain.exception.estoque.ProductNotDraftException se o
+     *         produto não estiver em {@code RASCUNHO}.
+     * @throws com.cernecommerce.core.domain.exception.estoque.ProductHasStockHistoryException se
+     *         houver saldo ou movimentação gravados para o SKU — ou para qualquer SKU da grade.
+     */
+    void deleteProduct(String sku);
+
     // ── Categorias do catálogo ───────────────────────────────────────────────
     //
     // Categoria deixou de ser só texto livre dentro do produto para poder carregar destaque e
@@ -661,16 +687,93 @@ public interface EstoqueUseCase {
      *        {@code pricing.effectivePrice()}. Nulo quando o produto não oferece consumo livre.
      */
     record CatalogSaleInfo(String productName, Pricing pricing, boolean availableForTable,
-            boolean sessionProduct, BigDecimal openRoshPrice) {
+            boolean sessionProduct, BigDecimal openRoshPrice, Integer sessionsPerUnit, boolean kit) {
 
         /**
          * Forma curta, para quem só precisa do par nome/preço: resolve os campos de mesa para o
          * mesmo default da migration — disponível na mesa, não vendido por sessão, sem open rosh.
          */
         public CatalogSaleInfo(String productName, Pricing pricing) {
-            this(productName, pricing, true, false, null);
+            this(productName, pricing, true, false, null, null, false);
+        }
+
+        /**
+         * Forma sem os campos de lata (EST-F027) e sem {@code kit} (PDV-C020) — compatibilidade
+         * com chamadores anteriores, mesmo idioma das sobrecargas de {@code ProductFilter}.
+         */
+        public CatalogSaleInfo(String productName, Pricing pricing, boolean availableForTable,
+                boolean sessionProduct, BigDecimal openRoshPrice) {
+            this(productName, pricing, availableForTable, sessionProduct, openRoshPrice, null, false);
+        }
+
+        /**
+         * O SKU é consumido por lata aberta (EST-F027)? Exige as duas pontas: ser produto de
+         * sessão <b>e</b> declarar quantas sessões saem de uma unidade. Sem {@code sessionsPerUnit}
+         * o comportamento antigo continua valendo — baixa direta de unidade —, o que torna a
+         * adoção da lata uma escolha por produto, não uma virada de chave para o catálogo inteiro.
+         */
+        public boolean consumesOpenPackage() {
+            return sessionProduct && sessionsPerUnit != null && sessionsPerUnit > 0;
         }
     }
+
+    /**
+     * Registra o consumo de {@code quantity} sessões na lata aberta de {@code sku} (EST-F027),
+     * abrindo uma se não houver.
+     *
+     * <p>É o que substitui a {@code SAIDA} de uma unidade por sessão. <b>A unidade sai do saldo na
+     * ABERTURA da lata</b>, não a cada sessão nem na reposição: o saldo passa a significar "latas
+     * lacradas na prateleira", que é o que o operador conta no balanço, e nenhum movimento é
+     * inventado — a saída acontece no instante físico em que a lata deixa a prateleira.</p>
+     *
+     * <p>Quantidade fracionária é arredondada <b>para cima</b>: não existe meia lata aberta, e meia
+     * sessão consome um uso inteiro.</p>
+     *
+     * @throws com.cernecommerce.core.domain.exception.estoque.NotAPackagedSessionProductException
+     *         se o SKU não for produto de sessão com {@code sessionsPerUnit} declarado.
+     * @throws com.cernecommerce.core.domain.exception.estoque.InsufficientStockException se não
+     *         houver saldo para abrir a lata.
+     */
+    OpenPackage consumeSession(String sku, String warehouseCode, BigDecimal quantity, String username);
+
+    /**
+     * Desfaz {@code quantity} sessões da lata aberta — cancelamento de comanda e remoção de linha
+     * (EST-F027).
+     *
+     * <p><b>Não devolve unidade ao estoque</b>, ao contrário do {@code ENTRADA} que o cancelamento
+     * fazia antes: a essência já foi queimada e não voltou para a prateleira. Devolver unidade
+     * criaria saldo que fisicamente não existe. Se não houver lata aberta — porque foi reposta
+     * entre o lançamento e o cancelamento —, não faz nada: recusar o cancelamento por causa disso
+     * deixaria a mesa presa por um detalhe de contabilidade de lata.</p>
+     */
+    void releaseSession(String sku, String warehouseCode, BigDecimal quantity);
+
+    /**
+     * "Repor essência" (EST-F027): descarta a lata em uso e abre outra, baixando <b>uma</b>
+     * unidade do saldo.
+     *
+     * <p>Existe porque a lata acaba antes do previsto, que é o caso comum. A sobra
+     * ({@code uses < sessionsPerUnit} na lata fechada) fica registrada no histórico e <b>não</b>
+     * vira ajuste de estoque: a unidade já saiu do saldo quando foi aberta, e transformar o resto
+     * em perda criaria movimento para medir uma quantidade que ninguém mediu.</p>
+     *
+     * @throws com.cernecommerce.core.domain.exception.estoque.InsufficientStockException se não
+     *         houver saldo para abrir a lata nova — a antiga <b>não</b> é fechada nesse caso, e o
+     *         atendente continua com o que tem na mão.
+     */
+    OpenPackage replaceOpenPackage(String sku, String warehouseCode, String username);
+
+    /** Latas em uso num depósito. */
+    List<OpenPackage> listOpenPackages(String warehouseCode);
+
+    /**
+     * A lata em uso de um SKU.
+     *
+     * @throws com.cernecommerce.core.domain.exception.estoque.OpenPackageNotFoundException se não
+     *         houver nenhuma aberta — distinto de "produto não usa lata", que é
+     *         {@code NotAPackagedSessionProductException}.
+     */
+    OpenPackage findOpenPackage(String sku, String warehouseCode);
 
     /**
      * Resolve o produto (com categoria e precificação) de qualquer SKU do catálogo — pai ou
@@ -802,6 +905,59 @@ public interface EstoqueUseCase {
      */
     StockBalance adjustStock(String sku, String warehouseCode, MovementType type, BigDecimal quantity,
             String reason, String username);
+
+    /**
+     * Converte saldo de um SKU em saldo de outro <b>numa única transação</b> (EST-F025): uma
+     * {@code SAIDA} de {@code fromQuantity} em {@code fromSku} e uma {@code ENTRADA} de
+     * {@code toQuantity} em {@code toSku}, no mesmo depósito.
+     *
+     * <p><b>Por que não bastam dois {@code adjustStock}.</b> É assim que a operação é feita hoje —
+     * dois {@code POST /estoque/movements} disparados em sequência pelo cliente —, e cada um é sua
+     * própria transação: se o segundo falhar (conflito de {@code @Version}, rede, permissão), a lata
+     * saiu do saldo e nenhuma sessão entrou, sem compensação nem rastro de que os dois movimentos
+     * eram um ato só. Aqui ou os dois acontecem, ou nenhum.</p>
+     *
+     * <p>O caso que a motivou é o lounge: uma lata de essência vira N sessões de narguilé. Lata e
+     * sessão são SKUs distintos por decisão da V112 (toda quantidade do sistema é inteira), e
+     * {@code sessionsPerUnit} é sugestão de tela — por isso {@code toQuantity} é <b>explícito</b>
+     * aqui, e não derivado: o saldo não pode depender de um número que o admin edita no catálogo.</p>
+     *
+     * <p>Não há {@code MovementType} novo: são uma {@code SAIDA} e uma {@code ENTRADA} comuns, com
+     * {@code reason} cruzado para o ledger mostrar o vínculo. Acrescentar um {@code TRANSFER} ao enum
+     * mexeria no {@code CHECK} de {@code stock_movement} e na semântica de {@code AJUSTE} sem
+     * entregar nada que a transação já não entregue.</p>
+     *
+     * @param reason motivo livre, gravado nas duas pontas do ledger junto do SKU do outro lado
+     * @throws com.cernecommerce.core.domain.exception.estoque.SameSkuConversionException se origem e
+     *         destino forem o mesmo SKU
+     * @throws com.cernecommerce.core.domain.exception.estoque.InsufficientStockException se o saldo
+     *         de {@code fromSku} não cobrir a saída — e então a entrada <b>não</b> acontece
+     * @throws com.cernecommerce.core.domain.exception.estoque.KitDirectAdjustmentException se
+     *         qualquer um dos lados for um SKU de kit, que não tem saldo próprio
+     */
+    StockConversionResult convertStock(String fromSku, String toSku, BigDecimal fromQuantity,
+            BigDecimal toQuantity, String warehouseCode, String reason, String username);
+
+    /**
+     * Os dois saldos depois de uma conversão — quanto sobrou da origem e quanto passou a existir do
+     * destino. Devolver os dois evita o {@code GET} extra que a tela faria para mostrar o resultado.
+     */
+    record StockConversionResult(StockBalance from, StockBalance to) {
+    }
+
+    /**
+     * Curva ABC e giro do consumo de um período (EST-F011), da maior participação para a menor.
+     *
+     * <p>Classifica os SKUs por <b>valor consumido</b> (quantidade de saída × custo médio) na regra
+     * de Pareto — 80% em A, até 95% em B, o resto em C — e devolve o giro de cada um. É o relatório
+     * que responde "onde meu dinheiro está parado" para quem faz a compra.</p>
+     *
+     * <p>A fonte é o ledger de {@code SAIDA}, não as vendas: o que precisa ser reposto é tudo que
+     * saiu da prateleira, e cortesia, perda e conversão saem sem virar venda.</p>
+     *
+     * @param warehouseCode depósito a filtrar; nulo agrega a loja inteira
+     */
+    List<AbcAnalysis.AbcEntry> findAbcAnalysis(String warehouseCode, Instant from, Instant to);
 
     /**
      * Mesmo que {@link #adjustStock(String, String, MovementType, BigDecimal, String, String)}, com

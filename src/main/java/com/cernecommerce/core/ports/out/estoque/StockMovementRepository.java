@@ -1,10 +1,12 @@
 package com.cernecommerce.core.ports.out.estoque;
 
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.estoque.AbcAnalysis;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.StockMovement;
 
 import java.time.Instant;
+import java.util.List;
 
 /**
  * Port de saída para persistência de movimentações de estoque (trilha de auditoria de
@@ -13,6 +15,16 @@ import java.time.Instant;
 public interface StockMovementRepository {
 
     StockMovement save(StockMovement movement);
+
+    /**
+     * Consumo agregado por SKU no período (EST-F011), já valorizado pelo custo médio e com o saldo
+     * atual — a entrada de {@code AbcAnalysis.classify}. {@code warehouseId} nulo agrega a loja
+     * inteira.
+     *
+     * <p>Devolve as linhas <b>cruas</b>, sem classificação: a curva é aritmética de domínio, e
+     * deixá-la em SQL a tornaria impossível de testar sem banco.</p>
+     */
+    List<AbcAnalysis.ConsumptionLine> findConsumptionByPeriod(Long warehouseId, Instant from, Instant to);
 
     /**
      * Histórico paginado de movimentações, mais recentes primeiro. {@code sku} e/ou

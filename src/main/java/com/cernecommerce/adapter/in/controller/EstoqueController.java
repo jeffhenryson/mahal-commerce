@@ -27,6 +27,8 @@ import com.cernecommerce.adapter.in.dtos.request.ReorderPointRequest;
 import com.cernecommerce.adapter.in.dtos.request.StockCountItemRequest;
 import com.cernecommerce.adapter.in.dtos.request.StockCountRequest;
 import com.cernecommerce.adapter.in.dtos.request.StockMovementRequest;
+import com.cernecommerce.adapter.in.dtos.request.ReplaceOpenPackageRequest;
+import com.cernecommerce.adapter.in.dtos.request.StockConversionRequest;
 import com.cernecommerce.adapter.in.dtos.request.WarehousePatchRequest;
 import com.cernecommerce.adapter.in.dtos.request.WarehouseRequest;
 import com.cernecommerce.adapter.in.dtos.response.BrandResponseDTO;
@@ -43,6 +45,9 @@ import com.cernecommerce.adapter.in.dtos.response.ReplenishmentListItemResponseD
 import com.cernecommerce.adapter.in.dtos.response.ReorderPointResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.ReservationIntegrityMismatchResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.StockBalanceResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.AbcEntryResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.OpenPackageResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.StockConversionResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.StockCountResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.StockLotResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.StockMovementResponseDTO;
@@ -59,6 +64,7 @@ import com.cernecommerce.core.domain.model.estoque.KitAvailability;
 import com.cernecommerce.core.domain.model.estoque.LotIntegrityMismatch;
 import com.cernecommerce.core.domain.model.estoque.MeasurementUnit;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
+import com.cernecommerce.core.domain.model.estoque.OpenPackage;
 import com.cernecommerce.core.domain.model.estoque.OrphanSku;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductFilter;
@@ -191,7 +197,19 @@ public class EstoqueController {
             description = "Números agregados (contagem de produtos/variantes, valor em estoque a "
                     + "custo, alertas de reposição por severidade, categoria com mais produtos) "
                     + "para telas/widgets que só precisam do resumo, sem baixar o catálogo "
-                    + "inteiro — badge de alertas, KPIs do Catálogo, painel de Estoque do Dashboard.")
+                    + "inteiro — badge de alertas, KPIs do Catálogo, painel de Estoque do Dashboard."
+                    + "\n\n**Regra de `valorEstoqueCusto`** (EST-C022, antes só implícita, o que "
+                    + "fazia servidor e tela mostrarem números diferentes): soma "
+                    + "`quantidade × custo` de **todos os depósitos**, com o custo resolvido em "
+                    + "cascata — `averageCost` do saldo (custo médio ponderado das entradas reais), "
+                    + "senão o `costPrice` da variação, o do produto pai da variação, o do produto; "
+                    + "saldo sem custo conhecido contribui **zero**.\n\n"
+                    + "Produto em `RASCUNHO` fica **fora**: não é mercadoria da loja, é cadastro em "
+                    + "construção. Produto e depósito **inativos ficam dentro** — desativar tira de "
+                    + "circulação, não da prateleira, e o total precisa bater com a contagem "
+                    + "física.\n\n**`alertasCriticos`/`alertasAtencao`** contam pontos de "
+                    + "reposição cadastrados, tratando SKU **sem linha de saldo como quantidade "
+                    + "zero** (EST-C019) — é o caso mais grave e era justamente o que sumia.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "OK"),
             @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
@@ -655,6 +673,37 @@ public class EstoqueController {
         return ResponseEntity.ok(converter.toResponse(updated));
     }
 
+    @Operation(summary = "Descarta um rascunho de produto ou kit (EST-F026)",
+            description = "Exclusão de verdade, **restrita a `status: RASCUNHO`**. Existe porque o "
+                    + "teto de 5 rascunhos orientava uma ação que não existia: o `409 "
+                    + "DRAFT_LIMIT_REACHED` diz \"publique ou remova um rascunho\", e "
+                    + "`PATCH .../active` com `active:false` **não** libera a vaga — `status` e "
+                    + "`active` são eixos independentes. Cinco rascunhos abandonados desligavam o "
+                    + "recurso para todo o tenant.\n\n"
+                    + "Produto publicado responde **409** e continua saindo de circulação por "
+                    + "`PATCH .../active`: apagar do catálogo deixaria órfão o histórico que "
+                    + "referencia o SKU como texto livre, sem FK. Pelo mesmo motivo, rascunho com "
+                    + "saldo ou movimentação gravados — no SKU pai ou em qualquer variação — "
+                    + "também é recusado.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "204", description = "Rascunho excluído"),
+            @ApiResponse(responseCode = "404", description = "SKU não encontrado", content = @Content),
+            @ApiResponse(responseCode = "409", description = "Produto não é rascunho, ou o rascunho tem saldo/movimentação", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @DeleteMapping("/products/{sku}")
+    @PreAuthorize("hasAuthority('ESTOQUE_PRODUCT_MANAGE')")
+    public ResponseEntity<Void> deleteProduct(
+            @PathVariable @NotBlank @Size(min = 3, max = 50) String sku, Authentication authentication) {
+        // O nome é lido antes de apagar: depois da exclusão a linha não existe mais, e um evento
+        // de auditoria só com o SKU não diz o que foi descartado.
+        String name = estoqueUseCase.findProductBySku(sku).name();
+        estoqueUseCase.deleteProduct(sku);
+        publisher.publishEvent(AuditEvent.of(EventType.PRODUCT_DELETED,
+                authentication.getName(), Map.of("sku", sku, "name", name)));
+        return ResponseEntity.noContent().build();
+    }
+
     @Operation(summary = "Consulta a precificação vigente de um SKU",
             description = "Aceita SKU pai ou de variação — a variação herda o preço do pai. "
                     + "Devolve os valores derivados (preço sugerido, preço efetivo, margem) já "
@@ -880,6 +929,174 @@ public class EstoqueController {
                 .body(warehouseConverter.toResponse(updated, request.getWarehouseCode(), resolveUnit(request.getSku())));
     }
 
+    @Operation(summary = "Curva ABC e giro do consumo de um período (EST-F011)",
+            description = "Classifica os SKUs por **valor consumido** (quantidade que saiu × custo "
+                    + "médio vigente) na regra de Pareto: A até 80% do acumulado, B até 95%, C o "
+                    + "resto. É o relatório de priorização de compra — responde onde o dinheiro "
+                    + "está, não o que sai mais vezes: a essência cara que sai pouco pesa mais no "
+                    + "caixa do que o carvão barato que sai sempre. A fonte é o ledger de `SAIDA` e "
+                    + "não as vendas, porque cortesia, perda e conversão saem da prateleira sem "
+                    + "virar venda e também precisam ser repostas. `turnover` é o consumo dividido "
+                    + "pelo saldo atual, e vem **nulo** quando o saldo é zero — um SKU que acabou "
+                    + "tem giro desconhecido, não infinito. `warehouseCode` omitido agrega a loja "
+                    + "inteira.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "404", description = "Depósito não encontrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/analytics/abc")
+    @PreAuthorize("hasAnyAuthority('ESTOQUE_PRODUCT_READ','ESTOQUE_STOCK_MANAGE')")
+    public ResponseEntity<List<AbcEntryResponseDTO>> findAbcAnalysis(
+            @RequestParam(required = false) @Size(min = 2, max = 50) String warehouseCode,
+            @RequestParam Instant from,
+            @RequestParam Instant to) {
+        List<AbcEntryResponseDTO> response = estoqueUseCase.findAbcAnalysis(warehouseCode, from, to).stream()
+                .map(e -> {
+                    AbcEntryResponseDTO dto = new AbcEntryResponseDTO();
+                    dto.setSku(e.sku());
+                    dto.setProductName(e.productName());
+                    dto.setConsumedQuantity(e.consumedQuantity());
+                    dto.setConsumedValue(e.consumedValue());
+                    dto.setCumulativePercent(e.cumulativePercent());
+                    dto.setAbcClass(e.abcClass());
+                    dto.setTurnover(e.turnover());
+                    return dto;
+                })
+                .toList();
+        return ResponseEntity.ok(response);
+    }
+
+    // ── Lata aberta (EST-F027) ───────────────────────────────────────────────
+
+    @Operation(summary = "Latas abertas de um depósito (EST-F027)",
+            description = "Os pacotes de essência já abertos no balcão, com o contador de sessões "
+                    + "de cada um. É o \"3 de 5\" da tela de sessão e da aba Essências.\n\n"
+                    + "A lata sai do saldo quando é **aberta**, não a cada sessão: "
+                    + "`stock-balance` passa a significar *latas lacradas na prateleira*, que é o "
+                    + "que o operador conta no balanço, e o consumo de dentro da lata vive aqui.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "404", description = "Depósito não encontrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/open-packages")
+    @PreAuthorize("hasAnyAuthority('ESTOQUE_PRODUCT_READ','PDV_COMANDA_MANAGE')")
+    public ResponseEntity<List<OpenPackageResponseDTO>> listOpenPackages(
+            @RequestParam @NotBlank @Size(min = 2, max = 50) String warehouseCode) {
+        return ResponseEntity.ok(estoqueUseCase.listOpenPackages(warehouseCode).stream()
+                .map(open -> toResponse(open, warehouseCode))
+                .toList());
+    }
+
+    @Operation(summary = "A lata aberta de um SKU (EST-F027)",
+            description = "404 quando não há nenhuma aberta — estado normal, não erro: a próxima "
+                    + "sessão abre uma. Distinto do 400 de produto que não é vendido por sessão.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK"),
+            @ApiResponse(responseCode = "404", description = "Não há lata aberta deste SKU, ou o depósito não existe", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/open-packages/{sku}")
+    @PreAuthorize("hasAnyAuthority('ESTOQUE_PRODUCT_READ','PDV_COMANDA_MANAGE')")
+    public ResponseEntity<OpenPackageResponseDTO> findOpenPackage(
+            @PathVariable @NotBlank @Size(min = 3, max = 50) String sku,
+            @RequestParam @NotBlank @Size(min = 2, max = 50) String warehouseCode) {
+        return ResponseEntity.ok(toResponse(estoqueUseCase.findOpenPackage(sku, warehouseCode), warehouseCode));
+    }
+
+    @Operation(summary = "Repor essência: descarta a lata em uso e abre outra (EST-F027)",
+            description = "Baixa **uma** unidade do saldo e zera o contador. Existe porque a lata "
+                    + "acaba antes do previsto, que é o caso comum.\n\n"
+                    + "A sobra da lata descartada (`uses` menor que `sessionsPerUnit`) fica no "
+                    + "histórico e **não** vira ajuste de estoque: a unidade já saiu do saldo "
+                    + "quando foi aberta, e transformar o resto em perda criaria movimento para "
+                    + "medir uma quantidade que ninguém mediu.\n\n"
+                    + "Sem saldo para abrir a nova, responde `400 INSUFFICIENT_STOCK` e a lata "
+                    + "antiga **continua aberta** — o atendente segue com o que tem na mão.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Reposta — devolve a lata nova"),
+            @ApiResponse(responseCode = "400", description = "Sem saldo para abrir, ou SKU não é vendido por sessão", content = @Content),
+            @ApiResponse(responseCode = "404", description = "SKU ou depósito não encontrado", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PostMapping("/open-packages/{sku}/replace")
+    @PreAuthorize("hasAnyAuthority('ESTOQUE_STOCK_MANAGE','PDV_COMANDA_MANAGE')")
+    public ResponseEntity<OpenPackageResponseDTO> replaceOpenPackage(
+            @PathVariable @NotBlank @Size(min = 3, max = 50) String sku,
+            @Valid @RequestBody ReplaceOpenPackageRequest request, Authentication authentication) {
+        OpenPackage replaced = estoqueUseCase.replaceOpenPackage(sku, request.getWarehouseCode(),
+                authentication.getName());
+        // A trilha do movimento de estoque já está em stock_movement; o que este evento guarda é a
+        // DECISÃO de descartar a lata, que não aparece em lugar nenhum lá.
+        publisher.publishEvent(AuditEvent.of(EventType.OPEN_PACKAGE_REPLACED, authentication.getName(),
+                Map.of("sku", sku, "warehouseCode", request.getWarehouseCode())));
+        return ResponseEntity.ok(toResponse(replaced, request.getWarehouseCode()));
+    }
+
+    /**
+     * O nome do produto sai de {@code resolveSaleInfo}, uma consulta por lata. É N+1 assumido, e
+     * limitado por construção: existe no máximo uma lata aberta por SKU de essência num depósito,
+     * e o salão trabalha com algumas dezenas de sabores — não é a listagem de catálogo, que por
+     * isso é ID-first. Se um dia virar problema, o caminho é o mesmo de EST-C009: buscar os nomes
+     * em lote pelos SKUs da página.
+     */
+    private OpenPackageResponseDTO toResponse(OpenPackage open, String warehouseCode) {
+        OpenPackageResponseDTO dto = new OpenPackageResponseDTO();
+        dto.setSku(open.sku());
+        dto.setProductName(estoqueUseCase.resolveSaleInfo(open.sku()).productName());
+        dto.setWarehouseCode(warehouseCode);
+        dto.setUses(open.uses());
+        dto.setSessionsPerUnit(open.sessionsPerUnit());
+        dto.setRemaining(open.remaining());
+        dto.setExhausted(open.isExhausted());
+        dto.setOpenedAt(open.openedAt());
+        dto.setOpenedBy(open.openedBy());
+        return dto;
+    }
+
+    @Operation(summary = "Converte saldo de um SKU em saldo de outro, atomicamente",
+            description = "Uma `SAIDA` de `fromQuantity` em `fromSku` e uma `ENTRADA` de "
+                    + "`toQuantity` em `toSku`, no mesmo depósito e na **mesma transação** — ex.: 1 "
+                    + "lata de essência vira 5 sessões de narguilé. Ou os dois movimentos acontecem, "
+                    + "ou nenhum. Substitui o par de `POST /estoque/movements` disparado em "
+                    + "sequência pelo cliente, onde uma falha no segundo sumia com o saldo do "
+                    + "primeiro. `toQuantity` é explícito: `sessionsPerUnit` do catálogo é sugestão "
+                    + "de tela, não fonte de saldo.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "201", description = "Convertido — devolve os dois saldos"),
+            @ApiResponse(responseCode = "400", description = "SKUs iguais, saldo insuficiente na "
+                    + "origem ou payload inválido", content = @Content),
+            @ApiResponse(responseCode = "404", description = "SKU ou depósito não encontrado", content = @Content),
+            @ApiResponse(responseCode = "409", description = "Conflito de concorrência no saldo", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PostMapping("/conversions")
+    @PreAuthorize("hasAuthority('ESTOQUE_STOCK_MANAGE')")
+    public ResponseEntity<StockConversionResponseDTO> convertStock(
+            @Valid @RequestBody StockConversionRequest request, Authentication authentication) {
+        EstoqueUseCase.StockConversionResult result = estoqueUseCase.convertStock(request.getFromSku(),
+                request.getToSku(), request.getFromQuantity(), request.getToQuantity(),
+                request.getWarehouseCode(), request.getReason(), authentication.getName());
+
+        StockConversionResponseDTO response = new StockConversionResponseDTO();
+        response.setFrom(warehouseConverter.toResponse(result.from(), request.getWarehouseCode(),
+                resolveUnit(request.getFromSku())));
+        response.setTo(warehouseConverter.toResponse(result.to(), request.getWarehouseCode(),
+                resolveUnit(request.getToSku())));
+
+        // Um evento para o ato, não um por movimento: a trilha item a item já vive em stock_movement,
+        // e o que se perderia com dois eventos soltos é que as duas pontas foram a mesma decisão.
+        publisher.publishEvent(AuditEvent.of(EventType.STOCK_CONVERTED, authentication.getName(),
+                Map.of("fromSku", request.getFromSku(), "toSku", request.getToSku(),
+                        "fromQuantity", request.getFromQuantity(), "toQuantity", request.getToQuantity(),
+                        "warehouseCode", request.getWarehouseCode())));
+
+        return ResponseEntity.created(URI.create("/estoque/stock-balance?sku=" + request.getToSku()
+                        + "&warehouseCode=" + request.getWarehouseCode()))
+                .body(response);
+    }
+
     @Operation(summary = "Lista o histórico paginado de movimentações de estoque",
             description = "`sku` e `warehouseCode` são opcionais. Omitidos, devolve o feed geral de "
                     + "movimentações (mais recentes primeiro); informados, filtram por esse SKU e/ou "
@@ -891,7 +1108,14 @@ public class EstoqueController {
             @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
     })
     @GetMapping("/movements")
-    @PreAuthorize("hasAuthority('ESTOQUE_STOCK_MANAGE')")
+    // EST-C015 — ler o ledger é leitura, e passa a bastar uma permissão de leitura. A regra antiga
+    // ("ler expõe quem movimentou o quê, logo exige STOCK_MANAGE") não protegia nada: o vizinho
+    // GET /estoque/products/{sku}/purchase-history devolve PageResult<StockMovement> — o MESMO
+    // ledger, a mesma entidade — com ESTOQUE_PRODUCT_READ desde sempre. O que a regra fazia era
+    // quebrar uma tela: ROLE_ATENDENTE tem PRODUCT_READ e não tem STOCK_MANAGE, e o interceptor do
+    // admin manda todo GET 403 para /access-denied — o operador era expulso em vez de avisado.
+    // O POST logo acima continua em STOCK_MANAGE: escrever saldo é outra coisa.
+    @PreAuthorize("hasAnyAuthority('ESTOQUE_PRODUCT_READ','ESTOQUE_STOCK_MANAGE')")
     public ResponseEntity<PageResult<StockMovementResponseDTO>> listMovements(
             @RequestParam(required = false) @Size(min = 3, max = 50) String sku,
             @RequestParam(required = false) @Size(min = 2, max = 50) String warehouseCode,

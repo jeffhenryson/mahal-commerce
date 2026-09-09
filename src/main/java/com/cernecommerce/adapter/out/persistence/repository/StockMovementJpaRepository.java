@@ -4,32 +4,24 @@ import com.cernecommerce.adapter.out.persistence.entity.StockMovementEntity;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 
-public interface StockMovementJpaRepository extends JpaRepository<StockMovementEntity, Long> {
+public interface StockMovementJpaRepository
+        extends JpaRepository<StockMovementEntity, Long>, JpaSpecificationExecutor<StockMovementEntity> {
 
-    /**
-     * {@code sku}/{@code warehouseId} nulos não filtram por esse critério — alimenta tanto a
-     * busca pontual (ambos informados) quanto o feed geral de movimentações (ambos omitidos).
-     *
-     * <p>O desempate por {@code id} não é cosmético: uma venda com N itens grava N movimentos no
-     * mesmo loop e na mesma transação, com {@code created_at} idêntico. Ordenar só por
-     * {@code created_at} deixa a chave de ordenação não-única, e aí a paginação fica instável —
-     * a mesma linha pode voltar em duas páginas ou não aparecer em nenhuma. {@code id} é
-     * BIGSERIAL monotônico, então dá ordem total e determinística.</p>
-     */
-    @Query("SELECT m FROM StockMovementEntity m "
-            + "WHERE (:sku IS NULL OR m.sku = :sku) "
-            + "AND (:warehouseId IS NULL OR m.warehouseId = :warehouseId) "
-            + "AND (:type IS NULL OR m.type = :type) "
-            + "AND (:from IS NULL OR m.createdAt >= :from) "
-            + "AND (:to IS NULL OR m.createdAt <= :to) "
-            + "ORDER BY m.createdAt DESC, m.id DESC")
-    Page<StockMovementEntity> search(@Param("sku") String sku, @Param("warehouseId") Long warehouseId,
-            @Param("type") String type, @Param("from") Instant from, @Param("to") Instant to, Pageable pageable);
+    // EST-C018 — a listagem filtrada do ledger não mora mais aqui: era um @Query com o padrão
+    // ":param IS NULL OR ...", e com :from/:to (Instant) nulos o Postgres real recusava inferir o
+    // tipo do bind ("could not determine data type of parameter $7"), derrubando GET
+    // /estoque/movements com 500 em toda chamada — inclusive sem filtro nenhum. A montagem passou a
+    // ser Specification em StockMovementRepositoryImpl.findBySkuAndWarehouseId, mesmo caminho que
+    // OrderRepositoryImpl.findAll já tinha tomado pelo mesmo motivo. O javadoc de
+    // ProductJpaRepository.search continua valendo para os filtros de String/Boolean que ficaram lá.
 
     /**
      * Últimas ENTRADAs de um SKU num depósito (item 2 — histórico de compras). Mesmo desempate
@@ -41,6 +33,51 @@ public interface StockMovementJpaRepository extends JpaRepository<StockMovementE
             + "ORDER BY m.createdAt DESC, m.id DESC")
     Page<StockMovementEntity> searchEntradas(@Param("sku") String sku, @Param("warehouseId") Long warehouseId,
             Pageable pageable);
+
+    /**
+     * Consumo agregado por SKU no período (EST-F011) — a base da curva ABC.
+     *
+     * <p>Fonte é {@code SAIDA} do ledger, e não {@code order_item}: o que precisa ser reposto é
+     * tudo que saiu da prateleira, incluindo cortesia, perda e o lado de saída de uma conversão
+     * (EST-F025), que uma consulta a vendas não enxerga.</p>
+     *
+     * <p>Valoriza pelo custo médio vigente do par SKU/depósito ({@code stock_balance.average_cost},
+     * EST-F007), com {@code COALESCE} para zero: SKU sem custo conhecido entra valendo nada e cai em
+     * C, em vez de desaparecer do relatório. O {@code LEFT JOIN} em {@code StockBalanceEntity} também
+     * traz o saldo atual, que é o denominador do giro.</p>
+     *
+     * <p>O índice {@code idx_stock_movement_sku_warehouse_created} da V55 cobre o filtro.</p>
+     */
+    @Query("""
+            SELECT m.sku AS sku, COALESCE(p.name, m.sku) AS productName,
+                   SUM(m.quantity) AS consumedQuantity,
+                   COALESCE(SUM(m.quantity * COALESCE(b.averageCost, 0)), 0) AS consumedValue,
+                   COALESCE(MAX(b.quantity), 0) AS currentBalance
+            FROM StockMovementEntity m
+            LEFT JOIN ProductEntity p ON p.sku = m.sku
+            LEFT JOIN StockBalanceEntity b ON b.sku = m.sku AND b.warehouseId = m.warehouseId
+            WHERE m.type = 'SAIDA'
+              AND (:warehouseId IS NULL OR m.warehouseId = :warehouseId)
+              AND m.createdAt >= :from
+              AND m.createdAt <= :to
+            GROUP BY m.sku, p.name
+            ORDER BY consumedValue DESC
+            """)
+    List<ConsumptionProjection> findConsumptionByPeriod(@Param("warehouseId") Long warehouseId,
+            @Param("from") Instant from, @Param("to") Instant to);
+
+    /** Projeção de {@link #findConsumptionByPeriod}. */
+    interface ConsumptionProjection {
+        String getSku();
+
+        String getProductName();
+
+        BigDecimal getConsumedQuantity();
+
+        BigDecimal getConsumedValue();
+
+        BigDecimal getCurrentBalance();
+    }
 
     boolean existsBySku(String sku);
 }

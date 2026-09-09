@@ -86,20 +86,34 @@ class HexagonalArchitectureTest {
         // Impede que controllers acessem repositórios/ports de saída diretamente,
         // bypassing o use case. Adaptadores em adapter.in.sse podem implementar ports de saída.
         //
-        // Exceção consciente: core.ports.out.ratelimit (PLAT-C030). Rate limit é preocupação de
-        // borda HTTP — a chave é IP ou usuário autenticado, "quantas requisições isso aguenta
-        // nesta janela" — não regra de negócio. Forçar essa checagem a atravessar CrmUseCase/
-        // EstoqueUseCase/ShopUseCase obrigaria cada assinatura a carregar um parâmetro só de
-        // infraestrutura (identificador de rate limit) sem nenhum significado para o caso de uso
-        // em si. Mesmo raciocínio de core_service_may_only_use_spring_transaction logo abaixo:
-        // uma exceção estreita e documentada, não uma brecha geral.
-        DescribedPredicate<JavaClass> outputPortButNotRateLimit =
+        // Duas exceções conscientes, e as duas são a MESMA exceção: preocupação de borda HTTP,
+        // não regra de negócio. Nenhuma delas é brecha geral — o predicado nomeia dois pacotes,
+        // e qualquer outro out port continua proibido.
+        //
+        // 1. core.ports.out.ratelimit (PLAT-C030). Rate limit é preocupação de borda HTTP — a
+        // chave é IP ou usuário autenticado, "quantas requisições isso aguenta nesta janela" —
+        // não regra de negócio. Forçar essa checagem a atravessar CrmUseCase/EstoqueUseCase/
+        // ShopUseCase obrigaria cada assinatura a carregar um parâmetro só de infraestrutura
+        // (identificador de rate limit) sem nenhum significado para o caso de uso em si.
+        //
+        // 2. core.ports.out.sse (PLAT-C051). O bilhete de stream é preocupação de AUTENTICAÇÃO de
+        // borda: ele existe só porque a API EventSource do navegador não envia headers, e sem ele
+        // GET /notifications/stream respondia 401 para todo cliente de navegador. Levar
+        // issue(username, ttlSeconds) para um port de entrada colocaria TTL e token opaco dentro
+        // de NotificationUseCase, que não sabe nem que HTTP existe — seria piorar a fronteira
+        // para satisfazer a regra que a protege. O outro consumidor do port,
+        // SseTicketAuthenticationFilter, já vive em infra.security pela mesma razão.
+        //
+        // Mesmo raciocínio de core_service_may_only_use_spring_transaction logo abaixo: exceções
+        // estreitas e documentadas.
+        DescribedPredicate<JavaClass> outputPortButNotEdgeConcern =
                 JavaClass.Predicates.resideInAPackage("..core.ports.out..")
-                        .and(not(JavaClass.Predicates.resideInAPackage("..core.ports.out.ratelimit..")));
+                        .and(not(JavaClass.Predicates.resideInAPackage("..core.ports.out.ratelimit..")))
+                        .and(not(JavaClass.Predicates.resideInAPackage("..core.ports.out.sse..")));
 
         ArchRule rule = noClasses()
                 .that().resideInAPackage("..adapter.in.controller..")
-                .should().dependOnClassesThat(outputPortButNotRateLimit);
+                .should().dependOnClassesThat(outputPortButNotEdgeConcern);
 
         rule.check(classes);
     }
