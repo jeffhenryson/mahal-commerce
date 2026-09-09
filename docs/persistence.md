@@ -428,6 +428,43 @@ Tabela de junção pura (muitos-para-muitos), sem coluna própria além das duas
 
 ---
 
+### OpenPackageEntity — tabela `open_package` (V124, EST-F027)
+
+| Coluna | Tipo | Constraint |
+|--------|------|-----------|
+| id | BIGINT | PK, auto-increment |
+| sku | VARCHAR(50) | NOT NULL — **sem FK** para `product`, mesma decisão de `stock_balance`/`stock_movement` (EST-C011): pode ser SKU de variação, que vive em outra tabela |
+| warehouse_id | BIGINT | NOT NULL, FK → `warehouse (id)` |
+| uses | INTEGER | NOT NULL DEFAULT 0 — `CHECK (uses >= 0 AND uses <= sessions_per_unit)` |
+| sessions_per_unit | INTEGER | NOT NULL, `CHECK (> 0)` — **cópia** de `product.sessions_per_unit` no momento da abertura, não leitura viva |
+| opened_at | TIMESTAMP | NOT NULL |
+| opened_by | VARCHAR(100) | NOT NULL — sempre do JWT |
+| closed_at | TIMESTAMP | nullable |
+| close_reason | VARCHAR(20) | nullable — `EXHAUSTED` \| `REPLACED` |
+
+Índice único **parcial** `uk_open_package_sku_warehouse_open (sku, warehouse_id) WHERE closed_at IS NULL`:
+uma lata em uso por par, e não `UNIQUE` simples porque a tabela é **histórico** e guarda todas as
+latas já fechadas do mesmo par — uma constraint simples proibiria a segunda. Molde dos índices
+parciais da V75. Mais `idx_open_package_warehouse_open (warehouse_id) WHERE closed_at IS NULL` para a
+leitura da tela.
+
+`CHECK ((closed_at IS NULL) = (close_reason IS NULL))` — fechada e sem motivo, ou o inverso, é meio
+estado. O compact constructor de `OpenPackage` recusa os dois; o banco recusa junto, para carga
+direta não abrir a exceção.
+
+**A unidade sai de `stock_balance` na abertura da lata**, não a cada sessão: o saldo passa a
+significar *latas lacradas na prateleira*, que é o que o operador conta no balanço, e o consumo de
+dentro da lata é o contador desta tabela. `comanda_item.package_uses`/`package_sessions_per_unit`
+(mesma migration) guardam **qual uso** cada linha da comanda foi — snapshot, não FK para
+`open_package.id`, para o histórico sobreviver à reposição e para o cancelamento saber, meses
+depois, que a linha consumiu uso e não unidade.
+
+Sem `@Version`: a escrita é sempre dentro da transação de `addItem`/`replaceOpenPackage`, que já
+serializa a mesa por trava pessimista da comanda (PDV-C008), e o índice único parcial barra a
+segunda lata aberta do mesmo par.
+
+---
+
 ## Repositórios
 
 Cada port OUT tem uma implementação `*RepositoryImpl` que:
@@ -687,6 +724,7 @@ Um único `JOIN FETCH` traz usuários, roles e permissões em uma só query. O `
 | `ProductRepositoryImpl.findAll()` | `findAllIds()` → `findAllByIdsWithVariants()` (JOIN FETCH em `variants` e `variants.attributes`) |
 | `OrderRepositoryImpl.findAll()` / `findBySessionId()` | página resolvida sem fetch → `findAllByIdsWithItems()` (JOIN FETCH em `items`) — PED-C002. A fase 1 aqui é a própria consulta paginada (`Specification` ou método derivado), que já não tocava a coleção: só a fase 2 foi acrescentada |
 | `ComandaRepositoryImpl.findOpen()` | `findOpenIds()` → `findAllByIdsWithItems()` (JOIN FETCH em `items`) — PDV-C009 |
+| `ComandaRepositoryImpl.moveOpenItems()` | `UPDATE` de `comanda_item.comanda_id` (PDV-F016) — **não** passa pelo `save` do agregado. Reatribuir a FK preserva os ids das linhas; movê-las dentro do agregado destino criaria ids novos e quebraria `linked_item_id`, que é FK auto-referente (V114) |
 | `StockCountRepositoryImpl.findByWarehouseId()` | `findIdsByWarehouseId()` → `findAllByIdsWithItems()` |
 
 ### `findFiltered` e a Criteria API

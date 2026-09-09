@@ -983,6 +983,7 @@ Query: sku (obrigatório, 3..50), warehouseCode (obrigatório, 2..50)
 // Response 201 + Location → StockBalanceResponse (saldo já atualizado)
 // 404 PRODUCT_NOT_FOUND (SKU não existe no catálogo) / 404 WAREHOUSE_NOT_FOUND
 // 400 INSUFFICIENT_STOCK (SAIDA deixaria o saldo negativo) / 400 VALIDATION_ERROR
+// 400 RESERVED_STOCK (o físico bastaria, mas parte dele está reservada — EST-C016)
 // 400 UNIT_COST_NOT_APPLICABLE (unitCost fora de ENTRADA, ou SKU é kit)
 // 409 STOCK_UPDATE_CONFLICT (conflito de concorrência otimista — tente novamente)
 // 409 DATA_INTEGRITY_VIOLATION (corrida na primeira movimentação do par — refazer resolve)
@@ -1003,6 +1004,15 @@ negativo, e zerar exatamente é permitido. Em `AJUSTE` é o **saldo-alvo**: o sa
 exatamente o valor informado, para cima ou para baixo, e zero é um alvo válido (item que acabou).
 É o que permite corrigir inventário para baixo sem lançar uma `SAIDA` falsa. Baixar por `AJUSTE`
 nunca devolve `INSUFFICIENT_STOCK` — é substituição, não subtração.
+
+⚠️ **`RESERVED_STOCK` não é o mesmo que `INSUFFICIENT_STOCK`** (EST-C016), e a diferença decide o
+que o operador faz. `INSUFFICIENT_STOCK` diz que **nem o saldo físico bastaria** — não há o que
+fazer no caixa. `RESERVED_STOCK` diz que o físico bastaria, mas parte dele está **separada para um
+pedido ainda não concluído**: a solução existe, é cancelar a reserva pelo painel e vender. A
+mensagem traz o físico, o reservado, o disponível e a quantidade pedida. Um `AJUSTE` que levaria o
+saldo **abaixo do reservado** responde o mesmo 400 — a contagem encontrou menos unidades do que já
+foram prometidas, e quais pedidos perder é decisão humana, não arredondamento do sistema. Até
+2026-08-30 esta exceção não tinha handler e saía como **500**.
 
 Além do lançamento manual, `AJUSTE` é o tipo usado pelo fechamento de um
 [balanço de inventário](#balanço-de-inventário--estoquestock-counts--permissão-estoque_stock_manage).
@@ -1027,7 +1037,181 @@ onde um SKU desconhecido reverte a venda ou o recebimento inteiro.
 
 ---
 
-### GET /estoque/movements — Permissão: ESTOQUE_STOCK_MANAGE
+### GET /estoque/analytics/abc — Permissão: ESTOQUE_PRODUCT_READ ou ESTOQUE_STOCK_MANAGE
+
+Curva ABC e giro do consumo de um período (EST-F011) — o relatório de priorização de compra.
+
+```
+Query: from (obrigatório, ISO), to (obrigatório, ISO), warehouseCode (opcional, 2..50 — omitido agrega a loja)
+// Response 200 → [{ sku, productName, consumedQuantity, consumedValue, cumulativePercent, abcClass, turnover }]
+// 404 WAREHOUSE_NOT_FOUND / 400 VALIDATION_ERROR (from/to ausentes)
+```
+
+**Classifica dinheiro, não movimento.** A ordenação é por `consumedValue` (quantidade que saiu ×
+custo médio vigente), então a essência cara que sai duas vezes por semana pode ser **A** e o carvão
+barato que sai todo dia pode ser **C**. É essa inversão que o relatório existe para mostrar.
+
+**A fonte é o ledger de `SAIDA`, não as vendas.** Cortesia, perda e o lado de saída de uma conversão
+(`POST /estoque/conversions`) tiram mercadoria da prateleira sem virar venda — e também precisam ser
+repostas. Um relatório sobre `order_item` não as veria.
+
+`abcClass` corta em 80% e 95% do acumulado, olhando o acumulado **antes** da linha: o item que cruza
+o limiar pertence à faixa que estava cruzando, então o primeiro SKU é sempre `A` mesmo quando sozinho
+já passa dos 80%.
+
+`turnover` é o consumo dividido pelo saldo atual, e vem **`null`** quando o saldo é zero — um SKU em
+ruptura não tem giro infinito, tem giro desconhecido. SKU sem custo médio conhecido entra valendo
+zero e cai em `C`, em vez de sumir do relatório.
+
+---
+
+### POST /estoque/conversions — Permissão: ESTOQUE_STOCK_MANAGE
+
+Converte saldo de um SKU em saldo de outro **numa única transação** (EST-F025) — o caso diário do
+lounge: uma lata de essência vira N sessões de narguilé.
+
+```json
+{
+  "fromSku": "ESS-BLUE-LATA",   // obrigatório, 3..50
+  "toSku": "SESS-BLUE",         // obrigatório, 3..50, diferente de fromSku
+  "fromQuantity": 1.000,        // obrigatório, > 0 — quanto sai da origem
+  "toQuantity": 5.000,          // obrigatório, > 0 — quanto entra no destino
+  "warehouseCode": "LOJA-01",   // obrigatório, 2..50 — o mesmo para as duas pontas
+  "reason": "Fracionamento"     // obrigatório, máx. 255
+}
+// Response 201 + Location (saldo do destino) → { "from": StockBalanceResponse, "to": StockBalanceResponse }
+// 400 SAME_SKU_CONVERSION (origem e destino iguais)
+// 400 INSUFFICIENT_STOCK / 400 RESERVED_STOCK (na SAIDA da origem) / 400 VALIDATION_ERROR
+// 404 PRODUCT_NOT_FOUND / 404 WAREHOUSE_NOT_FOUND
+// 409 STOCK_UPDATE_CONFLICT (concorrência otimista — refazer resolve)
+```
+
+**Por que não bastam dois `POST /estoque/movements`.** É como a operação era feita: uma `SAIDA` e uma
+`ENTRADA` disparadas em sequência pelo cliente, cada uma em sua transação. Se a segunda falhasse, a
+lata tinha saído do saldo e nenhuma sessão entrava — sem compensação e sem rastro de que os dois
+movimentos eram um ato só. Aqui ou os dois acontecem, ou nenhum.
+
+A **`SAIDA` é aplicada primeiro**, de propósito: é o lado que pode faltar saldo, então falta na origem
+impede a entrada do destino de sequer existir.
+
+`toQuantity` é **explícito**, e não derivado de `sessionsPerUnit` do catálogo: aquele campo é sugestão
+de tela por decisão da V112, e o saldo não pode depender de um número que o admin edita no cadastro.
+
+Não há `MovementType` novo — são uma `SAIDA` e uma `ENTRADA` comuns no ledger, com `reason` cruzado
+citando o SKU do outro lado. Na trilha de auditoria a operação aparece como **um** evento
+`STOCK_CONVERTED`, não dois de movimentação: o que importa auditar é que as duas pontas foram a mesma
+decisão.
+
+Kit é recusado dos dois lados (`KIT_DIRECT_ADJUSTMENT`): kit não tem saldo próprio.
+
+> **Fronteira com a lata aberta (EST-F027).** Este endpoint continua sendo a ferramenta **genérica**
+> de reembalagem entre SKUs **distintos** — comprei em fardo, vendo em unidade. A **essência saiu
+> deste caminho**: o dono confirmou em 06/09/2026 que a essência *é* o produto de sessão, com
+> `openRoshPrice` e `sessionsPerUnit` próprios, então origem e sessão são o mesmo SKU e o consumo
+> passou a ser contado em `/estoque/open-packages`. Manter os dois caminhos para a essência deixaria
+> o operador com duas verdades sobre a mesma lata.
+
+### GET /estoque/open-packages — Permissão: ESTOQUE_PRODUCT_READ ou PDV_COMANDA_MANAGE
+
+As latas de essência **em uso** num depósito, com o contador de sessões de cada uma (EST-F027).
+
+```
+GET /estoque/open-packages?warehouseCode=LOJA-01
+// Response 200 → [ OpenPackageResponse ]
+// 404 WAREHOUSE_NOT_FOUND
+```
+
+```json
+// OpenPackageResponse
+{
+  "sku": "ESSE-ZGY-BLUEBERRY",
+  "productName": "Zgy Blueberry",
+  "warehouseCode": "LOJA-01",
+  "uses": 3,                 // sessões já lançadas nesta lata
+  "sessionsPerUnit": 5,      // cópia do cadastro no momento da ABERTURA
+  "remaining": 2,
+  "exhausted": false,        // rendeu tudo; continua aberta até a próxima sessão
+  "openedAt": "2026-09-08T20:14:03Z",
+  "openedBy": "atendente"
+}
+```
+
+**A unidade sai do saldo na ABERTURA da lata, não a cada sessão.** É o que mantém o significado de
+`/estoque/stock-balance` igual ao que o operador conta no balanço: *latas lacradas na prateleira*. O
+consumo de dentro da lata vive aqui, e nenhum movimento é inventado — a `SAIDA` de 1 acontece no
+instante físico em que alguém tira a lata da prateleira.
+
+`sessionsPerUnit` é **cópia** do catálogo, feita na abertura, e não leitura viva: o admin pode
+corrigir o cadastro no meio da noite, e uma lata pela metade não pode mudar de tamanho por isso.
+
+### GET /estoque/open-packages/{sku} — Permissão: ESTOQUE_PRODUCT_READ ou PDV_COMANDA_MANAGE
+
+```
+GET /estoque/open-packages/ESSE-ZGY-BLUEBERRY?warehouseCode=LOJA-01
+// Response 200 → OpenPackageResponse
+// 404 OPEN_PACKAGE_NOT_FOUND — não há lata aberta deste SKU
+// 404 WAREHOUSE_NOT_FOUND
+```
+
+O `404` aqui é **estado normal**, não erro: significa que nenhuma lata está aberta, e a próxima
+sessão abre uma. É distinto do `400 NOT_A_PACKAGED_SESSION_PRODUCT`, que é cadastro faltando —
+`sessionsPerUnit` em branco no produto.
+
+### POST /estoque/open-packages/{sku}/replace — Permissão: ESTOQUE_STOCK_MANAGE ou PDV_COMANDA_MANAGE
+
+"Repor essência": descarta a lata em uso e abre outra, baixando **uma** unidade do saldo.
+
+```json
+{ "warehouseCode": "LOJA-01" }   // obrigatório, 2..50
+// Response 200 → OpenPackageResponse (a lata NOVA, com uses = 0)
+// 400 INSUFFICIENT_STOCK — sem saldo para abrir; a lata antiga CONTINUA aberta
+// 400 NOT_A_PACKAGED_SESSION_PRODUCT — SKU não é vendido por sessão, ou sem sessionsPerUnit
+// 404 PRODUCT_NOT_FOUND / 404 WAREHOUSE_NOT_FOUND
+```
+
+Existe porque a lata acaba **antes** do previsto, que é o caso comum. A sobra da lata descartada
+(`uses` menor que `sessionsPerUnit`) fica registrada no histórico e **não vira ajuste de estoque**: a
+unidade já saiu do saldo quando a lata foi aberta, e transformar o resto em perda criaria movimento
+para medir uma quantidade que ninguém mediu.
+
+A lata nova é aberta **antes** de a velha ser fechada, mesma razão pela qual a conversão faz a `SAIDA`
+primeiro: abrir baixa estoque e pode faltar saldo, e falhar depois de fechar deixaria o atendente sem
+lata nenhuma no sistema, com uma na mão.
+
+`PDV_COMANDA_MANAGE` é aceita porque **quem repõe a essência é o atendente**, que tem essa permissão
+(V111) e não `ESTOQUE_STOCK_MANAGE` — exigir só a segunda deixaria o botão inalcançável justamente
+para quem o aperta.
+
+### DELETE /estoque/products/{sku} — Permissão: ESTOQUE_PRODUCT_MANAGE
+
+Descarta um **rascunho** de produto ou kit (EST-F026).
+
+```
+DELETE /estoque/products/SKU-DRAFT
+// Response 204
+// 409 PRODUCT_NOT_DRAFT — produto publicado; use PATCH /estoque/products/{sku}/active
+// 409 PRODUCT_HAS_STOCK_HISTORY — há saldo ou movimentação no SKU pai ou em alguma variação
+// 404 PRODUCT_NOT_FOUND
+```
+
+Existe porque o `409 DRAFT_LIMIT_REACHED` orientava uma ação que o sistema não oferecia: dizia
+"publique ou remova um rascunho", e `PATCH .../active` com `active: false` **não** libera a vaga —
+`status` e `active` são eixos independentes. Cinco rascunhos abandonados desligavam o recurso para o
+tenant inteiro.
+
+**Restrito a `status: RASCUNHO`, e é o que separa "descartar um cadastro que nunca foi publicado" de
+"apagar um produto do catálogo".** O segundo não existe: SKU é referenciado como texto livre por
+`stock_balance`, `stock_movement`, `order_item` e `comanda_item`, **sem FK** (EST-C011), e apagar o
+produto deixaria esse histórico órfão. Pelo mesmo motivo, rascunho que chegou a movimentar estoque
+também é recusado.
+
+---
+
+### GET /estoque/movements — Permissão: ESTOQUE_PRODUCT_READ **ou** ESTOQUE_STOCK_MANAGE
+
+> **Mudou em 2026-08-31 (EST-C015).** Antes exigia `ESTOQUE_STOCK_MANAGE`, permissão de escrita, para
+> uma leitura. O `POST` abaixo **não** mudou. Quem já chamava com `STOCK_MANAGE` continua funcionando —
+> a mudança só amplia.
 
 ```
 Query: sku (obrigatório, 3..50), warehouseCode (obrigatório, 2..50), page (default 0, >= 0), size (default 20, 1..100)
@@ -1313,8 +1497,82 @@ de `GET /estoque/integrity/orphan-skus`. Base íntegra devolve `content` vazio c
 ### GET /compras/suppliers — Permissão: COMPRAS_READ
 
 Lista fornecedores paginados (`page` ≥ 0, `size` entre 1 e 100 — default 0/20). Retorna
-`PageResult<Supplier>`. **Não há endpoint de criação de fornecedor** — a inserção é feita via SQL
-ou repositório.
+`PageResult<SupplierResponseDTO>` — até COM-C002 devolvia o record de domínio direto, o único ponto
+da API assim.
+
+```json
+// SupplierResponseDTO
+{
+  "id": 12,
+  "legalName": "Distribuidora Zomo LTDA",
+  "taxId": "12345678000199",       // SÓ DÍGITOS — é como o XML da NF-e traz o emitente
+  "email": "contato@zomo.com.br",  // pode ser null
+  "active": true
+}
+```
+
+### GET /compras/suppliers/{id} — Permissão: COMPRAS_READ
+
+```
+// Response 200 → SupplierResponseDTO
+// 404 SUPPLIER_NOT_FOUND
+```
+
+### POST /compras/suppliers — Permissão: COMPRAS_SUPPLIER_MANAGE
+
+Cadastra um fornecedor (COM-F001).
+
+```json
+{
+  "legalName": "Distribuidora Zomo LTDA",  // obrigatório, máx. 150
+  "taxId": "12.345.678/0001-99",           // obrigatório — com ou sem máscara
+  "email": "contato@zomo.com.br"           // opcional, máx. 150
+}
+// Response 201 → SupplierResponseDTO
+// 400 VALIDATION_ERROR — razão social ausente, ou CNPJ/CPF com número de dígitos inválido
+// 409 SUPPLIER_TAX_ID_ALREADY_EXISTS
+```
+
+**Destrava uma feature já entregue.** A importação de NF-e por XML responde
+`404 SUPPLIER_NOT_FOUND_BY_TAX_ID` quando o CNPJ do emitente não está cadastrado — decisão
+deliberada, porque `taxId` é dado de compliance e não se cria fornecedor por dedução —, e até aqui
+não havia nenhum caminho pela UI para cadastrá-lo: o único jeito era `INSERT` direto no banco.
+
+**`taxId` é gravado só com dígitos, e a duplicidade é conferida sobre o valor normalizado.** Não é
+cosmético: `findByTaxId` é comparação exata de string e é ela que a importação usa para achar o
+emitente, que chega do XML **sem máscara**. Aceitar `12.345.678/0001-99` e `12345678000199` como
+valores distintos criaria dois fornecedores para o mesmo CNPJ, com a `uk_supplier_tax_id` sem
+enxergar a duplicidade.
+
+CPF de 11 dígitos é aceito — produtor rural que emite nota é pessoa física. **Sem** validação de
+dígito verificador, de propósito: a nota que traz esse número já foi validada pela SEFAZ, e reprovar
+aqui um CNPJ que o fisco aceitou travaria o recebimento por causa de uma regra nossa.
+
+### PATCH /compras/suppliers/{id} — Permissão: COMPRAS_SUPPLIER_MANAGE
+
+```json
+{ "legalName": "Distribuidora Zomo ME", "email": "compras@zomo.com.br" }  // campo ausente mantém
+// Response 200 → SupplierResponseDTO
+// 404 SUPPLIER_NOT_FOUND
+```
+
+**`taxId` não é editável**, pelo mesmo motivo que o SKU do produto também ficou fora do PATCH: é a
+chave pela qual a importação de NF-e encontra o fornecedor, e trocá-lo faria os recebimentos já
+registrados apontarem para um CNPJ que nunca os emitiu. Fornecedor com CNPJ errado se resolve
+criando o certo e desativando o outro.
+
+### PATCH /compras/suppliers/{id}/active — Permissão: COMPRAS_SUPPLIER_MANAGE
+
+```json
+{ "active": false }   // obrigatório
+// Response 200 → SupplierResponseDTO
+// 400 VALIDATION_ERROR (campo ausente) / 404 SUPPLIER_NOT_FOUND
+```
+
+Endpoint próprio, e não um campo do PATCH acima, pelo mesmo motivo de
+`PATCH /estoque/products/{sku}/active` (EST-F018): desativar tem efeito operacional e merece evento
+de auditoria distinto de uma correção de nome. Fornecedor inativo sai da escolha de um recebimento
+novo, mas continua resolvendo os recebimentos já registrados — desativar não apaga histórico.
 
 ### POST /compras/goods-receipts — Permissão: COMPRAS_RECEIPT_MANAGE
 
@@ -1541,6 +1799,7 @@ pagamento.
 }
 // Response 201 → OrderResponseDTO
 // 400 INSUFFICIENT_STOCK (saldo insuficiente para algum item) / 400 VALIDATION_ERROR
+// 400 RESERVED_STOCK (o físico bastaria, mas está reservado para um pedido online)
 // 403 desconto > 0 sem PDV_SALE_DISCOUNT
 // 404 CASH_REGISTER_SESSION_NOT_FOUND / 404 PRODUCT_NOT_FOUND
 // 409 CASH_REGISTER_SESSION_CLOSED / 409 PRODUCT_NOT_PRICED / 409 DISCOUNT_LIMIT_EXCEEDED
@@ -1629,7 +1888,7 @@ lançado**, não no fechamento — ver a nota de limitação conhecida no README
 { "sku": "ESS-MENTA-50", "quantity": 1 }
 ```
 Preço e custo vêm do catálogo, igual à venda de balcão. `201` com a comanda atualizada
-(`runningTotal` recalculado). `400 INSUFFICIENT_STOCK`; `403 SESSION_NOT_OWNED`;
+(`runningTotal` recalculado). `400 INSUFFICIENT_STOCK`; `400 RESERVED_STOCK`; `403 SESSION_NOT_OWNED`;
 `404 COMANDA_NOT_FOUND`/`PRODUCT_NOT_FOUND`; `409 COMANDA_NOT_OPEN`/`PRODUCT_NOT_PRICED`.
 
 ### DELETE /pdv/comandas/{id}/items/{itemId} — Permissão: PDV_COMANDA_MANAGE
@@ -1683,12 +1942,13 @@ a conta. Zero significa que a casa não cobra.
 
 ### POST /pdv/comandas/{id}/close — Permissão: PDV_COMANDA_MANAGE (+ PDV_COMANDA_DISCOUNT se discountAmount > 0)
 
-Dois campos opcionais além dos pagamentos:
+Três campos opcionais além dos pagamentos:
 
 | Campo | Default | Descrição |
 |---|---|---|
 | `discountAmount` | `0` | PDV-F014 — abatimento sobre a **conta inteira**, rateado pelo servidor entre as linhas proporcionalmente ao valor de cada uma. Exige `PDV_COMANDA_DISCOUNT` (403 `COMANDA_DISCOUNT_NOT_ALLOWED`) e respeita o mesmo teto do balcão (409 `DISCOUNT_LIMIT_EXCEEDED`). Maior que o total da conta é 409 `DISCOUNT_EXCEEDS_BILL` (PDV-C016; antes caía no 400 genérico, **sem** chegar ao 409 do teto). Não confundir com `surchargeAmount`, que é acréscimo **por linha** no open rosh |
 | `applyServiceFee` | `true` | PDV-F015 — taxa de serviço. Vem **aplicada por omissão**, porque é o padrão do salão; `false` é o cliente recusando |
+| `itemIds` | todas as abertas | PDV-F017 — **conta dividida**: as linhas que ESTE fechamento cobra. Com a lista, o pedido sai só com elas, são marcadas como cobradas e a comanda **continua ABERTA** com o resto; repita até zerar, e o último fechamento encerra a mesa. Desconto, taxa e troco incidem **só sobre o escopo**. Um `OPEN_ROSH` e as `TROCA`/`SABOR_EXTRA` ligados a ele têm que sair juntos: 409 `LINKED_ITEM_MUST_CLOSE_TOGETHER`. Linha inexistente ou já cobrada é 400 `ITEM_NOT_OPEN_IN_COMANDA` |
 
 **O pagamento é validado contra `netAmount + serviceFeeAmount`**, não contra o líquido. A resposta
 traz os dois números separados: `netAmount` é o que a loja vendeu, `totalPayable` é o que o cliente
@@ -1703,6 +1963,39 @@ Mesmo contrato de pagamento de `POST /pdv/sessions/{id}/sales`: pelo menos uma l
 concluído — `201`~`200` com `OrderResponseDTO`. **Sem novo débito de estoque**: já saiu item a
 item em cada lançamento. `400 INSUFFICIENT_PAYMENT`; `403 SESSION_NOT_OWNED`;
 `404 COMANDA_NOT_FOUND`; `409 COMANDA_NOT_OPEN`/`COMANDA_EMPTY`/`PAYMENT_EXCEEDS_ORDER_TOTAL`.
+
+> **Conta dividida muda o significado de dois campos** (PDV-F017). `runningTotal` da comanda passa a
+> somar **só as linhas em aberto** — é o "falta pagar", não o total consumido. E `comanda.orderId`
+> passa a ser **o pedido que encerrou a mesa**; a lista completa dos pedidos dela sai filtrando
+> `GET /orders?comandaId=` pelo `sales_order.comanda_id`, que é N→1.
+
+### PATCH /pdv/comandas/{id} — Permissão: PDV_COMANDA_MANAGE
+
+Troca o rótulo da mesa (PDV-F016) — o cliente mudou de lugar no salão.
+
+```json
+{ "tableOrCustomerLabel": "Mesa 7" }
+```
+`200` com a comanda. Nada de físico acontece: itens, depósito e sessão de origem seguem os mesmos, e
+**nenhum estoque se move**. Antes disto o rótulo era imutável, e trocar de mesa só era possível
+cancelando a comanda — o que devolvia tudo ao estoque — e relançando item a item.
+`404 COMANDA_NOT_FOUND`; `409 COMANDA_NOT_OPEN`.
+
+### POST /pdv/comandas/{id}/merge-into/{targetId} — Permissão: PDV_COMANDA_MANAGE
+
+Junta esta mesa em outra (PDV-F016): as linhas em aberto passam para o destino e esta é encerrada.
+`200` com a comanda **de destino**.
+
+**Nenhum estoque se move.** A mercadoria não voltou para a prateleira nem saiu de novo — mudou de
+conta. Por isso a origem termina `CANCELADA` **sem** a `ENTRADA` que `POST /cancel` faria; o que
+distingue os dois casos na trilha é o evento `COMANDA_MERGED`.
+
+Os ids das linhas são **preservados** na mudança de comanda, então um `OPEN_ROSH` e as `TROCA` dele
+chegam juntos e ainda ligados.
+
+As duas mesas precisam estar `ABERTA` e no **mesmo depósito** (o estoque de cada linha saiu de um só),
+e a origem não pode ter tido parte da conta cobrada. `404 COMANDA_NOT_FOUND`;
+`409 COMANDA_NOT_OPEN`/`COMANDA_MERGE_NOT_ALLOWED`/`COMANDA_PARTIALLY_CLOSED`.
 
 ### POST /pdv/comandas/{id}/cancel — Permissão: PDV_COMANDA_MANAGE
 
@@ -2428,7 +2721,29 @@ Remove permanentemente uma notificação do usuário autenticado. Silencioso se 
 
 ---
 
-### GET /notifications/stream — Autenticado
+### POST /notifications/stream-ticket — Autenticado
+
+Emite um bilhete de uso único para abrir o stream SSE (PLAT-C051).
+
+```json
+// Response 200
+{ "ticket": "kK3v9c1Zx0aQ8m2s7Lb4eR6tY5uI1oP3aS0dF7gH9jK", "expiresInSeconds": 30 }
+```
+
+**Existe porque a API `EventSource` do navegador não envia headers.** Sem isto,
+`GET /notifications/stream` respondia 401 para todo cliente de navegador — não por causa do token,
+mas porque a requisição chegava sem autenticação nenhuma — e notificação em tempo real simplesmente
+não existia. O efeito extrapolava o endpoint: o cliente reagia ao 401 refazendo a sessão, estourava
+o rate limit do `/auth/refresh` e derrubava o usuário no meio de qualquer fluxo.
+
+**Não é um token de acesso.** Vale para uma rota, um uso e 30 segundos, e é queimado na abertura —
+cada reconexão precisa de um bilhete novo. A alternativa óbvia, aceitar o JWT em `?token=`, foi
+recusada: query string entra em log de acesso, histórico de proxy e cabeçalho `Referer`, e o access
+token vale 15 minutos em **toda** a API.
+
+---
+
+### GET /notifications/stream — Autenticado (Bearer **ou** `?ticket=`)
 
 Abre uma conexão SSE (Server-Sent Events) para receber notificações em tempo real. Cada notificação persistida é enviada como evento `notification` no stream.
 
@@ -2437,6 +2752,16 @@ Abre uma conexão SSE (Server-Sent Events) para receber notificações em tempo 
 | Content-Type | `text/event-stream` |
 | Timeout | 30 minutos |
 | Nome do evento SSE | `notification` |
+| Autenticação | `Authorization: Bearer` **ou** `?ticket=` de `POST /notifications/stream-ticket` |
+| Rate limit | bucket `notifications-stream`, **por usuário** (30/min) — antes era por IP, e num salão atrás de um NAT um cliente em laço de reconexão consumia o balde de todos |
+
+```
+GET /notifications/stream?ticket=kK3v9c1Zx0aQ8m2s7Lb4eR6tY5uI1oP3aS0dF7gH9jK
+```
+
+O Bearer continua funcionando e tem precedência: quem consegue mandar o header (curl, integração
+servidor-a-servidor) não precisa de bilhete. O caminho do bilhete só age quando não há autenticação
+nenhuma no contexto.
 
 ```
 // Exemplo de evento recebido
@@ -2749,10 +3074,13 @@ interface TotpConfirmResponse {
 | `PERMISSION_DELETE` | Deletar permissão |
 | `AUDIT_READ` | Ver audit logs |
 | `ESTOQUE_PRODUCT_READ` | Listar produtos do estoque |
+| `ESTOQUE_PRODUCT_READ` **ou** `ESTOQUE_STOCK_MANAGE` | `GET /estoque/movements` — leitura do ledger (EST-C015) |
 | `ESTOQUE_PRODUCT_MANAGE` | Criar/gerenciar produtos do estoque |
 | `ESTOQUE_WAREHOUSE_READ` | Listar depósitos e consultar saldo |
 | `ESTOQUE_WAREHOUSE_MANAGE` | Criar/gerenciar depósitos |
-| `ESTOQUE_STOCK_MANAGE` | `POST`/`GET /estoque/movements`, `PUT /estoque/products/{sku}/reorder-point`, `GET /estoque/integrity/orphan-skus`, `GET /estoque/integrity/reservation-mismatch` e todo o `/estoque/stock-counts` (balanço de inventário) |
+| `ESTOQUE_STOCK_MANAGE` **ou** `PDV_COMANDA_MANAGE` | `POST /estoque/open-packages/{sku}/replace` — "Repor essência" (EST-F027). Quem repõe é o **atendente**, que tem a segunda e não a primeira |
+| `ESTOQUE_PRODUCT_READ` **ou** `PDV_COMANDA_MANAGE` | `GET /estoque/open-packages` e `GET /estoque/open-packages/{sku}` — o contador da lata alimenta a tela de sessão do atendente |
+| `ESTOQUE_STOCK_MANAGE` | `POST /estoque/movements`, `POST /estoque/conversions`, `PUT /estoque/products/{sku}/reorder-point`, `GET /estoque/integrity/orphan-skus`, `GET /estoque/integrity/reservation-mismatch` e todo o `/estoque/stock-counts` (balanço de inventário) |
 | `ESTOQUE_RESERVATION_READ` | `GET /estoque/reservations` e `GET /estoque/reservations/{id}` |
 | `ESTOQUE_KIT_MANAGE` | `PUT /estoque/products/{sku}/kit` — definir a receita de um kit |
 | `ESTOQUE_PRODUCT_MANAGE` | `POST /estoque/products`, `PATCH /estoque/products/{sku}` e `.../active` |
@@ -2765,6 +3093,7 @@ interface TotpConfirmResponse {
 | `CASHBACK_READ` | Leituras de `/cashback/**` — taxas, saldo, extrato e diagnóstico de margem |
 | `COMPRAS_READ` | `GET /compras/suppliers` |
 | `COMPRAS_RECEIPT_MANAGE` | `POST /compras/goods-receipts` — recebimento de mercadoria; também `POST /compras/goods-receipts/nfe-preview`/`.../nfe-confirm` — importação de NF-e (EST-F005) |
+| `COMPRAS_SUPPLIER_MANAGE` | `POST /compras/suppliers`, `PATCH /compras/suppliers/{id}` e `.../active` — cadastro de fornecedor (COM-F001). Própria e não `COMPRAS_RECEIPT_MANAGE` reaproveitada: receber mercadoria é rotina de balcão, cadastrar fornecedor grava CNPJ, que é dado de compliance |
 | `PDV_READ` | `GET /pdv/sessions` |
 | `PDV_SALE_MANAGE` | `POST /pdv/sessions/{id}/sales` — venda com baixa de estoque |
 | `PDV_COMANDA_MANAGE` | `POST /pdv/comandas` e `.../items`/`.../close`/`.../cancel` — comanda de mesa (PDV-F009) |

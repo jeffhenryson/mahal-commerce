@@ -3,7 +3,16 @@
 **Status:** 🟢 Operacional — grade de produtos, saldo multi-depósito, ledger de movimentações (gravação e consulta), alerta de ponto de reposição, reserva, kits, lote/validade, custo médio ponderado e importação de entrada de mercadoria por XML de NF-e em produção
 **Pacote Java:** `com.cernecommerce.core.domain.model.estoque`
 **Rota HTTP base:** `/estoque`
-**Última atualização deste doc:** 2026-08-18 (EST-F005, importação de NF-e; EST-C014, teste do `ProductImageController`)
+**Última atualização deste doc:** 2026-08-31 — **o backlog do módulo ficou sem correção
+pendente**: fecharam **EST-F011** (curva ABC), **EST-C006** (como decisão) e **EST-C017** (a
+documentação da mesa). Resta só **EST-F016** (unidade de medida), 🟢, e **EST-F012**, despriorizado.
+Antes, no mesmo dia — **EST-C015** (leitura do ledger com
+`ESTOQUE_PRODUCT_READ`) e **EST-F025** (`POST /estoque/conversions`, a conversão lata→sessão numa
+transação só). Antes, em 2026-08-30 — **EST-C016**: `ReservedStockException` não tinha
+`@ExceptionHandler` e respondia **500** onde o contrato pedia `400 RESERVED_STOCK`; entre os caminhos que a
+alcançam está `ComandaService.addItem`, o lançamento de item em **mesa**. Registrados na mesma passada
+**EST-F025** (conversão atômica entre SKUs — a lata que vira N sessões) e **EST-C017** (este README não
+documenta a mesa). Antes: 2026-08-18 (EST-F005, importação de NF-e; EST-C014, teste do `ProductImageController`).
 
 ## Objetivo
 
@@ -33,6 +42,8 @@ compact constructor e o par de fábricas `create()` (entidade nova, sem `id`) / 
 | Modelo | Campos | Invariantes e comportamento |
 |---|---|---|
 | `Product` | `id, sku, name, category, active, variants, pricing` | `sku` e `name` obrigatórios; `variants` null vira `List.of()`, senão cópia defensiva; `pricing` null vira `Pricing.empty()`; `create` nasce `active = true` |
+| `Product` — campos de mesa (V112) | `availableForTable, sessionProduct, sessionsPerUnit, openRoshPrice` | Acrescentados por PDV-F010 a `product`, que é tabela **deste** módulo, e por isso documentados aqui. `availableForTable` (default `true`) decide se o SKU pode ser lançado numa comanda — é a regra *"bebida e narguilé saem na mesa, cigarro e isqueiro não"* existindo no servidor. `sessionProduct` marca o que é vendido por sessão, e os sabores são as variações da grade. `sessionsPerUnit` **passou a movimentar saldo em EST-F027**: nasceu como sugestão de tela para a conversão e ficou dois meses sem nenhum leitor, o que fazia cada sessão baixar uma lata inteira. Hoje é ele que diz quantas sessões saem de uma unidade, e a lata em uso vive em `open_package`. `openRoshPrice` mora no SKU **pai** de propósito — a linha da comanda chega com o SKU da variação (para saber qual essência sai do estoque), mas cobra este valor. |
+| `OpenPackage` (V124) | `sku, warehouseId, uses, sessionsPerUnit, openedAt, openedBy, closedAt, closeReason` | EST-F027 — a lata de essência já aberta no balcão. **A unidade sai de `stock_balance` na abertura**, então o saldo passa a significar *latas lacradas na prateleira*, que é o que o operador conta no balanço; o consumo de dentro da lata é o contador daqui. `sessionsPerUnit` é **cópia** do catálogo no momento da abertura, não leitura viva — editar o produto não pode mudar o tamanho de uma lata pela metade. Uma lata em uso por par `(sku, depósito)`, garantido por índice único **parcial** (a tabela é histórico e guarda as fechadas). A lata esgotada continua aberta até a sessão seguinte, que é o que permite a tela mostrar "5 de 5". |
 | `Pricing` | `costPrice, markupPercent, salePrice` | Value object (EST-F019); os três campos são opcionais e **não negativos**; `empty()` é "não precificado". Deriva `suggestedPrice`, `effectivePrice`, `marginAmount`, `marginPercent`, `effectiveMarkupPercent` |
 | `ProductVariant` | `id, sku, attributes, active` | `sku` obrigatório; cópia defensiva dos atributos |
 | `ProductAttribute` | `type, value` | Ambos obrigatórios; **sem identidade própria** (persistido como `@ElementCollection`) |
@@ -171,8 +182,13 @@ Todos exigem `bearerAuth`. Controller: `adapter/in/controller/EstoqueController.
 | `GET` | `/estoque/warehouses` | `ESTOQUE_WAREHOUSE_READ` | Lista depósitos paginados, ordenados por id (`page` = 0, `size` = 20, faixa 1–100) |
 | `GET` | `/estoque/stock-balance` | `ESTOQUE_WAREHOUSE_READ` | Consulta saldo por `sku` + `warehouseCode`. Retorna zero se nunca houve movimentação; `404 WAREHOUSE_NOT_FOUND`; `400 VALIDATION_ERROR` |
 | `POST` | `/estoque/movements` | `ESTOQUE_STOCK_MANAGE` | Registra movimentação manual (`ENTRADA`/`SAIDA`/`AJUSTE`) e devolve o saldo atualizado. Aceita `lotCode`/`expiryDate` opcionais (EST-F008) — obrigatórios juntos numa `ENTRADA` de SKU lote-rastreado, recusados em qualquer outro caso. `201` + `Location` para o saldo; `400 INSUFFICIENT_STOCK`/`LOT_INFO_REQUIRED`/`LOT_INFO_NOT_APPLICABLE`; `404 WAREHOUSE_NOT_FOUND`; `409 STOCK_UPDATE_CONFLICT`/`LOT_EXPIRY_MISMATCH` |
+| `POST` | `/estoque/conversions` | `ESTOQUE_STOCK_MANAGE` | Converte saldo de um SKU em saldo de outro **na mesma transação** (EST-F025): `SAIDA` de `fromQuantity` em `fromSku` + `ENTRADA` de `toQuantity` em `toSku`, no mesmo depósito. `201` com os **dois** saldos; `400 SAME_SKU_CONVERSION` / `INSUFFICIENT_STOCK` / `RESERVED_STOCK`; `404 PRODUCT_NOT_FOUND`/`WAREHOUSE_NOT_FOUND`; `409 STOCK_UPDATE_CONFLICT`. A saída é aplicada primeiro, então falta de saldo na origem impede a entrada do destino de existir |
+| `GET` | `/estoque/open-packages` | `ESTOQUE_PRODUCT_READ` ou `PDV_COMANDA_MANAGE` | EST-F027 — as latas em uso de um depósito, com o contador de sessões de cada uma. É o "3 de 5" da tela de sessão. `404 WAREHOUSE_NOT_FOUND` |
+| `GET` | `/estoque/open-packages/{sku}` | `ESTOQUE_PRODUCT_READ` ou `PDV_COMANDA_MANAGE` | EST-F027 — a lata de um SKU. `404 OPEN_PACKAGE_NOT_FOUND` quando não há nenhuma aberta, que é **estado normal**, não erro: a próxima sessão abre uma |
+| `POST` | `/estoque/open-packages/{sku}/replace` | `ESTOQUE_STOCK_MANAGE` ou `PDV_COMANDA_MANAGE` | EST-F027 — "Repor essência": descarta a lata em uso e abre outra, baixando **uma** unidade. Quem repõe é o atendente, que tem `PDV_COMANDA_MANAGE` e não `STOCK_MANAGE` — exigir só a segunda deixaria o botão inalcançável para quem o aperta. `400 INSUFFICIENT_STOCK` (e a lata antiga **continua aberta**) / `NOT_A_PACKAGED_SESSION_PRODUCT`; `404 PRODUCT_NOT_FOUND`/`WAREHOUSE_NOT_FOUND` |
+| `DELETE` | `/estoque/products/{sku}` | `ESTOQUE_PRODUCT_MANAGE` | EST-F026 — descarta um **rascunho**. `204`; `409 PRODUCT_NOT_DRAFT` (publicado: use `PATCH .../active`) / `PRODUCT_HAS_STOCK_HISTORY`; `404 PRODUCT_NOT_FOUND` |
 | `PATCH` | `/estoque/products/{sku}/lot-tracked` | `ESTOQUE_PRODUCT_MANAGE` | Ativa/desativa o rastreamento de lote e validade do SKU (EST-F008), opt-in — kit não pode. `200`; `400` se SKU é `KIT`; `404 PRODUCT_NOT_FOUND` |
-| `GET` | `/estoque/movements` | `ESTOQUE_STOCK_MANAGE` | Histórico paginado do ledger por `sku` + `warehouseCode` (`page` = 0, `size` = 20, teto de 100), mais recentes primeiro. Par nunca movimentado devolve página vazia com `200`; `404 WAREHOUSE_NOT_FOUND`; `400 MISSING_PARAMETER` |
+| `GET` | `/estoque/movements` | `ESTOQUE_PRODUCT_READ` ou `ESTOQUE_STOCK_MANAGE` | Histórico paginado do ledger por `sku` + `warehouseCode` (`page` = 0, `size` = 20, teto de 100), mais recentes primeiro. Par nunca movimentado devolve página vazia com `200`; `404 WAREHOUSE_NOT_FOUND`; `400 MISSING_PARAMETER` |
 | `POST` | `/estoque/stock-counts` | `ESTOQUE_STOCK_MANAGE` | Abre um balanço para o depósito. `201` + `Location`; `404 WAREHOUSE_NOT_FOUND`; `409 STOCK_COUNT_ALREADY_OPEN` |
 | `POST` | `/estoque/stock-counts/{id}/items` | `ESTOQUE_STOCK_MANAGE` | Registra a contagem física de um SKU (upsert; zero é válido). SKU lote-rastreado (EST-F008) exige `lotCode` — upsert então é por `(sku, lotCode)`, cada lote contado à parte. `200`; `404 PRODUCT_NOT_FOUND`/`STOCK_COUNT_NOT_FOUND`/`STOCK_LOT_NOT_FOUND`; `400 LOT_INFO_REQUIRED`/`LOT_INFO_NOT_APPLICABLE`; `409 STOCK_COUNT_NOT_OPEN` |
 | `POST` | `/estoque/stock-counts/{id}/close` | `ESTOQUE_STOCK_MANAGE` | Fecha e aplica os `AJUSTE` dos itens divergentes. `200`; `409 STOCK_COUNT_NOT_OPEN` |
@@ -213,7 +229,8 @@ ordem de exibição, depois id.
 | `ESTOQUE_PRODUCT_PRICE_MANAGE` | O bloco `pricing` no `POST`/`PATCH` de produto | V63 | ✅ `SeedConfig` + `DevRoleBootstrapConfig` |
 | `ESTOQUE_WAREHOUSE_READ` | `GET /estoque/warehouses`, `GET /estoque/stock-balance`, `GET .../reorder-point`, `GET /reorder-points` | V47 | ✅ |
 | `ESTOQUE_WAREHOUSE_MANAGE` | `POST /estoque/warehouses` | V47 | ✅ |
-| `ESTOQUE_STOCK_MANAGE` | `POST`/`GET /estoque/movements`, `PUT .../reorder-point`, stock counts e diagnósticos | V56 | ✅ |
+| `ESTOQUE_STOCK_MANAGE` | `POST /estoque/movements`, `POST /estoque/conversions`, `PUT .../reorder-point`, stock counts e diagnósticos | V56 | ✅ |
+| `ESTOQUE_PRODUCT_READ` **ou** `ESTOQUE_STOCK_MANAGE` | `GET /estoque/movements` — leitura do ledger (EST-C015). Antes exigia a permissão de escrita, o que deixava o `ROLE_ATENDENTE` de fora do próprio histórico que o PDV consulta | — | ✅ |
 | `ESTOQUE_RESERVATION_READ` | `GET /estoque/reservations`, `GET .../reservations/{id}` | V64 | ✅ `SeedConfig` + `DevRoleBootstrapConfig` |
 | `ESTOQUE_KIT_MANAGE` | `PUT /estoque/products/{sku}/kit` | V71 | ✅ `SeedConfig` + `DevRoleBootstrapConfig` |
 | `ESTOQUE_CATEGORY_MANAGE` | `POST`/`PATCH` de `/estoque/categories` | V90 | ✅ `SeedConfig` + `DevRoleBootstrapConfig` |
@@ -239,7 +256,8 @@ estoque não é o único caminho para alterar saldo.
 ❌ **Nenhum endpoint deste módulo é limitado.** O `LoginRateLimitingFilter`
 (`infra/security/LoginRateLimitingFilter.java:42-77`) cobre apenas `/auth/**` e duas rotas de
 notificação. `GET /estoque/movements` pode ser varrido em loop por qualquer token válido com
-`ESTOQUE_STOCK_MANAGE`. Ver PLAT-C030.
+`ESTOQUE_PRODUCT_READ` ou `ESTOQUE_STOCK_MANAGE` — desde EST-C015 a superfície é maior, o que reforça
+PLAT-C030 em vez de criar risco novo: a alternativa era manter o operador de PDV fora da tela.
 
 ### Isolamento de dados
 
@@ -312,13 +330,33 @@ notificação por item (EST-C003). Não há fila: se a entrega falhar, não há 
 ## Integrações entre Domínios
 
 Estoque é consumido por outros domínios através do port de entrada `EstoqueUseCase`, injetado
-em `infra/config/CoreBeanConfig.java`. As duas integrações são **chamadas síncronas diretas**
+em `infra/config/CoreBeanConfig.java`. Todas as integrações são **chamadas síncronas diretas**
 — não há evento, listener, fila nem outbox.
 
-| Origem | Onde | Tipo | `reason` gravado no ledger |
-|---|---|---|---|
-| **Compras — recebimento de mercadoria** | `ComprasService.receiveGoods` (`core/service/ComprasService.java:44`) | `ENTRADA` por item | `Recebimento de mercadoria - fornecedor #{supplierId}` |
-| **PDV — venda no balcão** | `PdvService.registerSale` (`core/service/PdvService.java:47`) | `SAIDA` por item | `Venda balcão sessão #{sessionId}` |
+| Origem | Onde | Tipo |
+|---|---|---|
+| **Compras — recebimento** | `ComprasService.receiveGoods` | `ENTRADA` por item |
+| **PDV — venda no balcão** | `PdvService.registerSale` | `SAIDA` por item |
+| **PDV — liquidação de pedido online** | `PdvService.settleOnlineOrder` | consome a reserva |
+| **Mesa — lançamento na comanda** | `ComandaService.addItem` | `SAIDA`, **uma por lançamento** |
+| **Mesa — remoção de linha** | `ComandaService.removeItem` | `ENTRADA` das linhas removidas |
+| **Mesa — cancelamento** | `ComandaService.cancelComanda` | `ENTRADA` de todos os itens |
+| **Pedido — cancelamento** | `OrderService.cancelOrder` | libera a reserva |
+| **Pedido — estorno** | `OrderService.refundOrder` | `ENTRADA` por item |
+| **Marketplace — checkout** | `ShopService.checkout` | **reserva** |
+| **Marketplace — pagamento aprovado** | `PaymentWebhookService` | consome a reserva |
+
+**A mesa é a integração que foge do padrão de todas as outras, e vale saber por quê.** Compras, PDV e
+marketplace resolvem o estoque numa transação só, junto do documento que os origina. A comanda não
+pode: ela fica aberta por horas, e não há como segurar uma transação de banco aberta durante o
+consumo. Por isso cada `addItem` **debita e commita por conta própria**, e o fechamento
+(`closeComanda`) **não toca em saldo** — o estoque já saiu, item a item. A contrapartida é que a
+baixa da mesa não é atômica ao longo da vida dela: mesa esquecida deixa saldo debitado, e o que a
+varredura de PDV-F013 devolve automaticamente é só o caso da comanda **vazia** — quando houve consumo
+real, a essência foi queimada e devolvê-la criaria saldo que não existe.
+
+Cortesia **baixa estoque igual**: o cliente não paga, mas a mercadoria saiu.
+Junção de mesas (PDV-F016) **não move estoque**: a mercadoria não voltou à prateleira, mudou de conta.
 
 Em ambos os casos o ajuste de estoque acontece **antes** de persistir o documento de origem
 (`GoodsReceipt` / `Sale`), dentro da mesma transação. Consequência: se qualquer item falhar
@@ -337,6 +375,13 @@ uma venda com N itens abaixo do mínimo gera um aviso listando os N SKUs — nã
 transação de venda não espera o envio, e uma venda revertida não notifica ninguém (EST-C003).
 
 ## Schema de Banco (Migrations)
+
+> **Permissão em migration usa `ON CONFLICT DO NOTHING` — sempre** (EST-C006). V45 e V47 não usam, e
+> re-executá-las numa base parcialmente populada quebra. **Não há correção possível nos arquivos:**
+> migration já aplicada não se edita sem `flyway repair`, que reescreveria o checksum de um script que
+> rodou em produção. Fica como regra de processo, não como dívida a pagar — V56, V57, V60, V105, V111,
+> V115, V117 e V119 já a seguem, e toda nova deve seguir.
+
 
 **V44 — `estoque_product`**
 - `product` (id, sku UNIQUE `uk_product_sku`, name, category, active DEFAULT TRUE)
@@ -460,19 +505,134 @@ reexecutável sem limpeza manual.
 Convenções, variáveis e o environment compartilhado estão em
 [`docs/postman/README.md`](../../postman/README.md).
 
+
+**V122 — `estoque_busca_sem_acento`** (EST-C020)
+- `CREATE EXTENSION IF NOT EXISTS unaccent` — *trusted* desde o PG13, não exige superusuário em banco gerenciado.
+- **Sem índice**, mantendo a decisão registrada na V87: a busca textual do catálogo não é indexada enquanto couber num `LIKE` sequencial, e o caminho para quando não couber continua sendo `pg_trgm` + GIN. Um índice funcional sobre `unaccent()` exigiria antes empacotá-la numa função `IMMUTABLE` própria (a nativa é `STABLE`) — trabalho que só se paga junto com a troca para `pg_trgm`.
+- Contraparte no H2 do perfil `dev`: alias em `db/dev/dev-schema.sql` apontando para `H2Unaccent`, para o mesmo HQL valer nos dois bancos.
+
+**V123 — `estoque_backfill_brand_id`** (EST-C023)
+- Repete os três passos do backfill da V107 de forma idempotente, para a base semeada **depois** dela: cria as marcas que só existiam em texto, vincula `product.brand_id` casando por `LOWER(unaccent(TRIM(...)))` e alinha o texto à grafia canônica.
+- Produto sem marca nenhuma continua com `brand_id` nulo — estado válido desde a V107. Inventar marca seria pior que a coluna vazia.
+
+**V124 — `estoque_lata_aberta`** (EST-F027 / PDV-F018)
+- `open_package` (id, sku, warehouse_id FK → `warehouse`, uses DEFAULT 0, sessions_per_unit, opened_at, opened_by, closed_at NULL, close_reason NULL) — CHECKs de `uses` entre 0 e `sessions_per_unit`, de `sessions_per_unit > 0`, de `close_reason ∈ {EXHAUSTED, REPLACED}` e de que `closed_at`/`close_reason` vêm **juntos** (meio estado é o que o compact constructor do domínio recusa; o banco recusa junto para carga direta não abrir a exceção).
+- Índice único **parcial** `uk_open_package_sku_warehouse_open ... WHERE closed_at IS NULL` — uma lata em uso por par, e não `UNIQUE` simples porque a tabela é histórico e guarda todas as fechadas do mesmo par. Molde dos parciais da V75. Mais `idx_open_package_warehouse_open` para a leitura da tela.
+- `sku` **sem FK** para `product`, mesma decisão de `stock_balance`/`stock_movement` (EST-C011): pode ser SKU de variação, que vive em outra tabela, e a checagem de existência mora no service.
+- `comanda_item.package_uses` / `package_sessions_per_unit` (nullable, com os mesmos dois CHECKs) — qual uso da lata a linha foi, congelado no lançamento. Snapshot e não FK para `open_package.id`: o histórico continua verdadeiro depois da reposição, e é por aqui que o cancelamento sabe, meses depois, que a linha consumiu **uso** e não unidade. `NULL` é toda linha anterior a esta migration; **sem backfill**, porque não há como saber quantas latas de fato foram abertas no passado.
+
+**V125 — `compras_supplier_manage_permission`** (COM-F001) — documentada em [`compras`](../compras/README.md).
+
 ## Backlog do Módulo
 
 | ID | Prioridade | Tipo | Item | Descrição | Status |
 |---|---|---|---|---|---|
 | EST-F005 | 🟡 Média | Feature | importacao-nfe-xml | Entrada de mercadoria por XML de NF-e (`NfeXmlImportPort`) gerando `StockMovement` de entrada — diferencial operacional. | ✅ Fechado (2026-08-18) — ver Histórico abaixo. |
-| EST-F011 | 🟢 Baixa | Feature | curva-abc-giro | Análise ABC e giro de produtos para priorização de compras (domínio `relatorios`). | Backlog (Sprint 6) |
-| EST-F012 | 🟢 Baixa | Feature | transferencia-entre-depositos | `MovementType.TRANSFER`: saída atômica de um `Warehouse` + entrada em outro, distinto do ajuste manual. **Só faz sentido quando existir um segundo local físico de verdade** ([`plano-pdv-marketplace.md`](../../plano-pdv-marketplace.md) §2.2): o marketplace **não** vai usar `WarehouseType.ECOMMERCE` para separar canal — para uma tabacaria de uma loja, a prateleira é uma só, e partir o pool geraria rebalanceamento manual permanente e o absurdo de "o site tem 5 e a loja tem 0" com tudo no mesmo armário. A reserva (EST-F013) é o mecanismo que permite um pool servir dois canais. | Backlog (Sprint 4) |
+| EST-F011 | 🟢 Baixa | Feature | curva-abc-giro | Análise ABC e giro de produtos para priorização de compras (domínio `relatorios`). | ✅ Fechado (2026-08-31) — `GET /estoque/analytics/abc`, sobre `stock_movement`, sem domínio `relatorios` novo. Ver Histórico. |
+| EST-F012 | 🟢 Baixa | Feature | transferencia-entre-depositos | `MovementType.TRANSFER`: saída atômica de um `Warehouse` + entrada em outro, distinto do ajuste manual. **Só faz sentido quando existir um segundo local físico de verdade** ([`plano-pdv-marketplace.md`](../../plano-pdv-marketplace.md) §2.2): o marketplace **não** vai usar `WarehouseType.ECOMMERCE` para separar canal — para uma tabacaria de uma loja, a prateleira é uma só, e partir o pool geraria rebalanceamento manual permanente e o absurdo de "o site tem 5 e a loja tem 0" com tudo no mesmo armário. A reserva (EST-F013) é o mecanismo que permite um pool servir dois canais. | ⏸️ Despriorizado por decisão (revisto em 2026-08-31) — segue sem caso de uso enquanto houver um só local físico. **EST-F025 entregou o que a operação de fato precisava**: a conversão atômica entre SKUs é o mesmo desenho (duas pontas numa transação) aplicado onde há demanda diária. |
 | EST-F016 | 🟢 Baixa | Feature | unidade-medida-conversao | Múltiplas unidades por produto (compra em kg, venda em porção/g) com fator de conversão nas movimentações. | Backlog (Sprint 6) |
-| EST-C006 | 🟢 Melhoria | Correção | migrations-v45-v47-sem-on-conflict | V45 e V47 inserem permissões sem `ON CONFLICT DO NOTHING`, ao contrário de V56/V57/V60. Re-execução em base parcialmente populada quebra. Herdado do antigo C018. | Pendente |
+| EST-C006 | 🟢 Melhoria | Correção | migrations-v45-v47-sem-on-conflict | V45 e V47 inserem permissões sem `ON CONFLICT DO NOTHING`, ao contrário de V56/V57/V60. Re-execução em base parcialmente populada quebra. Herdado do antigo C018. | ✅ Fechado (2026-08-31) — **como decisão, não como código**: não há correção possível no arquivo. Ver a nota em §Schema de Banco e o Histórico. |
 | EST-C014 | 🔴 Alta | Correção | productimagecontroller-sem-teste | `ProductImageController` (`adapter/in/controller/ProductImageController.java:39-45`) implementa a mesma guarda anti-path-traversal que `AvatarController`, mas não existe nenhum `ProductImageControllerTest` — só `ProductImageServiceTest`, que não passa pelo MockMvc/guard do controller. Endpoint **público** (`GET /product-images/{filename}`, sem autenticação): a defesa nunca foi exercitada via HTTP real. Criar `ProductImageControllerTest` espelhando `AvatarControllerTest` (casos `".."`/`"/"`/`"\\"`). Achado em auditoria `analyze-domain`/testes de 2026-08-18. | ✅ Fechado (2026-08-18) — `ProductImageControllerTest` criado, cópia adaptada de `AvatarControllerTest` (4 casos: `LocalFile`, `Redirect`, `NotFound`, guarda de `..`). |
-| EST-C015 | 🟡 Importante | Correção | permitir-leitura-de-movements-com-product-read | `EstoqueController.listMovements` (`adapter/in/controller/EstoqueController.java:894`) exige `ESTOQUE_STOCK_MANAGE` — permissão de **escrita** — para uma leitura, enquanto o resto do módulo lê com `ESTOQUE_PRODUCT_READ`. Efeito no consumidor: o `global-error.interceptor` do `frontend-admin-prod` manda todo `GET` 403 para `/app/access-denied`, então um gerente sem `STOCK_MANAGE` é **expulso da tela** em vez de ver um aviso. Pedido formal em `frontend-admin-prod/Docs/BACKEND_TODO.md` §"Duas dívidas de permissão": trocar por `hasAnyAuthority('ESTOQUE_PRODUCT_READ','ESTOQUE_STOCK_MANAGE')` no `GET`, mantendo o `POST /estoque/movements` em `STOCK_MANAGE`, que é o correto. `EstoqueControllerSecurityTest.list_movements_with_warehouse_read_only_returns_403` (`:347`) codifica o comportamento atual e muda junto. Levantado na `/1-analise` de vendas-balcao (2026-08-28). | Pendente |
+| EST-C015 | 🟡 Importante | Correção | permitir-leitura-de-movements-com-product-read | `EstoqueController.listMovements` (`adapter/in/controller/EstoqueController.java:894`) exige `ESTOQUE_STOCK_MANAGE` — permissão de **escrita** — para uma leitura, enquanto o resto do módulo lê com `ESTOQUE_PRODUCT_READ`. Efeito no consumidor: o `global-error.interceptor` do `frontend-admin-prod` manda todo `GET` 403 para `/app/access-denied`, então um gerente sem `STOCK_MANAGE` é **expulso da tela** em vez de ver um aviso. Pedido formal em `frontend-admin-prod/Docs/BACKEND_TODO.md` §"Duas dívidas de permissão": trocar por `hasAnyAuthority('ESTOQUE_PRODUCT_READ','ESTOQUE_STOCK_MANAGE')` no `GET`, mantendo o `POST /estoque/movements` em `STOCK_MANAGE`, que é o correto. `EstoqueControllerSecurityTest.list_movements_with_warehouse_read_only_returns_403` (`:347`) codifica o comportamento atual e muda junto. Levantado na `/1-analise` de vendas-balcao (2026-08-28). | ✅ Fechado (2026-08-31) — trocado por `hasAnyAuthority('ESTOQUE_PRODUCT_READ','ESTOQUE_STOCK_MANAGE')`; ver Histórico abaixo. |
+| EST-C016 | 🔴 Alta | Correção | reservedstockexception-sem-handler-responde-500 | `ReservedStockException` (`core/domain/exception/estoque/ReservedStockException.java`) é lançada por `StockBalance.apply` em `SAIDA` (`:166`) e no `AJUSTE` abaixo do reservado (`:152`), mas **não tinha `@ExceptionHandler`** — `grep -rn "ReservedStockException" src/main/java` devolvia só a própria classe e `StockBalance`. Caía no `@ExceptionHandler(Exception.class)` (`GlobalExceptionHandler:1103`) e virava **500 `INTERNAL_ERROR` "Erro interno inesperado"**, descartando a mensagem do domínio — justamente a que diz quanto está reservado, que é o que resolve o caso para o operador. A classe existe **para** não se confundir com `InsufficientStockException` (que tem handler desde sempre, `:403`): *"'não tem' e 'tem, mas está separado para um pedido online' pedem ações diferentes de quem está no balcão"*. O contrato `400 RESERVED_STOCK` já estava especificado em [`plano-pdv-marketplace.md`](../../plano-pdv-marketplace.md) §2.2 e na tabela de endpoints do §9, e nunca foi implementado. Alcançável por `POST /estoque/movements`, `PdvService.registerSale`, o fechamento de balanço — e, com pool único, por `ComandaService.addItem:182`, o caminho da **mesa**: o atendente lança a essência que o marketplace reservou e recebe 500. Cobertura anterior: só `StockBalanceTest` (domínio), nunca via HTTP. Achado na análise de estoque×mesa de 2026-08-30. | ✅ Fechado (2026-08-30) — ver Histórico abaixo. |
+| EST-F025 | 🟡 Importante | Feature | conversao-atomica-entre-skus | Converter 1 lata de essência em N sessões de narguilé — a operação diária do lounge — são hoje **dois `POST /estoque/movements` independentes** disparados pelo admin (`estoque-conversao.dialog.ts`): `SAIDA` do SKU origem e `ENTRADA` do SKU destino, cada um em sua transação. Se o segundo falhar (409 de `@Version`, 403, rede), **a lata saiu do saldo e nenhuma sessão entrou**, sem compensação nem rastro de que os dois movimentos eram um só ato. `sessions_per_unit` (V112) não fecha o buraco: a própria migration diz que ele *"NÃO movimenta saldo sozinho"*, e uma varredura confirma que o campo só aparece em DTO, converter, entity e patch de catálogo — nunca em `EstoqueService.adjustStock`. Desenho decidido com o dono em 2026-08-30: `POST /estoque/conversions` (`ESTOQUE_STOCK_MANAGE`) com `{fromSku, toSku, fromQuantity, toQuantity, warehouseCode, reason}`, **uma transação** chamando `adjustStock(SAIDA)` + `adjustStock(ENTRADA)` — validação de SKU, `@Version`, alerta de reposição, explosão de kit e FEFO vêm de graça e nenhuma regra é duplicada. Os dois `StockMovement` gravam `reason` cruzado. `toQuantity` é **explícito no request**, não derivado de `sessions_per_unit`: o campo é sugestão de UI por decisão da V112, e derivar no servidor amarraria o saldo a um número que o admin edita no catálogo. **Não** usa um `MovementType.TRANSFER` novo — acrescentar valor ao enum mexe no `CHECK` de `stock_movement` e na semântica de `AJUSTE` (saldo-alvo, não delta); dois movimentos comuns numa transação entregam a atomicidade sem tocar nele. Recusar `fromSku == toSku`. É o desenho de EST-F012 aplicado entre **SKUs** em vez de entre depósitos — e, ao contrário de F012, tem caso de uso hoje. | ✅ Fechado (2026-08-31) — `POST /estoque/conversions`; ver Histórico abaixo. |
+| EST-C017 | 🟢 Melhoria | Correção | readme-de-estoque-nao-conhece-a-mesa | `grep -rn -i "comanda" docs/dominios/estoque/` volta **vazio**, embora a mesa seja hoje o consumidor do `EstoqueUseCase` com o padrão de baixa mais distinto de todos (item a item, um commit por lançamento, sem reserva). Quatro lacunas: (1) §Integrações entre Domínios declara *"as **duas** integrações"* e lista só `receiveGoods` e `registerSale`, quando há pelo menos **seis** portas de escrita — somam-se `ComandaService.addItem`/`removeItem`/`cancelComanda` e `OrderService.refundOrder`; (2) os quatro campos que a V112 acrescentou a `product`, que é tabela **deste** domínio (`available_for_table`, `session_product`, `sessions_per_unit`, `open_rosh_price`), não estão no §Modelo de Domínio nem no §Schema daqui, nem em `persistence.md`, `domain-model.md` ou `feature-registry.md` — só na migration e no README do PDV; (3) **`EST-F024`** (mutação da grade de variantes pós-criação) está implementado, com `EstoqueVariantMutationIT` e seções próprias em `EstoqueControllerTest`/`EstoqueServiceTest`, e **não aparece em nenhum arquivo de `docs/`** — como `.claude/commands/1-analise.md:79` manda extrair os IDs usados do README para achar o próximo livre, quem seguir a instrução ao pé da letra **reatribui EST-F024 e colide**; (4) há dois headings `## Próximos passos` consecutivos. É o espelho de PDV-C006, que arrumou o lado do PDV e nunca foi feito deste lado. | ✅ Fechado (2026-08-31) — §Integrações reescrita, campos da V112 documentados, EST-F024 registrado. |
+| EST-C018 | 🔴 Alta | Correção | movements-responde-500-em-toda-chamada | `GET /estoque/movements` respondia **500 em qualquer chamada**, com ou sem filtro: `StockMovementJpaRepository.search` usava o padrão `:param IS NULL OR ...` com `Instant`, e o Postgres real recusa inferir o tipo do bind nulo (`could not determine data type of parameter $7`). A aba Movimentações ficava inteiramente inutilizável, e o pior é que a **escrita continuava funcionando** — o operador registrava movimento e nunca conseguia conferir. O projeto já tinha resolvido este bug em `OrderRepositoryImpl.findAll`, com Specification, e o javadoc de `ProductJpaRepository.search` já avisava que o padrão "só vale para filtros de `String`/`Boolean`"; a regra existia e não tinha sido aplicada aqui. Reportado como EST-001 no QA de 06/09/2026 do `frontend-admin-prod`. | ✅ Fechado (2026-09-08) — Specification em `StockMovementRepositoryImpl`, com o desempate de EST-C012 preservado no `Sort`. **Não** o CAST explícito que o front sugeriu: ele tem bug conhecido de Hibernate/pgjdbc que troca o tipo do parâmetro por `bytea`. |
+| EST-C019 | 🔴 Alta | Correção | alertascriticos-descarta-os-sku-zerados | `ReorderPointJpaRepository.countAlertsRaw` cruzava ponto de reposição com saldo por `JOIN`, então SKU com mínimo cadastrado e **sem linha em `stock_balance`** — o que nunca recebeu entrada, portanto saldo zero — ficava fora das duas contagens. O `summary` dizia "nenhum produto crítico" enquanto a tela de Alertas listava três SKUs zerados. O QA provou lançando ENTRADA+SAIDA de 1 num deles: `alertasCriticos` saltou de 0 para 1 sem nada mudar no estoque real. EST-004 do QA de 06/09/2026. | ✅ Fechado (2026-09-08) — `LEFT JOIN` + `COALESCE(sb.quantity, 0)`. |
+| EST-C020 | 🟡 Importante | Correção | busca-de-produto-ignora-caixa-mas-nao-acento | `search=Carvão` devolvia 6 e `search=carvao` devolvia 0. O efeito pior é o do narguilé: a base tem produtos cadastrados **com e sem** acento, então cada busca devolvia só o seu grupo — quem digitava "narguile" via 6 de 14 e recebia uma lista plausível, incompleta e sem nenhum sinal de que faltava metade. EST-021 do QA de 06/09/2026. | ✅ Fechado (2026-09-08) — extensão `unaccent` (V122) aplicada nos **dois** lados da comparação, com `UnaccentFunctionContributor` registrando a função no HQL e alias equivalente no H2 do perfil `dev`. Sem índice, mantendo a decisão da V87. |
+| EST-C021 | 🟢 Melhoria | Correção | mensagem-de-nfe-invalida-vaza-o-parser | `MalformedNfeXmlException` concatenava `e.getMessage()` do `SAXException`: prefixo em português, substância em inglês e em jargão de parser Java, exibida direto na tela. Pior, o comentário do código dizia que a mensagem era "deliberadamente genérica para não confirmar a um atacante se foi malformado ou DOCTYPE bloqueado" — e o texto do Xerces confirma exatamente isso. Código e comentário discordavam. EST-024 do QA de 06/09/2026. | ✅ Fechado (2026-09-08) — `fromParser(Throwable)` com frase de usuário; o detalhe técnico vive na causa e no log, alcançável pelo `traceId` que o `ApiError` já devolve. |
+| EST-C022 | 🟡 Importante | Correção | valorestoquecusto-sem-regra-escrita | O QA achou R$ 1.562,49 de diferença entre `summary.valorEstoqueCusto` e a soma dos saldos, e a causa não era um erro de conta: **não havia regra escrita**, então servidor e tela escolheram critérios diferentes e chegaram a três números. EST-005 do QA de 06/09/2026. | ✅ Fechado (2026-09-08) — regra decidida e documentada na `@Operation` e aqui: `RASCUNHO` fica **fora** (cadastro em construção não é mercadoria), produto e depósito **inativos ficam dentro** (desativar tira de circulação, não da prateleira, e o total precisa bater com a contagem física). |
+| EST-C023 | 🟡 Importante | Correção | backfill-de-brand-id-na-base-semeada | 190 produtos com marca em texto e **zero** com `brandId`; as 73 marcas cadastradas todas com `productCount: 0`. Não era defeito de código nem falha da V107 — o catálogo de demonstração foi semeado por `scripts/` **depois** da migration, inserindo direto em `product`. Na tela: coluna MARCA em "—", filtro de marca sem nada para filtrar, "Todas as Marcas" listando 73 cards de "0 SKUs". EST-008 do QA de 06/09/2026. | ✅ Fechado (2026-09-08) — V123 repete os três passos da V107 de forma idempotente, casando por `LOWER(unaccent(...))`. **O seed continua reabrindo o buraco**: toda carga em massa que não passe pelo `EstoqueService` nasce sem vínculo. |
+| EST-F026 | 🟡 Importante | Feature | excluir-rascunho-de-produto | O 409 `DRAFT_LIMIT_REACHED` orientava uma ação que o sistema não oferecia: dizia "publique ou remova um rascunho", e remover não existia. `PATCH .../active` com `false` **não** liberava a vaga (`status` e `active` são eixos independentes), então a única saída era publicar no catálogo um produto que o operador não queria publicar — cinco rascunhos abandonados desligavam o recurso para o tenant inteiro. EST-020 do QA de 06/09/2026. | ✅ Fechado (2026-09-08) — `DELETE /estoque/products/{sku}`, restrito a `RASCUNHO` (409 `PRODUCT_NOT_DRAFT` no publicado) e recusando rascunho com saldo/movimentação (409 `PRODUCT_HAS_STOCK_HISTORY`, mesma régua de EST-C011). |
+| EST-F027 | 🔴 Alta | Feature | lata-de-essencia-aberta | `sessions_per_unit` existia em `product` desde a V112 e **nunca era lido por ninguém**: cada sessão de narguilé baixava uma lata inteira. Medido no QA de 06/09/2026: `ESSE-ZGY-BLUEBERRY` foi de 50 para 49 numa sessão só — com `sessionsPerUnit: 5`, o estoque some cinco vezes mais rápido que a realidade, o alerta de reposição dispara cedo e a margem do open rosh, que é o número que o dono quer olhar, sai errada. Pedido levantado com o dono. | ✅ Fechado (2026-09-08) — `open_package` (V124) com contador de usos por `(sku, depósito)`, `GET /estoque/open-packages`, `.../{sku}` e `POST .../{sku}/replace`. **A baixa acontece na abertura**: o saldo passa a significar "latas lacradas na prateleira", que é o que o operador conta no balanço. Par de PDV-F018. |
 
 ## Histórico de Implementações
+
+- **2026-09-08** — `lata-de-essencia-aberta` (EST-F027): `sessions_per_unit` existia em `product`
+  desde a V112 e **nunca era lido por ninguém** — a própria migration o declarava como "sugestão de
+  tela, não movimenta saldo". A consequência foi medida no QA de 06/09/2026 do
+  `frontend-admin-prod`: cada sessão de narguilé baixava uma **lata inteira**
+  (`ESSE-ZGY-BLUEBERRY` foi de 50 para 49 numa sessão só). Com `sessionsPerUnit: 5`, o estoque
+  sumia cinco vezes mais rápido que a realidade — o alerta de reposição disparava cedo, o custo por
+  sessão saía inflado e a margem do open rosh, que é a pergunta de negócio por trás da feature
+  inteira, saía errada. Nova tabela `open_package` (**V124**) com contador de usos por
+  `(sku, depósito)`, mais `GET /estoque/open-packages`, `GET .../{sku}` e
+  `POST .../{sku}/replace`. **Cinco decisões que valem registro:**
+  (1) **A baixa acontece na ABERTURA**, não a cada sessão nem na reposição — decisão do dono do
+  produto. É o que mantém o significado do saldo igual ao que o operador conta no balanço:
+  `stock_balance` passa a ser *latas lacradas na prateleira*, e a lata em uso vive aqui. Nenhum
+  movimento é inventado: a `SAIDA` acontece no instante físico em que alguém tira a lata da
+  prateleira.
+  (2) **`sessions_per_unit` é copiado para a lata na abertura**, não lido do catálogo a cada uso. O
+  admin pode corrigir o cadastro no meio da noite, e uma lata pela metade não pode mudar de tamanho
+  por causa disso.
+  (3) **A lata esgotada continua aberta** até a sessão seguinte. É a que o atendente está
+  terminando, e é o que permite a tela mostrar "5 de 5"; quem a fecha como `EXHAUSTED` é a próxima
+  sessão, ao abrir a seguinte.
+  (4) **Reposição antecipada não vira perda.** `POST .../replace` fecha a lata como `REPLACED` com
+  a sobra registrada (`uses < sessionsPerUnit`) e não lança ajuste: a unidade já saiu do saldo na
+  abertura, e transformar o resto em perda criaria movimento para medir uma quantidade que ninguém
+  mediu. A lata nova é aberta **antes** de a velha ser fechada, mesma razão pela qual
+  `convertStock` faz a `SAIDA` primeiro — falhar depois de fechar deixaria o atendente sem lata
+  nenhuma no sistema, com uma na mão.
+  (5) **Fronteira com EST-F025.** `POST /estoque/conversions` continua existindo como ferramenta
+  **genérica** de reembalagem entre SKUs distintos (comprei em fardo, vendo em unidade); a
+  **essência sai daquele caminho**, porque com a lata origem e sessão são o mesmo SKU — o produto
+  de sessão, com `openRoshPrice` e `sessionsPerUnit` próprios. Sem essa fronteira escrita, o
+  operador ficaria com duas verdades sobre a mesma lata.
+  Nada de histórico é reprocessado: latas nascem zeradas a partir daqui e o saldo atual fica como
+  está — recalcular comandas antigas geraria movimento retroativo sem lastro físico. Par de
+  **PDV-F018**, que é o lado da mesa.
+- **2026-09-08** — `excluir-rascunho-de-produto` (EST-F026): `DELETE /estoque/products/{sku}`,
+  restrito a `status: RASCUNHO`. O 409 `DRAFT_LIMIT_REACHED` de EST-F023 orientava uma ação que o
+  sistema não oferecia — "publique ou remova um rascunho" —, e `PATCH .../active` com `false`
+  **não** liberava a vaga, porque `status` e `active` são eixos independentes: a única saída era
+  publicar no catálogo um produto que o operador não queria publicar, e cinco rascunhos abandonados
+  desligavam o recurso para o tenant inteiro. Produto publicado responde 409 `PRODUCT_NOT_DRAFT`
+  com a mensagem apontando o `active:false` — apagar do catálogo deixaria órfão o histórico que
+  referencia o SKU como texto livre, sem FK (EST-C011). Pelo mesmo motivo, rascunho com saldo ou
+  movimentação, no SKU pai **ou em qualquer variação**, responde 409 `PRODUCT_HAS_STOCK_HISTORY` —
+  mesma régua de `deleteVariant`. Auditoria `PRODUCT_DELETED`, gravando o **nome** junto do SKU: é o
+  único evento do módulo cujo objeto não existe mais depois dele.
+- **2026-09-08** — `movements-respondia-500-em-toda-chamada` (EST-C018): bloqueador em produção.
+  `GET /estoque/movements` respondia 500 em **qualquer** chamada, com ou sem filtro, porque
+  `StockMovementJpaRepository.search` usava `:param IS NULL OR ...` com `Instant` e o Postgres real
+  recusa inferir o tipo do bind nulo. E era pior do que falhar por inteiro: a **escrita continuava
+  funcionando**, então o operador registrava movimento e nunca conseguia conferir. Trocado por
+  `Specification`, preservando o desempate por `id` de EST-C012. **Não** o CAST explícito que o
+  frontend sugeriu — o javadoc de `OrderRepositoryImpl.findAll` já registra que ele tem bug
+  conhecido de Hibernate/pgjdbc que troca o tipo do parâmetro por `bytea`. O projeto já tinha
+  resolvido este mesmo bug ali e em `AuditLogRepositoryImpl`, e a regra estava escrita em
+  `ProductJpaRepository.search`; faltou aplicá-la aqui.
+- **2026-09-08** — `alertascriticos-descartava-os-sku-zerados` (EST-C019): `countAlertsRaw` cruzava
+  ponto de reposição com saldo por `JOIN`, e SKU que nunca recebeu entrada não tem linha em
+  `stock_balance` — sumia das duas contagens, justamente o caso mais grave. O `summary` dizia
+  "nenhum produto crítico" enquanto a tela de Alertas listava três SKUs zerados. `LEFT JOIN` +
+  `COALESCE(sb.quantity, 0)`, que é a mesma leitura que a tela de Alertas já fazia.
+- **2026-09-08** — `busca-de-produto-ignorava-caixa-mas-nao-acento` (EST-C020): extensão `unaccent`
+  (**V122**) aplicada nos **dois** lados da comparação, com `UnaccentFunctionContributor`
+  registrando a função no HQL pelo SPI do Hibernate e alias equivalente no H2 do perfil `dev`
+  (`db/dev/dev-schema.sql`, mesma paridade que já mantinha `order_number_seq`). Só na coluna
+  resolveria "carvao" achar "Carvão" e deixaria "Carvão" digitado sem achar "carvao" gravado — e a
+  base tem as duas grafias. **Sem índice**, mantendo a decisão da V87. `category`/`brand` ficam de
+  fora: são igualdade exata contra valor escolhido em lista, não texto digitado.
+- **2026-09-08** — `valorestoquecusto-sem-regra-escrita` (EST-C022): a diferença de R$ 1.562,49 que
+  o QA achou entre o `summary` e a soma dos saldos não era erro de conta — era ausência de regra, e
+  cada lado escolheu um critério. Decidido e escrito: `RASCUNHO` **fora** (cadastro em construção
+  não é mercadoria da loja), produto e depósito **inativos dentro** (desativar tira de circulação,
+  não da prateleira, e o total precisa bater com a contagem física).
+- **2026-09-08** — `backfill-de-brand-id-na-base-semeada` (EST-C023): 190 produtos com marca em
+  texto e zero com vínculo, 73 marcas com `productCount: 0`. Não era defeito de código nem falha da
+  V107 — o catálogo de demonstração foi semeado por `scripts/` **depois** da migration, inserindo
+  direto em `product`. **V123** repete os três passos da V107 de forma idempotente, casando por
+  `LOWER(unaccent(...))`. O seed continua reabrindo o buraco: toda carga em massa que não passe
+  pelo `EstoqueService` nasce sem vínculo.
+- **2026-09-08** — `mensagem-de-nfe-invalida-vazava-o-parser` (EST-C021): `MalformedNfeXmlException`
+  concatenava `e.getMessage()` do `SAXException`, e o comentário do código dizia que a mensagem era
+  genérica "para não confirmar a um atacante" enquanto o texto do Xerces confirmava exatamente isso.
+  Nova factory `fromParser(Throwable)`: frase de usuário no corpo, detalhe técnico na causa e no
+  log, alcançável pelo `traceId`. Os detalhes redigidos por nós ("NF-e sem nenhum item", "arquivo
+  vazio") continuam no corpo — são em português e dizem o que consertar na nota.
 
 - **2026-07-15** — `cadastrar-produto` (EST-F001): grade de produtos com SKU pai, variações e atributos; listagem paginada com padrão ID-first + `JOIN FETCH` (`ProductJpaRepository.findAllIds` + `findAllByIdsWithVariants`); RBAC `ESTOQUE_PRODUCT_READ`/`MANAGE`; migrations V44/V45.
 - **2026-07-15** — `controle-saldo-multi-deposito` (EST-F002): `Warehouse` (código único, loja física/e-commerce) e `StockBalance` por SKU/depósito com `@Version`; consulta de saldo retorna zero quando ainda não houve movimentação; RBAC `ESTOQUE_WAREHOUSE_READ`/`MANAGE`; migrations V46/V47.
@@ -764,8 +924,99 @@ Convenções, variáveis e o environment compartilhado estão em
   banco real, com produto/fornecedor reais e baixa de estoque conferida),
   `NfeImportControllerTest`/`NfeImportControllerSecurityTest`. Backend-only: feature que o
   `mahal-admin` nunca pediu — anunciada em `Docs/BACKEND_TODO.md` daquele repo.
+- **2026-08-30** — `reservedstockexception-sem-handler-responde-500` (EST-C016): `ReservedStockException`
+  existia desde EST-F021, era lançada nos dois ramos de `StockBalance.apply` que esbarram no reservado
+  (`SAIDA` e `AJUSTE` abaixo do reservado) e **nunca teve handler**. Caía no fallback de
+  `Exception.class` e saía como **500 `INTERNAL_ERROR`**, com a mensagem do domínio descartada. A
+  ironia é que a classe foi criada exatamente para *não* se confundir com `InsufficientStockException`:
+  "não tem" e "tem, mas está reservado para um pedido online" pedem ações diferentes do operador — a
+  segunda tem solução (cancelar a reserva pelo painel e vender). Um 500 genérico apagava a distinção
+  inteira, e apagava justamente o número que a resolve. Fechado com um `@ExceptionHandler` de quatro
+  linhas em `GlobalExceptionHandler`, ao lado do irmão: **`400 RESERVED_STOCK`**, que não é escolha
+  nova — é o código que [`plano-pdv-marketplace.md`](../../plano-pdv-marketplace.md) já especificava
+  em §2.2 e na tabela de endpoints do §9. Sem migration, sem permissão, sem tocar domínio ou service.
+  **Por que apareceu agora:** o caminho mais provável é a **mesa**. Com pool único, um pedido do
+  marketplace reserva do mesmo saldo do salão, e `ComandaService.addItem` chama `adjustStock(SAIDA)`
+  a cada lançamento — o atendente lança a essência e leva 500. Também alcançável por
+  `POST /estoque/movements`, `PdvService.registerSale` e o fechamento de balanço. Cobertura: a
+  exceção só tinha teste de domínio (`StockBalanceTest`) e nunca havia sido exercitada via HTTP;
+  agora tem `EstoqueControllerTest.registerMovement_reservedStock_returns_400` (que também afirma
+  que a mensagem do domínio sobrevive na resposta) e
+  `PdvComandaControllerTest.addItem_reservedStock_returns_400`, o caminho da mesa. Achado varrendo a
+  interseção estoque×mesa depois que o backlog documentado dos dois módulos já estava sem correções
+  — o mesmo padrão que produziu PDV-C017/C018 do outro lado.
 
-## Próximos passos
+- **2026-08-31** — `permitir-leitura-de-movements-com-product-read` (EST-C015): `GET /estoque/movements`
+  exigia `ESTOQUE_STOCK_MANAGE`, permissão de **escrita**, para uma leitura — a única do controller
+  assim. **O argumento que fechou o caso não era o do card:** o vizinho
+  `GET /estoque/products/{sku}/purchase-history` devolve `PageResult<StockMovement>` — o mesmo ledger,
+  a mesma entidade — com `ESTOQUE_PRODUCT_READ` desde sempre. A justificativa antiga ("ler o ledger
+  expõe quem movimentou o quê") não protegia nada, porque o dado já saía pela porta ao lado; o que ela
+  fazia era quebrar uma tela. E o afetado não era hipotético: `SeedConfig.ATENDENTE_PERMISSIONS` dá ao
+  `ROLE_ATENDENTE` `PRODUCT_READ` e **não** dá `STOCK_MANAGE`, então quem opera PDV e mesa era
+  justamente quem não lia o histórico nem abria o diálogo de conversão — e o `global-error.interceptor`
+  do admin manda todo `GET` 403 para `/access-denied`, expulsando o operador em vez de avisá-lo.
+  Agora `hasAnyAuthority('ESTOQUE_PRODUCT_READ','ESTOQUE_STOCK_MANAGE')`, o primeiro `hasAnyAuthority`
+  do projeto. O `POST` **não** mudou: escrever saldo continua em `STOCK_MANAGE`. Sem migration.
+  Cobertura: `list_movements_with_product_read_returns_200` novo, e
+  `list_movements_with_warehouse_read_only_returns_403` segue verde de propósito — `WAREHOUSE_READ` não
+  é nenhuma das duas —, com o javadoc reescrito, porque a razão dele mudou mesmo sem o resultado mudar.
+- **2026-08-31** — `conversao-atomica-entre-skus` (EST-F025): converter 1 lata de essência em N sessões
+  de narguilé — a operação diária do lounge — eram **dois `POST /estoque/movements` independentes**
+  disparados em sequência pelo admin, cada um em sua transação. Falha no segundo (conflito de
+  `@Version`, rede, permissão) e a lata saía do saldo sem nenhuma sessão entrar, sem compensação nem
+  rastro de que os dois movimentos eram um ato só. `POST /estoque/conversions` faz os dois numa
+  transação: ou acontecem, ou nenhum. **A `SAIDA` vem primeiro de propósito** — é o lado que pode
+  faltar saldo, e falhar antes de criar a entrada mantém a regra de "valida tudo antes de escrever" de
+  `registerSale`/`addItem`. As duas chamadas a `adjustStock` são autoinvocação do próprio bean: não
+  passam pelo proxy, seguem na mesma transação, mesmo idioma de `explodeKitMovement`. Nada foi
+  reescrito — validação de SKU, `@Version`, alerta de reposição, explosão de kit e FEFO já moram dentro
+  de `adjustStock`, e cada lado passa por todos. **Três decisões que valem registro:** (1) `toQuantity`
+  é explícito no request e **não** derivado de `sessions_per_unit`, que a V112 declara como sugestão de
+  tela — o saldo não pode depender de um número que o admin edita no catálogo; (2) **não** existe
+  `MovementType.TRANSFER` novo, porque acrescentar valor ao enum mexeria no `CHECK` de `stock_movement`
+  e na semântica de `AJUSTE` sem entregar nada que a transação já não entregue — são uma `SAIDA` e uma
+  `ENTRADA` comuns com `reason` cruzado; (3) `EventType.STOCK_CONVERTED` próprio em vez de dois
+  `STOCK_MOVEMENT_REGISTERED`, que descreveriam duas pontas sem relação aparente e perderiam o que
+  importa auditar — que foram a mesma decisão (mesma lição de PDV-C014). Exceção nova
+  `SameSkuConversionException` → `400 SAME_SKU_CONVERSION`. Sem migration e sem permissão nova: reusa
+  `ESTOQUE_STOCK_MANAGE`, o que significa que o `ROLE_ATENDENTE` lê o ledger (EST-C015) mas não
+  converte — converter altera saldo. Diferente de **EST-F012**, despriorizado por falta de caso de uso:
+  este é o mesmo desenho aplicado entre **SKUs** em vez de entre depósitos, e acontece todo dia.
+
+- **2026-08-31** — `curva-abc-giro` (EST-F011): `GET /estoque/analytics/abc?from=&to=&warehouseCode=`
+  (`ESTOQUE_PRODUCT_READ`), classificando os SKUs por **valor consumido** na regra de Pareto e
+  devolvendo o giro. **Duas decisões que o card não trazia.** (1) Ficou **em estoque**, não num
+  domínio `relatorios` novo: haveria um domínio inteiro para uma rota, e o dado é daqui. (2) A fonte
+  é `stock_movement` com `type = 'SAIDA'`, **não** `order_item` — o que precisa ser reposto é tudo
+  que saiu da prateleira, e cortesia, perda e o lado de saída de uma conversão (EST-F025) saem sem
+  virar venda. A valorização usa `stock_balance.average_cost` (EST-F007), com SKU sem custo entrando
+  a zero e caindo em C em vez de sumir do relatório.
+  **O detalhe que mudou durante a implementação:** o corte de faixa olha o acumulado **antes** da
+  linha, não o de depois. Escrevendo o teste apareceu o caso que decide: um SKU que sozinho vale 90%
+  do consumo sairia **B** pelo critério ingênuo — o item mais caro da loja fora da faixa de atenção,
+  exatamente o oposto do que a curva existe para dizer. Olhando o acumulado anterior, o item que
+  *cruza* o limiar pertence à faixa que estava cruzando, e o primeiro SKU é sempre A.
+  A classificação mora em `AbcAnalysis` (domínio puro, molde de `DiscountProration`) e não em SQL,
+  porque percentual acumulado, empate e saldo zero são onde este relatório erra e nenhum deles precisa
+  de banco para ser provado — `AbcAnalysisTest` tem 12 casos. Giro com saldo zero devolve **null**, não
+  infinito: um SKU em ruptura não é o que mais gira, é o que perdeu o denominador. Sem migration, sem
+  permissão nova, sem domínio novo.
+- **2026-08-31** — `migrations-v45-v47-sem-on-conflict` (EST-C006): **fechado como decisão, não como
+  código.** V45 e V47 inserem permissões sem `ON CONFLICT DO NOTHING`, e migration já aplicada não se
+  edita sem `flyway repair` — não há correção possível no arquivo. O que sobrava era o card
+  reaparecendo em toda análise sem nunca ter uma ação. Vira nota permanente em §Schema de Banco, com a
+  regra para o futuro: **toda migration de permissão nova usa `ON CONFLICT DO NOTHING`**, como V56,
+  V57, V60, V105, V111, V115, V117 e V119 já fazem. Nenhuma linha de SQL foi tocada.
+- **2026-08-31** — `readme-de-estoque-nao-conhece-a-mesa` (EST-C017): até aqui
+  `grep -rn -i "comanda" docs/dominios/estoque/` voltava **vazio**, embora a mesa seja o consumidor do
+  `EstoqueUseCase` com o padrão de baixa mais distinto de todos. §Integrações declarava *"as duas
+  integrações"* e listava compras + `registerSale`; são **dez** pontos de escrita em seis services, e a
+  tabela agora os lista. Os quatro campos que a V112 acrescentou a `product` — tabela **deste** módulo —
+  entraram no §Modelo de Domínio e no §Schema, onde faltavam desde 26/08. **EST-F024** (mutação da
+  grade de variantes) foi registrado: estava implementado, com IT próprio, e ausente de todo `docs/` —
+  quem seguisse `.claude/commands/1-analise.md:79` ao pé da letra reatribuiria o ID e colidiria. O
+  `## Próximos passos` duplicado saiu. Par de **PDV-C019**, do lado de vendas-balcão.
 
 ## Próximos passos
 

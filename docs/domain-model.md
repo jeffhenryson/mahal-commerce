@@ -334,19 +334,37 @@ record NotificationPreference(
 
 SKU pai da grade de produtos. Agrega as variações (SKU filhos).
 
+> ⚠️ **Este bloco descrevia 6 componentes quando o record já tinha 30** (corrigido em 2026-08-31,
+> EST-C017). `Product` cresceu por acumulação — pricing, kit, lote, marketing, marketplace, catálogo,
+> mesa — e a lista abaixo é a atual. As fábricas mantêm sobrecargas curtas por compatibilidade, então
+> chamadas antigas continuam compilando; a fonte da verdade é
+> `core/domain/model/estoque/Product.java`.
+
 ```java
 record Product(
-    Long id,
-    String sku,
-    String name,
-    String category,
-    boolean active,
-    List<ProductVariant> variants
+    Long id, String sku, String name, String category, boolean active,
+    List<ProductVariant> variants,
+    Pricing pricing, ProductType type, boolean lotTracked,          // preço, kit (EST-F015), lote (EST-F008)
+    String brand, String imageUrl, boolean onSale, boolean superPromo,
+    String description, String videoUrl, List<String> images,       // marketing / vitrine
+    List<ProductAttribute> attributes, Long categoryId, String barcode,
+    MeasurementUnit unit, boolean sampleProduct, boolean kitComponentEligible,
+    boolean visibleInPos, boolean visibleInMarketplace,             // canal (V91)
+    ProductStatus status, Long brandId,
+    boolean availableForTable, boolean sessionProduct,              // mesa (V112, PDV-F010)
+    Integer sessionsPerUnit, BigDecimal openRoshPrice
 ) {
-    static Product create(sku, name, category, variants)               // criação (id=null, active=true)
-    static Product of(id, sku, name, category, active, variants)       // reconstituição a partir de persistência
+    static Product create(...)   // criação (id=null, active=true) — várias sobrecargas
+    static Product of(...)       // reconstituição a partir de persistência
 }
 ```
+
+**Os quatro campos de mesa** (V112) moram aqui porque `product` é tabela do domínio `estoque`, ainda
+que quem os use seja o PDV: `availableForTable` decide se o SKU pode ser lançado numa comanda,
+`sessionProduct` marca o que é vendido por sessão de narguilé, `sessionsPerUnit` é **sugestão de
+tela** para a conversão (não movimenta saldo — para isso existe `POST /estoque/conversions`), e
+`openRoshPrice` mora no SKU **pai**: a linha da comanda chega com o SKU da variação, para saber qual
+essência sai do estoque, mas cobra este valor.
 
 ### ProductVariant (record) — domínio `estoque`
 

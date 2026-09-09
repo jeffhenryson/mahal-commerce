@@ -38,7 +38,11 @@ Reposição de estoque via fornecedores e entradas de mercadorias.
 
 | Método | Rota | Permissão | Descrição |
 |---|---|---|---|
-| `GET` | `/compras/suppliers` | `COMPRAS_READ` | Lista fornecedores paginados (`page` ≥ 0, `size` 1–100) |
+| `GET` | `/compras/suppliers` | `COMPRAS_READ` | Lista fornecedores paginados (`page` ≥ 0, `size` 1–100). Devolve `SupplierResponseDTO` desde COM-C002 — até então o record de domínio vazava direto no contrato |
+| `GET` | `/compras/suppliers/{id}` | `COMPRAS_READ` | COM-F001 — o `findSupplierById` já existia no use case sem rota. `404 SUPPLIER_NOT_FOUND` |
+| `POST` | `/compras/suppliers` | `COMPRAS_SUPPLIER_MANAGE` | COM-F001 — cadastra fornecedor. `taxId` aceita com ou sem máscara e é gravado **só com dígitos**, que é como o XML da NF-e traz o emitente. `400` (razão social ausente, CNPJ/CPF com número de dígitos inválido); `409 SUPPLIER_TAX_ID_ALREADY_EXISTS` |
+| `PATCH` | `/compras/suppliers/{id}` | `COMPRAS_SUPPLIER_MANAGE` | COM-F001 — edição parcial (nulo mantém). **`taxId` não é editável**: é a chave pela qual a importação de NF-e encontra o fornecedor, e trocá-lo faria os recebimentos já registrados apontarem para um CNPJ que nunca os emitiu. `404 SUPPLIER_NOT_FOUND` |
+| `PATCH` | `/compras/suppliers/{id}/active` | `COMPRAS_SUPPLIER_MANAGE` | COM-F001 — ativa/desativa. Endpoint próprio pelo mesmo motivo de `PATCH /estoque/products/{sku}/active`: gera evento de auditoria distinto de uma correção de nome. `404 SUPPLIER_NOT_FOUND` |
 | `POST` | `/compras/goods-receipts` | `COMPRAS_RECEIPT_MANAGE` | Registra recebimento e **dá entrada no estoque** item a item. `404 SUPPLIER_NOT_FOUND` |
 | `POST` | `/compras/goods-receipts/nfe-preview` | `COMPRAS_RECEIPT_MANAGE` | EST-F005 — parseia XML de NF-e (multipart), casa fornecedor por CNPJ e itens por EAN, sem persistir recebimento. `400 MALFORMED_NFE_XML`; `404 SUPPLIER_NOT_FOUND_BY_TAX_ID` |
 | `POST` | `/compras/goods-receipts/nfe-confirm` | `COMPRAS_RECEIPT_MANAGE` | EST-F005 — confirma um preview (com override manual de SKU para linhas `UNMATCHED`) e delega para o mesmo caminho de `POST /compras/goods-receipts`. `400 UNMATCHED_NFE_LINE`; `404 NFE_IMPORT_NOT_FOUND`; `409 NFE_IMPORT_ALREADY_PROCESSED` |
@@ -56,6 +60,7 @@ Reposição de estoque via fornecedores e entradas de mercadorias.
 |---|---|---|---|
 | `COMPRAS_READ` | `GET /compras/suppliers` | V53 | ✅ `SeedConfig` + `DevRoleBootstrapConfig` |
 | `COMPRAS_RECEIPT_MANAGE` | `POST /compras/goods-receipts` | V60 (com `ON CONFLICT DO NOTHING`) | ✅ |
+| `COMPRAS_SUPPLIER_MANAGE` | `POST`/`PATCH` de `/compras/suppliers` | V125 (com `ON CONFLICT DO NOTHING`) | ✅ `SeedConfig` + `DevRoleBootstrapConfig` |
 
 ⚠️ **`COMPRAS_RECEIPT_MANAGE` movimenta estoque sem exigir nenhuma permissão `ESTOQUE_*`.**
 `ComprasService.receiveGoods` chama `EstoqueUseCase.adjustStock` diretamente, e o
@@ -146,15 +151,39 @@ Convenções, variáveis e o environment compartilhado estão em
 
 | ID | Prioridade | Tipo | Item | Descrição | Status |
 |---|---|---|---|---|---|
-| COM-F001 | 🔴 Alta | Feature | cadastro-fornecedor | `registerSupplier` — hoje `Supplier` é um record stub sem validação e só existe listagem (`GET /compras/suppliers`). TODO em `core/ports/in/ComprasUseCase.java:13`. Faltam `POST` (criar) e `PATCH` (editar/ativar-desativar) — confirmado como bloqueio real pelo front (`mahal-admin`, `Docs/BACKEND_TODO.md`, seção "P2 — Compras", 2026-08-18): sem isso não há como testar o resto da tela de Compras. **Segundo bloqueio real, achado em EST-F005 (2026-08-18):** a importação de NF-e rejeita com 404 qualquer nota de fornecedor não cadastrado (decisão deliberada — sem criação automática, diferente de Categoria), então hoje o único jeito de cadastrar o fornecedor antes de importar é inserção direta no banco. | Pendente |
+| COM-F001 | 🔴 Alta | Feature | cadastro-fornecedor | `registerSupplier` — hoje `Supplier` é um record stub sem validação e só existe listagem (`GET /compras/suppliers`). TODO em `core/ports/in/ComprasUseCase.java:13`. Faltam `POST` (criar) e `PATCH` (editar/ativar-desativar) — confirmado como bloqueio real pelo front (`mahal-admin`, `Docs/BACKEND_TODO.md`, seção "P2 — Compras", 2026-08-18): sem isso não há como testar o resto da tela de Compras. **Segundo bloqueio real, achado em EST-F005 (2026-08-18):** a importação de NF-e rejeita com 404 qualquer nota de fornecedor não cadastrado (decisão deliberada — sem criação automática, diferente de Categoria), então hoje o único jeito de cadastrar o fornecedor antes de importar é inserção direta no banco. | ✅ Fechado (2026-09-08) — `POST /compras/suppliers`, `PATCH /compras/suppliers/{id}` e `.../active`, mais `GET /compras/suppliers/{id}` (o `findSupplierById` já existia sem rota). Nova permissão `COMPRAS_SUPPLIER_MANAGE` (V125), própria e não reaproveitando `COMPRAS_RECEIPT_MANAGE`: receber mercadoria é rotina de balcão, cadastrar fornecedor grava CNPJ, que é dado de compliance. O record `Supplier` ganhou invariantes — era o único do domínio sem nenhuma — e o `taxId` passou a ser **normalizado para só dígitos**, que é como o XML da NF-e traz o emitente; sem isso o fornecedor cadastrado com máscara nunca casaria com a nota, e a importação continuaria em 404, que é justamente o que este card veio resolver. |
 | COM-F002 | 🟡 Média | Feature | pedido-de-compra | `PurchaseOrder` e `createPurchaseOrder`, fechando o ciclo pedido → recebimento. TODO em `core/domain/model/compras/package-info.java:7`. Workflow de status esperado pelo front: rascunho → enviado → parcialmente recebido → recebido → cancelado, linkado ao `POST /compras/goods-receipts` já existente (hoje o recebimento é "solto", sem referenciar um pedido formal). Também é a extensão natural do alerta de ponto de reposição do estoque (EST-F004): hoje o alerta não gera nenhuma ação, o gestor decide comprar de cabeça — o pedido de compra pode sugerir itens a partir do relatório de reposição já existente. | Pendente |
 | COM-F003 | 🟢 Baixa | Feature | cotacoes-rfq | Solicitar cotação a um ou mais fornecedores, registrar respostas (preço, prazo, condições de pagamento), comparar e converter a vencedora em Pedido de Compra (`COM-F002`). Depende de `COM-F001`/`COM-F002` existirem primeiro. Ver `Docs/MODULO_COMPRAS.md` no `mahal-admin` para a especificação de tela original. Pedido confirmado pelo front em `Docs/BACKEND_TODO.md`, seção "P2 — Compras", 2026-08-18. | Pendente |
 | COM-C001 | 🟡 Importante | Correção | auditar-e-documentar-o-modulo | Preencher Regras de Negócio, Schema (V58/V59/V60) e Cobertura de Testes no padrão de `estoque`. | Pendente |
-| COM-C002 | 🟢 Melhoria | Correção | expor-dto-em-vez-de-record-de-dominio | `GET /compras/suppliers` retorna `PageResult<Supplier>` — o record de domínio vaza direto na API, sem DTO de resposta. | Pendente |
+| COM-C002 | 🟢 Melhoria | Correção | expor-dto-em-vez-de-record-de-dominio | `GET /compras/suppliers` retorna `PageResult<Supplier>` — o record de domínio vaza direto na API, sem DTO de resposta. | ✅ Fechado (2026-09-08) — `SupplierResponseDTO`, junto de COM-F001. Era o único ponto da API em que um record de domínio saía direto no contrato. |
 | COM-C004 | 🟡 Importante | Correção | recebimento-sem-teste-de-concorrencia | Nenhum IT de concorrência cobre `SupplierRepositoryImpl`/`GoodsReceiptRepositoryImpl` (dois recebimentos concorrentes incrementando o mesmo lote/saldo) — comparado ao rigor já aplicado em `StockBalanceConcurrencyIT`/`StockCountConcurrencyIT` em `estoque`, essa lacuna destoa do padrão do projeto. Achado em auditoria `analyze-domain`/testes de 2026-08-18. | Pendente |
 
 ## Histórico de Implementações
 
+- **2026-09-08** — `cadastro-fornecedor` (COM-F001 + COM-C002): o **pedido nº 1 deste domínio**,
+  e o que destrava uma feature já entregue. A importação de NF-e recusa nota de fornecedor não
+  cadastrado com `404 SUPPLIER_NOT_FOUND_BY_TAX_ID` — decisão deliberada de EST-F005, porque
+  `taxId` é dado de compliance e não se cria fornecedor por dedução —, e até aqui o único jeito de
+  cadastrá-lo era `INSERT` direto no banco. A tela de recebimento do `frontend-admin-prod` estava
+  pronta e consumindo os dois endpoints existentes; ela só não atendia fornecedor novo.
+  **Três decisões que valem registro:** (1) **permissão própria**, `COMPRAS_SUPPLIER_MANAGE`
+  (V125), e não `COMPRAS_RECEIPT_MANAGE` reaproveitada — receber mercadoria é rotina de quem
+  confere a nota no balcão, cadastrar fornecedor grava CNPJ; quem recebe não precisa poder
+  cadastrar, e o inverso também vale. (2) **`taxId` normalizado para só dígitos**, com a
+  duplicidade conferida sobre o valor normalizado: `findByTaxId` é comparação exata de string e é
+  ela que a importação usa para achar o emitente, que chega do XML **sem máscara** — aceitar
+  `12.345.678/0001-99` e `12345678000199` como valores distintos criaria dois fornecedores para o
+  mesmo CNPJ, com a `uk_supplier_tax_id` sem enxergar a duplicidade. É exatamente o buraco que
+  `Customer.cpf` tem hoje (`@Size(min=11,max=11)` sem normalização) e que aqui não se repete.
+  CPF de 11 dígitos é aceito, porque produtor rural que emite nota é pessoa física; **sem** dígito
+  verificador, porque a nota já foi validada pela SEFAZ e reprovar aqui um CNPJ que o fisco
+  aceitou travaria o recebimento por uma regra nossa. (3) **`taxId` fora do PATCH**, pelo mesmo
+  motivo que o SKU do produto ficou fora: trocá-lo faria os recebimentos já registrados apontarem
+  para um CNPJ que nunca os emitiu — fornecedor com CNPJ errado se resolve criando o certo e
+  desativando o outro. O record `Supplier` ganhou invariantes e factories (`create`,
+  `updatedWith`, `withActive`); era o único record de domínio do projeto sem nenhuma validação, o
+  que fazia sentido enquanto só existia leitura. **COM-C002 fechou junto**: `SupplierResponseDTO`
+  substitui o record de domínio que saía direto no contrato.
 - **2026-08-18** — `importacao-nfe-xml` (EST-F005): entrada de mercadoria automática lendo o XML
   de NF-e do fornecedor. Detalhamento completo (design, hardening contra XXE, casamento por
   EAN/CNPJ, migration V106) está em `docs/dominios/estoque/README.md` — o ID é `EST-*` porque a

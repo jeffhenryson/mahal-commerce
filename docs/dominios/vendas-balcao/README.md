@@ -3,7 +3,15 @@
 **Status:** 🟢 Operacional — ciclo de caixa completo (abertura, sangria/suprimento, fechamento com conferência por forma de pagamento), venda com preço vindo do catálogo, pagamento com múltiplas formas, troco e comprovante interno (PDV-F006, Fatia 3), comanda de mesa para consumo incremental de horas (PDV-F009) e sessão de narguilé na mesa com canal próprio `MESA`, modo de consumo, cortesia e open rosh (PDV-F010), com registro do setup da mesa e acréscimo manual no open rosh (PDV-F011), desconto no fechamento e taxa de serviço (PDV-F014/F015).
 **Pacote Java:** `com.cernecommerce...pdv` (packages não aceitam hífen; `pdv` ↔ `vendas-balcao`)
 **Rota HTTP base:** `/pdv`
-**Última atualização deste doc:** 2026-08-30 — **PDV-C016**: os dois descontos impossíveis ganharam
+**Última atualização deste doc:** 2026-08-31 — **o backlog do módulo zerou**: fecharam
+**PDV-F017** (conta dividida por seleção de itens, V121), **PDV-F016** (renomear e juntar mesas, sem
+migration e sem mover estoque) e **PDV-C019** (a §Integração com estoque, que ainda descrevia a era
+`Sale`). Antes, no mesmo dia — análise da interseção **estoque × mesa**: **PDV-F013**
+(varredura de comanda esquecida) subiu de 🟢 para 🟡 porque PDV-C005 transformou a mesa esquecida de
+saldo furado em **turno que não fecha**, e **PDV-C019** registra que a §Integração com estoque deste
+README ainda descreve a era `Sale` e não cita comanda. O bug encontrado na mesma varredura era do outro
+lado da fronteira e fechou lá: **EST-C016** (`ReservedStockException` respondia 500). Na mesma data,
+antes: **PDV-C016**: os dois descontos impossíveis ganharam
 código de erro próprio. Desconto de item acima do bruto da linha (balcão) e desconto acima da conta
 (mesa) subiam como `IllegalArgumentException` → **400 genérico** (`BAD_REQUEST`, "Requisição
 inválida"), indistinguível de qualquer corpo malformado; na mesa o rateio ainda roda **antes** do
@@ -82,7 +90,7 @@ registro de vendas no balcão.
 | `GET` | `/pdv/sales/{id}/receipt` | `PDV_READ` | Comprovante interno da venda — **não é documento fiscal** (isso é a NFC-e, Fatia 11) |
 | `GET` | `/pdv/sessions/{id}/sales` | `PDV_READ` | Pedidos da sessão, paginados, do mais recente para o mais antigo |
 | `POST` | `/pdv/comandas?sessionId=` | `PDV_COMANDA_MANAGE` | Abre comanda de mesa (PDV-F009). Controller próprio (`PdvComandaController`). Exige a **própria** sessão: a mesa nasce na gaveta de quem a abriu, e é esse depósito que vai baixar estoque. Aceita `customerId` opcional (PDV-F010) — é ele que faz o pedido da mesa sair com nome e gerar cashback |
-| `POST` | `/pdv/comandas/{id}/items` | `PDV_COMANDA_MANAGE` (+ `PDV_COMANDA_COURTESY` se a linha for cortesia, + `PDV_COMANDA_SURCHARGE` se houver acréscimo positivo) | Lança item na comanda aberta — **debita estoque na hora**, não no fechamento. Aceita `mode` (`NORMAL`/`OPEN_ROSH`/`SABOR_EXTRA`/`TROCA`), `courtesy` e `linkedItemId` (PDV-F010), mais `notes` (máx. 200, sem efeito em preço) e `surchargeAmount` (só em `OPEN_ROSH`, soma sobre o `openRoshPrice` do produto **pai**) (PDV-F011). Erros: `400 NOT_AVAILABLE_FOR_TABLE`, `400 NOT_A_SESSION_PRODUCT`, `400 OPEN_ROSH_NOT_PRICED`, `400 LINKED_ITEM_REQUIRED`, `403 COURTESY_NOT_ALLOWED`, `409 NOT_AN_OPEN_ROSH`, `400 NOTES_TOO_LONG`, `403 SURCHARGE_NOT_ALLOWED`, `400 SURCHARGE_ON_COURTESY`, `400 SURCHARGE_NOT_APPLICABLE`, `400 SURCHARGE_INVALID` |
+| `POST` | `/pdv/comandas/{id}/items` | `PDV_COMANDA_MANAGE` (+ `PDV_COMANDA_COURTESY` se a linha for cortesia, + `PDV_COMANDA_SURCHARGE` se houver acréscimo positivo) | Lança item na comanda aberta — **debita estoque na hora**, não no fechamento. Aceita `mode` (`NORMAL`/`OPEN_ROSH`/`SABOR_EXTRA`/`TROCA`), `courtesy` e `linkedItemId` (PDV-F010), mais `notes` (máx. 200, sem efeito em preço) e `surchargeAmount` (só em `OPEN_ROSH`, soma sobre o `openRoshPrice` do produto **pai**) (PDV-F011). Erros: `400 NOT_AVAILABLE_FOR_TABLE`, `400 NOT_A_SESSION_PRODUCT`, `400 OPEN_ROSH_NOT_PRICED`, `400 LINKED_ITEM_REQUIRED`, `403 COURTESY_NOT_ALLOWED`, `409 NOT_AN_OPEN_ROSH`, `400 NOTES_TOO_LONG`, `403 SURCHARGE_NOT_ALLOWED`, `400 SURCHARGE_ON_COURTESY`, `400 SURCHARGE_NOT_APPLICABLE`, `400 SURCHARGE_INVALID`. **EST-F027:** quando o SKU é produto de sessão com `sessionsPerUnit` declarado, a linha consome **uso de lata aberta** em vez de baixar unidade, e a resposta ecoa `packageUses`/`packageSessionsPerUnit` — o "3 de 5" da tela. `400 NOT_A_PACKAGED_SESSION_PRODUCT` só alcança os endpoints de `/estoque/open-packages`; aqui, produto sem `sessionsPerUnit` simplesmente segue o caminho antigo. |
 | `DELETE` | `/pdv/comandas/{id}/items/{itemId}` | `PDV_COMANDA_MANAGE` | Remove uma linha da comanda aberta, devolvendo o estoque dela (`ENTRADA`) — PDV-F012. **As `TROCA` penduradas nela saem junto**; um `SABOR_EXTRA` pendurado **barra** a remoção (`409 LINKED_ITEM_IS_CHARGED`), porque é linha própria e pode estar cobrada. Erros: `404 COMANDA_ITEM_NOT_FOUND`, `409 COMANDA_NOT_OPEN` |
 | `GET` | `/pdv/comandas/{id}` | `PDV_READ` | Detalhe da comanda, com o total corrente (`runningTotal`), o cliente (`customerId`/`customerName`, resolvido no CRM) e o `mode`/`courtesy`/`linkedItemId` de cada linha |
 | `GET` | `/pdv/comandas` | `PDV_READ` | As "mesas ocupadas". **`sessionId` é opcional desde PDV-C007**: sem ele a listagem é da **loja inteira**, que é o que a decisão de mesas compartilhadas pede — era a obrigatoriedade do parâmetro que forçava o cliente ao merge N+1 de uma chamada por sessão. Aceita também `warehouseCode`, e pagina (`page` ≥ 0, `size` 1–100, default 50). **Não checa posse.** Devolve `PageResult` — ver a nota de contrato abaixo |
@@ -423,21 +431,58 @@ política comercial do projeto.
 - **PLAT-C035** — a garantia de "uma sessão aberta por operador" depende de um índice parcial que
   o H2 não suporta; sob concorrência, só o Postgres protege, e isso nunca foi testado.
 - **PLAT-C030** — sem rate limit.
-- **PDV-F013** — a baixa de estoque da comanda não é transacionalmente atômica ao longo da vida
-  dela: cada `POST /pdv/comandas/{id}/items` debita e commita por conta própria (não dá para
-  segurar uma transação de banco aberta pelas horas em que uma comanda fica em uso). Uma comanda
-  esquecida aberta, sem `POST .../cancel` explícito, deixa estoque debitado sem devolução
-  automática — não há varredura/timeout para esse caso. (PDV-F012 deu um caminho manual de
-  devolução linha a linha, mas continua sendo manual.)
+- **Baixa de comanda não é atômica ao longo da vida dela** — cada
+  `POST /pdv/comandas/{id}/items` debita e commita por conta própria (não dá para segurar uma
+  transação de banco aberta pelas horas em que uma comanda fica em uso). **PDV-F013 (2026-08-31)
+  fechou a parte tratável:** a varredura diária cancela a mesa esquecida **vazia** e avisa sobre as
+  que têm consumo. O que **permanece por decisão** é o resto: mesa esquecida com consumo real segue
+  com o estoque debitado até alguém resolvê-la, porque devolver automaticamente reporia no sistema
+  essência que já foi queimada. É limitação escolhida, não pendência — ver o Histórico.
 - **PDV-F016 / PDV-F017** — não há como transferir/juntar mesas nem dividir a conta por pessoa.
 
 ## Integração com estoque
 
-`PdvService.registerSale` (`core/service/PdvService.java:47`) chama
-`EstoqueUseCase.adjustStock(..., MovementType.SAIDA, ...)` para cada item, com o motivo
-`Venda balcão sessão #{sessionId}`, e só então persiste a `Sale` — tudo na mesma transação.
-Saldo insuficiente em qualquer item reverte a venda inteira. A baixa também dispara o alerta
-de ponto de reposição. Detalhes em [`estoque`](../estoque/README.md#integrações-entre-domínios).
+Este módulo escreve estoque por **quatro** caminhos, e eles não seguem o mesmo padrão:
+
+| Caminho | Onde | Tipo |
+|---|---|---|
+| Venda de balcão | `PdvService.registerSale` | `SAIDA` por item, **na mesma transação** do pedido |
+| Liquidação de pedido do app | `PdvService.settleOnlineOrder` | consome a reserva feita no checkout |
+| Lançamento em mesa | `ComandaService.addItem` | `SAIDA`, **um commit por lançamento** |
+| Lançamento de **sessão de essência** | `ComandaService.addItem` → `EstoqueUseCase.consumeSession` | **uso de lata**; a `SAIDA` de 1 acontece só quando a lata é aberta (EST-F027) |
+| Devolução em mesa | `ComandaService.removeItem` / `cancelComanda` | `ENTRADA` das linhas devolvidas — **exceto** linha de lata, que devolve **uso** |
+
+Na **venda de balcão** o ajuste acontece antes de persistir o pedido, tudo numa transação: saldo
+insuficiente em qualquer item reverte a venda inteira, e a baixa dispara o alerta de reposição.
+
+Na **mesa** é diferente por necessidade, e é a diferença que importa entender: a comanda fica aberta
+por horas e não há como segurar uma transação de banco durante o consumo, então cada lançamento
+debita e commita por conta própria. Consequências: `closeComanda` **não toca em saldo** (já saiu, item
+a item), cortesia **baixa estoque igual** (o cliente não paga, mas a essência saiu), e mesa esquecida
+deixa saldo debitado — a varredura de PDV-F013 devolve só o caso da comanda **vazia**, porque onde
+houve consumo real a mercadoria não voltou para a prateleira.
+
+**A linha de essência é o quinto caminho, e o único que não mexe em `stock_balance` no lançamento**
+(EST-F027/PDV-F018). Quando o SKU é produto de sessão **com `sessionsPerUnit` declarado**, `addItem`
+chama `consumeSession` em vez de `adjustStock`: o que sobe é o contador da lata aberta, e a unidade
+só sai do saldo quando uma lata é **aberta**. O critério é do **produto**, não do modo — `NORMAL`
+também é sessão quando o SKU é a essência, que foi exatamente o caso medido no QA; olhar
+`mode.isSessionMode()` deixaria o bug de pé no caminho mais comum. Produto de sessão sem
+`sessionsPerUnit` continua baixando unidade, o que torna a adoção uma escolha por item de catálogo.
+
+Na **devolução dessa linha**, `removeItem`/`cancelComanda` **decrementam o contador** em vez de
+lançar `ENTRADA`, e a assimetria é o desenho: a essência foi queimada e não voltou para a
+prateleira, então devolver unidade inventaria saldo — trocaria um erro visível (a mesa cancelada)
+por um invisível, o saldo mentindo para cima até o próximo balanço. Quem decide é a **própria
+linha**, por `ComandaItem.consumedPackage()`, e não uma releitura do catálogo: o produto pode ter
+deixado de ser vendido por sessão desde o lançamento, e o desfazimento tem que espelhar o que de
+fato aconteceu.
+
+Duas operações de mesa **não movem estoque nenhum**, apesar da aparência: o fechamento (PDV-F009) e a
+junção de mesas (PDV-F016) — nesta, a mercadoria mudou de conta, não de lugar.
+
+O quadro completo dos dez pontos de escrita do sistema está em
+[`estoque`](../estoque/README.md#integrações-entre-domínios), que é o dono do ledger.
 
 ## Schema de Banco (Migrations)
 
@@ -505,6 +550,19 @@ de ponto de reposição. Detalhes em [`estoque`](../estoque/README.md#integraç�
   lugar**, mesma exceção documentada de `OrderPayment.confirmCaptured` e pela mesma razão: não há
   movimento de dinheiro para registrar, só o encerramento de uma cobrança em aberto.
 - Molde da migration: **V79**, que estendeu o `CHECK` irmão de método para `GATEWAY_PIX`.
+
+**V121 — `pdv_comanda_conta_dividida`** (PDV-F017 — dividir a conta por seleção de itens)
+- `comanda_item.closed_in_order_id BIGINT REFERENCES sales_order(id)` + índice.
+- **Por que no item e não num status novo de comanda:** o `ck_comanda_status_consistency` da V104 já
+  exige, para `ABERTA`, `closed_at` e `order_id` nulos. Guardando a cobrança na **linha**, uma comanda
+  com metade da conta paga continua legitimamente `ABERTA` — nenhum CHECK precisou ser dropado e
+  nenhum estado intermediário precisou existir. Quem responde "a mesa acabou?" é a ausência de linha
+  aberta, não uma coluna no cabeçalho.
+- **O que já era possível pelo schema:** `sales_order.comanda_id` nunca teve `UNIQUE` — a V113 criou
+  só um índice —, então vários pedidos apontando para a mesma comanda já cabiam. A conta dividida usa
+  essa folga em vez de abrir uma.
+- Efeito no significado de `comanda.order_id`: passa a ser **o pedido que encerrou a mesa**, e a lista
+  completa dos pedidos dela sai por `sales_order.comanda_id`.
 
 **V118 — `pedido_service_fee`** (PDV-F015 — a taxa de serviço da mesa)
 - `sales_order.service_fee_amount NUMERIC(14,2) NOT NULL DEFAULT 0`. **`NOT NULL DEFAULT 0` sem
@@ -598,12 +656,19 @@ de ponto de reposição. Detalhes em [`estoque`](../estoque/README.md#integraç�
   produtos distintos no catálogo, e os sabores da sessão são as **variações da grade** — o
   `sale_price` de cada variação já *é* o preço de sessão daquele sabor. Nada muda em
   `product_variant`.
-- `sessions_per_unit` é **só sugestão** para o diálogo de conversão de estoque do admin — não
-  movimenta saldo sozinho.
-- Lata de essência e sessão de narguilé são **SKUs distintos**, com conversão explícita
-  (saída de 1 lata, entrada de N sessões) pelo `POST /estoque/movements` que já existia. A
-  alternativa — saldo fracionado, baixando `1/N` — mudaria o contrato de quantidade de ajuste,
-  contagem e reposição de uma vez, já que todo campo de quantidade do sistema é inteiro.
+- `sessions_per_unit` era **só sugestão** para o diálogo de conversão de estoque do admin. **Isso
+  mudou em EST-F027/PDV-F018 (V124):** ele passou dois meses sem nenhum leitor, e o efeito era que
+  cada sessão baixava uma lata **inteira** — medido no QA de 06/09/2026, 50 → 49 numa sessão só.
+  Hoje é ele que diz quantas sessões saem de uma unidade, e a lata em uso vive em `open_package`.
+- Lata de essência e sessão de narguilé eram modeladas como **SKUs distintos**, com conversão
+  explícita (saída de 1 lata, entrada de N sessões). **Também mudou:** o dono confirmou em
+  06/09/2026 que *a essência **é** o produto de sessão*, com `openRoshPrice` e `sessionsPerUnit`
+  próprios, e a lata aberta passou a ser o caminho da essência. `POST /estoque/conversions`
+  (EST-F025) continua existindo como ferramenta **genérica** de reembalagem entre SKUs distintos,
+  mas sai do fluxo de sessão — sem essa fronteira escrita, o operador ficaria com duas verdades
+  sobre a mesma lata. A alternativa que continua descartada é o saldo fracionado (baixar `1/N`):
+  mudaria o contrato de quantidade de ajuste, contagem e reposição de uma vez, já que todo campo
+  de quantidade do sistema é inteiro.
 
 **V113 — `pedido_canal_mesa`** (PDV-F010 — o canal `MESA` no pedido)
 
@@ -776,7 +841,7 @@ Convenções, variáveis e o environment compartilhado estão em
 | PDV-C007 | 🟡 Importante | Correção | listar-comandas-abertas-da-loja-sem-sessionid | `PdvComandaController.listOpenComandas` (`:179`) exige `@RequestParam Long sessionId`, e `ComandaJpaRepository` só tem `findBySessionIdAndStatusOrderByIdDesc`. Como a decisão é "caixa por atendente, **mesas compartilhadas**", o front tem que buscar `GET /pdv/sessions`, filtrar as `OPEN` e disparar **uma chamada por sessão** (`pdv.service.ts::listComandasAbertas`, com `Promise.allSettled` para uma sessão que falhe não derrubar o salão). Proposta do §6 do `PROMPT_BACKEND_SESSAO_MESA.md`: `GET /pdv/comandas` sem `sessionId` (ou `?warehouseCode=`), devolvendo as mesas abertas da **loja** — troca o merge N+1 por uma chamada só. | ✅ Fechado (2026-08-30) — `sessionId` virou opcional em vez de rota nova; ver Histórico abaixo |
 | PDV-F011 | 🔴 Alta | Feature | componentes-da-sessao-e-acrescimo-no-open-rosh | **Pedido aberto do front, 0/8.** `notes` (string, máx. 200, nullable, sem efeito em preço) e `surchargeAmount` (decimal, `>= 0`, somado ao preço resolvido pelo servidor) em `AddComandaItemRequest`, ecoados em `ComandaItemResponseDTO` **e** `OrderItemAdminResponseDTO`. `notes` dá casa ao registro do setup da mesa — qual narguilé, com filtro, **qual pinça** — que não pode virar cortesia (cortesia baixa estoque, exige permissão e apareceria no cupom como item de R$ 0 não pedido). `surchargeAmount` é a essência que sai mais cara mesmo no open rosh, decidida caso a caso no balcão; só vale em `mode = OPEN_ROSH`, soma sobre o `openRoshPrice` do **produto pai**, e **não é `discountAmount` negativo** — o relatório precisa distinguir "cobramos a mais" de "cobramos a menos". Exige `PDV_COMANDA_SURCHARGE` própria, no espírito de `PDV_COMANDA_COURTESY`; `costPrice` segue congelado (o acréscimo é margem, não custo). Erros: `403 SURCHARGE_NOT_ALLOWED`, `400 SURCHARGE_ON_COURTESY`, `400 SURCHARGE_NOT_APPLICABLE`, `400 SURCHARGE_INVALID`, `400 NOTES_TOO_LONG`. Spec colável em `frontend-admin-prod/Docs/PROMPT_BACKEND_COMPONENTES_SESSAO.md`; front pronto atrás de `REGISTRO_COMPONENTES_ENABLED`/`ACRESCIMO_OPEN_ROSH_ENABLED`, com um teste-guarda que **falha de propósito** quando o contrato chegar. | ✅ Fechado (2026-08-29) — 8/8 do checklist do front. Ver Histórico abaixo. |
 | PDV-F012 | 🟡 Média | Feature | remover-item-de-comanda-aberta | Não existe endpoint de remover linha de comanda: lançamento errado numa mesa só sai cancelando a comanda **inteira**, que devolve tudo ao estoque e encerra a mesa. A regra difícil já está antecipada no §8.2 do `PROMPT_BACKEND_SESSAO_MESA.md` — remover uma linha `OPEN_ROSH` tem que arrastar as `TROCA` penduradas nela (`comanda_item.linked_item_id`) — e a devolução ao estoque é a mesma `ENTRADA` por item que `cancelComanda` já faz. | ✅ Fechado (2026-08-30) — `DELETE /pdv/comandas/{id}/items/{itemId}`; a `TROCA` é arrastada, o `SABOR_EXTRA` barra. Ver Histórico abaixo |
-| PDV-F013 | 🟢 Baixa | Feature | varredura-de-comanda-esquecida | A baixa de estoque da comanda não é atômica ao longo da vida dela (cada `addItem` é seu próprio commit — não dá para segurar transação de banco aberta por horas), então comanda esquecida aberta sem `POST .../cancel` explícito deixa estoque debitado sem devolução. Não há varredura nem timeout. Era limitação documentada em prosa desde PDV-F009; ganha ID para poder entrar em sprint. Molde possível: `StockReservationExpiryCleanupService` / `CashbackExpiryCleanupService`. | Pendente |
+| PDV-F013 | 🟡 Importante | Feature | varredura-de-comanda-esquecida | A baixa de estoque da comanda não é atômica ao longo da vida dela (cada `addItem` é seu próprio commit — não dá para segurar transação de banco aberta por horas), então comanda esquecida aberta sem `POST .../cancel` explícito deixa estoque debitado sem devolução. Não há varredura nem timeout. Era limitação documentada em prosa desde PDV-F009; ganha ID para poder entrar em sprint. Molde possível: `StockReservationExpiryCleanupService` / `CashbackExpiryCleanupService`. **Reprioridade em 2026-08-30 (🟢 Baixa → 🟡 Importante):** a nota original é anterior a **PDV-C005**. Enquanto o caixa fechava com mesa aberta, comanda esquecida era um saldo furado silencioso — ruim, mas contido no relatório. Desde que `closeSession` passou a recusar sessão com comanda aberta (`409 SESSION_HAS_OPEN_COMANDAS`), a **mesma** comanda esquecida passou a **impedir o fechamento do turno**: o sintoma saiu do relatório e foi para a operação da manhã seguinte, e a única saída manual é alguém achar a mesa e cancelá-la. Não é regressão de PDV-C005 — a guarda está certa e resolveu um problema pior (mesa congelada para sempre, sem caminho de devolução do estoque). É a prioridade deste item que ficou velha. Levantado na análise de estoque×mesa de 2026-08-30. | ✅ Fechado (2026-08-31) — cancela só as **vazias**; as com consumo viram alerta. Ver Histórico abaixo. |
 | PDV-C008 | 🔴 Alta | Correção | comanda-sem-trava-de-concorrencia | `ComandaEntity` (`adapter/out/persistence/entity/ComandaEntity.java`) **não tem `@Version`**, e `ComandaRepositoryImpl.save` (`:45-88`) é um read-modify-write do agregado inteiro: `findById`, reescreve todos os campos e regrava a coleção de itens. É a exceção no projeto — `OrderEntity`, `StockBalanceEntity` e `StockLotEntity` **têm** `@Version`. Falha concreta: dois atendentes lançam item na mesma mesa quase ao mesmo tempo, que é justamente o que PDV-F010 liberou ao trocar `requireOwnOpenSession` por `requireOpenSession` (`core/service/PdvService.java:330`). As duas transações leem a mesma versão da comanda e a segunda gravação sobrescreve a primeira — **uma linha desaparece**. Só que `ComandaService.addItem` (`:139`) já chamou `adjustStock(SAIDA)` em commit próprio: a essência saiu do estoque, o cliente não é cobrado por ela, e o saldo fica furado sem nenhum rastro na comanda. Existe `PdvSaleConcurrencyIT` para a venda de balcão; não existe equivalente para comanda. | ✅ Fechado (2026-08-29) — resolvido por trava **pessimista**, não `@Version`; ver Histórico abaixo. |
 | PDV-C009 | 🟡 Importante | Correção | n-mais-1-ao-listar-comandas-abertas | `ComandaEntity.items` é `fetch = FetchType.LAZY` (`:61`), `ComandaJpaRepository` tem um único método derivado sem `@EntityGraph` nem `JOIN FETCH` (`:10`), e `ComandaRepositoryImpl.findOpenBySessionId` (`:37-41`) mapeia cada comanda com `toDomain`, que toca `e.getItems()` (`:96`) — **uma consulta por mesa aberta**, além da consulta da lista. É problema distinto de PDV-C007: aquele é o N+1 **de HTTP** no cliente (uma chamada por sessão). Depois de PDV-C007 entregue o N+1 **de banco** continua, e fica pior: a chamada única traria as mesas de todas as sessões da loja de uma vez. Molde de correção: o padrão ID-first + `JOIN FETCH` de [`persistence.md`](../../persistence.md), o mesmo que PED-C002 rastreia para `GET /orders`. | ✅ Fechado (2026-08-30) — ID-first + `JOIN FETCH`, junto com PDV-C007; ver Histórico abaixo |
 | PDV-C010 | 🟡 Importante | Correção | tipar-mode-como-enum-nos-dtos-de-resposta | `ComandaItemResponseDTO.mode` (`:31`) e `OrderItemAdminResponseDTO.mode` (`:44`) são `String`, embora `AddComandaItemRequest.mode` já seja o enum `ConsumptionMode`. O contrato sai assimétrico: o OpenAPI publica enum no request e `string` solta na resposta. Pedido explícito do front (`frontend-admin-prod/Docs/BACKEND_TODO.md:413-417`) — por causa disso o `ModoItemComanda` continua mantido à mão em `sessao-mesa.models.ts` em vez de sair do client gerado. `ConsumptionMode` vive em `core/domain/model/pedido/` e o adapter já o importa no request: é trocar o tipo nos dois DTOs e no `ComandaDTOConverter`. | ✅ Fechado (2026-08-30) — `ConsumptionMode` nos dois DTOs de resposta |
@@ -786,12 +851,15 @@ Convenções, variáveis e o environment compartilhado estão em
 | PDV-C014 | 🟢 Melhoria | Correção | auditoria-da-comanda-com-eventtype-emprestado | `openComanda` (`PdvComandaController:118-127`) **não publica evento nenhum** — abrir mesa não deixa rastro, enquanto abrir caixa publica `CASH_SESSION_OPENED`. E `closeComanda` (`:209-213`) publica `STOCK_MOVEMENT_REGISTERED` com `origin: PDV_COMANDA_CLOSE`, embora **nenhum estoque se mova no fechamento** — o próprio service diz isso em `ComandaService:251`. A trilha de movimentação de estoque acaba descrevendo algo que não aconteceu. Raiz: não existe `COMANDA_OPENED`/`COMANDA_CLOSED`/`COMANDA_CANCELLED` em `AuditEvent.EventType`, e a comanda inteira anda pendurada em `STOCK_MOVEMENT_REGISTERED` + `origin`. | ✅ Fechado (2026-08-30) — cinco `EventType` próprios, substituindo o `STOCK_MOVEMENT_REGISTERED` emprestado |
 | PDV-F014 | 🟡 Média | Feature | desconto-no-fechamento-de-comanda | `ComandaService.closeComanda` (`:239`) grava `BigDecimal.ZERO` fixo no `discountAmount` de cada `OrderItem`, com o comentário *"Sem desconto por item nesta entrega (fora de escopo do PDV-F009)"*. A venda de balcão tem desconto desde PDV-F004: campo em `SaleRequest`, permissão `PDV_SALE_DISCOUNT`, teto `pdv.sale.max-discount-percent` e `409 DISCOUNT_LIMIT_EXCEEDED`. Na mesa o desconto de fim de noite não tem onde ir: ou se lança linha de cortesia (que baixa estoque e é outra coisa), ou se cobra fora do sistema. Reaproveita `PdvService.requireDiscountWithinLimit` (`:339-350`), que hoje simplesmente não é chamado no fechamento de comanda. Não confundir com PDV-F011: aquele é **acréscimo por linha** em `OPEN_ROSH`, este é **abatimento na conta**. | ✅ Fechado (2026-08-30) — rateado entre os itens, não solto no pedido; ver Histórico abaixo |
 | PDV-F015 | 🟡 Média | Feature | taxa-de-servico-na-comanda | Os 10% do garçom são o padrão do salão e **não existem em lugar nenhum do sistema** (uma varredura por `service_fee`, `serviceFee`, "taxa de servi", `couvert` e `gorjeta` volta vazia em `src/`). `Order.netAmount = grossAmount − discountAmount − cashbackRedeemed` (`core/domain/model/pedido/Order.java:116-121`) não tem campo de acréscimo — o único acréscimo desenhado é o `surchargeAmount` de PDV-F011, que é por linha e só vale em `OPEN_ROSH`. Hoje a taxa é somada de cabeça e cobrada por fora, o que significa que ela **não entra no fechamento de caixa, não aparece no comprovante e não é conferível**. Desenho natural: campo opcional no `CloseComandaRequest` (o cliente pode recusar), percentual configurável no molde de `pdv.sale.max-discount-percent`. | ✅ Fechado (2026-08-30) — em coluna própria, **fora** do `netAmount`; ver Histórico abaixo |
-| PDV-F016 | 🟢 Baixa | Feature | transferir-e-juntar-comandas | `tableOrCustomerLabel` é imutável: `Comanda` só expõe `withAddedItem`, `closed` e `cancelled`, e não há `PATCH`/`PUT` em `/pdv/comandas`. Trocar de mesa hoje só é possível cancelando (o que devolve tudo ao estoque e encerra a comanda) e relançando item a item. Juntar duas mesas que viraram uma conta só também não tem caminho. Depende de PDV-C008: mover linhas entre agregados sem trava de concorrência multiplica o problema de perda de item. | Pendente |
+| PDV-F016 | 🟢 Baixa | Feature | transferir-e-juntar-comandas | `tableOrCustomerLabel` é imutável: `Comanda` só expõe `withAddedItem`, `closed` e `cancelled`, e não há `PATCH`/`PUT` em `/pdv/comandas`. Trocar de mesa hoje só é possível cancelando (o que devolve tudo ao estoque e encerra a comanda) e relançando item a item. Juntar duas mesas que viraram uma conta só também não tem caminho. Depende de PDV-C008: mover linhas entre agregados sem trava de concorrência multiplica o problema de perda de item. | ✅ Fechado (2026-08-31) — `PATCH /pdv/comandas/{id}` renomeia e `POST .../merge-into/{targetId}` junta, **sem mover estoque**. Ver Histórico. |
 | PDV-C015 | 🔴 Alta | Correção | liquidacao-online-nao-registra-pagamento | `PdvService.settleOnlineOrder` (`core/service/PdvService.java:299`) consome a reserva e conclui o pedido, mas **nunca grava `OrderPayment`** — o único caminho de recebimento do projeto fora do ledger (`registerSale` e `closeComanda` gravam). Três consequências: (1) `closeSession` calcula o esperado com `sumCapturedAmountBySessionIdAndMethod(..., DINHEIRO)`, então o pedido do app pago em dinheiro no balcão soma **zero** ali — a cédula está na gaveta, a conferência não a espera, e o fechamento acusa **sobra sem dono**; (2) `/payment-totals`, `GET /pdv/sales/{id}` e o comprovante saem sem o pagamento; (3) a linha `PENDING`/`GATEWAY_PIX` que `ShopService.checkout:213` grava em todo pedido de marketplace fica **órfã para sempre**, descrevendo uma cobrança de gateway que não vai acontecer. Mesma família de PDV-F015: dinheiro que entra na loja e não é conferível. | ✅ Fechado (2026-08-30) — a rota ganhou corpo; ver Histórico abaixo |
 | PDV-C017 | 🔴 Alta | Correção | troco-nao-descontado-do-esperado-do-caixa | `order_payment.amount` em `DINHEIRO` é o valor **entregue** pelo cliente — `SalePaymentRequest` diz isso explicitamente ("pode passar do total da venda e virar troco"), `validatePaymentsAndComputeChange` deriva o troco de `total pago − líquido`, e o front manda o recebido inteiro (`pdv-pagamento.component.spec.ts:131`, *"manda o valor recebido inteiro e calcula o troco"*). Mas `PdvService.closeSession:155-157` somava `sum(CAPTURED, DINHEIRO)` **sem subtrair `sales_order.change_amount`**. Toda venda em dinheiro com troco inflava o esperado exatamente pelo troco, e o operador honesto fechava o turno acusando uma **falta** igual à soma dos trocos do dia — em toda venda quebrada, todo dia. O teste `PdvCashCycleIT.splitPaymentIsPersistedAndOnlyCashCountsTowardsTheDrawer` **fixava o defeito como correto**: afirmava esperado 60,00 numa gaveta que só podia conter 57,00. | ✅ Fechado (2026-08-30) — ver Histórico abaixo |
 | PDV-C018 | 🟡 Importante | Correção | estorno-nao-reduz-o-esperado-do-caixa | `OrderService.refundOrder` grava `OrderPayment.refunded(payment)` — linha nova `REFUNDED`, ledger append-only — e **deixa a `CAPTURED` original de pé**, que é o desenho certo para o histórico. Só que `sumCapturedAmountBySessionIdAndMethod` filtra `p.status = 'CAPTURED'`: estornar uma venda em dinheiro no mesmo turno devolve a cédula ao cliente e o esperado continua contando-a. Achado junto com PDV-C017, e agravado por um teste vazio: `PdvCashCycleIT.cancelledSaleDoesNotCountTowardsTheExpectedAmount` **não cancelava nada** (abria caixa, vendia, fechava — com um comentário interno dizendo "sem venda cancelada"), e o README citava esse teste como prova da regra. | ✅ Fechado (2026-08-30) — subtração própria + o teste refeito como estorno de verdade; ver Histórico abaixo |
 | PDV-C016 | 🟢 Melhoria | Correção | descontos-impossiveis-sem-codigo-de-erro-proprio | Dois descontos aritmeticamente impossíveis respondiam com o **400 genérico** do handler de `IllegalArgumentException` (`BAD_REQUEST`, mensagem fixa "Requisição inválida", que descarta a do domínio) — indistinguível de qualquer corpo malformado, num módulo cujo vocabulário de erro é específico em todo o resto. (1) `POST /pdv/sessions/{id}/sales` com `items[].discountAmount` maior que `quantity × unitPrice`, barrado pelo compact constructor de `OrderItem`. (2) `POST /pdv/comandas/{id}/close` com `discountAmount` maior que o total da conta, barrado por `DiscountProration.distribute` — e este é o pior dos dois **por causa da ordem**: o rateio roda antes de `requireDiscountWithinLimit`, então pedir 11% de desconto devolvia o `409 DISCOUNT_LIMIT_EXCEEDED` que a tela trata, e pedir o dobro da conta devolvia "Requisição inválida". `CloseComandaRequest.discountAmount` só tem `@DecimalMin("0.0")`, e teto não é expressável em Bean Validation porque depende da conta. | ✅ Fechado (2026-08-30) — exceção tipada com 409 próprio nos dois caminhos; ver Histórico |
-| PDV-F017 | 🟢 Baixa | Feature | dividir-conta-por-pessoa | `closeComanda` gera **um único** `Order` com todos os itens, e não há campo de pessoa em `ComandaItem`. O split que existe é de **forma de pagamento** (`payments` como lista, PDV-F006) — que é outra coisa: divide *como* se paga, não *quem* paga o quê. "Cada um paga o que consumiu" não tem representação no modelo, e é o pedido mais comum de mesa cheia depois da própria comanda. | Pendente |
+| PDV-F017 | 🟢 Baixa | Feature | dividir-conta-por-pessoa | `closeComanda` gera **um único** `Order` com todos os itens, e não há campo de pessoa em `ComandaItem`. O split que existe é de **forma de pagamento** (`payments` como lista, PDV-F006) — que é outra coisa: divide *como* se paga, não *quem* paga o quê. "Cada um paga o que consumiu" não tem representação no modelo, e é o pedido mais comum de mesa cheia depois da própria comanda. | ✅ Fechado (2026-08-31) — fechamento por seleção de itens: `itemIds` no `close`, a comanda segue ABERTA com o resto. Ver Histórico. |
+| PDV-C019 | 🟢 Melhoria | Correção | integracao-com-estoque-congelada-na-era-sale | A seção §Integração com estoque deste README descreve `PdvService.registerSale` chamando `adjustStock(SAIDA)` e *"só então persiste a `Sale`"* — mas `Sale` foi substituída por `Order`/`OrderItem` em **PDV-F003** (Fatia 0), e a seção não menciona **comanda nenhuma**, embora a mesa seja hoje o caminho de escrita em estoque com o padrão mais distinto do módulo: `addItem` debita item a item em commit próprio, `closeComanda` **não** debita nada, e `removeItem`/`cancelComanda` devolvem por `ENTRADA`. As regras corretas existem e estão certas — só que ~300 linhas acima, em §Regras de Negócio; quem abre a seção que leva o nome do assunto lê o desenho de julho. Par de **EST-C017**, que registra a mesma lacuna do lado do estoque (lá o §Integrações ainda diz "as duas integrações"). Levantado na análise de estoque×mesa de 2026-08-30. | ✅ Fechado (2026-08-31) — §Integração com estoque reescrita, apontando para o README de estoque. |
+| PDV-F018 | 🔴 Alta | Feature | lata-de-essencia-na-comanda | Par de **EST-F027** do lado da mesa. `ComandaService.addItem` chamava `adjustStock(SAIDA, quantity)` para toda linha, e com isso cada sessão de narguilé baixava uma **lata inteira** — medido no QA de 06/09/2026: `ESSE-ZGY-BLUEBERRY` foi de 50 para 49 numa sessão simples. O critério de decisão é do **produto**, não do modo: `NORMAL` também é sessão quando o SKU é a essência, que foi exatamente o caso medido. | ✅ Fechado (2026-09-08) — linha de essência consome **uso de lata**; `comanda_item.package_uses`/`package_sessions_per_unit` (V124) carimbam qual uso a linha foi, ecoados em `ComandaItemResponseDTO`. Cancelamento e remoção **decrementam o contador** em vez de lançar `ENTRADA`: a essência foi queimada e não voltou para a prateleira, e devolver unidade inventaria saldo. |
+| PDV-C020 | 🟡 Importante | Correção | kit-lancado-como-sabor-de-sessao | O QA de 06/09/2026 (PDV-003) achou kits sendo oferecidos como **sabor** no dialog de sessão, a R$ 95,37 — há kits cadastrados nas categorias `Essências`/`Narguilés` e o filtro do cliente não olhava o tipo. Kit não tem saldo próprio (explode em componentes, EST-F015) e não pode ser "a lata" que o contador de EST-F027 controla. O frontend corrigiu o filtro; faltava a guarda de servidor, sem a qual a combinação chegaria ao estoque. | ✅ Fechado (2026-09-08) — modo de sessão em SKU `KIT` recusado com `NOT_A_SESSION_PRODUCT`, o mesmo código que o front já trata. |
 
 > A permissão `PDV_SALE_MANAGE` está ausente dos seeders de dev — rastreado como
 > **EST-C001** em [`estoque`](../estoque/README.md#backlog-do-módulo), porque o sintoma
@@ -826,6 +894,26 @@ Convenções, variáveis e o environment compartilhado estão em
 > Ver [`pedido`](../pedido/README.md#modelo-de-domínio).
 
 ## Histórico de Implementações
+
+- **2026-09-08** — `lata-de-essencia-na-comanda` (PDV-F018 + PDV-C020): par de **EST-F027** do lado
+  da mesa. `addItem` chamava `adjustStock(SAIDA, quantity)` para toda linha, e com isso cada sessão
+  de narguilé baixava uma **lata inteira** — medido ao vivo no QA de 06/09/2026: 50 → 49 numa
+  sessão simples. **O critério de decisão é do PRODUTO, não do modo**, e isso é o que faz a
+  correção funcionar: `NORMAL` também é sessão quando o SKU é a essência, que foi exatamente o caso
+  medido, então olhar `mode.isSessionMode()` deixaria o bug de pé no caminho mais comum. Produto de
+  sessão **sem** `sessionsPerUnit` segue baixando unidade — a adoção é por item de catálogo, não
+  uma virada de chave para a casa inteira. `comanda_item.package_uses`/`package_sessions_per_unit`
+  (V124) carimbam **qual uso da lata a linha foi**: snapshot, não vínculo com `open_package.id`, o
+  que mantém o histórico verdadeiro depois da reposição, dá o "3 de 5" por linha sem uma segunda
+  chamada, e — o que mais importa — é por onde o cancelamento sabe, meses depois, que aquela linha
+  consumiu uso e não unidade. **Cancelamento e remoção decrementam o contador** em vez de lançar
+  `ENTRADA`: a essência foi queimada, e devolver unidade inventaria saldo. Linha comum continua
+  voltando por `ENTRADA`; os dois caminhos coexistem em `undoStock`. **PDV-C020 junto:** modo de
+  sessão em SKU do tipo `KIT` passa a ser recusado com `NOT_A_SESSION_PRODUCT` — o QA (PDV-003)
+  achou kits oferecidos como *sabor* a R$ 95,37, e kit não tem saldo próprio (explode em
+  componentes, EST-F015) nem pode ser "a lata" que o contador controla. O código de erro é o que o
+  frontend já trata, de propósito: um novo obrigaria o cliente a aprender outra mensagem para o
+  mesmo "este SKU não serve como sessão".
 
 - **2026-08-30** — `descontos-impossiveis-ganham-codigo-proprio` (**PDV-C016**): dois descontos
   aritmeticamente impossíveis respondiam com o 400 genérico do handler de
@@ -1306,10 +1394,106 @@ Fora do roteiro do plano original, o que a mesa trouxe:
       cego: cada entrega anterior acrescentou uma forma de dinheiro **entrar** (PDV-F006 o cartão,
       PDV-F015 a taxa, PDV-F008 a reserva) e nenhuma olhou para as duas formas de ele **sair**.
 
-**O backlog do módulo está limpo de correções.** O que resta são três features, todas 🟢 baixa, e
-nenhuma delas bloqueia operação:
+- **2026-08-31** — `varredura-de-comanda-esquecida` (PDV-F013): a baixa da comanda nunca foi atômica ao
+  longo da vida dela — cada `addItem` é seu próprio commit —, então mesa esquecida aberta deixava
+  estoque debitado sem devolução, e **desde PDV-C005 também travava o fechamento do caixa**. Era esse
+  segundo efeito que tornava o item urgente apesar de estar marcado 🟢: o sintoma tinha saído do
+  relatório e ido para a operação da manhã seguinte.
+  **A decisão que define a entrega: a varredura cancela apenas as comandas VAZIAS.** Cancelar devolve
+  o estoque por `ENTRADA`, e numa mesa com consumo real a essência **já foi queimada** — ela não voltou
+  para a prateleira. Cancelar em massa trocaria um problema visível (a mesa pendurada) por um invisível
+  (o saldo mentindo para cima, que só apareceria no balanço seguinte, sem ninguém saber de onde veio).
+  Comanda vazia não tem esse dilema: não há o que devolver, e o único efeito dela é travar o turno. As
+  que têm consumo geram **uma** notificação agregada para quem tem `PDV_COMANDA_MANAGE`, dizendo
+  explicitamente que o saldo continua debitado — cobrar, fechar como perda ou cancelar assumindo a
+  devolução é decisão humana.
+  Janela de 12h (`pdv.comanda.stale.hours`) e passada diária às 5h (`pdv.comanda.stale.cron`): o corte
+  atravessa o fim do expediente, então o que ficou aberto na virada do dia é esquecimento e não mesa em
+  uso, e o caixa da manhã já encontra o salão limpo. Cadência do `CashbackExpiryCleanupService`, não a
+  de 5 min do varredor de reserva — aqui não há saldo travado invisível a correr.
+  **A varredura não exige caixa aberto**, ao contrário de `cancelComanda`: a comanda mais presa de
+  todas é a órfã de uma sessão já fechada (possível para o que existia antes de PDV-C005), e exigir
+  sessão aberta faria a varredura recusar exatamente o caso que ela existe para resolver. Por isso o
+  caminho é próprio em `ComandaService.sweepStaleComandas`, e não uma chamada a `cancelComanda`.
+  Cada candidata é recarregada com `findByIdForUpdate` antes da decisão (PDV-C008): sem a trava, a
+  varredura poderia cancelar uma mesa no instante em que um atendente lança o primeiro item nela — com
+  ela o `addItem` espera e falha com `COMANDA_NOT_OPEN`, e o operador **vê** o erro.
+  `ComandaJpaRepository.findOpenIdsOlderThan` (ordem crescente de id, para a mais antiga sair primeiro
+  em vez de ficar no fim da fila para sempre) + `StaleComandaSweepService`. Sem migration —
+  `comanda.opened_at` existe desde a V104. `ComandaService` ganhou `NotificationUseCase` e
+  `UserRepository`, o mesmo par que `EstoqueService` usa para o alerta de lote.
 
-- **PDV-F013** — varredura de comanda esquecida. Molde: `StockReservationExpiryCleanupService`.
-- **PDV-F016** — transferir e juntar mesas. Dependia de PDV-C008, que está fechado.
-- **PDV-F017** — dividir a conta por pessoa. É o pedido mais comum de mesa cheia depois da própria
-  comanda, e o único que exige modelo novo (`ComandaItem` não tem campo de pessoa).
+- **2026-08-31** — `dividir-conta-por-pessoa` (PDV-F017): `POST /pdv/comandas/{id}/close` passou a
+  aceitar `itemIds`. Com a lista, o pedido sai só com aquelas linhas, elas são marcadas como cobradas e
+  **a comanda continua ABERTA** com o restante; repetido até zerar, o último fechamento encerra a mesa.
+  Sem `itemIds`, nada muda.
+  **A decisão de desenho:** a divisão é por **seleção de itens**, não por rótulo de pessoa. As duas
+  exigiriam o mesmo maquinário — marcar quais linhas já foram cobradas — e a diferença seria só um
+  campo `person_label` a mais, preenchido no lançamento. Selecionar na hora de fechar é o que o
+  atendente de fato faz na tela, e evita inventar um cadastro de pessoa que ninguém pediu.
+  **O que tornou isso barato:** o estado parcial cabe no schema que já existia. O
+  `ck_comanda_status_consistency` da V104 exige `ABERTA → order_id IS NULL`, e como a marcação de
+  cobrada mora na **linha** (`comanda_item.closed_in_order_id`, V121) e não no cabeçalho, a comanda com
+  metade da conta paga continua legitimamente `ABERTA`. Nenhum status novo, nenhum CHECK dropado. E
+  `sales_order.comanda_id` nunca teve `UNIQUE` — só índice (V113) —, então vários pedidos apontando
+  para a mesma comanda já era possível.
+  `Comanda.runningTotal()` mudou de significado: passou a somar só as linhas em aberto, que é o "falta
+  pagar" que a tela precisa. Antes as duas leituras coincidiam porque a conta só fechava inteira.
+  Desconto, taxa de serviço, troco e cashback incidem **sobre o escopo** — somar a taxa do salão sobre
+  o consumo alheio seria cobrar duas vezes pelo mesmo serviço. Uma seleção não pode separar linhas
+  amarradas por `linkedItemId`: um `OPEN_ROSH` e as trocas dele saem juntos
+  (`409 LINKED_ITEM_MUST_CLOSE_TOGETHER`), porque separados cada metade descreve um consumo que não
+  aconteceu e a margem do open rosh sai partida ao meio. Linha inexistente ou já cobrada dá
+  `400 ITEM_NOT_OPEN_IN_COMANDA` — 400 e não 404 porque "essa já foi" é resposta diferente de "não
+  achei". Migration **V121**.
+  **Efeito colateral bom:** com conta dividida, `comanda.order_id` passa a significar "o pedido que
+  encerrou a mesa" e a fonte completa vira `sales_order.comanda_id`, que já é N→1. Isso **resolve** a
+  redundância que o `plano-sessao-de-mesa.md` tinha deixado registrada em aberto.
+- **2026-08-31** — `transferir-e-juntar-comandas` (PDV-F016): `PATCH /pdv/comandas/{id}` troca o
+  rótulo — o cliente mudou de lugar no salão — e `POST /pdv/comandas/{id}/merge-into/{targetId}` passa
+  as linhas em aberto para outra mesa e encerra esta. Antes, trocar de mesa só era possível cancelando
+  (o que devolvia tudo ao estoque) e relançando item a item. **Sem migration.**
+  **O ponto técnico que decidiu a implementação.** Passar os itens de A dentro do agregado de B **não
+  funciona**: `ComandaRepositoryImpl.save` trata item de id desconhecido como linha nova, os ids mudam,
+  e `comanda_item.linked_item_id` — FK auto-referente da V114 — passa a apontar para linhas que não
+  existem mais. A junção é feita reatribuindo a FK no adapter (`moveOpenItems`), o que **preserva os
+  ids**: o vínculo continua válido sem remapeamento nenhum, e o problema desaparece em vez de ser
+  resolvido. `ComandaRepositoryIT.moveOpenItems_preservesIdsAndKeepsLinkedItemIdValid` é o teste que
+  justifica o desenho.
+  **Nenhum estoque se move numa junção**, e isso precisa ser dito porque o status sugere o contrário: a
+  origem termina `CANCELADA` — o único estado terminal sem pedido que o CHECK da V104 aceita — mas
+  **sem** o `adjustStock(ENTRADA)` que `cancelComanda` faz. A mercadoria não voltou para a prateleira,
+  mudou de conta. O que distingue os dois casos na trilha é o `EventType.COMANDA_MERGED` próprio.
+  As duas comandas são travadas em **ordem crescente de id**, não na ordem em que o cliente as mandou:
+  duas junções simultâneas em sentidos opostos (A→B e B→A) são o deadlock clássico de duas travas sem
+  ordem canônica. Recusa: mesas de depósitos diferentes ou a mesma comanda
+  (`409 COMANDA_MERGE_NOT_ALLOWED`), e origem que já teve parte da conta cobrada
+  (`409 COMANDA_PARTIALLY_CLOSED`) — mover o resto partiria a conta entre duas mesas e o recibo já
+  entregue deixaria de bater. É a interação com PDV-F017, e o motivo de aquele ter vindo primeiro.
+- **2026-08-31** — `integracao-com-estoque-congelada-na-era-sale` (PDV-C019): a §Integração com estoque
+  descrevia `registerSale` persistindo *"a `Sale`"* — entidade que PDV-F003 substituiu por
+  `Order`/`OrderItem` na Fatia 0 — e não citava comanda nenhuma, embora a mesa seja o caminho de
+  escrita mais distinto do módulo. As regras corretas existiam, ~300 linhas acima em §Regras de
+  Negócio; quem abria a seção com o nome do assunto lia o desenho de julho. Reescrita com os quatro
+  caminhos e apontando para o README de estoque em vez de duplicar a tabela. Par de **EST-C017**.
+
+**O backlog deste módulo está zerado.** Não resta feature nem correção pendente — PDV-F001 a F017 e
+PDV-C001 a C019 estão todos fechados. É a primeira vez desde a criação do módulo.
+
+O que existe são **limitações escolhidas**, não pendências, e as duas valem ser lembradas por quem
+mexer aqui:
+
+- A baixa de estoque da comanda **não é atômica ao longo da vida dela** — cada lançamento é seu
+  próprio commit, porque não dá para segurar uma transação de banco pelas horas de uma mesa. A
+  varredura de PDV-F013 cobre a comanda esquecida **vazia**; onde houve consumo real ela avisa e não
+  devolve, porque a essência foi queimada.
+- Junção de mesa **não move estoque** e a origem fica `CANCELADA`. Quem ler o status sem o evento
+  `COMANDA_MERGED` ao lado vai supor uma devolução que não houve.
+
+> A varredura de 2026-08-30 na interseção **estoque × mesa** — feita depois que o backlog dos dois
+> módulos já estava sem correções — devolveu um bug real de fora daqui: `ReservedStockException` não
+> tinha `@ExceptionHandler` e respondia **500** onde o contrato pedia `400 RESERVED_STOCK`, com
+> `ComandaService.addItem` entre os caminhos que a alcançam. Fechado como **EST-C016** em
+> [`estoque`](../estoque/README.md#histórico-de-implementações). Mesmo padrão de PDV-C017/C018: o
+> ponto cego não estava no que o backlog listava, e sim na fronteira entre dois módulos que cada
+> README supunha ser problema do outro.
