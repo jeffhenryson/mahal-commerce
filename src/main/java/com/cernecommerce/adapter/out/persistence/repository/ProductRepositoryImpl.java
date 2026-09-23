@@ -256,9 +256,11 @@ public class ProductRepositoryImpl implements ProductRepository {
 
     @Override
     @Transactional(readOnly = true)
-    public PageResult<Product> findAllActiveAndPriced(int page, int size, Boolean onSale, Long categoryId) {
+    public PageResult<Product> findAllActiveAndPriced(int page, int size, Boolean onSale, Long categoryId,
+            String search) {
+        String normalized = search == null || search.isBlank() ? null : search.trim().toLowerCase();
         Page<Long> idPage = productJpaRepository.findActivePricedIds(
-                PageRequest.of(page, size), onSale, categoryId);
+                PageRequest.of(page, size), onSale, categoryId, likePattern(normalized));
         return toPageResult(idPage, page, size);
     }
 

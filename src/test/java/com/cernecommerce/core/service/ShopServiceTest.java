@@ -160,7 +160,7 @@ class ShopServiceTest {
         Product product = Product.of(1L, "ESS-001", "Essência Maçã", "essencia", true, List.of(),
                 Pricing.of(new BigDecimal("15.00"), null, new BigDecimal("30.00")));
         when(estoqueUseCase.getDefaultWarehouse()).thenReturn(WAREHOUSE);
-        when(estoqueUseCase.listActivePricedProducts(0, 20, null, null))
+        when(estoqueUseCase.listActivePricedProducts(0, 20, null, null, null))
                 .thenReturn(new PageResult<>(List.of(product), 0, 20, 1L, 1));
         when(estoqueUseCase.getStockBalance("ESS-001", "LOJA-01"))
                 .thenReturn(StockBalance.of(1L, "ESS-001", 1L, BigDecimal.TEN, BigDecimal.ZERO, 0L));
@@ -179,7 +179,7 @@ class ShopServiceTest {
         Product product = Product.of(1L, "ESS-001", "Essência Maçã", "essencia", true, List.of(),
                 Pricing.of(new BigDecimal("15.00"), null, new BigDecimal("30.00")));
         when(estoqueUseCase.getDefaultWarehouse()).thenReturn(WAREHOUSE);
-        when(estoqueUseCase.listActivePricedProducts(0, 20, null, null))
+        when(estoqueUseCase.listActivePricedProducts(0, 20, null, null, null))
                 .thenReturn(new PageResult<>(List.of(product), 0, 20, 1L, 1));
         when(estoqueUseCase.getStockBalance("ESS-001", "LOJA-01"))
                 .thenReturn(StockBalance.of(1L, "ESS-001", 1L, BigDecimal.ZERO, BigDecimal.ZERO, 0L));
@@ -195,7 +195,7 @@ class ShopServiceTest {
 
         assertThatThrownBy(() -> shopService.listCatalog(0, 20, null))
                 .isInstanceOf(DefaultWarehouseNotConfiguredException.class);
-        verify(estoqueUseCase, never()).listActivePricedProducts(anyInt(), anyInt(), any(), any());
+        verify(estoqueUseCase, never()).listActivePricedProducts(anyInt(), anyInt(), any(), any(), any());
     }
 
     @Test
@@ -253,7 +253,7 @@ class ShopServiceTest {
                 ProductType.SIMPLES, false, null, null, false, true, "Descrição", "http://video.mp4",
                 List.of("http://img1.png"));
         when(estoqueUseCase.getDefaultWarehouse()).thenReturn(WAREHOUSE);
-        when(estoqueUseCase.listActivePricedProducts(0, 20, null, null))
+        when(estoqueUseCase.listActivePricedProducts(0, 20, null, null, null))
                 .thenReturn(new PageResult<>(List.of(product), 0, 20, 1L, 1));
         when(estoqueUseCase.getStockBalance("ESS-001", "LOJA-01"))
                 .thenReturn(StockBalance.of(1L, "ESS-001", 1L, BigDecimal.TEN, BigDecimal.ZERO, 0L));

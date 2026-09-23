@@ -69,7 +69,15 @@ public interface ShopUseCase {
      * @param categoryId filtro opcional de categoria — {@code null} devolve o catálogo inteiro,
      *        já na ordem da vitrine (categoria em destaque primeiro).
      */
-    PageResult<CatalogItem> listCatalog(int page, int size, Boolean onSale, Long categoryId);
+    default PageResult<CatalogItem> listCatalog(int page, int size, Boolean onSale, Long categoryId) {
+        return listCatalog(page, size, onSale, categoryId, null);
+    }
+
+    /**
+     * @param search busca livre opcional (EST-F029) — nome, SKU, categoria ou marca, sem caixa nem
+     *        acento. {@code null} não filtra.
+     */
+    PageResult<CatalogItem> listCatalog(int page, int size, Boolean onSale, Long categoryId, String search);
 
     /** Categorias ativas na ordem da vitrine — a primeira linha do app sai daqui. */
     java.util.List<Category> listCategories();

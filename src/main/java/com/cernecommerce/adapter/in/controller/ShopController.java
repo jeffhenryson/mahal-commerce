@@ -21,6 +21,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Size;
 
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.ResponseEntity;
@@ -106,8 +107,10 @@ public class ShopController {
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size,
             @RequestParam(required = false) Boolean onSale,
-            @RequestParam(required = false) Long categoryId) {
-        PageResult<ShopUseCase.CatalogItem> result = shopUseCase.listCatalog(page, size, onSale, categoryId);
+            @RequestParam(required = false) Long categoryId,
+            @RequestParam(required = false) @Size(max = 100) String search) {
+        PageResult<ShopUseCase.CatalogItem> result = shopUseCase.listCatalog(page, size, onSale, categoryId,
+                search);
         PageResult<ShopCatalogItemResponseDTO> response = new PageResult<>(
                 result.content().stream().map(catalogConverter::toResponse).toList(),
                 result.page(), result.size(), result.totalElements(), result.totalPages());

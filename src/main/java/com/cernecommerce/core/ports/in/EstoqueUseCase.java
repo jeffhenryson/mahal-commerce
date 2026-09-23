@@ -284,12 +284,20 @@ public interface EstoqueUseCase {
      * @param categoryId filtro opcional de categoria — {@code null} não filtra. A ordem é a da
      *        vitrine: categoria em destaque primeiro, depois ordem de exibição, depois id.
      */
-    PageResult<Product> listActivePricedProducts(int page, int size, Boolean onSale, Long categoryId);
+    default PageResult<Product> listActivePricedProducts(int page, int size, Boolean onSale, Long categoryId) {
+        return listActivePricedProducts(page, size, onSale, categoryId, null);
+    }
+
+    /**
+     * @param search busca livre opcional (EST-F029) — nome, SKU, categoria ou marca; digitar o
+     *        nome de uma categoria traz a categoria inteira. {@code null} não filtra.
+     */
+    PageResult<Product> listActivePricedProducts(int page, int size, Boolean onSale, Long categoryId, String search);
 
     /**
      * Alteração parcial de produto (EST-F018): {@code name} e/ou {@code category} nulos são
-     * mantidos como estão. Não altera {@code sku} (identidade referenciada como texto livre pelas
-     * tabelas de estoque) nem as variações. Lança
+     * mantidos como estão. Não altera {@code sku} — a troca tem operação própria,
+     * {@link #changeSku(String, String)} (EST-F030) — nem as variações. Lança
      * {@link com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException} se o SKU
      * não for um SKU pai existente.
      */

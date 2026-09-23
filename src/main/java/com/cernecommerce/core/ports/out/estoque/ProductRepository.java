@@ -55,7 +55,15 @@ public interface ProductRepository {
      *        sempre a da vitrine: categoria em destaque primeiro, depois ordem de exibição,
      *        depois id.
      */
-    PageResult<Product> findAllActiveAndPriced(int page, int size, Boolean onSale, Long categoryId);
+    default PageResult<Product> findAllActiveAndPriced(int page, int size, Boolean onSale, Long categoryId) {
+        return findAllActiveAndPriced(page, size, onSale, categoryId, null);
+    }
+
+    /**
+     * @param search busca livre opcional (EST-F029) — nome, SKU, categoria ou marca, sem caixa nem
+     *        acento; {@code null} ou em branco não filtra.
+     */
+    PageResult<Product> findAllActiveAndPriced(int page, int size, Boolean onSale, Long categoryId, String search);
 
     Optional<Product> findBySku(String sku);
 

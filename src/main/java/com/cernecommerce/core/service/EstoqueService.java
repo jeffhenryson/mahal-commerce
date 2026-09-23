@@ -300,8 +300,9 @@ public class EstoqueService implements EstoqueUseCase {
 
     @Override
     @Transactional(readOnly = true)
-    public PageResult<Product> listActivePricedProducts(int page, int size, Boolean onSale, Long categoryId) {
-        return productRepository.findAllActiveAndPriced(page, size, onSale, categoryId);
+    public PageResult<Product> listActivePricedProducts(int page, int size, Boolean onSale, Long categoryId,
+            String search) {
+        return productRepository.findAllActiveAndPriced(page, size, onSale, categoryId, search);
     }
 
     @Override

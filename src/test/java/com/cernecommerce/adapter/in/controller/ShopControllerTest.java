@@ -122,7 +122,7 @@ class ShopControllerTest {
     void listCatalog_returnsPagedItems() throws Exception {
         ShopUseCase.CatalogItem item = new ShopUseCase.CatalogItem(
                 "ESS-001", "Essência Maçã", "essencia", new BigDecimal("30.00"), true, null, false, null, false);
-        when(shopUseCase.listCatalog(0, 20, null, null)).thenReturn(new PageResult<>(List.of(item), 0, 20, 1L, 1));
+        when(shopUseCase.listCatalog(0, 20, null, null, null)).thenReturn(new PageResult<>(List.of(item), 0, 20, 1L, 1));
 
         mockMvc.perform(get("/shop/catalog"))
                 .andExpect(status().isOk())
@@ -133,7 +133,7 @@ class ShopControllerTest {
 
     @Test
     void listCatalog_defaultWarehouseNotConfigured_returns_503() throws Exception {
-        when(shopUseCase.listCatalog(0, 20, null, null)).thenThrow(new DefaultWarehouseNotConfiguredException());
+        when(shopUseCase.listCatalog(0, 20, null, null, null)).thenThrow(new DefaultWarehouseNotConfiguredException());
 
         mockMvc.perform(get("/shop/catalog"))
                 .andExpect(status().isServiceUnavailable())
@@ -164,7 +164,7 @@ class ShopControllerTest {
         ShopUseCase.CatalogItem item = new ShopUseCase.CatalogItem(
                 "ESS-001", "Essência Maçã", "essencia", new BigDecimal("30.00"), true, null, false,
                 new BigDecimal("40.00"), true);
-        when(shopUseCase.listCatalog(0, 20, null, null)).thenReturn(new PageResult<>(List.of(item), 0, 20, 1L, 1));
+        when(shopUseCase.listCatalog(0, 20, null, null, null)).thenReturn(new PageResult<>(List.of(item), 0, 20, 1L, 1));
 
         mockMvc.perform(get("/shop/catalog"))
                 .andExpect(status().isOk())
@@ -216,12 +216,12 @@ class ShopControllerTest {
 
     @Test
     void listCatalog_repassaCategoryIdAoUseCase() throws Exception {
-        when(shopUseCase.listCatalog(0, 20, null, 7L))
+        when(shopUseCase.listCatalog(0, 20, null, 7L, null))
                 .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0));
 
         mockMvc.perform(get("/shop/catalog").param("categoryId", "7"))
                 .andExpect(status().isOk());
 
-        verify(shopUseCase).listCatalog(0, 20, null, 7L);
+        verify(shopUseCase).listCatalog(0, 20, null, 7L, null);
     }
 }

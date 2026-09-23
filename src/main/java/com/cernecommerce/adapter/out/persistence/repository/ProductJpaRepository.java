@@ -62,12 +62,15 @@ public interface ProductJpaRepository extends JpaRepository<ProductEntity, Long>
      * ({@code ProductSortField}). Concatenar o nome da coluna na string da query seria injeção.</p>
      *
      * <p>{@code search} chega já em minúsculas e com os {@code %} aplicados pelo adapter, e cobre
-     * nome e SKU — é o mesmo campo de busca único da tela do admin.</p>
+     * nome, SKU, categoria e marca — é o mesmo campo de busca único da tela do admin. Categoria e
+     * marca entraram depois (EST-F029): o lojista digita "alfafa" esperando ver a categoria
+     * inteira, e antes só achava o produto que por acaso tivesse a palavra no nome.</p>
      *
      * <p><b>EST-C020:</b> {@code unaccent} entra nos <b>dois</b> lados da comparação. Só na coluna
      * resolveria "carvao" achar "Carvão" e deixaria "Carvão" digitado sem achar "carvao" gravado —
-     * e a base tem as duas grafias. {@code category} e {@code brand} continuam fora: são igualdade
-     * exata contra valor escolhido numa lista, não texto digitado. A função é registrada por
+     * e a base tem as duas grafias. Os filtros {@code :category} e {@code :brand} continuam igualdade
+     * exata: são valor escolhido numa lista, não texto digitado — a busca parcial por eles mora
+     * dentro de {@code :search}. A função é registrada por
      * {@code UnaccentFunctionContributor} e existe nos dois bancos (extensão no Postgres, alias no
      * H2 do perfil dev).</p>
      *
@@ -92,7 +95,9 @@ public interface ProductJpaRepository extends JpaRepository<ProductEntity, Long>
             SELECT p.id FROM ProductEntity p
             WHERE (:search   IS NULL
                      OR unaccent(LOWER(p.name)) LIKE unaccent(CAST(:search AS String))
-                     OR unaccent(LOWER(p.sku))  LIKE unaccent(CAST(:search AS String)))
+                     OR unaccent(LOWER(p.sku))  LIKE unaccent(CAST(:search AS String))
+                     OR unaccent(LOWER(p.category)) LIKE unaccent(CAST(:search AS String))
+                     OR unaccent(LOWER(p.brand))    LIKE unaccent(CAST(:search AS String)))
               AND (:category IS NULL OR LOWER(p.category) = :category)
               AND (:brand    IS NULL OR LOWER(p.brand)    = :brand)
               AND (:active   IS NULL OR p.active = :active)
@@ -159,6 +164,9 @@ public interface ProductJpaRepository extends JpaRepository<ProductEntity, Long>
      * catálogo. Os {@code COALESCE} colocam esse produto no grupo dos não-destacados e no fim da
      * ordem, em vez de deixá-lo à mercê do tratamento de NULL do banco, que difere entre
      * PostgreSQL e H2.</p>
+     *
+     * <p>{@code search} segue a mesma regra de {@link #findFilteredIds} (EST-F029): minúsculas,
+     * {@code %} aplicados pelo adapter, sem acento nos dois lados, e o {@code CAST} do EST-C024.</p>
      */
     @Query("SELECT p.id FROM ProductEntity p "
             + "LEFT JOIN ProductCategoryEntity c ON c.id = p.categoryId "
@@ -166,9 +174,14 @@ public interface ProductJpaRepository extends JpaRepository<ProductEntity, Long>
             + "AND (p.salePrice IS NOT NULL OR (p.costPrice IS NOT NULL AND p.markupPercent IS NOT NULL)) "
             + "AND (:onSale IS NULL OR p.onSale = :onSale) "
             + "AND (:categoryId IS NULL OR p.categoryId = :categoryId) "
+            + "AND (:search IS NULL "
+            + "     OR unaccent(LOWER(p.name))     LIKE unaccent(CAST(:search AS String)) "
+            + "     OR unaccent(LOWER(p.sku))      LIKE unaccent(CAST(:search AS String)) "
+            + "     OR unaccent(LOWER(p.category)) LIKE unaccent(CAST(:search AS String)) "
+            + "     OR unaccent(LOWER(p.brand))    LIKE unaccent(CAST(:search AS String))) "
             + "ORDER BY COALESCE(c.featured, FALSE) DESC, COALESCE(c.displayOrder, 2147483647) ASC, p.id ASC")
     Page<Long> findActivePricedIds(Pageable pageable, @Param("onSale") Boolean onSale,
-            @Param("categoryId") Long categoryId);
+            @Param("categoryId") Long categoryId, @Param("search") String search);
 
     @Query("SELECT DISTINCT p FROM ProductEntity p LEFT JOIN FETCH p.variants v LEFT JOIN FETCH v.attributes "
             + "WHERE p.id IN :ids ORDER BY p.id")

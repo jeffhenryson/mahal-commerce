@@ -89,9 +89,11 @@ public class ShopService implements ShopUseCase {
 
     @Override
     @Transactional(readOnly = true)
-    public PageResult<CatalogItem> listCatalog(int page, int size, Boolean onSale, Long categoryId) {
+    public PageResult<CatalogItem> listCatalog(int page, int size, Boolean onSale, Long categoryId,
+            String search) {
         Warehouse warehouse = estoqueUseCase.getDefaultWarehouse();
-        PageResult<Product> products = estoqueUseCase.listActivePricedProducts(page, size, onSale, categoryId);
+        PageResult<Product> products = estoqueUseCase.listActivePricedProducts(page, size, onSale, categoryId,
+                search);
         return new PageResult<>(
                 products.content().stream().map(p -> toCatalogItem(p, warehouse.code())).toList(),
                 products.page(), products.size(), products.totalElements(), products.totalPages());
