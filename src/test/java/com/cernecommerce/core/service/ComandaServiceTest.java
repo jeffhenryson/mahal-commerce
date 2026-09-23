@@ -42,6 +42,13 @@ import com.cernecommerce.core.ports.in.ComandaUseCase;
 import com.cernecommerce.core.ports.in.NotificationUseCase;
 import com.cernecommerce.core.ports.in.CashbackUseCase;
 import com.cernecommerce.core.ports.in.EstoqueUseCase;
+import com.cernecommerce.core.ports.in.KitBuilderUseCase;
+import com.cernecommerce.core.domain.exception.pdv.KitItemRemovalNotAllowedException;
+import com.cernecommerce.core.domain.model.estoque.KitChannel;
+import com.cernecommerce.core.domain.model.estoque.KitQuote;
+import com.cernecommerce.core.domain.model.estoque.KitSelection;
+import com.cernecommerce.core.domain.model.estoque.KitTemplate;
+import com.cernecommerce.core.domain.model.estoque.KitTemplateStep;
 import com.cernecommerce.core.ports.in.PdvUseCase.PaymentCommand;
 import com.cernecommerce.core.ports.out.user.UserRepository;
 import com.cernecommerce.core.ports.out.pagamento.OrderPaymentRepository;
@@ -80,6 +87,7 @@ class ComandaServiceTest {
     @Mock PdvService pdvService;
     @Mock NotificationUseCase notificationUseCase;
     @Mock UserRepository userRepository;
+    @Mock KitBuilderUseCase kitBuilderUseCase;
 
     ComandaService comandaService;
 
@@ -90,7 +98,7 @@ class ComandaServiceTest {
     void setUp() {
         comandaService = new ComandaService(comandaRepository, estoqueUseCase, orderRepository,
                 orderPaymentRepository, cashbackUseCase, pdvService, notificationUseCase, userRepository,
-                SERVICE_FEE_PERCENT);
+                SERVICE_FEE_PERCENT, kitBuilderUseCase);
     }
 
     private CashRegisterSession openSession() {
@@ -1579,5 +1587,124 @@ class ComandaServiceTest {
 
         verify(estoqueUseCase, never()).adjustStock(any(), any(), any(), any(), any(), any());
         verify(estoqueUseCase, never()).consumeSession(any(), any(), any(), any());
+    }
+
+    // ── PDV-F019 — kit montável ──────────────────────────────────────────────────────────────
+
+    private static final Pricing BAG = Pricing.of(new BigDecimal("20.00"), null, new BigDecimal("40.00"));
+    private static final Pricing SEDA = Pricing.of(new BigDecimal("2.00"), null, new BigDecimal("10.00"));
+
+    private static final KitTemplate KIT_MAHAL = new KitTemplate(7L, "Kit Mahal", null, null, new BigDecimal("10"),
+            true, true, true, List.of(new KitTemplateStep(10L, "Bag", 0, 1L, true, 1),
+                    new KitTemplateStep(20L, "Seda", 1, 2L, true, 1)));
+
+    private static final KitSelection SELECAO = new KitSelection(7L, List.of(
+            new KitSelection.Pick(10L, "BAG-01"), new KitSelection.Pick(20L, "SEDA-01")));
+
+    private static KitQuote cotacao() {
+        return new KitQuote(KIT_MAHAL, List.of(
+                new KitQuote.Line(10L, "Bag", "BAG-01", "Bag", new BigDecimal("40.00"), new BigDecimal("4.00")),
+                new KitQuote.Line(20L, "Seda", "SEDA-01", "Seda", new BigDecimal("10.00"), new BigDecimal("1.00"))),
+                new BigDecimal("50.00"), new BigDecimal("5.00"), new BigDecimal("45.00"));
+    }
+
+    private static Comanda comandaComKit() {
+        return abertaComandaStatic(
+                ComandaItem.of(1L, "BAG-01", BigDecimal.ONE, new BigDecimal("40.00"), new BigDecimal("20.00"), "Bag",
+                        Instant.now(), null, false, null, null, null, null, null, null, "b-1", 7L,
+                        new BigDecimal("4.00")),
+                ComandaItem.of(2L, "SEDA-01", BigDecimal.ONE, new BigDecimal("10.00"), new BigDecimal("2.00"), "Seda",
+                        Instant.now(), null, false, null, null, null, null, null, null, "b-1", 7L,
+                        new BigDecimal("1.00")),
+                ComandaItem.of(3L, "BEB-COLA", BigDecimal.ONE, new BigDecimal("50.00"), new BigDecimal("10.00"),
+                        "Refrigerante", Instant.now()));
+    }
+
+    private static Comanda abertaComandaStatic(ComandaItem... items) {
+        Comanda comanda = Comanda.open(1L, "LOJA-01", "Mesa 4", "caixa1");
+        for (ComandaItem item : items) {
+            comanda = comanda.withAddedItem(item);
+        }
+        return Comanda.of(10L, comanda.sessionId(), comanda.warehouseCode(), comanda.tableOrCustomerLabel(),
+                comanda.customerId(), comanda.status(), comanda.items(), comanda.orderId(), comanda.openedBy(),
+                comanda.openedAt(), comanda.closedAt());
+    }
+
+    @Test
+    void addKit_writesOneLinePerPickWithSharedBundleAndDebitsEach() {
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(abertaComanda()));
+        when(pdvService.requireOpenSession(1L)).thenReturn(openSession());
+        when(kitBuilderUseCase.quote(SELECAO, KitChannel.PDV)).thenReturn(cotacao());
+        when(estoqueUseCase.resolveSaleInfo("BAG-01")).thenReturn(new EstoqueUseCase.CatalogSaleInfo("Bag", BAG));
+        when(estoqueUseCase.resolveSaleInfo("SEDA-01")).thenReturn(new EstoqueUseCase.CatalogSaleInfo("Seda", SEDA));
+        when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Comanda updated = comandaService.addKit(10L, SELECAO, "caixa1");
+
+        assertThat(updated.items()).extracting(ComandaItem::sku, ComandaItem::kitDiscountAmount)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("BAG-01", new BigDecimal("4.00")),
+                        org.assertj.core.groups.Tuple.tuple("SEDA-01", new BigDecimal("1.00")));
+        assertThat(updated.items().get(0).kitBundleId()).isNotNull().isEqualTo(updated.items().get(1).kitBundleId());
+        // Preço cheio na linha; o total da mesa já é líquido do kit.
+        assertThat(updated.items().get(0).unitPrice()).isEqualByComparingTo("40.00");
+        assertThat(updated.runningTotal()).isEqualByComparingTo("45.00");
+        verify(estoqueUseCase).adjustStock(eq("BAG-01"), eq("LOJA-01"), eq(MovementType.SAIDA), eq(BigDecimal.ONE),
+                any(), eq("caixa1"));
+        verify(estoqueUseCase).adjustStock(eq("SEDA-01"), eq("LOJA-01"), eq(MovementType.SAIDA), eq(BigDecimal.ONE),
+                any(), eq("caixa1"));
+    }
+
+    @Test
+    void removeItem_refusesSingleLineOfKit() {
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(comandaComKit()));
+        when(pdvService.requireOpenSession(1L)).thenReturn(openSession());
+
+        assertThatThrownBy(() -> comandaService.removeItem(10L, 1L, "caixa1"))
+                .isInstanceOf(KitItemRemovalNotAllowedException.class);
+        verify(estoqueUseCase, never()).adjustStock(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void removeKit_removesWholeBundleAndReturnsStockOfEachLine() {
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(comandaComKit()));
+        when(pdvService.requireOpenSession(1L)).thenReturn(openSession());
+        when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Comanda updated = comandaService.removeKit(10L, "b-1", "caixa1");
+
+        assertThat(updated.items()).extracting(ComandaItem::sku).containsExactly("BEB-COLA");
+        verify(estoqueUseCase).adjustStock(eq("BAG-01"), eq("LOJA-01"), eq(MovementType.ENTRADA), eq(BigDecimal.ONE),
+                any(), eq("caixa1"));
+        verify(estoqueUseCase).adjustStock(eq("SEDA-01"), eq("LOJA-01"), eq(MovementType.ENTRADA), eq(BigDecimal.ONE),
+                any(), eq("caixa1"));
+    }
+
+    /**
+     * O desconto do kit vai para o item junto com o desconto de conta, e o de conta é rateado
+     * sobre o líquido do kit: 100 cheio − 5 do kit = 95; 9,50 de desconto de conta sai 10% de cada.
+     */
+    @Test
+    void closeComanda_addsKitDiscountToLineAndExemptsItFromLimit() {
+        givenCloseablePara(comandaComKit());
+
+        Order order = comandaService.closeComanda(10L, dinheiro("85.50"), new BigDecimal("9.50"), false, "caixa1");
+
+        assertThat(order.items()).extracting(i -> i.sku(), i -> i.discountAmount())
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("BAG-01", new BigDecimal("7.60")),
+                        org.assertj.core.groups.Tuple.tuple("SEDA-01", new BigDecimal("1.90")),
+                        org.assertj.core.groups.Tuple.tuple("BEB-COLA", new BigDecimal("5.00")));
+        assertThat(order.discountAmount()).isEqualByComparingTo("14.50");
+        assertThat(order.netAmount()).isEqualByComparingTo("85.50");
+        verify(pdvService).requireDiscountWithinLimit(any(Order.class), eq(new BigDecimal("5.00")));
+        verify(pdvService, never()).requireDiscountWithinLimit(any(Order.class));
+    }
+
+    @Test
+    void removeKit_throwsWhenBundleIsNotInComanda() {
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(comandaComKit()));
+        when(pdvService.requireOpenSession(1L)).thenReturn(openSession());
+
+        assertThatThrownBy(() -> comandaService.removeKit(10L, "nao-existe", "caixa1"))
+                .isInstanceOf(com.cernecommerce.core.domain.exception.pdv.ComandaItemNotFoundException.class);
     }
 }

@@ -48,6 +48,9 @@ public class ComandaDTOConverter {
         dto.setClosedInOrderId(item.closedInOrderId());
         dto.setPackageUses(item.packageUses());
         dto.setPackageSessionsPerUnit(item.packageSessionsPerUnit());
+        dto.setKitBundleId(item.kitBundleId());
+        dto.setKitTemplateId(item.kitTemplateId());
+        dto.setKitDiscountAmount(item.kitDiscountAmount());
         return dto;
     }
 }

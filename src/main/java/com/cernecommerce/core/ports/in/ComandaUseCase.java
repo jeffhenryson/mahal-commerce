@@ -1,6 +1,7 @@
 package com.cernecommerce.core.ports.in;
 
 import com.cernecommerce.core.domain.model.PageResult;
+import com.cernecommerce.core.domain.model.estoque.KitSelection;
 import com.cernecommerce.core.domain.model.pdv.Comanda;
 import com.cernecommerce.core.domain.model.pedido.ConsumptionMode;
 import com.cernecommerce.core.domain.model.pedido.Order;
@@ -147,6 +148,25 @@ public interface ComandaUseCase {
      *         {@code SABOR_EXTRA} pendurado na linha
      */
     Comanda removeItem(Long comandaId, Long itemId, String username);
+
+    /**
+     * PDV-F019 — lança um kit montável na comanda: uma linha por item escolhido, todas com o mesmo
+     * pacote e cada uma com a sua parte do desconto do kit. Preço congelado agora, como todo
+     * lançamento; o estoque de cada item sai agora, como em {@link #addItem}.
+     *
+     * @throws com.cernecommerce.core.domain.exception.estoque.InvalidKitSelectionException se a
+     *         escolha não fecha um kit válido no PDV
+     */
+    Comanda addKit(Long comandaId, KitSelection selection,
+            String username);
+
+    /**
+     * Tira o pacote inteiro da comanda e devolve o estoque de cada linha.
+     *
+     * @throws com.cernecommerce.core.domain.exception.pdv.ComandaItemNotFoundException se o pacote
+     *         não tiver linha aberta nesta comanda
+     */
+    Comanda removeKit(Long comandaId, String kitBundleId, String username);
 
     /**
      * Busca uma comanda pelo id.

@@ -98,4 +98,14 @@ public class ComandaItemEntity {
 
     @Column(name = "package_sessions_per_unit")
     private Integer packageSessionsPerUnit;
+
+    // PDV-F019 — kit montável: o pacote, o modelo e a parte do desconto do kit desta linha.
+    @Column(name = "kit_bundle_id", length = 36)
+    private String kitBundleId;
+
+    @Column(name = "kit_template_id")
+    private Long kitTemplateId;
+
+    @Column(name = "kit_discount_amount", precision = 14, scale = 2)
+    private BigDecimal kitDiscountAmount;
 }

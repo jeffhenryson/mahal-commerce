@@ -59,4 +59,9 @@ public class ComandaItemResponseDTO {
             + "no momento da abertura: editar sessionsPerUnit no catálogo não reescreve o "
             + "histórico.", example = "5")
     private Integer packageSessionsPerUnit;
+
+    // PDV-F019 — kit montável. Nulos para linha avulsa; subtotal continua bruto.
+    private String kitBundleId;
+    private Long kitTemplateId;
+    private BigDecimal kitDiscountAmount;
 }

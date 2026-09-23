@@ -35,7 +35,10 @@ public record ComandaItem(
         BigDecimal surchargeAmount,
         Long closedInOrderId,
         Integer packageUses,
-        Integer packageSessionsPerUnit) {
+        Integer packageSessionsPerUnit,
+        String kitBundleId,
+        Long kitTemplateId,
+        BigDecimal kitDiscountAmount) {
 
     /** Limite de {@link #notes}, casado com {@code comanda_item.notes VARCHAR(200)}. */
     public static final int NOTES_MAX_LENGTH = 200;
@@ -98,6 +101,16 @@ public record ComandaItem(
             throw new IllegalArgumentException(
                     "contadores da lata têm que ser positivos: " + packageUses + "/" + packageSessionsPerUnit);
         }
+        // PDV-F019 — espelha ck_comanda_item_kit_fields (V126): pacote, modelo e desconto andam
+        // juntos, e o desconto nunca passa do valor da linha.
+        boolean anyKit = kitBundleId != null || kitTemplateId != null || kitDiscountAmount != null;
+        if (anyKit && (kitBundleId == null || kitTemplateId == null || kitDiscountAmount == null)) {
+            throw new IllegalArgumentException("kitBundleId, kitTemplateId e kitDiscountAmount vêm juntos");
+        }
+        if (kitDiscountAmount != null && (kitDiscountAmount.signum() < 0
+                || kitDiscountAmount.compareTo(quantity.multiply(unitPrice)) > 0)) {
+            throw new IllegalArgumentException("kitDiscountAmount fora do intervalo da linha: " + kitDiscountAmount);
+        }
     }
 
     /**
@@ -111,7 +124,8 @@ public record ComandaItem(
             throw new ProductNotPricedException(sku);
         }
         return new ComandaItem(null, sku, quantity, pricing.effectivePrice(), pricing.costPrice(),
-                productName, Instant.now(), ConsumptionMode.NORMAL, false, null, null, null, null, null, null);
+                productName, Instant.now(), ConsumptionMode.NORMAL, false, null, null, null, null, null, null, null, null,
+                null);
     }
 
     /**
@@ -143,7 +157,7 @@ public record ComandaItem(
             throw new ProductNotPricedException(sku);
         }
         return new ComandaItem(null, sku, quantity, unitPrice, pricing.costPrice(), productName,
-                Instant.now(), mode, courtesy, linkedItemId, notes, surchargeAmount, null, null, null);
+                Instant.now(), mode, courtesy, linkedItemId, notes, surchargeAmount, null, null, null, null, null, null);
     }
 
     /** Reconstitui um item a partir de persistência. */
@@ -192,8 +206,18 @@ public record ComandaItem(
             BigDecimal costPrice, String productName, Instant addedAt, ConsumptionMode mode, boolean courtesy,
             Long linkedItemId, String notes, BigDecimal surchargeAmount, Long closedInOrderId,
             Integer packageUses, Integer packageSessionsPerUnit) {
+        return of(id, sku, quantity, unitPrice, costPrice, productName, addedAt, mode, courtesy, linkedItemId,
+                notes, surchargeAmount, closedInOrderId, packageUses, packageSessionsPerUnit, null, null, null);
+    }
+
+    public static ComandaItem of(Long id, String sku, BigDecimal quantity, BigDecimal unitPrice,
+            BigDecimal costPrice, String productName, Instant addedAt, ConsumptionMode mode, boolean courtesy,
+            Long linkedItemId, String notes, BigDecimal surchargeAmount, Long closedInOrderId,
+            Integer packageUses, Integer packageSessionsPerUnit, String kitBundleId, Long kitTemplateId,
+            BigDecimal kitDiscountAmount) {
         return new ComandaItem(id, sku, quantity, unitPrice, costPrice, productName, addedAt, mode, courtesy,
-                linkedItemId, notes, surchargeAmount, closedInOrderId, packageUses, packageSessionsPerUnit);
+                linkedItemId, notes, surchargeAmount, closedInOrderId, packageUses, packageSessionsPerUnit,
+                kitBundleId, kitTemplateId, kitDiscountAmount);
     }
 
     /**
@@ -216,7 +240,8 @@ public record ComandaItem(
                     "item " + id + " já foi cobrado pelo pedido " + closedInOrderId);
         }
         return new ComandaItem(id, sku, quantity, unitPrice, costPrice, productName, addedAt, mode, courtesy,
-                linkedItemId, notes, surchargeAmount, orderId, packageUses, packageSessionsPerUnit);
+                linkedItemId, notes, surchargeAmount, orderId, packageUses, packageSessionsPerUnit, kitBundleId,
+                kitTemplateId, kitDiscountAmount);
     }
 
     /**
@@ -230,7 +255,34 @@ public record ComandaItem(
      */
     public ComandaItem withPackageCounter(int uses, int sessionsPerUnit) {
         return new ComandaItem(id, sku, quantity, unitPrice, costPrice, productName, addedAt, mode, courtesy,
-                linkedItemId, notes, surchargeAmount, closedInOrderId, uses, sessionsPerUnit);
+                linkedItemId, notes, surchargeAmount, closedInOrderId, uses, sessionsPerUnit, kitBundleId,
+                kitTemplateId, kitDiscountAmount);
+    }
+
+    /**
+     * PDV-F019 — marca a linha como item de um kit montável, com a parte do desconto do kit que
+     * coube a ela. O preço cheio continua em {@code unitPrice}: o desconto é somado ao desconto de
+     * conta no fechamento e vai para {@code OrderItem.discountAmount}, onde cashback e margem já o
+     * enxergam.
+     */
+    public ComandaItem withKit(String bundleId, Long templateId, BigDecimal discountAmount) {
+        return new ComandaItem(id, sku, quantity, unitPrice, costPrice, productName, addedAt, mode, courtesy,
+                linkedItemId, notes, surchargeAmount, closedInOrderId, packageUses, packageSessionsPerUnit,
+                bundleId, templateId, discountAmount);
+    }
+
+    public boolean inKit() {
+        return kitBundleId != null;
+    }
+
+    /** Desconto do kit montável nesta linha; zero fora de kit. */
+    public BigDecimal kitDiscount() {
+        return kitDiscountAmount == null ? BigDecimal.ZERO : kitDiscountAmount;
+    }
+
+    /** {@link #subtotal()} menos o desconto do kit — o que a linha cobra antes do desconto de conta. */
+    public BigDecimal netSubtotal() {
+        return subtotal().subtract(kitDiscount());
     }
 
     /**

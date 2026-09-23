@@ -149,6 +149,9 @@ public class ComandaRepositoryImpl implements ComandaRepository {
             itemEntity.setClosedInOrderId(item.closedInOrderId());
             itemEntity.setPackageUses(item.packageUses());
             itemEntity.setPackageSessionsPerUnit(item.packageSessionsPerUnit());
+            itemEntity.setKitBundleId(item.kitBundleId());
+            itemEntity.setKitTemplateId(item.kitTemplateId());
+            itemEntity.setKitDiscountAmount(item.kitDiscountAmount());
         }
         return toDomain(comandaJpaRepository.save(entity));
     }
@@ -167,6 +170,7 @@ public class ComandaRepositoryImpl implements ComandaRepository {
                 // cobre as linhas já gravadas, e este null-check cobre carga direta.
                 e.getMode() == null ? ConsumptionMode.NORMAL : ConsumptionMode.valueOf(e.getMode()),
                 e.isCourtesy(), e.getLinkedItemId(), e.getNotes(), e.getSurchargeAmount(),
-                e.getClosedInOrderId(), e.getPackageUses(), e.getPackageSessionsPerUnit());
+                e.getClosedInOrderId(), e.getPackageUses(), e.getPackageSessionsPerUnit(), e.getKitBundleId(),
+                e.getKitTemplateId(), e.getKitDiscountAmount());
     }
 }

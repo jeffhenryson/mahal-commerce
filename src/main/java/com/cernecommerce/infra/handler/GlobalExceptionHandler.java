@@ -72,6 +72,7 @@ import com.cernecommerce.core.domain.exception.estoque.KitDirectAdjustmentExcept
 import com.cernecommerce.core.domain.exception.estoque.KitTemplateNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.DuplicateKitTemplateNameException;
 import com.cernecommerce.core.domain.exception.estoque.InvalidKitSelectionException;
+import com.cernecommerce.core.domain.exception.pdv.KitItemRemovalNotAllowedException;
 import com.cernecommerce.core.domain.exception.estoque.KitHasVariantsException;
 import com.cernecommerce.core.domain.exception.estoque.KitSelfReferenceException;
 import com.cernecommerce.core.domain.exception.estoque.LotExpiryDateMismatchException;
@@ -251,6 +252,12 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiError> handleInvalidKitSelection(
             InvalidKitSelectionException ex, HttpServletRequest req) {
         return error(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage(), ex.code(), req);
+    }
+
+    @ExceptionHandler(KitItemRemovalNotAllowedException.class)
+    public ResponseEntity<ApiError> handleKitItemRemovalNotAllowed(
+            KitItemRemovalNotAllowedException ex, HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "KIT_ITEM_REMOVAL_NOT_ALLOWED", req);
     }
 
     @ExceptionHandler(CategoryNotFoundException.class)

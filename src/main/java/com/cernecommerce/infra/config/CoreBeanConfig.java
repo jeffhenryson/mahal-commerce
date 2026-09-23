@@ -292,10 +292,11 @@ class CoreBeanConfig {
             // PDV-F015 — os 10% do garçom. Configuração e não constante porque é o costume do
             // salão, não uma lei; zero desliga a cobrança sem mexer em código. Migra para
             // system_config junto com o teto de desconto, quando o painel existir.
-            @Value("${pdv.comanda.service-fee-percent:10}") BigDecimal serviceFeePercent) {
+            @Value("${pdv.comanda.service-fee-percent:10}") BigDecimal serviceFeePercent,
+            KitBuilderUseCase kitBuilderUseCase) {
         return new ComandaService(comandaRepository, estoqueUseCase, orderRepository,
                 orderPaymentRepository, cashbackUseCase, pdvService, notificationUseCase,
-                userRepository, serviceFeePercent);
+                userRepository, serviceFeePercent, kitBuilderUseCase);
     }
 
     @Bean

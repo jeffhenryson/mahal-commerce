@@ -8,6 +8,7 @@ import com.cernecommerce.core.domain.exception.pdv.ComandaPartiallyClosedExcepti
 import com.cernecommerce.core.domain.exception.pdv.ComandaNotOpenException;
 import com.cernecommerce.core.domain.exception.pdv.ComandaOnlyCourtesyException;
 import com.cernecommerce.core.domain.exception.pdv.DiscountExceedsBillException;
+import com.cernecommerce.core.domain.exception.pdv.KitItemRemovalNotAllowedException;
 import com.cernecommerce.core.domain.exception.pdv.LinkedItemIsChargedException;
 import com.cernecommerce.core.domain.exception.pdv.ItemNotOpenInComandaException;
 import com.cernecommerce.core.domain.exception.pdv.LinkedItemMustCloseTogetherException;
@@ -22,6 +23,9 @@ import com.cernecommerce.core.domain.exception.pdv.SurchargeNotApplicableExcepti
 import com.cernecommerce.core.domain.exception.pdv.SurchargeOnCourtesyException;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.cashback.CashbackRate;
+import com.cernecommerce.core.domain.model.estoque.KitChannel;
+import com.cernecommerce.core.domain.model.estoque.KitQuote;
+import com.cernecommerce.core.domain.model.estoque.KitSelection;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.estoque.OpenPackage;
 import com.cernecommerce.core.domain.model.pagamento.OrderPayment;
@@ -37,6 +41,7 @@ import com.cernecommerce.core.domain.model.pedido.OrderItem;
 import com.cernecommerce.core.ports.in.CashbackUseCase;
 import com.cernecommerce.core.ports.in.ComandaUseCase;
 import com.cernecommerce.core.ports.in.EstoqueUseCase;
+import com.cernecommerce.core.ports.in.KitBuilderUseCase;
 import com.cernecommerce.core.ports.in.NotificationUseCase;
 import com.cernecommerce.core.ports.in.PdvUseCase.PaymentCommand;
 import com.cernecommerce.core.ports.out.pagamento.OrderPaymentRepository;
@@ -52,6 +57,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
@@ -128,11 +134,24 @@ public class ComandaService implements ComandaUseCase {
      */
     private final BigDecimal serviceFeePercent;
 
+    /** PDV-F019 — validação e cotação do kit montável. Nulo só nos testes que não o exercitam. */
+    private final KitBuilderUseCase kitBuilderUseCase;
+
     public ComandaService(ComandaRepository comandaRepository, EstoqueUseCase estoqueUseCase,
             OrderRepository orderRepository, OrderPaymentRepository orderPaymentRepository,
             CashbackUseCase cashbackUseCase, PdvService pdvService,
             NotificationUseCase notificationUseCase, UserRepository userRepository,
             BigDecimal serviceFeePercent) {
+        this(comandaRepository, estoqueUseCase, orderRepository, orderPaymentRepository, cashbackUseCase,
+                pdvService, notificationUseCase, userRepository, serviceFeePercent, null);
+    }
+
+    public ComandaService(ComandaRepository comandaRepository, EstoqueUseCase estoqueUseCase,
+            OrderRepository orderRepository, OrderPaymentRepository orderPaymentRepository,
+            CashbackUseCase cashbackUseCase, PdvService pdvService,
+            NotificationUseCase notificationUseCase, UserRepository userRepository,
+            BigDecimal serviceFeePercent, KitBuilderUseCase kitBuilderUseCase) {
+        this.kitBuilderUseCase = kitBuilderUseCase;
         this.comandaRepository = comandaRepository;
         this.estoqueUseCase = estoqueUseCase;
         this.orderRepository = orderRepository;
@@ -229,6 +248,53 @@ public class ComandaService implements ComandaUseCase {
         }
 
         return comandaRepository.save(comanda.withAddedItem(item));
+    }
+
+    @Override
+    @Transactional
+    public Comanda addKit(Long comandaId, KitSelection selection, String username) {
+        // Mesmas travas e checagens de addItem, na mesma ordem: tudo validado antes da primeira
+        // baixa, porque aqui cada lançamento é seu próprio commit.
+        Comanda comanda = getComandaForUpdate(comandaId);
+        pdvService.requireOpenSession(comanda.sessionId());
+        requireOpen(comanda);
+
+        KitQuote quote = kitBuilderUseCase.quote(selection, KitChannel.PDV);
+        String bundleId = UUID.randomUUID().toString();
+        Comanda updated = comanda;
+        for (KitQuote.Line line : quote.lines()) {
+            EstoqueUseCase.CatalogSaleInfo saleInfo = estoqueUseCase.resolveSaleInfo(line.sku());
+            // Sem availableForTable: esse filtro é da venda avulsa na mesa ("isto é servido
+            // aqui?"), e o kit é oferta montada pelo admin, que já escolheu o que entra nele.
+            ComandaItem item = ComandaItem.fromCatalog(line.sku(), BigDecimal.ONE, saleInfo.pricing(),
+                            saleInfo.productName())
+                    .withKit(bundleId, quote.template().id(), line.discountAmount());
+            estoqueUseCase.adjustStock(line.sku(), comanda.warehouseCode(), MovementType.SAIDA, BigDecimal.ONE,
+                    "Comanda #" + comandaId + " (kit " + quote.template().name() + ")", username);
+            updated = updated.withAddedItem(item);
+        }
+        return comandaRepository.save(updated);
+    }
+
+    @Override
+    @Transactional
+    public Comanda removeKit(Long comandaId, String kitBundleId, String username) {
+        Comanda comanda = getComandaForUpdate(comandaId);
+        pdvService.requireOpenSession(comanda.sessionId());
+        requireOpen(comanda);
+
+        List<ComandaItem> linhas = comanda.openItems().stream()
+                .filter(i -> kitBundleId != null && kitBundleId.equals(i.kitBundleId()))
+                .toList();
+        if (linhas.isEmpty()) {
+            throw new ComandaItemNotFoundException(null, comandaId);
+        }
+        Comanda semKit = comanda;
+        for (ComandaItem linha : linhas) {
+            semKit = semKit.withRemovedItem(linha.id());
+            undoStock(linha, comanda.warehouseCode(), "Remoção de kit da comanda #" + comandaId, username);
+        }
+        return comandaRepository.save(semKit);
     }
 
     /**
@@ -341,6 +407,10 @@ public class ComandaService implements ComandaUseCase {
                 .filter(i -> itemId != null && itemId.equals(i.id()))
                 .findFirst()
                 .orElseThrow(() -> new ComandaItemNotFoundException(itemId, comandaId));
+        // PDV-F019 — linha de kit sai só com o pacote inteiro.
+        if (alvo.inKit()) {
+            throw new KitItemRemovalNotAllowedException(itemId, alvo.kitBundleId());
+        }
 
         // A troca sai junto (é cortesia e não existe sem a sessão); o sabor extra barra, porque
         // pode estar cobrado — ver o javadoc de Comanda.withRemovedItem.
@@ -424,7 +494,10 @@ public class ComandaService implements ComandaUseCase {
         // item que o cashback é creditado e a margem calculada. Ratear é o que impede a casa de
         // pagar cashback sobre dinheiro que não recebeu e de ver margem cheia numa venda abatida.
         // A cortesia absorve zero por construção — a proporção de uma linha de valor zero é zero.
-        List<BigDecimal> lineAmounts = escopo.stream().map(ComandaItem::subtotal).toList();
+        //
+        // PDV-F019 — a base do rateio é o LÍQUIDO do desconto de kit: a linha de kit já vem abatida,
+        // e ratear sobre o bruto poderia dar a ela mais desconto total que o valor dela.
+        List<BigDecimal> lineAmounts = escopo.stream().map(ComandaItem::netSubtotal).toList();
         // PDV-C016 — desconto maior que a conta é recusado AQUI, com código próprio. distribute()
         // já recusava (não há como ratear um abatimento maior que a soma das linhas sem violar a
         // invariante de OrderItem), mas com IllegalArgumentException, que o handler global achata
@@ -461,7 +534,8 @@ public class ComandaService implements ComandaUseCase {
             // "qual pinça saiu com aquela mesa" é pergunta feita DEPOIS do fechamento; o acréscimo
             // porque não dá para reconstruí-lo do unitPrice, que já é a soma.
             orderItems.add(OrderItem.of(null, item.sku(), item.quantity(), item.unitPrice(), item.costPrice(),
-                    lineDiscounts.get(i), rate == null ? null : rate.percent(), item.productName(), item.mode(),
+                    lineDiscounts.get(i).add(item.kitDiscount()), rate == null ? null : rate.percent(),
+                    item.productName(), item.mode(),
                     item.courtesy(), item.notes(), item.surchargeAmount()));
         }
 
@@ -473,7 +547,14 @@ public class ComandaService implements ComandaUseCase {
         // Mesmo teto do balcão, e de propósito: o limite é política comercial da casa, não
         // característica do canal. Checado DEPOIS de montar o pedido porque a regra é percentual
         // sobre o bruto, e é o pedido que sabe o bruto.
-        pdvService.requireDiscountWithinLimit(order);
+        // PDV-F019 — desconto de kit montável não conta para o teto (ver PdvService).
+        BigDecimal kitDiscountTotal = escopo.stream().map(ComandaItem::kitDiscount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        if (kitDiscountTotal.signum() > 0) {
+            pdvService.requireDiscountWithinLimit(order, kitDiscountTotal);
+        } else {
+            pdvService.requireDiscountWithinLimit(order);
+        }
 
         // PDV-F015 — a taxa entra por último, sobre o LÍQUIDO: os 10% incidem sobre o que o cliente
         // de fato vai pagar pela mercadoria, não sobre o valor antes do abatimento. Cobrar serviço

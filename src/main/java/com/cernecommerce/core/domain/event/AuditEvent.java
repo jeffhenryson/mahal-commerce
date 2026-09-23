@@ -91,6 +91,8 @@ public record AuditEvent(EventType type, String username, Instant timestamp, Map
         // de abrir caixa. O rastro item a item continua onde sempre esteve: em stock_movement.
         COMANDA_OPENED, COMANDA_CLOSED, COMANDA_CANCELLED,
         COMANDA_ITEM_ADDED, COMANDA_ITEM_REMOVED,
+        // PDV-F019 — kit montável lançado/retirado da mesa, como pacote.
+        COMANDA_KIT_ADDED, COMANDA_KIT_REMOVED,
         // PDV-F016. COMANDA_MERGED é o que distingue, na trilha, a origem de uma junção de uma
         // mesa abandonada: as duas terminam CANCELADA, mas só o abandono devolveu estoque.
         COMANDA_RENAMED, COMANDA_MERGED,

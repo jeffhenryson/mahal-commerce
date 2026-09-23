@@ -425,10 +425,21 @@ public class PdvService implements PdvUseCase {
 
     /** Package-private — ver a nota em {@link #requireOwnOpenSession}. */
     void requireDiscountWithinLimit(Order order) {
-        if (order.discountAmount().signum() == 0 || order.grossAmount().signum() == 0) {
+        requireDiscountWithinLimit(order, BigDecimal.ZERO);
+    }
+
+    /**
+     * PDV-F019 — mesmo teto, descontando do total o que é desconto de kit montável. O desconto do
+     * kit é preço de catálogo configurado pelo admin, não abatimento concedido pelo atendente, e é
+     * este segundo que o teto existe para limitar: sem a isenção, um kit com 10% bloquearia
+     * qualquer desconto de conta numa mesa com teto de 10%.
+     */
+    void requireDiscountWithinLimit(Order order, BigDecimal exemptDiscount) {
+        BigDecimal granted = order.discountAmount().subtract(exemptDiscount == null ? BigDecimal.ZERO : exemptDiscount);
+        if (granted.signum() <= 0 || order.grossAmount().signum() == 0) {
             return;
         }
-        BigDecimal percent = order.discountAmount()
+        BigDecimal percent = granted
                 .divide(order.grossAmount(), Money.INTERMEDIATE_SCALE, Money.ROUNDING)
                 .multiply(Money.HUNDRED)
                 .setScale(Money.PERCENT_SCALE, Money.ROUNDING);

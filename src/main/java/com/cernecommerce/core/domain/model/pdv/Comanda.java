@@ -236,7 +236,8 @@ public record Comanda(
      * um fechamento parcial o operador quer ver o saldo restante da mesa, não o total consumido.</p>
      */
     public BigDecimal runningTotal() {
-        return openItems().stream().map(ComandaItem::subtotal).reduce(BigDecimal.ZERO, BigDecimal::add);
+        // PDV-F019: líquido do desconto do kit montável — é o que a mesa deve.
+        return openItems().stream().map(ComandaItem::netSubtotal).reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
     /** As linhas que nenhum pedido cobrou ainda (PDV-F017). */
