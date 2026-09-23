@@ -548,6 +548,26 @@ Convenções, variáveis e o environment compartilhado estão em
 
 ## Histórico de Implementações
 
+- **2026-09-23** — `kit-montavel` (EST-F031, com ECM-F008 e PDV-F019): o "Kit Mahal", em que o
+  cliente escolhe bag, seda, piteira, tubeck, tesoura, cuia e isqueiro e paga a soma dos itens menos
+  um desconto %. Novas tabelas `kit_template`/`kit_template_step` (**V126**), CRUD em
+  `/estoque/kit-templates` sob a nova `ESTOQUE_KIT_TEMPLATE_MANAGE`. **Decisões que valem registro:**
+  (1) não é o kit de EST-F015 — a receita muda a cada venda, então o modelo não tem SKU nem saldo, e
+  cada item escolhido vira linha comum de carrinho/comanda agrupada por `kit_bundle_id`, com a baixa
+  de estoque item a item pelo caminho de sempre; (2) o passo aponta para **categoria**, não para uma
+  lista de SKUs, para produto novo entrar no kit sem ninguém editar o modelo; (3) toda regra mora em
+  `KitBuilderService.quote`, chamado por carrinho, checkout e comanda — o checkout recota mesmo que
+  o carrinho já tenha validado, porque o carrinho não guarda preço; (4) o desconto é rateado por
+  linha com `DiscountProration` e gravado em `OrderItem.discountAmount`, onde cashback e margem já o
+  enxergam; (5) passos são atualizados no lugar por id, porque o carrinho guarda o passo de cada item.
+- **2026-09-23** — `troca-de-sku` (EST-F030): `PATCH /estoque/products/{sku}/sku`. O SKU era
+  imutável porque nenhuma das ~17 colunas que o guardam tem FK para cascatear. A troca roda um
+  `UPDATE` por coluna de `ProductRepositoryImpl.SKU_COLUMNS` numa transação só, **inclusive o
+  histórico**. A lista é protegida por `ProductRepositoryPostgresIT.renameSku_coversEverySkuColumnInSchema`,
+  que a compara com o `information_schema`: **migration nova com coluna de SKU precisa entrar na lista**.
+- **2026-09-23** — `busca-livre-por-categoria-e-marca` (EST-F029): `search` passa a cobrir categoria e
+  marca, além de nome e SKU, no admin e no catálogo público (`GET /shop/catalog?search=`).
+
 - **2026-09-08** — `lata-de-essencia-aberta` (EST-F027): `sessions_per_unit` existia em `product`
   desde a V112 e **nunca era lido por ninguém** — a própria migration o declarava como "sugestão de
   tela, não movimenta saldo". A consequência foi medida no QA de 06/09/2026 do

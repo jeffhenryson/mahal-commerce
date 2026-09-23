@@ -93,6 +93,30 @@
       "key": "unpricedSku",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "kitTemplateId",
+      "value": ""
+    },
+    {
+      "key": "kitStepBagId",
+      "value": ""
+    },
+    {
+      "key": "kitStepSedaId",
+      "value": ""
+    },
+    {
+      "key": "bagCategoryId",
+      "value": ""
+    },
+    {
+      "key": "sedaCategoryId",
+      "value": ""
+    },
+    {
+      "key": "isqueiroCategoryId",
+      "value": ""
     }
   ],
   "item": [
@@ -3669,6 +3693,237 @@
               }
             }
           ]
+        }
+      ]
+    },
+    {
+      "name": "10 — Troca de SKU e kit montável (EST-F029..F031)",
+      "item": [
+        {
+          "name": "Buscar por categoria (EST-F029)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/products?search=alfafa",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "products?search=alfafa"
+              ]
+            },
+            "description": "`search` cobre nome, SKU, categoria e marca, sem caixa nem acento: \"alfafa\" traz a categoria Alfafa inteira."
+          },
+          "response": []
+        },
+        {
+          "name": "Trocar SKU (EST-F030)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/products/{{sku}}/sku",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "products",
+                "{{sku}}",
+                "sku"
+              ]
+            },
+            "description": "`ESTOQUE_PRODUCT_MANAGE`. Pai ou variação. Propaga para saldo, lotes, movimentos, pedidos, compras, NF-e e receitas de kit — inclusive histórico. Rode a próxima para desfazer.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"newSku\": \"{{sku}}-NOVO\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Desfazer troca de SKU",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/products/{{sku}}-NOVO/sku",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "products",
+                "{{sku}}-NOVO",
+                "sku"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"newSku\": \"{{sku}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Criar kit montável (EST-F031)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/kit-templates",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "kit-templates"
+              ]
+            },
+            "description": "`ESTOQUE_KIT_TEMPLATE_MANAGE`. Preencha `bagCategoryId`, `sedaCategoryId` e `isqueiroCategoryId` com categorias existentes (`GET /estoque/categories`). Guarda o id do kit e dos passos.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Kit Mahal\",\n  \"description\": \"Monte o seu kit\",\n  \"discountPercent\": 10,\n  \"steps\": [\n    {\n      \"name\": \"Bag\",\n      \"displayOrder\": 0,\n      \"categoryId\": \"{{bagCategoryId}}\",\n      \"required\": true,\n      \"maxItems\": 1\n    },\n    {\n      \"name\": \"Seda\",\n      \"displayOrder\": 1,\n      \"categoryId\": \"{{sedaCategoryId}}\",\n      \"required\": true,\n      \"maxItems\": 2\n    },\n    {\n      \"name\": \"Isqueiro\",\n      \"displayOrder\": 2,\n      \"categoryId\": \"{{isqueiroCategoryId}}\",\n      \"required\": false,\n      \"maxItems\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('2xx', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('kitTemplateId', b.id);",
+                  "pm.collectionVariables.set('kitStepBagId', b.steps[0].id);",
+                  "pm.collectionVariables.set('kitStepSedaId', b.steps[1].id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar kits montáveis",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/kit-templates",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "kit-templates"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Excluir kit montável",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/estoque/kit-templates/{{kitTemplateId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "estoque",
+                "kit-templates",
+                "{{kitTemplateId}}"
+              ]
+            },
+            "description": "`204`. Rode por último."
+          },
+          "response": []
         }
       ]
     },

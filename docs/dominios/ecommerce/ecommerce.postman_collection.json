@@ -55,6 +55,22 @@
       "key": "permissions",
       "value": "[]",
       "type": "string"
+    },
+    {
+      "key": "kitTemplateId",
+      "value": ""
+    },
+    {
+      "key": "kitStepBagId",
+      "value": ""
+    },
+    {
+      "key": "kitStepSedaId",
+      "value": ""
+    },
+    {
+      "key": "kitBundleId",
+      "value": ""
     }
   ],
   "item": [
@@ -484,6 +500,211 @@
               }
             }
           ]
+        }
+      ]
+    },
+    {
+      "name": "03 — Kit montável (ECM-F008)",
+      "item": [
+        {
+          "name": "Kits à venda",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/shop/kits",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "shop",
+                "kits"
+              ]
+            },
+            "description": "Público.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "if (b.length) { pm.collectionVariables.set('kitTemplateId', b[0].id); pm.collectionVariables.set('kitStepBagId', b[0].steps[0].id); pm.collectionVariables.set('kitStepSedaId', b[0].steps[1].id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Opções do passo",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/shop/kits/{{kitTemplateId}}/steps/{{kitStepBagId}}/options",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "shop",
+                "kits",
+                "{{kitTemplateId}}",
+                "steps",
+                "{{kitStepBagId}}",
+                "options"
+              ]
+            },
+            "description": "Público. `sku` de cada opção é o que vai na escolha.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Cotar kit",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/shop/kits/quote",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "shop",
+                "kits",
+                "quote"
+              ]
+            },
+            "description": "Público. Ajuste os SKUs para opções reais. 422 com `code` KIT_* se a escolha não fecha.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"templateId\": \"{{kitTemplateId}}\",\n  \"picks\": [\n    {\n      \"stepId\": \"{{kitStepBagId}}\",\n      \"sku\": \"BAG-01\"\n    },\n    {\n      \"stepId\": \"{{kitStepSedaId}}\",\n      \"sku\": \"SEDA-01\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Pôr kit no carrinho",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/shop/cart/kits",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "shop",
+                "cart",
+                "kits"
+              ]
+            },
+            "description": "`SHOP_CART_OWN` (login de cliente).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"templateId\": \"{{kitTemplateId}}\",\n  \"picks\": [\n    {\n      \"stepId\": \"{{kitStepBagId}}\",\n      \"sku\": \"BAG-01\"\n    },\n    {\n      \"stepId\": \"{{kitStepSedaId}}\",\n      \"sku\": \"SEDA-01\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "const k = pm.response.json().items.find(i => i.kitBundleId);",
+                  "if (k) pm.collectionVariables.set('kitBundleId', k.kitBundleId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tirar kit do carrinho",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/shop/cart/kits/{{kitBundleId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "shop",
+                "cart",
+                "kits",
+                "{{kitBundleId}}"
+              ]
+            },
+            "description": "`204`."
+          },
+          "response": []
         }
       ]
     },

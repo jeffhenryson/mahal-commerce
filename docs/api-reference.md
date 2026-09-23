@@ -38,6 +38,16 @@ Todos os erros retornam `ApiError`:
 | `TOTP_NOT_CONSECUTIVE` | 400 | Segundo código DEV não pertence ao período T+1 do primeiro |
 | `DEV_CHALLENGE_EXPIRED` | 410 | devToken DEV expirou (TTL 90s) ou já foi consumido |
 | `TOTP_ALREADY_ENABLED` | 409 | 2FA já está ativo |
+| `KIT_TEMPLATE_NOT_FOUND` | 404 | Kit montável inexistente, ou inativo/invisível no canal (EST-F031) |
+| `DUPLICATE_KIT_TEMPLATE_NAME` | 409 | Nome de kit montável já em uso |
+| `KIT_NOT_AVAILABLE` | 422 | Kit inativo ou fora de venda no canal |
+| `KIT_EMPTY` | 422 | Nenhum item escolhido |
+| `KIT_REQUIRED_STEP_MISSING` | 422 | Passo obrigatório sem escolha |
+| `KIT_STEP_NOT_FOUND` | 422 | Passo não pertence ao kit |
+| `KIT_STEP_MAX_ITEMS_EXCEEDED` | 422 | Mais escolhas que o `maxItems` do passo |
+| `KIT_ITEM_NOT_IN_STEP_CATEGORY` | 422 | Produto não é da categoria do passo |
+| `KIT_ITEM_NOT_SELLABLE` | 422 | Produto inexistente, inativo, rascunho, sem preço, kit, ou invisível no canal |
+| `KIT_ITEM_REMOVAL_NOT_ALLOWED` | 409 | Remoção avulsa de linha de kit na comanda — remova o kit inteiro |
 | `TOTP_NOT_ENABLED` | 400 | Operação requer 2FA ativo |
 | `TOTP_SETUP_REQUIRED` | 403 | Login bloqueado: `security.2fa.required=true` e o usuário ainda não ativou 2FA |
 | `INVALID_PASSWORD` | 400 | Senha atual incorreta |
@@ -807,6 +817,7 @@ Query: page, size
 
 ```
 Query: page (default 0, >= 0), size (default 20, 1..100)
+       search — nome, SKU, categoria ou marca, sem caixa nem acento (EST-F029: "alfafa" traz a categoria Alfafa inteira)
 // Response 200 → PageResult<ProductResponse> / 400 VALIDATION_ERROR
 ```
 
@@ -849,6 +860,17 @@ Query: page (default 0, >= 0), size (default 20, 1..100)
   ]
 }
 ```
+
+---
+
+### PATCH /estoque/products/{sku}/sku — Permissão: ESTOQUE_PRODUCT_MANAGE (EST-F030)
+
+```json
+{ "newSku": "SEDA-ALF-KS" }   // 3–50 chars
+// 200 → ProductResponse (o produto pai) · 404 PRODUCT_NOT_FOUND · 409 DUPLICATE_SKU
+```
+
+Aceita SKU pai ou de variação. Reescreve o SKU numa única transação em **todas** as tabelas que o guardam como texto (catálogo, saldo, lotes, movimentos, reservas, ponto de reposição, balanço, lata aberta, carrinho, comanda, pedidos, recebimentos, lista de reposição, NF-e e receitas de kit) — inclusive o histórico. Auditoria `PRODUCT_SKU_CHANGED` com `oldSku`/`newSku`. Mesmo SKU atual é no-op.
 
 ---
 
@@ -1489,6 +1511,88 @@ nenhuma reserva ativa a explica (ou o inverso), mais difícil de diagnosticar qu
 a reserva existe para evitar. `difference` positivo é contador acima do ledger; negativo é ledger
 acima do contador. Somente leitura — a correção de cada linha é decisão humana, no mesmo espírito
 de `GET /estoque/integrity/orphan-skus`. Base íntegra devolve `content` vazio com `200`.
+
+---
+
+## Kit montável — `/estoque/kit-templates`, `/shop/kits`, `/pdv/kits` (EST-F031 · ECM-F008 · PDV-F019)
+
+O "Kit Mahal": o cliente escolhe um item por passo (bag, seda, piteira, tubeck, tesoura, cuia, isqueiro) e paga a **soma dos itens menos `discountPercent`**. Cada passo aponta para uma **categoria**; as opções são os produtos ativos, publicados, precificados e não-kit dessa categoria (produto com grade vira uma opção por variação ativa). Não é o kit de receita fixa (EST-F015): não tem SKU nem saldo — cada item vira uma linha comum agrupada por `kitBundleId`, e o estoque baixa item a item.
+
+### GET /estoque/kit-templates · GET /estoque/kit-templates/{id} — Permissão: ESTOQUE_PRODUCT_READ
+
+### POST /estoque/kit-templates · PUT /estoque/kit-templates/{id} — Permissão: ESTOQUE_KIT_TEMPLATE_MANAGE
+
+```json
+{
+  "name": "Kit Mahal",              // único, sem caixa
+  "description": "Monte o seu kit",
+  "imageUrl": null,
+  "discountPercent": 10,            // 0 ≤ x < 100
+  "active": true,                   // default true
+  "visibleInPos": true,             // default true
+  "visibleInMarketplace": true,     // default true
+  "steps": [
+    { "name": "Bag",      "displayOrder": 0, "categoryId": 1, "required": true,  "maxItems": 1 },
+    { "name": "Seda",     "displayOrder": 1, "categoryId": 2, "required": true,  "maxItems": 2 },
+    { "name": "Piteira",  "displayOrder": 2, "categoryId": 3, "required": false, "maxItems": 1 },
+    { "name": "Tubeck",   "displayOrder": 3, "categoryId": 4, "required": false, "maxItems": 1 },
+    { "name": "Tesoura",  "displayOrder": 4, "categoryId": 5, "required": false, "maxItems": 1 },
+    { "name": "Cuia",     "displayOrder": 5, "categoryId": 6, "required": false, "maxItems": 1 },
+    { "name": "Isqueiro", "displayOrder": 6, "categoryId": 7, "required": true,  "maxItems": 1 }
+  ]
+}
+// 201/200 → KitTemplateResponse (com ids dos passos) · 404 CATEGORY_NOT_FOUND · 409 DUPLICATE_KIT_TEMPLATE_NAME
+```
+
+`PUT` substitui o modelo inteiro: passo **com** `id` é atualizado no lugar, passo sem `id` é criado, passo ausente é removido. Mantenha o `id` dos passos — o carrinho guarda o passo de cada item, e o checkout recota por ele.
+
+### DELETE /estoque/kit-templates/{id} — Permissão: ESTOQUE_KIT_TEMPLATE_MANAGE
+
+`204`. Não desfaz venda nenhuma; kit que estava em carrinho passa a ser recusado no checkout (`KIT_NOT_AVAILABLE`).
+
+### GET /shop/kits · GET /shop/kits/{id} — **Público**
+
+Só kits ativos e com `visibleInMarketplace`. Inativo responde 404 `KIT_TEMPLATE_NOT_FOUND`.
+
+### GET /shop/kits/{id}/steps/{stepId}/options — **Público**
+
+```json
+// 200 → [{ "sku": "SEDA-G-MENTA", "productSku": "SEDA-G", "name": "Seda Sabores",
+//          "attributes": [...], "price": 7.00, "imageUrl": null, "available": true }]
+```
+
+`sku` é o que vai na escolha. `available` = saldo no depósito padrão do marketplace.
+
+### POST /shop/kits/quote — **Público** · POST /pdv/kits/quote — Permissão: PDV_READ
+
+```json
+{ "templateId": 7, "picks": [ { "stepId": 10, "sku": "BAG-01" }, { "stepId": 20, "sku": "SEDA-01" } ] }
+// 200 → { "subtotal": 50.00, "discount": 5.00, "total": 45.00,
+//         "lines": [{ "sku": "BAG-01", "unitPrice": 40.00, "discountAmount": 4.00, "netAmount": 36.00, ... }] }
+// 422 → code KIT_* (ver tabela de error codes)
+```
+
+O desconto é rateado por linha ao centavo (`DiscountProration`): a soma dos `discountAmount` é exatamente `discount`.
+
+### POST /shop/cart/kits — Permissão: SHOP_CART_OWN
+
+Mesmo corpo do quote. `201 → ShopCartResponse`. Cada chamada cria um pacote novo (`kitBundleId`). O carrinho passa a trazer `kitBundleId`, `kitTemplateId`, `kitStepId` e `discountAmount` por item, e `discountTotal` no topo; **`total` agora é líquido** (soma dos subtotais − `discountTotal`). O `POST /shop/checkout` recota cada pacote e grava o desconto de cada linha em `OrderItem.discountAmount`; pacote que não fecha mais recusa o checkout inteiro com 422.
+
+### DELETE /shop/cart/kits/{bundleId} — Permissão: SHOP_CART_OWN
+
+`204`. Item de kit não sai por `DELETE /shop/cart/items/{sku}` (essa rota só mexe em linha avulsa).
+
+### GET /pdv/kits · GET /pdv/kits/{id}/steps/{stepId}/options?warehouseCode= — Permissão: PDV_READ
+
+Kits com `visibleInPos`. Sem `warehouseCode`, `available` vem `null`.
+
+### POST /pdv/comandas/{id}/kits — Permissão: PDV_COMANDA_MANAGE
+
+Mesmo corpo do quote. `201 → ComandaResponse`. Uma linha por item, preço cheio em `unitPrice` e a parte do kit em `kitDiscountAmount`; `runningTotal` já é líquido. Estoque sai agora (SAIDA por item). No fechamento, o desconto do kit **soma** ao desconto de conta em cada `OrderItem.discountAmount`, o desconto de conta é rateado sobre o líquido do kit, e o desconto do kit **não conta** para o teto `pdv.sale.max-discount-percent`.
+
+### DELETE /pdv/comandas/{id}/kits/{bundleId} — Permissão: PDV_COMANDA_MANAGE
+
+Remove o pacote inteiro e devolve o estoque (ENTRADA por item). `DELETE /pdv/comandas/{id}/items/{itemId}` numa linha de kit responde 409 `KIT_ITEM_REMOVAL_NOT_ALLOWED`.
 
 ---
 
