@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 @Repository
@@ -30,16 +31,12 @@ public class CartRepositoryImpl implements CartRepository {
 
     @Override
     public Cart upsertItem(Long customerId, String sku, BigDecimal quantity) {
-        CartEntity cart = cartJpaRepository.findByCustomerId(customerId).orElseGet(() -> {
-            CartEntity created = new CartEntity();
-            created.setCustomerId(customerId);
-            created.setCreatedAt(Instant.now());
-            created.setUpdatedAt(Instant.now());
-            return created;
-        });
+        CartEntity cart = findOrCreate(customerId);
 
+        // Só linha avulsa: a mesma seda dentro de um kit (ECM-F008) é outra linha, e mexer nela
+        // aqui mudaria a quantidade de um item do pacote por fora da cotação.
         Optional<CartItemEntity> existing = cart.getItems().stream()
-                .filter(item -> item.getSku().equals(sku))
+                .filter(item -> item.getKitBundleId() == null && item.getSku().equals(sku))
                 .findFirst();
         if (existing.isPresent()) {
             existing.get().setQuantity(quantity);
@@ -55,13 +52,55 @@ public class CartRepositoryImpl implements CartRepository {
     }
 
     @Override
+    public Cart addKitBundle(Long customerId, List<CartItem> items) {
+        CartEntity cart = findOrCreate(customerId);
+        for (CartItem item : items) {
+            CartItemEntity entity = new CartItemEntity();
+            entity.setCart(cart);
+            entity.setSku(item.sku());
+            entity.setQuantity(item.quantity());
+            entity.setKitBundleId(item.kitBundleId());
+            entity.setKitTemplateId(item.kitTemplateId());
+            entity.setKitStepId(item.kitStepId());
+            cart.getItems().add(entity);
+        }
+        cart.setUpdatedAt(Instant.now());
+        return toDomain(cartJpaRepository.save(cart));
+    }
+
+    @Override
+    public boolean removeKitBundle(Long customerId, String kitBundleId) {
+        Optional<CartEntity> cartOpt = cartJpaRepository.findByCustomerId(customerId);
+        if (cartOpt.isEmpty()) {
+            return false;
+        }
+        CartEntity cart = cartOpt.get();
+        boolean removed = cart.getItems().removeIf(item -> kitBundleId.equals(item.getKitBundleId()));
+        if (removed) {
+            cart.setUpdatedAt(Instant.now());
+            cartJpaRepository.save(cart);
+        }
+        return removed;
+    }
+
+    private CartEntity findOrCreate(Long customerId) {
+        return cartJpaRepository.findByCustomerId(customerId).orElseGet(() -> {
+            CartEntity created = new CartEntity();
+            created.setCustomerId(customerId);
+            created.setCreatedAt(Instant.now());
+            created.setUpdatedAt(Instant.now());
+            return created;
+        });
+    }
+
+    @Override
     public boolean removeItem(Long customerId, String sku) {
         Optional<CartEntity> cartOpt = cartJpaRepository.findByCustomerId(customerId);
         if (cartOpt.isEmpty()) {
             return false;
         }
         CartEntity cart = cartOpt.get();
-        boolean removed = cart.getItems().removeIf(item -> item.getSku().equals(sku));
+        boolean removed = cart.getItems().removeIf(item -> item.getKitBundleId() == null && item.getSku().equals(sku));
         if (removed) {
             cart.setUpdatedAt(Instant.now());
             cartJpaRepository.save(cart);
@@ -82,7 +121,8 @@ public class CartRepositoryImpl implements CartRepository {
 
     private Cart toDomain(CartEntity e) {
         var items = e.getItems().stream()
-                .map(i -> new CartItem(i.getSku(), i.getQuantity()))
+                .map(i -> new CartItem(i.getSku(), i.getQuantity(), i.getKitBundleId(), i.getKitTemplateId(),
+                        i.getKitStepId()))
                 .toList();
         return Cart.of(e.getId(), e.getCustomerId(), items, e.getUpdatedAt());
     }

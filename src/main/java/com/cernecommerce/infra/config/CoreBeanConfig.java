@@ -374,9 +374,11 @@ class CoreBeanConfig {
     ShopUseCase shopUseCase(CrmUseCase crmUseCase, UserUseCase userUseCase, EstoqueUseCase estoqueUseCase,
             CartRepository cartRepository, OrderRepository orderRepository, OrderUseCase orderUseCase,
             CashbackUseCase cashbackUseCase, PaymentGatewayPort paymentGatewayPort,
-            OrderPaymentRepository orderPaymentRepository, EmailPort emailPort) {
+            OrderPaymentRepository orderPaymentRepository, EmailPort emailPort,
+            KitBuilderUseCase kitBuilderUseCase) {
         return new ShopService(crmUseCase, userUseCase, estoqueUseCase, cartRepository, orderRepository,
-                orderUseCase, cashbackUseCase, paymentGatewayPort, orderPaymentRepository, emailPort);
+                orderUseCase, cashbackUseCase, paymentGatewayPort, orderPaymentRepository, emailPort,
+                kitBuilderUseCase);
     }
 
     @Bean

@@ -11,7 +11,10 @@ import java.math.BigDecimal;
 @NoArgsConstructor
 @Entity
 @EqualsAndHashCode(onlyExplicitlyIncluded = true)
-@Table(name = "cart_item", uniqueConstraints = @UniqueConstraint(name = "uk_cart_item_cart_sku", columnNames = {"cart_id", "sku"}))
+// Sem @UniqueConstraint desde ECM-F008: (cart_id, sku) só é único para linha AVULSA — índice
+// parcial na V126, que o JPA não sabe declarar. A linha avulsa continua única por construção em
+// CartRepositoryImpl.upsertItem.
+@Table(name = "cart_item")
 public class CartItemEntity {
 
     @Id
@@ -31,4 +34,14 @@ public class CartItemEntity {
 
     @Column(nullable = false, precision = 14, scale = 3)
     private BigDecimal quantity;
+
+    // ECM-F008 — pacote de kit montável. Os três nulos = linha avulsa.
+    @Column(name = "kit_bundle_id", length = 36)
+    private String kitBundleId;
+
+    @Column(name = "kit_template_id")
+    private Long kitTemplateId;
+
+    @Column(name = "kit_step_id")
+    private Long kitStepId;
 }

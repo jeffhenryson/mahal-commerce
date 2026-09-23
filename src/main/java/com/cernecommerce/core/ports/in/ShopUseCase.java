@@ -4,6 +4,7 @@ import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.auth.User;
 import com.cernecommerce.core.domain.model.crm.Customer;
 import com.cernecommerce.core.domain.model.estoque.Category;
+import com.cernecommerce.core.domain.model.estoque.KitSelection;
 import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
 import com.cernecommerce.core.domain.model.pedido.Order;
 
@@ -107,11 +108,25 @@ public interface ShopUseCase {
      * despreço um produto depois de precificado), mas o contrato não assume isso para sempre.
      */
     record CartItemView(String sku, BigDecimal quantity, BigDecimal unitPrice, BigDecimal subtotal,
-            boolean available) {
+            boolean available, String kitBundleId, Long kitTemplateId, Long kitStepId, BigDecimal discountAmount) {
+
+        /** Linha avulsa, sem desconto de kit. */
+        public CartItemView(String sku, BigDecimal quantity, BigDecimal unitPrice, BigDecimal subtotal,
+                boolean available) {
+            this(sku, quantity, unitPrice, subtotal, available, null, null, null, BigDecimal.ZERO);
+        }
     }
 
-    /** Carrinho do cliente autenticado, pronto para exibição. */
-    record CartView(List<CartItemView> items, BigDecimal total, Instant updatedAt) {
+    /**
+     * Carrinho do cliente autenticado, pronto para exibição. {@code total} já é o líquido — a
+     * soma dos subtotais menos {@code discountTotal}, que é o desconto dos kits montáveis
+     * (ECM-F008). Sem kit, {@code discountTotal} é zero e {@code total} é o que sempre foi.
+     */
+    record CartView(List<CartItemView> items, BigDecimal total, Instant updatedAt, BigDecimal discountTotal) {
+
+        public CartView(List<CartItemView> items, BigDecimal total, Instant updatedAt) {
+            this(items, total, updatedAt, BigDecimal.ZERO);
+        }
     }
 
     /**
@@ -139,6 +154,25 @@ public interface ShopUseCase {
      *         não estiver no carrinho
      */
     CartView removeCartItem(String username, String sku);
+
+    /**
+     * ECM-F008 — põe um kit montável no carrinho. A escolha é validada e cotada agora
+     * ({@link KitBuilderUseCase#quote}) e de novo no checkout; o carrinho continua sem guardar
+     * preço. Cada chamada é um pacote novo, mesmo que igual a um que já está no carrinho.
+     *
+     * @throws com.cernecommerce.core.domain.exception.estoque.InvalidKitSelectionException se a
+     *         escolha não fecha um kit válido
+     */
+    CartView addKitToCart(String username, KitSelection selection);
+
+    /**
+     * Tira o pacote inteiro do carrinho — item de kit não sai sozinho, porque sem ele o desconto
+     * cotado deixaria de valer.
+     *
+     * @throws com.cernecommerce.core.domain.exception.ecommerce.CartItemNotFoundException se o
+     *         pacote não estiver no carrinho
+     */
+    CartView removeKitFromCart(String username, String kitBundleId);
 
     /** Pedido criado e a URL de checkout hospedada pelo gateway para onde o cliente é redirecionado. */
     record CheckoutResult(Order order, String checkoutUrl) {

@@ -11,6 +11,7 @@ public class ShopCartDTOConverter {
         ShopCartResponseDTO dto = new ShopCartResponseDTO();
         dto.setItems(cart.items().stream().map(this::toResponse).toList());
         dto.setTotal(cart.total());
+        dto.setDiscountTotal(cart.discountTotal());
         dto.setUpdatedAt(cart.updatedAt());
         return dto;
     }
@@ -22,6 +23,10 @@ public class ShopCartDTOConverter {
         dto.setUnitPrice(item.unitPrice());
         dto.setSubtotal(item.subtotal());
         dto.setAvailable(item.available());
+        dto.setKitBundleId(item.kitBundleId());
+        dto.setKitTemplateId(item.kitTemplateId());
+        dto.setKitStepId(item.kitStepId());
+        dto.setDiscountAmount(item.discountAmount());
         return dto;
     }
 }

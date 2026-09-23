@@ -46,6 +46,8 @@ class SecurityArchitectureTest {
     private static final Set<String> PUBLIC_ROUTE_CONTROLLERS = Set.of(
             "AuthController", "OAuthController", "RegistrationController", "DevAuthController",
             "TotpController", "ShopController",
+            // ECM-F008: montador de kit da vitrine, público como o catálogo (rotas em SecurityConfig).
+            "ShopKitController",
             // ECM-F004 (Fatia 10): é o gateway de pagamento chamando, sem sessão de usuário. A
             // defesa mora dentro de PaymentWebhookService (payment_check sempre reconsulta a
             // verdade no gateway), não em @PreAuthorize — o InfinitePay nem assina o webhook.

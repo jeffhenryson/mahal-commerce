@@ -3,6 +3,7 @@ package com.cernecommerce.core.service;
 import com.cernecommerce.core.domain.exception.crm.DuplicateCustomerEmailException;
 import com.cernecommerce.core.domain.exception.ecommerce.CartEmptyException;
 import com.cernecommerce.core.domain.exception.ecommerce.CartItemNotFoundException;
+import com.cernecommerce.core.domain.exception.estoque.InvalidKitSelectionException;
 import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
 import com.cernecommerce.core.domain.exception.pedido.OrderNotFoundException;
 import com.cernecommerce.core.domain.exception.user.EmailAlreadyExistsException;
@@ -15,6 +16,9 @@ import com.cernecommerce.core.domain.model.crm.Customer;
 import com.cernecommerce.core.domain.model.ecommerce.Cart;
 import com.cernecommerce.core.domain.model.ecommerce.CartItem;
 import com.cernecommerce.core.domain.model.estoque.Category;
+import com.cernecommerce.core.domain.model.estoque.KitChannel;
+import com.cernecommerce.core.domain.model.estoque.KitQuote;
+import com.cernecommerce.core.domain.model.estoque.KitSelection;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.domain.model.estoque.Warehouse;
@@ -25,6 +29,7 @@ import com.cernecommerce.core.domain.model.pedido.OrderItem;
 import com.cernecommerce.core.ports.in.CashbackUseCase;
 import com.cernecommerce.core.ports.in.CrmUseCase;
 import com.cernecommerce.core.ports.in.EstoqueUseCase;
+import com.cernecommerce.core.ports.in.KitBuilderUseCase;
 import com.cernecommerce.core.ports.in.OrderUseCase;
 import com.cernecommerce.core.ports.in.ShopUseCase;
 import com.cernecommerce.core.ports.in.UserUseCase;
@@ -38,7 +43,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 public class ShopService implements ShopUseCase {
 
@@ -54,11 +64,14 @@ public class ShopService implements ShopUseCase {
     private final PaymentGatewayPort paymentGatewayPort;
     private final OrderPaymentRepository orderPaymentRepository;
     private final EmailPort emailPort;
+    private final KitBuilderUseCase kitBuilderUseCase;
 
     public ShopService(CrmUseCase crmUseCase, UserUseCase userUseCase, EstoqueUseCase estoqueUseCase,
             CartRepository cartRepository, OrderRepository orderRepository, OrderUseCase orderUseCase,
             CashbackUseCase cashbackUseCase, PaymentGatewayPort paymentGatewayPort,
-            OrderPaymentRepository orderPaymentRepository, EmailPort emailPort) {
+            OrderPaymentRepository orderPaymentRepository, EmailPort emailPort,
+            KitBuilderUseCase kitBuilderUseCase) {
+        this.kitBuilderUseCase = kitBuilderUseCase;
         this.crmUseCase = crmUseCase;
         this.userUseCase = userUseCase;
         this.estoqueUseCase = estoqueUseCase;
@@ -172,6 +185,49 @@ public class ShopService implements ShopUseCase {
 
     @Override
     @Transactional
+    public CartView addKitToCart(String username, KitSelection selection) {
+        Long customerId = requireCustomerId(username);
+        KitQuote quote = kitBuilderUseCase.quote(selection, KitChannel.MARKETPLACE);
+        String bundleId = UUID.randomUUID().toString();
+        List<CartItem> items = quote.lines().stream()
+                .map(line -> new CartItem(line.sku(), BigDecimal.ONE, bundleId, quote.template().id(), line.stepId()))
+                .toList();
+        return toCartView(cartRepository.addKitBundle(customerId, items));
+    }
+
+    @Override
+    @Transactional
+    public CartView removeKitFromCart(String username, String kitBundleId) {
+        Long customerId = requireCustomerId(username);
+        if (!cartRepository.removeKitBundle(customerId, kitBundleId)) {
+            throw new CartItemNotFoundException(kitBundleId);
+        }
+        Cart cart = cartRepository.findByCustomerId(customerId).orElse(Cart.empty(customerId));
+        return toCartView(cart);
+    }
+
+    /**
+     * Agrupa as linhas de kit do carrinho por pacote, na ordem em que aparecem. A ordem das linhas
+     * dentro do pacote é a ordem da escolha, e é ela que casa cada linha com a da cotação.
+     */
+    private static Map<String, List<CartItem>> kitBundles(Cart cart) {
+        Map<String, List<CartItem>> bundles = new LinkedHashMap<>();
+        for (CartItem item : cart.items()) {
+            if (item.inKit()) {
+                bundles.computeIfAbsent(item.kitBundleId(), k -> new ArrayList<>()).add(item);
+            }
+        }
+        return bundles;
+    }
+
+    private static KitSelection toSelection(List<CartItem> bundle) {
+        return new KitSelection(bundle.get(0).kitTemplateId(), bundle.stream()
+                .map(i -> new KitSelection.Pick(i.kitStepId(), i.sku()))
+                .toList());
+    }
+
+    @Override
+    @Transactional
     public CheckoutResult checkout(String username) {
         Long customerId = requireCustomerId(username);
         Cart cart = cartRepository.findByCustomerId(customerId).orElse(Cart.empty(customerId));
@@ -184,11 +240,24 @@ public class ShopService implements ShopUseCase {
         // no carrinho — mesmo caminho de PdvService.registerSale: fromCatalog recusa item sem
         // preço, e a taxa é carimbada aqui porque settleOnlineOrder/o webhook (que confirmam este
         // pedido mais tarde) não resolvem taxa nenhuma, só leem o que já foi carimbado.
+        //
+        // ECM-F008 — kit montável é RECOTADO aqui, pelo mesmo motivo: a cotação do carrinho não
+        // prometeu nada. Pacote que deixou de fechar (item desativado, kit tirado de linha) recusa
+        // o checkout inteiro com o código da regra, em vez de cobrar o kit sem o desconto em
+        // silêncio. O desconto de cada linha é a parte rateada pela cotação.
+        Map<String, Iterator<KitQuote.Line>> kitLines = new HashMap<>();
+        for (Map.Entry<String, List<CartItem>> bundle : kitBundles(cart).entrySet()) {
+            KitQuote quote = kitBuilderUseCase.quote(toSelection(bundle.getValue()), KitChannel.MARKETPLACE);
+            kitLines.put(bundle.getKey(), quote.lines().iterator());
+        }
         List<OrderItem> orderItems = new ArrayList<>(cart.items().size());
         for (CartItem cartItem : cart.items()) {
             EstoqueUseCase.CatalogSaleInfo saleInfo = estoqueUseCase.resolveSaleInfo(cartItem.sku());
+            BigDecimal discount = cartItem.inKit()
+                    ? kitLines.get(cartItem.kitBundleId()).next().discountAmount()
+                    : BigDecimal.ZERO;
             OrderItem item = OrderItem.fromCatalog(cartItem.sku(), cartItem.quantity(),
-                    saleInfo.pricing(), BigDecimal.ZERO, saleInfo.productName());
+                    saleInfo.pricing(), discount, saleInfo.productName());
             CashbackRate resolvedRate = cashbackUseCase.resolveApplicableRate(cartItem.sku());
             if (resolvedRate != null) {
                 item = item.withCashbackPercent(resolvedRate.percent());
@@ -265,20 +334,42 @@ public class ShopService implements ShopUseCase {
      */
     private CartView toCartView(Cart cart) {
         String warehouseCode = cart.isEmpty() ? null : estoqueUseCase.getDefaultWarehouse().code();
+        // ECM-F008 — cada pacote é cotado para exibir o desconto. Pacote que não fecha mais aparece
+        // sem desconto e indisponível, em vez de derrubar o GET do carrinho: é o checkout quem
+        // recusa, e o cliente precisa enxergar o carrinho para remover o pacote.
+        Map<String, Iterator<KitQuote.Line>> kitLines = new HashMap<>();
+        for (Map.Entry<String, List<CartItem>> bundle : kitBundles(cart).entrySet()) {
+            try {
+                KitQuote quote = kitBuilderUseCase.quote(toSelection(bundle.getValue()), KitChannel.MARKETPLACE);
+                kitLines.put(bundle.getKey(), quote.lines().iterator());
+            } catch (InvalidKitSelectionException e) {
+                // sem entrada no mapa = pacote inválido
+            }
+        }
         List<CartItemView> items = cart.items().stream()
-                .map(item -> toCartItemView(item, warehouseCode))
+                .map(item -> toCartItemView(item, warehouseCode, kitLines))
                 .toList();
-        BigDecimal total = items.stream()
+        BigDecimal gross = items.stream()
                 .map(CartItemView::subtotal)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-        return new CartView(items, total, cart.updatedAt());
+        BigDecimal discountTotal = items.stream()
+                .map(CartItemView::discountAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        return new CartView(items, gross.subtract(discountTotal), cart.updatedAt(), discountTotal);
     }
 
-    private CartItemView toCartItemView(CartItem cartItem, String warehouseCode) {
+    private CartItemView toCartItemView(CartItem cartItem, String warehouseCode,
+            Map<String, Iterator<KitQuote.Line>> kitLines) {
         BigDecimal unitPrice = estoqueUseCase.findPricingBySku(cartItem.sku()).effectivePrice();
         BigDecimal subtotal = unitPrice.multiply(cartItem.quantity());
-        return new CartItemView(cartItem.sku(), cartItem.quantity(), unitPrice, subtotal,
-                isAvailable(cartItem.sku(), warehouseCode));
+        boolean available = isAvailable(cartItem.sku(), warehouseCode);
+        if (!cartItem.inKit()) {
+            return new CartItemView(cartItem.sku(), cartItem.quantity(), unitPrice, subtotal, available);
+        }
+        Iterator<KitQuote.Line> lines = kitLines.get(cartItem.kitBundleId());
+        BigDecimal discount = lines == null ? BigDecimal.ZERO : lines.next().discountAmount();
+        return new CartItemView(cartItem.sku(), cartItem.quantity(), unitPrice, subtotal, available && lines != null,
+                cartItem.kitBundleId(), cartItem.kitTemplateId(), cartItem.kitStepId(), discount);
     }
 
     /** Mesma validação que {@link OrderItem#fromCatalog} faria no checkout — só descarta o resultado. */

@@ -2,7 +2,10 @@ package com.cernecommerce.core.ports.out.ecommerce;
 
 import com.cernecommerce.core.domain.model.ecommerce.Cart;
 
+import com.cernecommerce.core.domain.model.ecommerce.CartItem;
+
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -20,7 +23,22 @@ public interface CartRepository {
     Cart upsertItem(Long customerId, String sku, BigDecimal quantity);
 
     /**
-     * Remove uma linha do carrinho.
+     * ECM-F008 — acrescenta um pacote de kit montável inteiro. As linhas chegam já com
+     * {@code kitBundleId} preenchido. Nunca mescla com linha avulsa do mesmo SKU nem com outro
+     * pacote: dois kits iguais são dois pacotes.
+     */
+    Cart addKitBundle(Long customerId, List<CartItem> items);
+
+    /**
+     * Remove todas as linhas do pacote.
+     *
+     * @return {@code false} se o pacote não estava no carrinho
+     */
+    boolean removeKitBundle(Long customerId, String kitBundleId);
+
+    /**
+     * Remove uma linha <b>avulsa</b> do carrinho — linha de kit sai só com o pacote inteiro
+     * ({@link #removeKitBundle}).
      *
      * @return {@code true} se havia uma linha para remover, {@code false} se o SKU não estava no
      *         carrinho (o service decide se isso é 404 — a repository só relata o fato)

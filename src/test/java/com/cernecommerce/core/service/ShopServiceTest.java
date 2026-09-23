@@ -5,6 +5,7 @@ import com.cernecommerce.core.domain.exception.ecommerce.CartEmptyException;
 import com.cernecommerce.core.domain.exception.ecommerce.CartItemNotFoundException;
 import com.cernecommerce.core.domain.exception.estoque.DefaultWarehouseNotConfiguredException;
 import com.cernecommerce.core.domain.exception.estoque.InsufficientStockException;
+import com.cernecommerce.core.domain.exception.estoque.InvalidKitSelectionException;
 import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
 import com.cernecommerce.core.domain.exception.pedido.OrderNotFoundException;
 import com.cernecommerce.core.domain.exception.pedido.ProductNotPricedException;
@@ -17,6 +18,11 @@ import com.cernecommerce.core.domain.model.cashback.CashbackScope;
 import com.cernecommerce.core.domain.model.crm.Customer;
 import com.cernecommerce.core.domain.model.ecommerce.Cart;
 import com.cernecommerce.core.domain.model.ecommerce.CartItem;
+import com.cernecommerce.core.domain.model.estoque.KitChannel;
+import com.cernecommerce.core.domain.model.estoque.KitQuote;
+import com.cernecommerce.core.domain.model.estoque.KitSelection;
+import com.cernecommerce.core.domain.model.estoque.KitTemplate;
+import com.cernecommerce.core.domain.model.estoque.KitTemplateStep;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.estoque.Product;
 import com.cernecommerce.core.domain.model.estoque.ProductAttribute;
@@ -32,6 +38,7 @@ import com.cernecommerce.core.domain.model.rbac.Role;
 import com.cernecommerce.core.ports.in.CashbackUseCase;
 import com.cernecommerce.core.ports.in.CrmUseCase;
 import com.cernecommerce.core.ports.in.EstoqueUseCase;
+import com.cernecommerce.core.ports.in.KitBuilderUseCase;
 import com.cernecommerce.core.ports.in.OrderUseCase;
 import com.cernecommerce.core.ports.in.ShopUseCase;
 import com.cernecommerce.core.ports.in.UserUseCase;
@@ -76,6 +83,7 @@ class ShopServiceTest {
     @Mock PaymentGatewayPort paymentGatewayPort;
     @Mock OrderPaymentRepository orderPaymentRepository;
     @Mock EmailPort emailPort;
+    @Mock KitBuilderUseCase kitBuilderUseCase;
 
     ShopService shopService;
 
@@ -88,7 +96,7 @@ class ShopServiceTest {
     void setUp() {
         shopService = new ShopService(crmUseCase, userUseCase, estoqueUseCase, cartRepository,
                 orderRepository, orderUseCase, cashbackUseCase, paymentGatewayPort, orderPaymentRepository,
-                emailPort);
+                emailPort, kitBuilderUseCase);
     }
 
     private void stubAuthenticatedCustomer() {
@@ -432,6 +440,117 @@ class ShopServiceTest {
         verify(cartRepository).clear(CUSTOMER_ID);
         verify(emailPort).sendOrderConfirmation(eq(USERNAME), eq("Maria"), eq("Pedido #99"),
                 eq(result.order().netAmount()), eq(2), eq("https://checkout.infinitepay.io/loja?lenc=abc"));
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // ECM-F008 — kit montável no carrinho
+    // ---------------------------------------------------------------------------------------
+
+    private static final KitTemplate KIT_MAHAL =
+            new KitTemplate(7L, "Kit Mahal", null, null,
+                    new BigDecimal("10"), true, true, true, List.of(
+                            new KitTemplateStep(10L, "Bag", 0, 1L, true, 1),
+                            new KitTemplateStep(20L, "Seda", 1, 2L, true, 1)));
+
+    private static KitQuote kitQuote() {
+        return new KitQuote(KIT_MAHAL, List.of(
+                new KitQuote.Line(10L, "Bag", "BAG-01", "Bag",
+                        new BigDecimal("40.00"), new BigDecimal("4.00")),
+                new KitQuote.Line(20L, "Seda", "SEDA-01", "Seda",
+                        new BigDecimal("10.00"), new BigDecimal("1.00"))),
+                new BigDecimal("50.00"), new BigDecimal("5.00"), new BigDecimal("45.00"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void addKitToCart_writesOneBundleWithStepOfEachLine() {
+        stubAuthenticatedCustomer();
+        var selection = new KitSelection(7L, List.of(
+                new KitSelection.Pick(10L, "BAG-01"),
+                new KitSelection.Pick(20L, "SEDA-01")));
+        when(kitBuilderUseCase.quote(selection, KitChannel.MARKETPLACE))
+                .thenReturn(kitQuote());
+        when(cartRepository.addKitBundle(eq(CUSTOMER_ID), anyList()))
+                .thenAnswer(inv -> Cart.of(1L, CUSTOMER_ID, inv.getArgument(1), Instant.now()));
+        when(estoqueUseCase.getDefaultWarehouse()).thenReturn(WAREHOUSE);
+        when(estoqueUseCase.findPricingBySku("BAG-01")).thenReturn(Pricing.of(null, null, new BigDecimal("40.00")));
+        when(estoqueUseCase.findPricingBySku("SEDA-01")).thenReturn(Pricing.of(null, null, new BigDecimal("10.00")));
+        when(estoqueUseCase.getStockBalance(anyString(), eq("LOJA-01")))
+                .thenReturn(StockBalance.of(1L, "X", 1L, BigDecimal.TEN, BigDecimal.ZERO, 0L));
+
+        ShopUseCase.CartView view = shopService.addKitToCart(USERNAME, selection);
+
+        ArgumentCaptor<List<CartItem>> captor = ArgumentCaptor.forClass(List.class);
+        verify(cartRepository).addKitBundle(eq(CUSTOMER_ID), captor.capture());
+        List<CartItem> written = captor.getValue();
+        assertThat(written).extracting(CartItem::sku, CartItem::kitStepId, CartItem::kitTemplateId)
+                .containsExactly(tuple("BAG-01", 10L, 7L), tuple("SEDA-01", 20L, 7L));
+        assertThat(written.get(0).kitBundleId()).isNotNull().isEqualTo(written.get(1).kitBundleId());
+        // Carrinho mostra o líquido: 50 cheio − 5 do kit.
+        assertThat(view.discountTotal()).isEqualByComparingTo("5.00");
+        assertThat(view.total()).isEqualByComparingTo("45.00");
+    }
+
+    @Test
+    void removeKitFromCart_throwsWhenBundleIsNotInCart() {
+        stubAuthenticatedCustomer();
+        when(cartRepository.removeKitBundle(CUSTOMER_ID, "nao-existe")).thenReturn(false);
+
+        assertThatThrownBy(() -> shopService.removeKitFromCart(USERNAME, "nao-existe"))
+                .isInstanceOf(CartItemNotFoundException.class);
+    }
+
+    @Test
+    void checkout_requotesKitAndCarriesProratedDiscountToOrderItems() {
+        stubAuthenticatedCustomer();
+        stubCustomerLookup();
+        Cart cart = Cart.of(1L, CUSTOMER_ID, List.of(
+                new CartItem("ESS-001", BigDecimal.ONE),
+                new CartItem("BAG-01", BigDecimal.ONE, "b-1", 7L, 10L),
+                new CartItem("SEDA-01", BigDecimal.ONE, "b-1", 7L, 20L)), Instant.now());
+        when(cartRepository.findByCustomerId(CUSTOMER_ID)).thenReturn(Optional.of(cart));
+        when(estoqueUseCase.getDefaultWarehouse()).thenReturn(WAREHOUSE);
+        when(kitBuilderUseCase.quote(new KitSelection(7L, List.of(
+                        new KitSelection.Pick(10L, "BAG-01"),
+                        new KitSelection.Pick(20L, "SEDA-01"))),
+                KitChannel.MARKETPLACE)).thenReturn(kitQuote());
+        when(estoqueUseCase.resolveSaleInfo("ESS-001")).thenReturn(new EstoqueUseCase.CatalogSaleInfo(
+                "Essência", Pricing.of(null, null, new BigDecimal("30.00"))));
+        when(estoqueUseCase.resolveSaleInfo("BAG-01")).thenReturn(new EstoqueUseCase.CatalogSaleInfo(
+                "Bag", Pricing.of(null, null, new BigDecimal("40.00"))));
+        when(estoqueUseCase.resolveSaleInfo("SEDA-01")).thenReturn(new EstoqueUseCase.CatalogSaleInfo(
+                "Seda", Pricing.of(null, null, new BigDecimal("10.00"))));
+        when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> withId(invocation.getArgument(0), 99L));
+        when(paymentGatewayPort.createCheckoutLink(eq("99"), any(), any(), any(), any()))
+                .thenReturn(new PaymentGatewayPort.CheckoutLink("https://checkout"));
+
+        ShopUseCase.CheckoutResult result = shopService.checkout(USERNAME);
+
+        assertThat(result.order().items())
+                .extracting(i -> i.sku(), i -> i.discountAmount())
+                .containsExactly(tuple("ESS-001", BigDecimal.ZERO), tuple("BAG-01", new BigDecimal("4.00")),
+                        tuple("SEDA-01", new BigDecimal("1.00")));
+        assertThat(result.order().netAmount()).isEqualByComparingTo("75.00");
+        verify(estoqueUseCase).reserveStock(eq("BAG-01"), eq("LOJA-01"), eq(BigDecimal.ONE), eq("ORDER:99"),
+                isNull(), eq(USERNAME));
+    }
+
+    @Test
+    void checkout_refusesWhenKitNoLongerQuotes() {
+        stubAuthenticatedCustomer();
+        Cart cart = Cart.of(1L, CUSTOMER_ID, List.of(
+                new CartItem("BAG-01", BigDecimal.ONE, "b-1", 7L, 10L)), Instant.now());
+        when(cartRepository.findByCustomerId(CUSTOMER_ID)).thenReturn(Optional.of(cart));
+        when(estoqueUseCase.getDefaultWarehouse()).thenReturn(WAREHOUSE);
+        when(kitBuilderUseCase.quote(any(), any())).thenThrow(
+                new InvalidKitSelectionException(
+                        InvalidKitSelectionException.Reason.KIT_REQUIRED_STEP_MISSING,
+                        "Passo obrigatório sem escolha: Seda"));
+
+        assertThatThrownBy(() -> shopService.checkout(USERNAME))
+                .isInstanceOf(InvalidKitSelectionException.class);
+        verify(orderRepository, never()).save(any());
+        verify(cartRepository, never()).clear(any());
     }
 
     @Test

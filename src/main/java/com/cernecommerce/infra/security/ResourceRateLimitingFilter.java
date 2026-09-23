@@ -57,7 +57,11 @@ public class ResourceRateLimitingFilter extends OncePerRequestFilter {
                 && !"/estoque/movements".equals(path)
                 && !"/notifications/stream".equals(path)
                 && !"/shop/catalog".equals(path)
-                && !path.startsWith("/shop/catalog/");
+                && !path.startsWith("/shop/catalog/")
+                // ECM-F008 — o montador de kit é vitrine pública como o catálogo, e as opções de um
+                // passo consultam saldo item a item: mesmo bucket, mesma chave por IP.
+                && !"/shop/kits".equals(path)
+                && !path.startsWith("/shop/kits/");
     }
 
     @Override
