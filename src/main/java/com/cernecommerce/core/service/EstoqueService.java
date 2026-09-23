@@ -902,6 +902,28 @@ public class EstoqueService implements EstoqueUseCase {
     }
 
     @Override
+    @Transactional
+    public Product changeSku(String currentSku, String newSku) {
+        String target = newSku == null ? null : newSku.trim();
+        if (target == null || target.isEmpty()) {
+            throw new IllegalArgumentException("newSku é obrigatório");
+        }
+        if (!productRepository.existsBySku(currentSku)) {
+            throw new ProductNotFoundException(currentSku);
+        }
+        if (!target.equals(currentSku)) {
+            // Pai e variações dividem o espaço de nomes (uk_product_sku e uk_product_variant_sku),
+            // e existsBySku olha os dois — mesma checagem do createProduct.
+            if (productRepository.existsBySku(target)) {
+                throw new DuplicateSkuException(target);
+            }
+            productRepository.renameSku(currentSku, target);
+        }
+        return productRepository.findByAnySku(target)
+                .orElseThrow(() -> new ProductNotFoundException(target));
+    }
+
+    @Override
     @Transactional(readOnly = true)
     public Product findProductBySku(String sku) {
         // Mesma razão de findPricingBySku: a variação não tem categoria própria, herda a do pai.

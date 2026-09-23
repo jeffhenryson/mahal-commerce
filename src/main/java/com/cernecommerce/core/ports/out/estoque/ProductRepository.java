@@ -84,6 +84,21 @@ public interface ProductRepository {
     boolean existsBySku(String sku);
 
     /**
+     * EST-F030 — reescreve {@code currentSku} para {@code newSku} em <b>todas</b> as tabelas que
+     * guardam SKU como texto (catálogo, saldo, lotes, movimentos, reservas, carrinho, comanda,
+     * pedidos, compras, NF-e, receitas de kit), numa única transação. Não há FK para cascatear:
+     * o SKU sempre foi referenciado como texto livre, e é por isso que a troca mora aqui e não
+     * num {@code save}.
+     *
+     * <p>Não valida nada — existência do atual e unicidade do novo são do chamador. Depois de
+     * chamar, entidades já carregadas na sessão estão obsoletas; a implementação limpa o contexto
+     * de persistência.</p>
+     *
+     * @return total de linhas reescritas, somando todas as tabelas
+     */
+    int renameSku(String currentSku, String newSku);
+
+    /**
      * Indica se o SKU está <b>ativo</b> e, portanto, pode receber entrada de estoque (EST-F018).
      * SKU de variação exige que a variação e o produto pai estejam ativos.
      *

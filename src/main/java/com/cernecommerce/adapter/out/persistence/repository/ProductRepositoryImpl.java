@@ -16,6 +16,8 @@ import com.cernecommerce.core.domain.model.estoque.ProductStatus;
 import com.cernecommerce.core.domain.model.estoque.ProductType;
 import com.cernecommerce.core.domain.model.estoque.ProductVariant;
 import com.cernecommerce.core.ports.out.estoque.ProductRepository;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -33,7 +35,36 @@ import java.util.stream.Collectors;
 @Transactional
 public class ProductRepositoryImpl implements ProductRepository {
 
+    /**
+     * EST-F030 — toda coluna que guarda SKU como texto, no formato {@code tabela.coluna}. Nenhuma
+     * tem FK para {@code product}, então esta lista é a única coisa que garante que a troca de
+     * SKU não deixa saldo, lote ou histórico órfão. Coluna nova com SKU entra aqui junto da
+     * migration que a cria — o {@code ProductRepositoryPostgresIT} confere contra o
+     * {@code information_schema} que nenhuma ficou de fora.
+     */
+    static final List<String> SKU_COLUMNS = List.of(
+            "product.sku",
+            "product_variant.sku",
+            "product_kit_component.kit_sku",
+            "product_kit_component.component_sku",
+            "stock_balance.sku",
+            "stock_lot.sku",
+            "stock_movement.sku",
+            "stock_reservation.sku",
+            "stock_reorder_point.sku",
+            "stock_count_item.sku",
+            "open_package.sku",
+            "cart_item.sku",
+            "comanda_item.sku",
+            "order_item.sku",
+            "goods_receipt_item.sku",
+            "replenishment_list_item.sku",
+            "nfe_import_line.matched_sku");
+
     private final ProductJpaRepository productJpaRepository;
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     public ProductRepositoryImpl(ProductJpaRepository productJpaRepository) {
         this.productJpaRepository = productJpaRepository;
@@ -208,6 +239,26 @@ public class ProductRepositoryImpl implements ProductRepository {
     @Transactional(readOnly = true)
     public boolean existsBySku(String sku) {
         return productJpaRepository.existsBySkuOrVariantSku(sku);
+    }
+
+    @Override
+    public int renameSku(String currentSku, String newSku) {
+        // flush antes: alteração pendente numa entidade carregada com o SKU antigo seria gravada
+        // depois do UPDATE e desfaria a troca. clear depois: as entidades da sessão ainda dizem o
+        // SKU antigo, e quem reler na mesma transação precisa ver o banco.
+        entityManager.flush();
+        int total = 0;
+        for (String column : SKU_COLUMNS) {
+            String[] parts = column.split("\\.");
+            // Nomes vêm da constante acima, nunca de entrada — concatenar aqui não é injeção.
+            total += entityManager.createNativeQuery(
+                            "UPDATE " + parts[0] + " SET " + parts[1] + " = :newSku WHERE " + parts[1] + " = :oldSku")
+                    .setParameter("newSku", newSku)
+                    .setParameter("oldSku", currentSku)
+                    .executeUpdate();
+        }
+        entityManager.clear();
+        return total;
     }
 
     @Override

@@ -11,6 +11,7 @@ import com.cernecommerce.adapter.in.converter.WarehouseDTOConverter;
 import com.cernecommerce.adapter.in.dtos.request.ActiveRequest;
 import com.cernecommerce.adapter.in.dtos.request.AddVariantsRequest;
 import com.cernecommerce.adapter.in.dtos.request.AttributeTypeRequest;
+import com.cernecommerce.adapter.in.dtos.request.ChangeSkuRequest;
 import com.cernecommerce.adapter.in.dtos.request.BrandPatchRequest;
 import com.cernecommerce.adapter.in.dtos.request.BrandRequest;
 import com.cernecommerce.adapter.in.dtos.request.CategoryPatchRequest;
@@ -759,6 +760,33 @@ public class EstoqueController {
         publisher.publishEvent(AuditEvent.of(
                 request.getLotTracked() ? EventType.PRODUCT_LOT_TRACKED_ENABLED : EventType.PRODUCT_LOT_TRACKED_DISABLED,
                 authentication.getName(), Map.of("sku", updated.sku())));
+        return ResponseEntity.ok(converter.toResponse(updated));
+    }
+
+    @Operation(summary = "Troca o SKU de um produto ou variação (EST-F030)",
+            description = "Aceita SKU pai ou de variação. A troca é propagada para todo o sistema numa "
+                    + "única transação — saldo, lotes, reservas, carrinhos, comandas, pedidos, compras, "
+                    + "NF-e e receitas de kit —, inclusive o histórico: depois dela o SKU antigo não "
+                    + "existe mais em lugar nenhum além da auditoria (`PRODUCT_SKU_CHANGED`). Mandar o "
+                    + "mesmo SKU atual é no-op.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Trocado — devolve o produto pai", content = @Content(schema = @Schema(implementation = ProductResponseDTO.class))),
+            @ApiResponse(responseCode = "400", description = "Campo 'newSku' ausente ou fora de 3..50 caracteres", content = @Content),
+            @ApiResponse(responseCode = "404", description = "SKU não encontrado", content = @Content),
+            @ApiResponse(responseCode = "409", description = "O SKU novo já pertence a outro produto ou variação", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PatchMapping("/products/{sku}/sku")
+    @PreAuthorize("hasAuthority('ESTOQUE_PRODUCT_MANAGE')")
+    public ResponseEntity<ProductResponseDTO> changeProductSku(
+            @PathVariable @NotBlank @Size(min = 3, max = 50) String sku,
+            @Valid @RequestBody ChangeSkuRequest request, Authentication authentication) {
+        String newSku = request.getNewSku().trim();
+        Product updated = estoqueUseCase.changeSku(sku, newSku);
+        if (!newSku.equals(sku)) {
+            publisher.publishEvent(AuditEvent.of(EventType.PRODUCT_SKU_CHANGED,
+                    authentication.getName(), Map.of("oldSku", sku, "newSku", newSku, "productSku", updated.sku())));
+        }
         return ResponseEntity.ok(converter.toResponse(updated));
     }
 

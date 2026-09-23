@@ -414,6 +414,19 @@ public interface EstoqueUseCase {
             ProductStatus status, Long brandId, TableSessionCommand tableSession);
 
     /**
+     * Troca o SKU de um produto pai ou de uma variação (EST-F030), propagando para todo o sistema
+     * — saldo, lotes, reservas, carrinhos, comandas, pedidos, compras, NF-e e receitas de kit —
+     * inclusive o histórico, para relatório por SKU continuar batendo antes e depois da troca.
+     *
+     * @return o produto pai já com o SKU novo (se a troca foi de variação, é o pai dela)
+     * @throws com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException se
+     *         {@code currentSku} não existe no catálogo
+     * @throws com.cernecommerce.core.domain.exception.estoque.DuplicateSkuException se
+     *         {@code newSku} já é SKU de outro produto ou variação
+     */
+    Product changeSku(String currentSku, String newSku);
+
+    /**
      * Acrescenta uma ou mais variações novas à grade de um produto já existente (EST-F024).
      * Puramente aditivo — nenhuma variação já cadastrada é alterada ou removida.
      *

@@ -486,6 +486,48 @@ class EstoqueServiceTest {
     }
 
     @Test
+    void changeSku_renamesEverywhereAndReturnsReloadedProduct() {
+        Product renamed = Product.of(1L, "NARG-NOVO", "Narguile Aladin", "narguile", true, List.of());
+        when(productRepository.existsBySku("NARG-001")).thenReturn(true);
+        when(productRepository.existsBySku("NARG-NOVO")).thenReturn(false);
+        when(productRepository.findByAnySku("NARG-NOVO")).thenReturn(Optional.of(renamed));
+
+        Product result = estoqueService.changeSku("NARG-001", "  NARG-NOVO ");
+
+        verify(productRepository).renameSku("NARG-001", "NARG-NOVO");
+        assertThat(result.sku()).isEqualTo("NARG-NOVO");
+    }
+
+    @Test
+    void changeSku_throwsDuplicateWhenNewSkuAlreadyExists() {
+        when(productRepository.existsBySku("NARG-001")).thenReturn(true);
+        when(productRepository.existsBySku("NARG-002")).thenReturn(true);
+
+        assertThatThrownBy(() -> estoqueService.changeSku("NARG-001", "NARG-002"))
+                .isInstanceOf(DuplicateSkuException.class);
+        verify(productRepository, never()).renameSku(any(), any());
+    }
+
+    @Test
+    void changeSku_throwsNotFoundWhenCurrentSkuDoesNotExist() {
+        when(productRepository.existsBySku("NAO-EXISTE")).thenReturn(false);
+
+        assertThatThrownBy(() -> estoqueService.changeSku("NAO-EXISTE", "NARG-NOVO"))
+                .isInstanceOf(ProductNotFoundException.class);
+        verify(productRepository, never()).renameSku(any(), any());
+    }
+
+    @Test
+    void changeSku_sameSkuIsNoOp() {
+        Product product = Product.of(1L, "NARG-001", "Narguile Aladin", "narguile", true, List.of());
+        when(productRepository.findByAnySku("NARG-001")).thenReturn(Optional.of(product));
+
+        estoqueService.changeSku("NARG-001", "NARG-001");
+
+        verify(productRepository, never()).renameSku(any(), any());
+    }
+
+    @Test
     void findProductBySku_returnsProductWhenExists() {
         Product product = Product.of(1L, "NARG-001", "Narguile Aladin", "narguile", true, oneVariant());
         when(productRepository.findByAnySku("NARG-001")).thenReturn(Optional.of(product));

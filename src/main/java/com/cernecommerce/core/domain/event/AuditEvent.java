@@ -57,6 +57,9 @@ public record AuditEvent(EventType type, String username, Instant timestamp, Map
         // alcançável para rascunho, e é o único evento do módulo cujo objeto não existe mais
         // depois dele — daí gravar o nome junto do SKU, que é tudo o que restará.
         PRODUCT_DELETED,
+        // EST-F030 — troca de SKU reescreve a identidade do produto em todo o histórico; o evento
+        // guarda antigo e novo, porque depois dele o SKU antigo não aparece em lugar nenhum.
+        PRODUCT_SKU_CHANGED,
         WAREHOUSE_UPDATED, WAREHOUSE_ACTIVATED, WAREHOUSE_DEACTIVATED,
         STOCK_COUNT_OPENED, STOCK_COUNT_CLOSED, STOCK_COUNT_CANCELLED, KIT_RECIPE_CHANGED,
         PRODUCT_LOT_TRACKED_ENABLED, PRODUCT_LOT_TRACKED_DISABLED,

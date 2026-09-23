@@ -344,6 +344,44 @@ public class EstoqueControllerTest {
     }
 
     @Test
+    void changeSku_returns200AndAuditsOldAndNew() throws Exception {
+        when(estoqueUseCase.changeSku("NARG-001", "NARG-900")).thenReturn(product("NARG-900"));
+
+        mockMvc.perform(patch("/estoque/products/NARG-001/sku")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"newSku\":\" NARG-900 \"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sku").value("NARG-900"));
+
+        verify(publisher).publishEvent(org.mockito.ArgumentMatchers.<Object>argThat(e ->
+                e instanceof com.cernecommerce.core.domain.event.AuditEvent a
+                        && a.type() == com.cernecommerce.core.domain.event.AuditEvent.EventType.PRODUCT_SKU_CHANGED));
+    }
+
+    @Test
+    void changeSku_duplicateReturns409() throws Exception {
+        when(estoqueUseCase.changeSku("NARG-001", "NARG-002"))
+                .thenThrow(new com.cernecommerce.core.domain.exception.estoque.DuplicateSkuException("NARG-002"));
+
+        mockMvc.perform(patch("/estoque/products/NARG-001/sku")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"newSku\":\"NARG-002\"}"))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    void changeSku_blankReturns400() throws Exception {
+        mockMvc.perform(patch("/estoque/products/NARG-001/sku")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"newSku\":\"\"}"))
+                .andExpect(status().isBadRequest());
+        verify(estoqueUseCase, never()).changeSku(any(), any());
+    }
+
+    @Test
     void create_without_sku_returns_400() throws Exception {
         mockMvc.perform(post("/estoque/products")
                         .principal(AUTH)
