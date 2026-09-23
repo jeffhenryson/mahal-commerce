@@ -119,6 +119,8 @@ services:
       # HmlStartupValidator rejeita "localhost" em avatar.base-url/product.image.base-url;
       # 127.0.0.1 é o mesmo host, só não bate no filtro. Porta é a do HOST (8080), não a
       # interna do container (8082) — é o que o navegador precisa alcançar.
+      # server.port default virou 8080 (b88667c); o mapeamento abaixo espera 8082.
+      PORT: 8082
       AVATAR_BASE_URL: http://127.0.0.1:8080
       PRODUCT_IMAGE_BASE_URL: http://127.0.0.1:8080
       # InfinitePay real ainda não configurado (handle vem do cliente depois) —
