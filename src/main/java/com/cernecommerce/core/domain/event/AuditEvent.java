@@ -60,6 +60,8 @@ public record AuditEvent(EventType type, String username, Instant timestamp, Map
         // EST-F030 — troca de SKU reescreve a identidade do produto em todo o histórico; o evento
         // guarda antigo e novo, porque depois dele o SKU antigo não aparece em lugar nenhum.
         PRODUCT_SKU_CHANGED,
+        // EST-F031 — cadastro do kit montável.
+        KIT_TEMPLATE_CREATED, KIT_TEMPLATE_UPDATED, KIT_TEMPLATE_DELETED,
         WAREHOUSE_UPDATED, WAREHOUSE_ACTIVATED, WAREHOUSE_DEACTIVATED,
         STOCK_COUNT_OPENED, STOCK_COUNT_CLOSED, STOCK_COUNT_CANCELLED, KIT_RECIPE_CHANGED,
         PRODUCT_LOT_TRACKED_ENABLED, PRODUCT_LOT_TRACKED_DISABLED,

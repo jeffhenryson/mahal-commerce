@@ -76,9 +76,11 @@ import com.cernecommerce.core.ports.in.OrderReportUseCase;
 import com.cernecommerce.core.ports.in.OrderUseCase;
 import com.cernecommerce.core.ports.in.PdvUseCase;
 import com.cernecommerce.core.ports.in.EstoqueUseCase;
+import com.cernecommerce.core.ports.in.KitBuilderUseCase;
 import com.cernecommerce.core.ports.out.estoque.AttributeTypeRepository;
 import com.cernecommerce.core.ports.out.estoque.BrandRepository;
 import com.cernecommerce.core.ports.out.estoque.CategoryRepository;
+import com.cernecommerce.core.ports.out.estoque.KitTemplateRepository;
 import com.cernecommerce.core.ports.out.estoque.KitComponentRepository;
 import com.cernecommerce.core.ports.out.estoque.ProductRepository;
 import com.cernecommerce.core.ports.out.estoque.ReorderPointRepository;
@@ -129,6 +131,7 @@ import com.cernecommerce.core.service.OrderReportService;
 import com.cernecommerce.core.service.OrderService;
 import com.cernecommerce.core.service.PdvService;
 import com.cernecommerce.core.service.EstoqueService;
+import com.cernecommerce.core.service.KitBuilderService;
 import com.cernecommerce.core.service.ComprasService;
 import com.cernecommerce.core.service.NfeImportService;
 import com.cernecommerce.core.service.FinanceiroService;
@@ -355,6 +358,15 @@ class CoreBeanConfig {
     @Bean
     EcommerceUseCase ecommerceUseCase() {
         return new EcommerceService();
+    }
+
+    // EST-F031 — kit montável. Bean próprio, e não mais um método em EstoqueService: a regra do
+    // pacote atravessa carrinho (ShopService) e comanda (ComandaService), e os dois dependem só
+    // desta interface.
+    @Bean
+    KitBuilderUseCase kitBuilderUseCase(KitTemplateRepository kitTemplateRepository,
+            CategoryRepository categoryRepository, EstoqueUseCase estoqueUseCase) {
+        return new KitBuilderService(kitTemplateRepository, categoryRepository, estoqueUseCase);
     }
 
     @Bean

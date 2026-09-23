@@ -69,6 +69,9 @@ import com.cernecommerce.core.domain.exception.estoque.KitComponentNotSimpleExce
 import com.cernecommerce.core.domain.exception.estoque.KitInitialStockNotAllowedException;
 import com.cernecommerce.core.domain.exception.estoque.KitCostNotEditableException;
 import com.cernecommerce.core.domain.exception.estoque.KitDirectAdjustmentException;
+import com.cernecommerce.core.domain.exception.estoque.KitTemplateNotFoundException;
+import com.cernecommerce.core.domain.exception.estoque.DuplicateKitTemplateNameException;
+import com.cernecommerce.core.domain.exception.estoque.InvalidKitSelectionException;
 import com.cernecommerce.core.domain.exception.estoque.KitHasVariantsException;
 import com.cernecommerce.core.domain.exception.estoque.KitSelfReferenceException;
 import com.cernecommerce.core.domain.exception.estoque.LotExpiryDateMismatchException;
@@ -226,6 +229,28 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BarcodeNotFoundException.class)
     public ResponseEntity<ApiError> handleBarcodeNotFound(BarcodeNotFoundException ex, HttpServletRequest req) {
         return error(HttpStatus.NOT_FOUND, ex.getMessage(), "BARCODE_NOT_FOUND", req);
+    }
+
+    // EST-F031 / ECM-F008 / PDV-F019 — kit montável.
+    @ExceptionHandler(KitTemplateNotFoundException.class)
+    public ResponseEntity<ApiError> handleKitTemplateNotFound(
+            KitTemplateNotFoundException ex, HttpServletRequest req) {
+        return error(HttpStatus.NOT_FOUND, ex.getMessage(), "KIT_TEMPLATE_NOT_FOUND", req);
+    }
+
+    @ExceptionHandler(DuplicateKitTemplateNameException.class)
+    public ResponseEntity<ApiError> handleDuplicateKitTemplateName(
+            DuplicateKitTemplateNameException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "DUPLICATE_KIT_TEMPLATE_NAME", req);
+    }
+
+    // 422 e não 400: o corpo é bem-formado, é a escolha que não fecha um kit. O code diz qual
+    // regra falhou, para a tela voltar ao passo certo.
+    @ExceptionHandler(InvalidKitSelectionException.class)
+    public ResponseEntity<ApiError> handleInvalidKitSelection(
+            InvalidKitSelectionException ex, HttpServletRequest req) {
+        return error(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage(), ex.code(), req);
     }
 
     @ExceptionHandler(CategoryNotFoundException.class)
