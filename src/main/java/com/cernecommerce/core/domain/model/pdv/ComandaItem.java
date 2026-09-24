@@ -69,7 +69,7 @@ public record ComandaItem(
         }
         if (linkedItemId != null && !mode.requiresLinkedItem()) {
             throw new IllegalArgumentException(
-                    "linkedItemId só faz sentido em SABOR_EXTRA ou TROCA: mode=" + mode);
+                    "linkedItemId só faz sentido em SABOR_EXTRA, TROCA ou ROSH_EXTRA: mode=" + mode);
         }
         // PDV-F011 — as três invariantes do acréscimo, espelhando os CHECKs da V116. O service
         // recusa cada uma com um código de erro próprio antes de chegar aqui; estas são a rede de
@@ -158,6 +158,23 @@ public record ComandaItem(
         }
         return new ComandaItem(null, sku, quantity, unitPrice, pricing.costPrice(), productName,
                 Instant.now(), mode, courtesy, linkedItemId, notes, surchargeAmount, null, null, null, null, null, null);
+    }
+
+    /**
+     * Linha do cardápio de sessão (PDV-F021) — {@code SESSAO} ou {@code ROSH_EXTRA}, quantidade 1.
+     *
+     * <p>O preço vem da faixa resolvida pelo service (mais o upgrade de vaso), nunca do cliente
+     * HTTP. Sem custo: a sessão não tem produto no catálogo, e a essência é texto na {@code notes}
+     * — inventar um custo aqui daria margem falsa. O {@code notes} leva a essência e o vaso, que é
+     * o que a casa pergunta depois do fechamento.</p>
+     */
+    public static ComandaItem forMenuSession(String sku, BigDecimal unitPrice, String productName,
+            ConsumptionMode mode, boolean courtesy, Long linkedItemId, String notes) {
+        if (mode == null || !mode.isMenuSession()) {
+            throw new IllegalArgumentException("linha do cardápio de sessão exige SESSAO ou ROSH_EXTRA: " + mode);
+        }
+        return new ComandaItem(null, sku, BigDecimal.ONE, unitPrice, null, productName, Instant.now(), mode,
+                courtesy, linkedItemId, notes, null, null, null, null, null, null, null);
     }
 
     /** Reconstitui um item a partir de persistência. */

@@ -111,6 +111,10 @@ public class OrderService implements OrderUseCase {
         // carrega o número do pedido: sem ele, a trilha do movimento não é reconstruível.
         String movementReason = "Reembolso do pedido " + order.orderNumber();
         for (OrderItem item : order.items()) {
+            // PDV-F021 — sessão do cardápio não saiu do estoque (SKU sintético): nada a devolver.
+            if (!item.mode().isCatalogLine()) {
+                continue;
+            }
             RefundItemLot lot = lotBySku.get(item.sku());
             // Sempre a sobrecarga de 8 argumentos (EST-F008): sem entrada em lotBySku, lotCode/
             // expiryDate chegam nulos e o comportamento é idêntico ao overload antigo — válido só

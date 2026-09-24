@@ -49,6 +49,8 @@ public class DevRoleBootstrapConfig {
         "PDV_SESSION_MANAGE", "PDV_SESSION_CLOSE", "PDV_COMANDA_MANAGE", "PDV_COMANDA_COURTESY",
         // PDV-F011 — como a COURTESY, só no admin: acréscimo manual é decisão da casa (V117).
         "PDV_COMANDA_SURCHARGE",
+        // PDV-F021 — cadastro do cardápio de sessão (faixas, utensílios, duplo rosh), V128.
+        "PDV_SESSAO_MANAGE",
         // PDV-F014 — mesma família: abater da conta no fechamento da mesa é alçada, não operação
         // de turno (V119). Separada de PDV_SALE_DISCOUNT, que é a alçada do balcão.
         "PDV_COMANDA_DISCOUNT",

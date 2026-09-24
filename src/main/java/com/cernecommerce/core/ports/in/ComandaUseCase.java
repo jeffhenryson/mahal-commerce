@@ -316,6 +316,30 @@ public interface ComandaUseCase {
     Comanda linkCustomer(Long comandaId, Long customerId, String username);
 
     /**
+     * Lança uma sessão do cardápio da mesa (PDV-F021): cobra o preço da faixa, mais o upgrade se
+     * {@code vasoGrande}, registra a essência (texto) e aloca vaso + utensílios inclusos. Não move
+     * estoque.
+     *
+     * @throws com.cernecommerce.core.domain.exception.pdv.SessionTierNotFoundException faixa
+     *         inexistente ou inativa
+     * @throws com.cernecommerce.core.domain.exception.pdv.SessionAssetUnavailableException sem
+     *         utensílio livre
+     * @throws com.cernecommerce.core.domain.exception.pdv.SessionMenuConflictException vaso não
+     *         configurado
+     */
+    Comanda addSession(Long comandaId, Long tierId, String essencia, boolean vasoGrande, String username);
+
+    /**
+     * Lança o 2º rosh de uma sessão (PDV-F021): nova essência, mesmos utensílios, ligado à sessão
+     * (fecha junto com ela). De graça no primeiro rosh extra da sessão quando a mesa foi aberta em
+     * dia de duplo rosh; pelo preço da faixa ({@code tierId}, ou a da sessão se nulo) nos demais.
+     *
+     * @throws com.cernecommerce.core.domain.exception.pdv.NotASessionLineException se
+     *         {@code sessionItemId} não for uma sessão em aberto desta comanda
+     */
+    Comanda addRoshExtra(Long comandaId, Long sessionItemId, Long tierId, String essencia, String username);
+
+    /**
      * Junta duas mesas que viraram uma conta só (PDV-F016): as linhas em aberto de
      * {@code fromComandaId} passam para {@code toComandaId}, e a origem é encerrada.
      *

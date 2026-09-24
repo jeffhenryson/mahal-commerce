@@ -98,8 +98,13 @@ public class CashbackService implements CashbackUseCase {
     @Transactional(readOnly = true)
     public CashbackRate resolveApplicableRate(String sku) {
         Product product = estoqueUseCase.findProductBySku(sku);
-        return cashbackRateRepository.findApplicable(sku, product.category(), Instant.now())
-                .orElse(null);
+        return resolveApplicableRate(sku, product.category());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public CashbackRate resolveApplicableRate(String sku, String category) {
+        return cashbackRateRepository.findApplicable(sku, category, Instant.now()).orElse(null);
     }
 
     @Override

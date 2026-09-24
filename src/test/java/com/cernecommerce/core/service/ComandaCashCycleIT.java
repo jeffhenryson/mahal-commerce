@@ -25,6 +25,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -45,6 +46,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @SpringBootTest
 @ActiveProfiles("dev")
 @Transactional
+// PDV-F021 — a sessão por produto (OPEN_ROSH, SABOR_EXTRA, TROCA, lata) foi substituída pelo cardápio
+// e vem desligada por padrão. Estes cenários continuam valendo para o caminho legado, que segue
+// religável por propriedade; o fluxo novo está em SessionMenuFlowIT.
+@TestPropertySource(properties = "pdv.sessao.legacy-enabled=true")
 class ComandaCashCycleIT {
 
     @Autowired PdvUseCase pdvUseCase;

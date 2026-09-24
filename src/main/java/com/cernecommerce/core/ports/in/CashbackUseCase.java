@@ -52,6 +52,14 @@ public interface CashbackUseCase {
     CashbackRate resolveApplicableRate(String sku);
 
     /**
+     * Mesma cadeia SKU → CATEGORY → GLOBAL, com a categoria informada e sem ir ao catálogo — para
+     * linha que não tem produto, como a sessão do cardápio da mesa (PDV-F021).
+     *
+     * @return {@code null} se nenhuma taxa se aplica
+     */
+    CashbackRate resolveApplicableRate(String sku, String category);
+
+    /**
      * Produtos cuja taxa vigente consome mais de {@code maxSharePercent} da margem do item
      * ({@code Pricing.marginPercent()}) — o diagnóstico que evita descobrir um carvão a 8%
      * comendo 44% do lucro só no fechamento do mês.

@@ -8,6 +8,7 @@ import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.pagamento.OrderPayment;
 import com.cernecommerce.core.domain.model.pagamento.PaymentMethod;
 import com.cernecommerce.core.domain.model.pagamento.PaymentStatus;
+import com.cernecommerce.core.domain.model.pedido.ConsumptionMode;
 import com.cernecommerce.core.domain.model.pedido.Order;
 import com.cernecommerce.core.domain.model.pedido.OrderItem;
 import com.cernecommerce.core.domain.model.pedido.OrderStatus;
@@ -231,6 +232,25 @@ class OrderServiceTest {
         assertThat(refunded.cancelReason()).isEqualTo("cliente desistiu");
         assertThat(refunded.refundedAt()).isNotNull();
         // ENTRADA, não SAIDA: devolução devolve mercadoria à prateleira.
+        verify(estoqueUseCase).adjustStock(eq("CARV-001"), eq("LOJA-01"), eq(MovementType.ENTRADA),
+                eq(new BigDecimal("2.000")), any(), eq("gerente"), isNull(), isNull());
+    }
+
+    /** PDV-F021 — a sessão do cardápio nunca saiu do estoque (SKU sintético): o estorno só devolve o resto. */
+    @Test
+    void refundOrder_skipsMenuSessionLines() {
+        List<OrderItem> items = List.of(
+                OrderItem.of(null, "SESS-2", BigDecimal.ONE, new BigDecimal("30.00"), null, BigDecimal.ZERO, null,
+                        "Sessão Premium", ConsumptionMode.SESSAO, false, "Zomo Blueberry", null),
+                twoCharcoals().get(0));
+        Order order = Order.openBalcao(1L, "LOJA-01", null, items).concluded("000001000", null, NOW);
+        when(orderRepository.findById(1L)).thenReturn(Optional.of(order));
+        when(orderRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(orderPaymentRepository.findByOrderId(1L)).thenReturn(List.of());
+
+        orderService.refundOrder(1L, "erro de lançamento", "gerente");
+
+        verify(estoqueUseCase, never()).adjustStock(eq("SESS-2"), any(), any(), any(), any(), any(), any(), any());
         verify(estoqueUseCase).adjustStock(eq("CARV-001"), eq("LOJA-01"), eq(MovementType.ENTRADA),
                 eq(new BigDecimal("2.000")), any(), eq("gerente"), isNull(), isNull());
     }

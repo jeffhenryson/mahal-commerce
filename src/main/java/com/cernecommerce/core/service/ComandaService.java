@@ -1,5 +1,10 @@
 package com.cernecommerce.core.service;
 
+import com.cernecommerce.core.domain.exception.pdv.LegacySessionDisabledException;
+import com.cernecommerce.core.domain.exception.pdv.NotASessionLineException;
+import com.cernecommerce.core.domain.model.pdv.SessionAssetType;
+import com.cernecommerce.core.domain.model.pdv.SessionSettings;
+import com.cernecommerce.core.domain.model.pdv.SessionTier;
 import com.cernecommerce.core.domain.exception.pdv.ComandaEmptyException;
 import com.cernecommerce.core.domain.exception.pdv.ComandaItemNotFoundException;
 import com.cernecommerce.core.domain.exception.pdv.ComandaNotFoundException;
@@ -56,6 +61,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -137,6 +143,19 @@ public class ComandaService implements ComandaUseCase {
     /** PDV-F019 — validação e cotação do kit montável. Nulo só nos testes que não o exercitam. */
     private final KitBuilderUseCase kitBuilderUseCase;
 
+    /** PDV-F021 — cardápio de sessão. Nulo só nos testes que não o exercitam. */
+    private final SessionMenuService sessionMenu;
+
+    /**
+     * PDV-F021 — a sessão baseada em produto (PDV-F010) foi substituída pelo cardápio. Em produção
+     * vem de {@code pdv.sessao.legacy-enabled} (padrão {@code false}); os construtores antigos a
+     * mantêm ligada para os testes da sessão por produto continuarem exercitando aquele caminho.
+     */
+    private final boolean legacySessionEnabled;
+
+    /** Categoria usada para resolver a taxa de cashback da linha de sessão, que não tem produto. */
+    static final String SESSION_CASHBACK_CATEGORY = "Sessão";
+
     public ComandaService(ComandaRepository comandaRepository, EstoqueUseCase estoqueUseCase,
             OrderRepository orderRepository, OrderPaymentRepository orderPaymentRepository,
             CashbackUseCase cashbackUseCase, PdvService pdvService,
@@ -151,7 +170,19 @@ public class ComandaService implements ComandaUseCase {
             CashbackUseCase cashbackUseCase, PdvService pdvService,
             NotificationUseCase notificationUseCase, UserRepository userRepository,
             BigDecimal serviceFeePercent, KitBuilderUseCase kitBuilderUseCase) {
+        this(comandaRepository, estoqueUseCase, orderRepository, orderPaymentRepository, cashbackUseCase,
+                pdvService, notificationUseCase, userRepository, serviceFeePercent, kitBuilderUseCase, null, true);
+    }
+
+    public ComandaService(ComandaRepository comandaRepository, EstoqueUseCase estoqueUseCase,
+            OrderRepository orderRepository, OrderPaymentRepository orderPaymentRepository,
+            CashbackUseCase cashbackUseCase, PdvService pdvService,
+            NotificationUseCase notificationUseCase, UserRepository userRepository,
+            BigDecimal serviceFeePercent, KitBuilderUseCase kitBuilderUseCase,
+            SessionMenuService sessionMenu, boolean legacySessionEnabled) {
         this.kitBuilderUseCase = kitBuilderUseCase;
+        this.sessionMenu = sessionMenu;
+        this.legacySessionEnabled = legacySessionEnabled;
         this.comandaRepository = comandaRepository;
         this.estoqueUseCase = estoqueUseCase;
         this.orderRepository = orderRepository;
@@ -194,7 +225,18 @@ public class ComandaService implements ComandaUseCase {
         // TROCA é cortesia por definição: não depende do cliente HTTP ter marcado o campo.
         boolean resolvedCourtesy = courtesy || resolvedMode.impliesCourtesy();
 
+        // PDV-F021 — a linha do cardápio não tem produto: entra só por addSession/addRoshExtra.
+        if (resolvedMode.isMenuSession()) {
+            throw new IllegalArgumentException(
+                    "sessão do cardápio é lançada por POST /pdv/comandas/{id}/sessoes, não por /items");
+        }
+
         EstoqueUseCase.CatalogSaleInfo saleInfo = estoqueUseCase.resolveSaleInfo(sku);
+        // PDV-F021 — sessão por produto substituída pelo cardápio: nem os modos da sessão antiga
+        // nem um produto de sessão entram mais por aqui (a não ser com o legado religado).
+        if (!legacySessionEnabled && (resolvedMode.isSessionMode() || saleInfo.sessionProduct())) {
+            throw new LegacySessionDisabledException(sku);
+        }
         // Todas as validações ANTES de qualquer escrita de estoque — mesma ordem de
         // PdvService.registerSale, e a razão é a mesma: aqui cada lançamento é seu próprio commit,
         // então um débito seguido de recusa deixaria saldo baixado sem linha na comanda.
@@ -390,6 +432,115 @@ public class ComandaService implements ComandaUseCase {
         return linkedItemId;
     }
 
+    /**
+     * PDV-F021 — lança uma sessão do cardápio: preço da faixa (+ upgrade de vaso grande), essência
+     * em texto, utensílios alocados. Não toca estoque. Ver {@link ComandaUseCase#addSession}.
+     */
+    @Override
+    @Transactional
+    public Comanda addSession(Long comandaId, Long tierId, String essencia, boolean vasoGrande, String username) {
+        Comanda comanda = getComandaForUpdate(comandaId);
+        pdvService.requireOpenSession(comanda.sessionId());
+        requireOpen(comanda);
+        SessionMenuService menu = requireSessionMenu();
+
+        SessionTier tier = menu.requireActiveTier(tierId);
+        SessionSettings settings = menu.settings();
+        String notes = sessionNotes(essencia, vasoGrande);
+        // Trava e confere os utensílios ANTES de gravar a linha: sem vaso livre não há sessão.
+        List<SessionAssetType> assets = menu.reserveAssetsForSession(settings, vasoGrande);
+
+        BigDecimal price = vasoGrande ? tier.preco().add(settings.upgradeVasoGrandePreco()) : tier.preco();
+        String productName = "Sessão " + tier.nome() + (vasoGrande ? " + vaso grande" : "");
+        ComandaItem item = ComandaItem.forMenuSession(tier.sku(), price, productName, ConsumptionMode.SESSAO,
+                false, null, notes);
+
+        Comanda saved = comandaRepository.save(comanda.withAddedItem(item));
+        menu.allocate(newItemId(comanda, saved), assets);
+        return saved;
+    }
+
+    /**
+     * PDV-F021 — 2º rosh de uma sessão: nova essência, mesmos utensílios. De graça (cortesia) no
+     * primeiro rosh extra de uma sessão em dia de duplo rosh; pelo preço da faixa nos demais casos.
+     * Ver {@link ComandaUseCase#addRoshExtra}.
+     */
+    @Override
+    @Transactional
+    public Comanda addRoshExtra(Long comandaId, Long sessionItemId, Long tierId, String essencia, String username) {
+        Comanda comanda = getComandaForUpdate(comandaId);
+        pdvService.requireOpenSession(comanda.sessionId());
+        requireOpen(comanda);
+        SessionMenuService menu = requireSessionMenu();
+
+        ComandaItem sessao = comanda.openItems().stream()
+                .filter(i -> i.id() != null && i.id().equals(sessionItemId) && i.mode() == ConsumptionMode.SESSAO)
+                .findFirst()
+                .orElseThrow(() -> new NotASessionLineException(sessionItemId, comandaId));
+        SessionTier tier = menu.requireActiveTier(tierId != null ? tierId : tierIdOf(sessao));
+        String notes = sessionNotes(essencia, false);
+
+        boolean promoJaUsada = comanda.items().stream()
+                .anyMatch(i -> sessionItemId.equals(i.linkedItemId()) && i.mode() == ConsumptionMode.ROSH_EXTRA
+                        && i.courtesy());
+        boolean promo = !promoJaUsada && menu.isDuploRoshDay(menu.settings(), comanda.openedAt());
+
+        ComandaItem item = ComandaItem.forMenuSession(tier.sku(), promo ? BigDecimal.ZERO : tier.preco(),
+                "2º rosh " + tier.nome() + (promo ? " (duplo rosh)" : ""), ConsumptionMode.ROSH_EXTRA, promo,
+                sessionItemId, notes);
+        return comandaRepository.save(comanda.withAddedItem(item));
+    }
+
+    private SessionMenuService requireSessionMenu() {
+        if (sessionMenu == null) {
+            throw new IllegalStateException("cardápio de sessão não configurado neste ComandaService");
+        }
+        return sessionMenu;
+    }
+
+    /** Essência obrigatória (é o que a casa quer saber depois) e o vaso, na nota da linha. */
+    private String sessionNotes(String essencia, boolean vasoGrande) {
+        if (essencia == null || essencia.isBlank()) {
+            throw new IllegalArgumentException("essência é obrigatória na sessão");
+        }
+        String notes = essencia.trim() + (vasoGrande ? " · Vaso grande" : "");
+        validateNotes(notes);
+        return notes;
+    }
+
+    /** A faixa de uma linha de sessão vem do SKU sintético {@code SESS-{id}}. */
+    private static Long tierIdOf(ComandaItem sessao) {
+        try {
+            return Long.valueOf(sessao.sku().substring(SessionTier.SKU_PREFIX.length()));
+        } catch (RuntimeException e) {
+            throw new IllegalStateException("linha de sessão com SKU fora do padrão: " + sessao.sku(), e);
+        }
+    }
+
+    /** Id da linha que o save acabou de gerar — a que não existia antes. */
+    private static Long newItemId(Comanda before, Comanda after) {
+        Set<Long> antes = before.items().stream().map(ComandaItem::id).filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        return after.items().stream().map(ComandaItem::id)
+                .filter(id -> id != null && !antes.contains(id))
+                .max(Long::compareTo)
+                .orElseThrow(() -> new IllegalStateException("linha de sessão gravada sem id"));
+    }
+
+    /** PDV-F021 — devolve à casa os utensílios das linhas de sessão informadas. */
+    private void releaseSessionAssets(List<ComandaItem> items) {
+        if (sessionMenu == null) {
+            return;
+        }
+        List<Long> ids = items.stream()
+                .filter(i -> i.mode() == ConsumptionMode.SESSAO && i.id() != null)
+                .map(ComandaItem::id)
+                .toList();
+        if (!ids.isEmpty()) {
+            sessionMenu.release(ids);
+        }
+    }
+
     @Override
     @Transactional
     public Comanda removeItem(Long comandaId, Long itemId, String username) {
@@ -430,6 +581,8 @@ public class ComandaService implements ComandaUseCase {
         for (ComandaItem removida : removidas) {
             undoStock(removida, comanda.warehouseCode(), "Remoção de item da comanda #" + comandaId, username);
         }
+        // PDV-F021 — sessão removida devolve os utensílios à casa.
+        releaseSessionAssets(removidas);
         // Sem checagem de "última linha": comanda vazia é estado legítimo — é como ela nasce, e o
         // COMANDA_EMPTY do fechamento já barra fechá-la assim.
         return comandaRepository.save(semItem);
@@ -529,7 +682,11 @@ public class ComandaService implements ComandaUseCase {
             // recordEarnedForOrder lá embaixo é chamado, mas não acha item nenhum com valor a
             // lançar. Cortesia não precisa de exceção: o ganho é sobre o líquido, e o líquido dela
             // é zero por construção.
-            CashbackRate rate = cashbackUseCase.resolveApplicableRate(item.sku());
+            // PDV-F021 — sessão do cardápio não tem produto: a taxa sai da categoria "Sessão" (ou da
+            // global), sem ir ao catálogo, que não conhece o SKU sintético.
+            CashbackRate rate = item.mode().isCatalogLine()
+                    ? cashbackUseCase.resolveApplicableRate(item.sku())
+                    : cashbackUseCase.resolveApplicableRate(item.sku(), SESSION_CASHBACK_CATEGORY);
             // PDV-F011: notes e surchargeAmount atravessam junto com mode/courtesy. A nota porque
             // "qual pinça saiu com aquela mesa" é pergunta feita DEPOIS do fechamento; o acréscimo
             // porque não dá para reconstruí-lo do unitPrice, que já é a soma.
@@ -582,6 +739,9 @@ public class ComandaService implements ComandaUseCase {
         // status novo nem de migration no cabeçalho.
         Comanda cobrada = comanda.withItemsClosedIn(saved.id(),
                 escopo.stream().map(ComandaItem::id).toList());
+        // PDV-F021 — conta paga, utensílios de volta à casa (só das sessões deste fechamento: numa
+        // conta dividida a outra parte da mesa segue usando os dela).
+        releaseSessionAssets(escopo);
         comandaRepository.save(cobrada.isFullyCharged()
                 ? cobrada.closed(saved.id(), Instant.now())
                 : cobrada);
@@ -641,6 +801,7 @@ public class ComandaService implements ComandaUseCase {
         for (ComandaItem item : comanda.items()) {
             undoStock(item, comanda.warehouseCode(), "Cancelamento de comanda #" + comandaId, username);
         }
+        releaseSessionAssets(comanda.items());
         return comandaRepository.save(comanda.cancelled(Instant.now()));
     }
 
@@ -658,6 +819,10 @@ public class ComandaService implements ComandaUseCase {
      * desfazimento tem que espelhar o que de fato aconteceu, não o cadastro de hoje.</p>
      */
     private void undoStock(ComandaItem item, String warehouseCode, String reason, String username) {
+        // PDV-F021 — linha do cardápio de sessão nunca baixou estoque; não há o que devolver.
+        if (!item.mode().isCatalogLine()) {
+            return;
+        }
         if (item.consumedPackage()) {
             estoqueUseCase.releaseSession(item.sku(), warehouseCode, item.quantity());
         } else {

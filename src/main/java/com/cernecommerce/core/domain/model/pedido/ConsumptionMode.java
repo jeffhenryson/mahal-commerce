@@ -37,16 +37,45 @@ public enum ConsumptionMode {
      * Troca de sabor durante um {@link #OPEN_ROSH} já aberto. Sempre cortesia: o cliente não paga
      * de novo, mas a essência sai do estoque e o custo entra na margem.
      */
-    TROCA;
+    TROCA,
+
+    /**
+     * Sessão do cardápio da mesa (PDV-F021): cobrada pelo preço da faixa (+ upgrade de vaso), com
+     * SKU sintético {@code SESS-{faixa}}. Não é produto do catálogo e <b>não move estoque</b> — o
+     * que ela prende são utensílios, alocados à parte.
+     */
+    SESSAO,
+
+    /**
+     * 2º rosh de uma {@link #SESSAO} (PDV-F021): nova essência, mesmos utensílios. De graça nos
+     * dias de duplo rosh, pelo preço da faixa nos demais. Sempre ligado à sessão.
+     */
+    ROSH_EXTRA;
 
     /** Modos que só fazem sentido ligados a outra linha da mesma comanda. */
     public boolean requiresLinkedItem() {
-        return this == SABOR_EXTRA || this == TROCA;
+        return this == SABOR_EXTRA || this == TROCA || this == ROSH_EXTRA;
     }
 
-    /** Modos que exigem um produto marcado como {@code sessionProduct}. */
+    /**
+     * Modos da sessão baseada em produto (PDV-F010), que exigem um produto marcado como
+     * {@code sessionProduct}. Os modos do cardápio (PDV-F021) não entram: não têm produto.
+     */
     public boolean isSessionMode() {
-        return this != NORMAL;
+        return this == OPEN_ROSH || this == SABOR_EXTRA || this == TROCA;
+    }
+
+    /** Linhas do cardápio de sessão (PDV-F021) — lançadas por {@code /sessoes}, nunca por {@code /items}. */
+    public boolean isMenuSession() {
+        return this == SESSAO || this == ROSH_EXTRA;
+    }
+
+    /**
+     * A linha tem produto no catálogo e moveu estoque. Falso para o cardápio de sessão: o SKU é
+     * sintético, então nem cashback por SKU, nem devolução de estoque no estorno se aplicam.
+     */
+    public boolean isCatalogLine() {
+        return !isMenuSession();
     }
 
     /**

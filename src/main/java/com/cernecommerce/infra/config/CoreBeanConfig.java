@@ -127,6 +127,8 @@ import com.cernecommerce.core.ports.out.crm.CustomerTagRepository;
 import com.cernecommerce.core.ports.out.crm.StageTransitionRepository;
 import com.cernecommerce.core.ports.out.crm.TagRepository;
 import com.cernecommerce.core.service.ComandaService;
+import com.cernecommerce.core.service.SessionMenuService;
+import com.cernecommerce.core.ports.out.pdv.SessionMenuRepository;
 import com.cernecommerce.core.service.OrderReportService;
 import com.cernecommerce.core.service.OrderService;
 import com.cernecommerce.core.service.PdvService;
@@ -144,6 +146,7 @@ import com.cernecommerce.core.service.CrmService;
 import com.cernecommerce.core.service.CashbackService;
 
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.nio.file.Path;
 import java.time.Duration;
 
@@ -293,10 +296,20 @@ class CoreBeanConfig {
             // salão, não uma lei; zero desliga a cobrança sem mexer em código. Migra para
             // system_config junto com o teto de desconto, quando o painel existir.
             @Value("${pdv.comanda.service-fee-percent:10}") BigDecimal serviceFeePercent,
-            KitBuilderUseCase kitBuilderUseCase) {
+            KitBuilderUseCase kitBuilderUseCase,
+            // PDV-F021 — cardápio de sessão; a sessão por produto fica desligada por padrão e pode
+            // ser religada por propriedade durante a transição, sem deploy de código.
+            SessionMenuService sessionMenuService,
+            @Value("${pdv.sessao.legacy-enabled:false}") boolean legacySessionEnabled) {
         return new ComandaService(comandaRepository, estoqueUseCase, orderRepository,
                 orderPaymentRepository, cashbackUseCase, pdvService, notificationUseCase,
-                userRepository, serviceFeePercent, kitBuilderUseCase);
+                userRepository, serviceFeePercent, kitBuilderUseCase, sessionMenuService, legacySessionEnabled);
+    }
+
+    /** PDV-F021 — bean concreto: o ComandaService usa as regras de lançamento, como faz com o PdvService. */
+    @Bean
+    SessionMenuService sessionMenuService(SessionMenuRepository sessionMenuRepository) {
+        return new SessionMenuService(sessionMenuRepository, Clock.systemUTC());
     }
 
     @Bean

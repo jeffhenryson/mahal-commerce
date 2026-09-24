@@ -121,6 +121,12 @@ import com.cernecommerce.core.domain.exception.pdv.CourtesyNotAllowedException;
 import com.cernecommerce.core.domain.exception.pdv.LinkedItemRequiredException;
 import com.cernecommerce.core.domain.exception.pdv.NotASessionProductException;
 import com.cernecommerce.core.domain.exception.pdv.NotAnOpenRoshException;
+import com.cernecommerce.core.domain.exception.pdv.SessionTierNotFoundException;
+import com.cernecommerce.core.domain.exception.pdv.SessionAssetTypeNotFoundException;
+import com.cernecommerce.core.domain.exception.pdv.SessionAssetUnavailableException;
+import com.cernecommerce.core.domain.exception.pdv.SessionMenuConflictException;
+import com.cernecommerce.core.domain.exception.pdv.NotASessionLineException;
+import com.cernecommerce.core.domain.exception.pdv.LegacySessionDisabledException;
 import com.cernecommerce.core.domain.exception.pdv.NotAvailableForTableException;
 import com.cernecommerce.core.domain.exception.pdv.NotesTooLongException;
 import com.cernecommerce.core.domain.exception.pdv.OpenRoshNotPricedException;
@@ -1023,6 +1029,41 @@ public class GlobalExceptionHandler {
      * PDV-F010 — troca apontando para linha que não é open rosh. 409 e não 400: o id existe e é
      * válido; o que impede é o estado daquela linha.
      */
+    // ── PDV-F021 — cardápio de sessão ───────────────────────────────────────────────────────
+
+    @ExceptionHandler(SessionTierNotFoundException.class)
+    public ResponseEntity<ApiError> handleSessionTierNotFound(SessionTierNotFoundException ex, HttpServletRequest req) {
+        return error(HttpStatus.NOT_FOUND, ex.getMessage(), "SESSION_TIER_NOT_FOUND", req);
+    }
+
+    @ExceptionHandler(SessionAssetTypeNotFoundException.class)
+    public ResponseEntity<ApiError> handleSessionAssetTypeNotFound(SessionAssetTypeNotFoundException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.NOT_FOUND, ex.getMessage(), "SESSION_ASSET_TYPE_NOT_FOUND", req);
+    }
+
+    @ExceptionHandler(SessionAssetUnavailableException.class)
+    public ResponseEntity<ApiError> handleSessionAssetUnavailable(SessionAssetUnavailableException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "SESSION_ASSET_UNAVAILABLE", req);
+    }
+
+    @ExceptionHandler(SessionMenuConflictException.class)
+    public ResponseEntity<ApiError> handleSessionMenuConflict(SessionMenuConflictException ex, HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "SESSION_MENU_CONFLICT", req);
+    }
+
+    @ExceptionHandler(NotASessionLineException.class)
+    public ResponseEntity<ApiError> handleNotASessionLine(NotASessionLineException ex, HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "NOT_A_SESSION_LINE", req);
+    }
+
+    @ExceptionHandler(LegacySessionDisabledException.class)
+    public ResponseEntity<ApiError> handleLegacySessionDisabled(LegacySessionDisabledException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "LEGACY_SESSION_DISABLED", req);
+    }
+
     @ExceptionHandler(NotAnOpenRoshException.class)
     public ResponseEntity<ApiError> handleNotAnOpenRosh(NotAnOpenRoshException ex, HttpServletRequest req) {
         return error(HttpStatus.CONFLICT, ex.getMessage(), "NOT_AN_OPEN_ROSH", req);
