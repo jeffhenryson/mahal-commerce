@@ -1,6 +1,7 @@
 package com.cernecommerce.adapter.in.dtos.request;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
@@ -23,4 +24,10 @@ public class OpenComandaRequest {
             + "venda anônima, como o balcão sem CPF na nota.",
             example = "42")
     private Long customerId;
+
+    @Valid
+    @Schema(description = "PDV-F020 — cadastro rápido do cliente na abertura da mesa (nome + telefone, "
+            + "CPF opcional). Faz find-or-create no CRM: reaproveita quem já existe pelo CPF ou "
+            + "telefone. Ignorado se customerId vier preenchido. Exige CRM_LEAD_CREATE.")
+    private CustomerRequest lead;
 }

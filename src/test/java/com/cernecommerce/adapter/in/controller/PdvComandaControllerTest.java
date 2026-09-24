@@ -1,5 +1,9 @@
 package com.cernecommerce.adapter.in.controller;
 
+import com.cernecommerce.core.domain.exception.crm.CustomerNotFoundException;
+import com.cernecommerce.core.domain.model.crm.Customer;
+import com.cernecommerce.core.domain.model.crm.CustomerStage;
+import com.cernecommerce.core.domain.model.crm.LeadResolution;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -538,6 +542,7 @@ class PdvComandaControllerTest {
         Comanda comCliente = Comanda.of(10L, 1L, "LOJA-01", "Mesa 4", 42L, ComandaStatus.ABERTA,
                 List.of(), null, "caixa1", Instant.now(), null);
         when(comandaUseCase.openComanda(eq(1L), eq("Mesa 4"), eq(42L), anyString())).thenReturn(comCliente);
+        when(crmUseCase.findCustomerById(42L)).thenReturn(cliente(42L));
         when(crmUseCase.findCustomerNames(anyCollection())).thenReturn(Map.of(42L, "Ana"));
 
         mockMvc.perform(post("/pdv/comandas?sessionId=1")
@@ -547,6 +552,87 @@ class PdvComandaControllerTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.customerId").value(42))
                 .andExpect(jsonPath("$.customerName").value("Ana"));
+    }
+
+    // ── PDV-F020 — cliente da mesa: validação, lead na abertura e vínculo posterior ──────────
+
+    private static final UsernamePasswordAuthenticationToken AUTH_LEAD =
+            new UsernamePasswordAuthenticationToken("atendente", null,
+                    List.of(new SimpleGrantedAuthority("CRM_LEAD_CREATE")));
+
+    private static Customer cliente(Long id) {
+        return Customer.of(id, "Ana", "83999990000", null, null, "Mesa", Instant.now(), CustomerStage.NOVO_LEAD);
+    }
+
+    @Test
+    void openComanda_withUnknownCustomer_returns_404_andDoesNotOpen() throws Exception {
+        when(crmUseCase.findCustomerById(99L)).thenThrow(new CustomerNotFoundException(99L));
+
+        mockMvc.perform(post("/pdv/comandas?sessionId=1")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tableOrCustomerLabel\":\"Mesa 4\",\"customerId\":99}"))
+                .andExpect(status().isNotFound());
+
+        verify(comandaUseCase, never()).openComanda(any(), any(), any(), any());
+    }
+
+    @Test
+    void openComanda_withLead_resolvesCustomerInCrmAndLinksIt() throws Exception {
+        when(crmUseCase.resolveLead(eq("Ana"), eq("(83) 99999-0000"), any(), eq("123.456.789-00"), eq("Mesa")))
+                .thenReturn(new LeadResolution(cliente(42L), true));
+        when(comandaUseCase.openComanda(eq(1L), eq("Mesa 4"), eq(42L), anyString()))
+                .thenReturn(Comanda.of(10L, 1L, "LOJA-01", "Mesa 4", 42L, ComandaStatus.ABERTA,
+                        List.of(), null, "atendente", Instant.now(), null));
+
+        mockMvc.perform(post("/pdv/comandas?sessionId=1")
+                        .principal(AUTH_LEAD)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tableOrCustomerLabel\":\"Mesa 4\",\"lead\":{\"nome\":\"Ana\","
+                                + "\"contato\":\"(83) 99999-0000\",\"cpf\":\"123.456.789-00\"}}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.customerId").value(42));
+    }
+
+    @Test
+    void openComanda_withLeadButWithoutLeadAuthority_returns_403() throws Exception {
+        mockMvc.perform(post("/pdv/comandas?sessionId=1")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tableOrCustomerLabel\":\"Mesa 4\",\"lead\":{\"nome\":\"Ana\","
+                                + "\"contato\":\"83999990000\"}}"))
+                .andExpect(status().isForbidden());
+
+        verify(crmUseCase, never()).resolveLead(any(), any(), any(), any(), any());
+        verify(comandaUseCase, never()).openComanda(any(), any(), any(), any());
+    }
+
+    @Test
+    void linkCustomer_withLead_linksResolvedCustomer() throws Exception {
+        when(crmUseCase.resolveLead(eq("Ana"), eq("83999990000"), any(), any(), eq("Mesa")))
+                .thenReturn(new LeadResolution(cliente(42L), false));
+        when(comandaUseCase.linkCustomer(eq(10L), eq(42L), anyString()))
+                .thenReturn(Comanda.of(10L, 1L, "LOJA-01", "Mesa 4", 42L, ComandaStatus.ABERTA,
+                        List.of(), null, "caixa1", Instant.now(), null));
+
+        mockMvc.perform(patch("/pdv/comandas/10/customer")
+                        .principal(AUTH_LEAD)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"lead\":{\"nome\":\"Ana\",\"contato\":\"83999990000\"}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.customerId").value(42));
+    }
+
+    @Test
+    void linkCustomer_withEmptyBody_unlinks() throws Exception {
+        when(comandaUseCase.linkCustomer(eq(10L), isNull(), anyString())).thenReturn(abertaComanda());
+
+        mockMvc.perform(patch("/pdv/comandas/10/customer")
+                        .principal(AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.customerId").doesNotExist());
     }
 
     // ── PDV-F011 — acréscimo e registro do setup ─────────────────────────────────────────────

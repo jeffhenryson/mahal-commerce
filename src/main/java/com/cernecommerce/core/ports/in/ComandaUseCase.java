@@ -305,6 +305,17 @@ public interface ComandaUseCase {
     Comanda renameComanda(Long comandaId, String newLabel, String username);
 
     /**
+     * Vincula, troca ou remove ({@code customerId = null}) o cliente do CRM da mesa aberta
+     * (PDV-F020). A existência do cliente é checada por quem chama — o controller resolve o
+     * cliente no CRM (id existente ou find-or-create do lead) antes de chegar aqui. Vale para as
+     * linhas ainda não cobradas: o que já foi pago numa conta dividida mantém o cliente da época.
+     *
+     * @throws com.cernecommerce.core.domain.exception.pdv.ComandaNotOpenException se a comanda não
+     *         estiver aberta
+     */
+    Comanda linkCustomer(Long comandaId, Long customerId, String username);
+
+    /**
      * Junta duas mesas que viraram uma conta só (PDV-F016): as linhas em aberto de
      * {@code fromComandaId} passam para {@code toComandaId}, e a origem é encerrada.
      *

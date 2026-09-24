@@ -1425,6 +1425,31 @@ class ComandaServiceTest {
         verifyNoInteractions(estoqueUseCase);
     }
 
+    @Test
+    void linkCustomer_setsAndClearsTheCustomerWithoutTouchingStock() {
+        Comanda comanda = abertaComanda(essenciaItem());
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(comanda));
+        when(comandaRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Comanda vinculada = comandaService.linkCustomer(10L, 42L, "caixa1");
+
+        assertThat(vinculada.customerId()).isEqualTo(42L);
+        assertThat(vinculada.items()).hasSize(1);
+        assertThat(vinculada.withCustomer(null).customerId()).isNull();
+        verifyNoInteractions(estoqueUseCase);
+    }
+
+    @Test
+    void linkCustomer_onClosedComanda_isRejected() {
+        Comanda fechada = Comanda.of(10L, 1L, "LOJA-01", "Mesa 4", null, ComandaStatus.CANCELADA,
+                List.of(), null, "caixa1", Instant.now(), Instant.now());
+        when(comandaRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(fechada));
+
+        assertThatThrownBy(() -> comandaService.linkCustomer(10L, 42L, "caixa1"))
+                .isInstanceOf(ComandaNotOpenException.class);
+        verify(comandaRepository, never()).save(any());
+    }
+
     /**
      * <b>Nenhum estoque se move numa junção.</b> A mercadoria não voltou para a prateleira nem saiu
      * de novo — mudou de conta. É o que separa este caminho de {@code cancelComanda}, que devolve

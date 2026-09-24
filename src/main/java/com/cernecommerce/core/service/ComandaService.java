@@ -676,6 +676,16 @@ public class ComandaService implements ComandaUseCase {
         return comandaRepository.save(comanda.withLabel(newLabel));
     }
 
+    /** PDV-F020 — ver {@link ComandaUseCase#linkCustomer}. */
+    @Override
+    @Transactional
+    public Comanda linkCustomer(Long comandaId, Long customerId, String username) {
+        Comanda comanda = getComandaForUpdate(comandaId);
+        pdvService.requireOpenSession(comanda.sessionId());
+        requireOpen(comanda);
+        return comandaRepository.save(comanda.withCustomer(customerId));
+    }
+
     /**
      * PDV-F016 — juntar duas mesas. Ver {@link ComandaUseCase#mergeComanda} para o desenho.
      *

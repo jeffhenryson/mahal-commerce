@@ -1,5 +1,9 @@
 package com.cernecommerce.adapter.in.controller;
 
+import com.cernecommerce.adapter.in.dtos.request.CustomerRequest;
+import com.cernecommerce.adapter.in.dtos.request.LinkComandaCustomerRequest;
+import com.cernecommerce.core.domain.model.crm.LeadResolution;
+import org.springframework.security.access.AccessDeniedException;
 import com.cernecommerce.adapter.in.converter.ComandaDTOConverter;
 import com.cernecommerce.adapter.in.converter.OrderDTOConverter;
 import com.cernecommerce.adapter.in.dtos.request.AddComandaItemRequest;
@@ -82,6 +86,11 @@ public class PdvComandaController {
      * salão e alçada de caixa são concedidas a pessoas diferentes. O teto, esse, é compartilhado.
      */
     private static final String COMANDA_DISCOUNT_AUTHORITY = "PDV_COMANDA_DISCOUNT";
+
+    /** PDV-F020 — cadastrar o lead da mesa é a mesma alçada do cadastro rápido do balcão. */
+    private static final String LEAD_CREATE_AUTHORITY = "CRM_LEAD_CREATE";
+    private static final String CUSTOMER_MANAGE_AUTHORITY = "CRM_CUSTOMER_MANAGE";
+    private static final String LEAD_ORIGIN = "Mesa";
 
     private final ComandaUseCase comandaUseCase;
     private final ComandaDTOConverter comandaConverter;
@@ -182,6 +191,32 @@ public class PdvComandaController {
         return payload;
     }
 
+    /**
+     * PDV-F020 — resolve o cliente da mesa: {@code customerId} existente (404 se não existir, em
+     * vez do 409 genérico da FK), ou {@code lead} por find-or-create no CRM, ou nenhum.
+     */
+    private Long resolveComandaCustomer(Long customerId, CustomerRequest lead, Authentication authentication) {
+        if (customerId != null) {
+            return crmUseCase.findCustomerById(customerId).id();
+        }
+        if (lead == null) {
+            return null;
+        }
+        boolean allowed = authentication.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .anyMatch(a -> LEAD_CREATE_AUTHORITY.equals(a) || CUSTOMER_MANAGE_AUTHORITY.equals(a));
+        if (!allowed) {
+            throw new AccessDeniedException("Sem permissão para cadastrar cliente: " + LEAD_CREATE_AUTHORITY);
+        }
+        LeadResolution resolution = crmUseCase.resolveLead(lead.getNome(), lead.getContato(), lead.getEmail(),
+                lead.getCpf(), lead.getOrigem() == null || lead.getOrigem().isBlank() ? LEAD_ORIGIN : lead.getOrigem());
+        if (resolution.created()) {
+            publisher.publishEvent(AuditEvent.of(EventType.CUSTOMER_CREATED, authentication.getName(),
+                    Map.of("customerId", String.valueOf(resolution.customer().id()))));
+        }
+        return resolution.customer().id();
+    }
+
     private void requireAuthority(String authority, Authentication authentication,
             Supplier<RuntimeException> onDenied) {
         boolean allowed = authentication.getAuthorities().stream()
@@ -206,8 +241,9 @@ public class PdvComandaController {
     @PreAuthorize("hasAuthority('PDV_COMANDA_MANAGE')")
     public ResponseEntity<ComandaResponseDTO> openComanda(@RequestParam Long sessionId,
             @Valid @RequestBody OpenComandaRequest request, Authentication authentication) {
+        Long customerId = resolveComandaCustomer(request.getCustomerId(), request.getLead(), authentication);
         Comanda comanda = comandaUseCase.openComanda(sessionId, request.getTableOrCustomerLabel(),
-                request.getCustomerId(), authentication.getName());
+                customerId, authentication.getName());
         // PDV-C014 — abrir mesa não deixava rastro nenhum, ao contrário de abrir caixa
         // (CASH_SESSION_OPENED). É o evento que responde "quem abriu a Mesa 4, e quando".
         publisher.publishEvent(AuditEvent.of(EventType.COMANDA_OPENED, authentication.getName(),
@@ -415,6 +451,29 @@ public class PdvComandaController {
                 authentication.getName());
         publisher.publishEvent(AuditEvent.of(EventType.COMANDA_RENAMED, authentication.getName(),
                 auditPayload(comandaId, "tableOrCustomerLabel", comanda.tableOrCustomerLabel())));
+        ComandaResponseDTO dto = comandaConverter.toResponse(comanda);
+        enrichCustomerNames(List.of(dto));
+        return ResponseEntity.ok(dto);
+    }
+
+    @Operation(summary = "Vincula, troca ou remove o cliente da mesa aberta (PDV-F020)",
+            description = "customerId para cliente existente; lead para cadastrar na hora "
+                    + "(find-or-create por CPF/telefone, exige CRM_LEAD_CREATE); os dois nulos "
+                    + "desvinculam. O cliente vale para o que ainda não foi cobrado.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Vinculado", content = @Content(schema = @Schema(implementation = ComandaResponseDTO.class))),
+            @ApiResponse(responseCode = "404", description = "Comanda ou cliente não encontrado", content = @Content),
+            @ApiResponse(responseCode = "409", description = "Comanda não está aberta", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PatchMapping("/{id}/customer")
+    @PreAuthorize("hasAuthority('PDV_COMANDA_MANAGE')")
+    public ResponseEntity<ComandaResponseDTO> linkCustomer(@PathVariable("id") Long comandaId,
+            @Valid @RequestBody LinkComandaCustomerRequest request, Authentication authentication) {
+        Long customerId = resolveComandaCustomer(request.getCustomerId(), request.getLead(), authentication);
+        Comanda comanda = comandaUseCase.linkCustomer(comandaId, customerId, authentication.getName());
+        publisher.publishEvent(AuditEvent.of(EventType.COMANDA_CUSTOMER_LINKED, authentication.getName(),
+                auditPayload(comandaId, "customerId", customerId)));
         ComandaResponseDTO dto = comandaConverter.toResponse(comanda);
         enrichCustomerNames(List.of(dto));
         return ResponseEntity.ok(dto);

@@ -291,6 +291,17 @@ public record Comanda(
      *
      * @throws IllegalStateException se a comanda não estiver {@code ABERTA}
      */
+    /**
+     * PDV-F020 — vincula (ou troca, ou remove com {@code null}) o cliente do CRM de uma mesa já
+     * aberta. Antes disto o cliente só entrava na abertura: quem chegava sem cadastro e se
+     * identificava no meio da noite saía como venda anônima.
+     */
+    public Comanda withCustomer(Long newCustomerId) {
+        requireOpen();
+        return new Comanda(id, sessionId, warehouseCode, tableOrCustomerLabel, newCustomerId, status, items,
+                orderId, openedBy, openedAt, closedAt);
+    }
+
     public Comanda withLabel(String newLabel) {
         requireOpen();
         if (newLabel == null || newLabel.isBlank()) {
