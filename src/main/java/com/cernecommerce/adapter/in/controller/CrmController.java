@@ -36,6 +36,7 @@ import com.cernecommerce.core.domain.model.crm.CrmDashboardOverview;
 import com.cernecommerce.core.domain.model.crm.WebhookTestResult;
 import com.cernecommerce.core.domain.model.crm.Customer;
 import com.cernecommerce.core.domain.model.crm.CustomerNote;
+import com.cernecommerce.core.domain.model.crm.LeadResolution;
 import com.cernecommerce.core.ports.in.CashbackUseCase;
 import com.cernecommerce.core.ports.in.CrmUseCase;
 import io.swagger.v3.oas.annotations.Operation;
@@ -108,7 +109,7 @@ public class CrmController {
             @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
     })
     @PostMapping("/customers")
-    @PreAuthorize("hasAuthority('CRM_CUSTOMER_MANAGE')")
+    @PreAuthorize("hasAnyAuthority('CRM_CUSTOMER_MANAGE', 'CRM_LEAD_CREATE')")
     public ResponseEntity<CustomerResponseDTO> createCustomer(@Valid @RequestBody CustomerRequest request,
             Authentication authentication) {
         Customer created = crmUseCase.createCustomer(request.getNome(), request.getContato(), request.getEmail(),
@@ -117,6 +118,54 @@ public class CrmController {
                 authentication.getName(), Map.of("customerId", String.valueOf(created.id()))));
         return ResponseEntity.created(URI.create("/crm/customers/" + created.id()))
                 .body(converter.toResponse(created));
+    }
+
+    @Operation(summary = "Atualiza os dados cadastrais de um cliente (CRM-C006)",
+            description = "Nome, contato, email, CPF e origem. CPF aceita máscara e é gravado só com "
+                    + "dígitos; campo vazio vira nulo. O estágio muda só por PATCH /estagio.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Atualizado", content = @Content(schema = @Schema(implementation = CustomerResponseDTO.class))),
+            @ApiResponse(responseCode = "400", description = "Dados inválidos", content = @Content),
+            @ApiResponse(responseCode = "404", description = "Cliente não encontrado", content = @Content),
+            @ApiResponse(responseCode = "409", description = "Email ou CPF de outro cliente", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PutMapping("/customers/{id}")
+    @PreAuthorize("hasAuthority('CRM_CUSTOMER_MANAGE')")
+    public ResponseEntity<CustomerResponseDTO> updateCustomer(@PathVariable Long id,
+            @Valid @RequestBody CustomerRequest request, Authentication authentication) {
+        Customer updated = crmUseCase.updateCustomer(id, request.getNome(), request.getContato(),
+                request.getEmail(), request.getCpf(), request.getOrigem());
+        publisher.publishEvent(AuditEvent.of(EventType.CUSTOMER_UPDATED,
+                authentication.getName(), Map.of("customerId", String.valueOf(id))));
+        return ResponseEntity.ok(converter.toResponse(updated));
+    }
+
+    @Operation(summary = "Cadastra ou reaproveita o lead do balcão/mesa (PDV-F020)",
+            description = "Find-or-create: procura por CPF, depois telefone (só dígitos), depois email. "
+                    + "Achando, devolve o cadastro existente (200) completando o que faltava (ex.: CPF); "
+                    + "não achando, cria em NOVO_LEAD (201). Chamado ao concluir a 1ª etapa da venda.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "201", description = "Lead criado", content = @Content(schema = @Schema(implementation = CustomerResponseDTO.class))),
+            @ApiResponse(responseCode = "200", description = "Cliente existente reaproveitado", content = @Content(schema = @Schema(implementation = CustomerResponseDTO.class))),
+            @ApiResponse(responseCode = "400", description = "Dados inválidos", content = @Content),
+            @ApiResponse(responseCode = "409", description = "CPF/email de outro cliente", content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @PostMapping("/customers/lead")
+    @PreAuthorize("hasAnyAuthority('CRM_CUSTOMER_MANAGE', 'CRM_LEAD_CREATE')")
+    public ResponseEntity<CustomerResponseDTO> resolveLead(@Valid @RequestBody CustomerRequest request,
+            Authentication authentication) {
+        LeadResolution resolution = crmUseCase.resolveLead(request.getNome(), request.getContato(),
+                request.getEmail(), request.getCpf(), request.getOrigem());
+        Customer customer = resolution.customer();
+        if (!resolution.created()) {
+            return ResponseEntity.ok(converter.toResponse(customer));
+        }
+        publisher.publishEvent(AuditEvent.of(EventType.CUSTOMER_CREATED,
+                authentication.getName(), Map.of("customerId", String.valueOf(customer.id()))));
+        return ResponseEntity.created(URI.create("/crm/customers/" + customer.id()))
+                .body(converter.toResponse(customer));
     }
 
     @Operation(summary = "Busca um cliente por CPF, email ou contato — o \"CPF na nota?\" do balcão",

@@ -10,6 +10,7 @@ import com.cernecommerce.core.domain.model.crm.CrmDashboardOverview;
 import com.cernecommerce.core.domain.model.crm.Customer;
 import com.cernecommerce.core.domain.model.crm.CustomerNote;
 import com.cernecommerce.core.domain.model.crm.CustomerStage;
+import com.cernecommerce.core.domain.model.crm.LeadResolution;
 import com.cernecommerce.core.domain.model.crm.StageTransition;
 import com.cernecommerce.core.domain.model.crm.Tag;
 import com.cernecommerce.core.domain.model.crm.TagSummary;
@@ -35,6 +36,31 @@ public interface CrmUseCase {
      *         se o cpf já estiver cadastrado
      */
     Customer createCustomer(String nome, String contato, String email, String cpf, String origem);
+
+    /**
+     * Atualiza os dados cadastrais de um cliente (CRM-C006) — é por aqui que um cliente cadastrado
+     * sem CPF ganha o CPF depois. Estágio não muda por aqui. Identificadores passam pela mesma
+     * normalização do cadastro ({@link com.cernecommerce.core.domain.model.crm.CustomerIdentifiers}).
+     *
+     * @throws com.cernecommerce.core.domain.exception.crm.CustomerNotFoundException se não existir
+     * @throws com.cernecommerce.core.domain.exception.crm.DuplicateCustomerEmailException
+     *         se o email pertencer a outro cliente
+     * @throws com.cernecommerce.core.domain.exception.crm.DuplicateCustomerCpfException
+     *         se o cpf pertencer a outro cliente
+     */
+    Customer updateCustomer(Long id, String nome, String contato, String email, String cpf, String origem);
+
+    /**
+     * Find-or-create do lead do balcão e da mesa (PDV-F020): procura por CPF e depois por
+     * telefone (só dígitos); achando, reaproveita — e completa o CPF se o cadastro existente não
+     * tinha —; não achando, cria em {@code NOVO_LEAD}. Nunca duplica o cliente só porque o
+     * operador digitou o telefone com outra máscara.
+     *
+     * @throws com.cernecommerce.core.domain.exception.crm.DuplicateCustomerCpfException
+     *         se achou pelo telefone um cliente com CPF diferente do informado e o CPF informado já
+     *         pertence a um terceiro
+     */
+    LeadResolution resolveLead(String nome, String contato, String email, String cpf, String origem);
 
     /**
      * Busca um cliente por id. Lança
@@ -63,8 +89,8 @@ public interface CrmUseCase {
     Customer lookupCustomer(String cpf, String email, String contato);
 
     /**
-     * Lista clientes paginados, filtrando por nome ou contato quando {@code search} não for
-     * nulo/vazio.
+     * Lista clientes paginados (mais recentes primeiro), filtrando por nome, contato, email ou CPF
+     * quando {@code search} não for nulo/vazio.
      */
     PageResult<Customer> listCustomers(String search, int page, int size);
 

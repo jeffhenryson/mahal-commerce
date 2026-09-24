@@ -16,7 +16,9 @@ import com.cernecommerce.core.domain.model.crm.ChannelStatus;
 import com.cernecommerce.core.domain.model.crm.ChannelType;
 import com.cernecommerce.core.domain.model.crm.CrmDashboardOverview;
 import com.cernecommerce.core.domain.model.crm.Customer;
+import com.cernecommerce.core.domain.model.crm.CustomerIdentifiers;
 import com.cernecommerce.core.domain.model.crm.CustomerNote;
+import com.cernecommerce.core.domain.model.crm.LeadResolution;
 import com.cernecommerce.core.domain.model.crm.CustomerStage;
 import com.cernecommerce.core.domain.model.crm.StageTransition;
 import com.cernecommerce.core.domain.model.crm.Tag;
@@ -48,6 +50,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 public class CrmService implements CrmUseCase {
@@ -107,18 +110,88 @@ public class CrmService implements CrmUseCase {
     @Transactional
     public Customer createCustomer(String nome, String contato, String email, String cpf, String origem) {
         // CRM-C005: email e cpf são opcionais agora — só checa duplicidade do que veio preenchido.
-        if (email != null && !email.isBlank()) {
-            customerRepository.findByEmail(email).ifPresent(c -> {
-                throw new DuplicateCustomerEmailException(email);
-            });
-        }
-        if (cpf != null && !cpf.isBlank()) {
-            customerRepository.findByCpf(cpf).ifPresent(c -> {
-                throw new DuplicateCustomerCpfException(cpf);
-            });
-        }
-        Customer customer = Customer.create(nome, contato, email, cpf, origem);
+        // CRM-C006: normaliza antes (CPF só dígitos, "" vira null) — sem isso "" passava e o 2º
+        // cliente leve batia na unique de email.
+        String normalizedContato = CustomerIdentifiers.normalizeContato(contato);
+        String normalizedEmail = CustomerIdentifiers.normalizeEmail(email);
+        String normalizedCpf = CustomerIdentifiers.normalizeCpf(cpf);
+        ensureIdentifiersFree(null, normalizedEmail, normalizedCpf);
+        Customer customer = Customer.create(nome.trim(), normalizedContato, normalizedEmail, normalizedCpf,
+                CustomerIdentifiers.normalizeContato(origem));
         return customerRepository.save(customer);
+    }
+
+    @Override
+    @Transactional
+    public Customer updateCustomer(Long id, String nome, String contato, String email, String cpf, String origem) {
+        Customer current = requireCustomer(id);
+        String normalizedEmail = CustomerIdentifiers.normalizeEmail(email);
+        String normalizedCpf = CustomerIdentifiers.normalizeCpf(cpf);
+        ensureIdentifiersFree(id, normalizedEmail, normalizedCpf);
+        Customer updated = current.withProfile(nome.trim(), CustomerIdentifiers.normalizeContato(contato),
+                normalizedEmail, normalizedCpf, CustomerIdentifiers.normalizeContato(origem));
+        return customerRepository.save(updated);
+    }
+
+    @Override
+    @Transactional
+    public LeadResolution resolveLead(String nome, String contato, String email, String cpf, String origem) {
+        String normalizedCpf = CustomerIdentifiers.normalizeCpf(cpf);
+        String normalizedEmail = CustomerIdentifiers.normalizeEmail(email);
+        Optional<Customer> existing = Optional.empty();
+        if (normalizedCpf != null) {
+            existing = customerRepository.findByCpf(normalizedCpf);
+        }
+        if (existing.isEmpty() && CustomerIdentifiers.digitsOrNull(contato) != null) {
+            existing = customerRepository.findByContato(contato);
+        }
+        if (existing.isEmpty() && normalizedEmail != null) {
+            existing = customerRepository.findByEmail(normalizedEmail);
+        }
+        if (existing.isEmpty()) {
+            return new LeadResolution(createCustomer(nome, contato, email, cpf, origem), true);
+        }
+        return new LeadResolution(completeMissingIdentifiers(existing.get(), contato, normalizedEmail,
+                normalizedCpf), false);
+    }
+
+    /**
+     * Reaproveitou um cadastro: só preenche o que faltava (CPF, email, telefone) — nunca sobrescreve
+     * nome nem um identificador que já existia, para um lançamento rápido no balcão não desfazer o
+     * cadastro cuidadoso feito no CRM.
+     */
+    private Customer completeMissingIdentifiers(Customer customer, String contato, String email, String cpf) {
+        boolean missingCpf = !customer.isOfficiallyRegistered() && cpf != null;
+        boolean missingEmail = (customer.email() == null || customer.email().isBlank()) && email != null;
+        String normalizedContato = CustomerIdentifiers.normalizeContato(contato);
+        boolean missingContato = (customer.contato() == null || customer.contato().isBlank())
+                && normalizedContato != null;
+        if (!missingCpf && !missingEmail && !missingContato) {
+            return customer;
+        }
+        String newCpf = missingCpf ? cpf : customer.cpf();
+        String newEmail = missingEmail ? email : customer.email();
+        ensureIdentifiersFree(customer.id(), missingEmail ? newEmail : null, missingCpf ? newCpf : null);
+        return customerRepository.save(customer.withProfile(customer.nome(),
+                missingContato ? normalizedContato : customer.contato(), newEmail, newCpf, customer.origem()));
+    }
+
+    /** Email/CPF já usados por OUTRO cliente viram 409; {@code selfId} é o próprio cliente em edição. */
+    private void ensureIdentifiersFree(Long selfId, String email, String cpf) {
+        if (email != null) {
+            customerRepository.findByEmail(email)
+                    .filter(c -> !c.id().equals(selfId))
+                    .ifPresent(c -> {
+                        throw new DuplicateCustomerEmailException(email);
+                    });
+        }
+        if (cpf != null) {
+            customerRepository.findByCpf(cpf)
+                    .filter(c -> !c.id().equals(selfId))
+                    .ifPresent(c -> {
+                        throw new DuplicateCustomerCpfException(cpf);
+                    });
+        }
     }
 
     @Override
@@ -142,8 +215,10 @@ public class CrmService implements CrmUseCase {
         // contato — o mais forte primeiro, para não devolver o cliente errado por coincidência de
         // telefone quando o CPF, mais específico, também foi informado.
         if (cpf != null && !cpf.isBlank()) {
-            return customerRepository.findByCpf(cpf)
-                    .orElseThrow(() -> new CustomerNotFoundException("cpf " + cpf));
+            // CRM-C006: aceita CPF com máscara — gravado só com dígitos.
+            String digits = CustomerIdentifiers.normalizeCpf(cpf);
+            return customerRepository.findByCpf(digits)
+                    .orElseThrow(() -> new CustomerNotFoundException("cpf " + digits));
         }
         if (email != null && !email.isBlank()) {
             return customerRepository.findByEmail(email)

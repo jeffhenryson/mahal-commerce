@@ -136,6 +136,97 @@ public class CrmControllerSecurityTest {
                 .andExpect(status().isCreated());
     }
 
+    // ── CRM-C006 / PDV-F020: atendente cadastra lead; edição continua com o admin ─────────────
+
+    private static SimpleGrantedAuthority[] atendente() {
+        return new SimpleGrantedAuthority[]{
+                new SimpleGrantedAuthority("ROLE_ATENDENTE"),
+                new SimpleGrantedAuthority("CRM_CUSTOMER_READ"),
+                new SimpleGrantedAuthority("CRM_CUSTOMER_LOOKUP"),
+                new SimpleGrantedAuthority("CRM_LEAD_CREATE")};
+    }
+
+    /** Telefone único por teste, sem máscara (11 dígitos). */
+    private static String uniquePhone() {
+        return "839" + String.format("%08d", System.nanoTime() % 100_000_000L);
+    }
+
+    @Test
+    void create_customer_with_crm_lead_create_returns_201() throws Exception {
+        mockMvc.perform(post("/crm/customers")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"nome\":\"Lead Mesa\",\"contato\":\"" + uniquePhone() + "\",\"email\":\"\"}")
+                .with(user("atendente").authorities(atendente())))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.email").doesNotExist());
+    }
+
+    @Test
+    void resolve_lead_creates_then_reuses_same_customer_by_phone_with_other_mask() throws Exception {
+        String phone = uniquePhone();
+        String masked = "(" + phone.substring(0, 2) + ") " + phone.substring(2, 7) + "-" + phone.substring(7);
+        String cpf = String.valueOf(10000000000L + (System.nanoTime() % 89999999999L));
+        String maskedCpf = cpf.substring(0, 3) + "." + cpf.substring(3, 6) + "." + cpf.substring(6, 9) + "-"
+                + cpf.substring(9);
+
+        String location = mockMvc.perform(post("/crm/customers/lead")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"nome\":\"Lead PDV\",\"contato\":\"" + phone + "\",\"origem\":\"PDV\"}")
+                .with(user("atendente").authorities(atendente())))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.estagio").value("NOVO_LEAD"))
+                .andReturn().getResponse().getHeader("Location");
+        String id = location.substring(location.lastIndexOf('/') + 1);
+
+        mockMvc.perform(post("/crm/customers/lead")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"nome\":\"Lead PDV\",\"contato\":\"" + masked + "\",\"cpf\":\"" + maskedCpf + "\"}")
+                .with(user("atendente").authorities(atendente())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(Long.valueOf(id)))
+                .andExpect(jsonPath("$.cpf").value(cpf));
+    }
+
+    @Test
+    void resolve_lead_without_permission_returns_403() throws Exception {
+        mockMvc.perform(post("/crm/customers/lead")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"nome\":\"Lead\",\"contato\":\"11999998888\"}")
+                .with(user("bob").authorities(new SimpleGrantedAuthority("CRM_CUSTOMER_READ"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void update_customer_requires_crm_customer_manage() throws Exception {
+        mockMvc.perform(put("/crm/customers/1")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"nome\":\"Maria\",\"contato\":\"11999998888\"}")
+                .with(user("atendente").authorities(atendente())))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void update_customer_adds_cpf_to_light_customer() throws Exception {
+        Long id = givenCustomer();
+        String cpf = String.valueOf(10000000000L + (System.nanoTime() % 89999999999L));
+
+        mockMvc.perform(put("/crm/customers/" + id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"nome\":\"Maria Editada\",\"contato\":\"11999998888\",\"cpf\":\"" + cpf + "\"}")
+                .with(user("gerente").authorities(
+                        new SimpleGrantedAuthority("ROLE_ADMIN"),
+                        new SimpleGrantedAuthority("CRM_CUSTOMER_MANAGE"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.cpf").value(cpf))
+                .andExpect(jsonPath("$.nome").value("Maria Editada"))
+                .andExpect(jsonPath("$.email").doesNotExist());
+
+        mockMvc.perform(get("/crm/customers/" + id)
+                .with(user("caixa").authorities(new SimpleGrantedAuthority("CRM_CUSTOMER_READ"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.cpf").value(cpf));
+    }
+
     @Test
     void get_customer_without_auth_returns_401() throws Exception {
         mockMvc.perform(get("/crm/customers/1"))

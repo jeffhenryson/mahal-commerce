@@ -136,6 +136,121 @@ class CrmServiceTest {
         verify(customerRepository).save(any());
     }
 
+    // ── CRM-C006: normalização, edição e find-or-create de lead ────────────────────────────
+
+    @Test
+    void createCustomer_normalizesMaskedCpfAndBlankEmail() {
+        when(customerRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Customer result = crmService.createCustomer(" Maria ", "(11) 99999-8888", "", "123.456.789-00", "PDV");
+
+        assertThat(result.cpf()).isEqualTo("12345678900");
+        assertThat(result.email()).isNull();
+        assertThat(result.nome()).isEqualTo("Maria");
+        verify(customerRepository, never()).findByEmail(any());
+        verify(customerRepository).findByCpf("12345678900");
+    }
+
+    @Test
+    void createCustomer_rejectsCpfWithWrongLength() {
+        assertThatThrownBy(() -> crmService.createCustomer("Maria", "11999998888", null, "123.456", null))
+                .isInstanceOf(IllegalArgumentException.class);
+        verify(customerRepository, never()).save(any());
+    }
+
+    @Test
+    void updateCustomer_addsCpfToLightCustomerKeepingStageAndDate() {
+        Customer current = customer(1L, null, CustomerStage.QUALIFICADO);
+        when(customerRepository.findById(1L)).thenReturn(Optional.of(current));
+        when(customerRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Customer result = crmService.updateCustomer(1L, "Maria Silva", "11999998888", null,
+                "123.456.789-00", "PDV");
+
+        assertThat(result.cpf()).isEqualTo("12345678900");
+        assertThat(result.estagio()).isEqualTo(CustomerStage.QUALIFICADO);
+        assertThat(result.cadastradoEm()).isEqualTo(current.cadastradoEm());
+        assertThat(result.id()).isEqualTo(1L);
+    }
+
+    @Test
+    void updateCustomer_allowsKeepingOwnCpfButRejectsAnothersCpf() {
+        Customer self = Customer.of(1L, "Maria", "11999998888", null, "12345678900", null, Instant.now(),
+                CustomerStage.NOVO_LEAD);
+        when(customerRepository.findById(1L)).thenReturn(Optional.of(self));
+        when(customerRepository.findByCpf("12345678900")).thenReturn(Optional.of(self));
+        when(customerRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        crmService.updateCustomer(1L, "Maria Souza", "11999998888", null, "12345678900", null);
+
+        when(customerRepository.findByCpf("98765432100")).thenReturn(Optional.of(customer(2L, null)));
+        assertThatThrownBy(() -> crmService.updateCustomer(1L, "Maria", null, null, "98765432100", null))
+                .isInstanceOf(com.cernecommerce.core.domain.exception.crm.DuplicateCustomerCpfException.class);
+    }
+
+    @Test
+    void updateCustomer_throwsWhenCustomerDoesNotExist() {
+        when(customerRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> crmService.updateCustomer(99L, "Maria", "11999998888", null, null, null))
+                .isInstanceOf(CustomerNotFoundException.class);
+    }
+
+    @Test
+    void resolveLead_createsWhenNoMatch() {
+        when(customerRepository.save(any())).thenAnswer(inv -> {
+            Customer c = inv.getArgument(0);
+            return Customer.of(10L, c.nome(), c.contato(), c.email(), c.cpf(), c.origem(), c.cadastradoEm(),
+                    c.estagio());
+        });
+
+        var resolution = crmService.resolveLead("Jeff", "(83) 99999-0000", null, null, "PDV");
+
+        assertThat(resolution.created()).isTrue();
+        assertThat(resolution.customer().id()).isEqualTo(10L);
+        assertThat(resolution.customer().estagio()).isEqualTo(CustomerStage.NOVO_LEAD);
+        verify(customerRepository).findByContato("(83) 99999-0000");
+    }
+
+    @Test
+    void resolveLead_reusesByPhoneAndCompletesMissingCpf() {
+        Customer existing = Customer.of(5L, "Jeff", "83999990000", null, null, "PDV", Instant.now(),
+                CustomerStage.CLIENTE_ATIVO);
+        when(customerRepository.findByCpf("12345678900")).thenReturn(Optional.empty());
+        when(customerRepository.findByContato("(83) 99999-0000")).thenReturn(Optional.of(existing));
+        when(customerRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        var resolution = crmService.resolveLead("Outro Nome", "(83) 99999-0000", null, "123.456.789-00", "PDV");
+
+        assertThat(resolution.created()).isFalse();
+        assertThat(resolution.customer().id()).isEqualTo(5L);
+        assertThat(resolution.customer().cpf()).isEqualTo("12345678900");
+        // Nome e estágio do cadastro existente não são sobrescritos pelo lançamento rápido.
+        assertThat(resolution.customer().nome()).isEqualTo("Jeff");
+        assertThat(resolution.customer().estagio()).isEqualTo(CustomerStage.CLIENTE_ATIVO);
+    }
+
+    @Test
+    void resolveLead_reusesByCpfWithoutSavingWhenNothingIsMissing() {
+        Customer existing = Customer.of(5L, "Jeff", "83999990000", "jeff@example.com", "12345678900", null,
+                Instant.now(), CustomerStage.NOVO_LEAD);
+        when(customerRepository.findByCpf("12345678900")).thenReturn(Optional.of(existing));
+
+        var resolution = crmService.resolveLead("Jeff", "83 99999 0000", null, "12345678900", "PDV");
+
+        assertThat(resolution.created()).isFalse();
+        assertThat(resolution.customer()).isSameAs(existing);
+        verify(customerRepository, never()).findByContato(any());
+        verify(customerRepository, never()).save(any());
+    }
+
+    @Test
+    void lookupCustomer_acceptsMaskedCpf() {
+        when(customerRepository.findByCpf("12345678900")).thenReturn(Optional.of(customer(1L, null)));
+
+        assertThat(crmService.lookupCustomer("123.456.789-00", null, null).id()).isEqualTo(1L);
+    }
+
     @Test
     void lookupCustomer_findsByCpfFirstWhenMultipleCriteriaGiven() {
         Customer found = customer(1L, "maria@example.com");

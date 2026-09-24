@@ -3,10 +3,12 @@ package com.cernecommerce.adapter.out.persistence.repository;
 import com.cernecommerce.adapter.out.persistence.entity.CustomerEntity;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.crm.Customer;
+import com.cernecommerce.core.domain.model.crm.CustomerIdentifiers;
 import com.cernecommerce.core.domain.model.crm.CustomerStage;
 import com.cernecommerce.core.ports.out.crm.CustomerRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -53,7 +55,12 @@ public class CustomerRepositoryImpl implements CustomerRepository {
     @Override
     @Transactional(readOnly = true)
     public Optional<Customer> findByContato(String contato) {
-        return customerJpaRepository.findFirstByContato(contato).map(this::toDomain);
+        String digits = CustomerIdentifiers.digitsOrNull(contato);
+        if (digits == null) {
+            return Optional.empty();
+        }
+        return customerJpaRepository.findByContatoDigits(digits, PageRequest.of(0, 1)).stream()
+                .findFirst().map(this::toDomain);
     }
 
     @Override
@@ -74,10 +81,13 @@ public class CustomerRepositoryImpl implements CustomerRepository {
     @Override
     @Transactional(readOnly = true)
     public PageResult<Customer> findAll(String search, int page, int size) {
-        PageRequest pageRequest = PageRequest.of(page, size);
+        // Ordem estável: sem sort a página vinha em ordem indefinida e o cliente recém-cadastrado
+        // podia não aparecer na primeira página (CRM-C006).
+        PageRequest pageRequest = PageRequest.of(page, size,
+                Sort.by(Sort.Order.desc("cadastradoEm"), Sort.Order.desc("id")));
         Page<CustomerEntity> result = (search == null || search.isBlank())
                 ? customerJpaRepository.findAll(pageRequest)
-                : customerJpaRepository.findByNomeContainingIgnoreCaseOrContatoContaining(search, search, pageRequest);
+                : customerJpaRepository.search(search.trim(), cpfSearchDigits(search), pageRequest);
         List<Customer> content = result.getContent().stream().map(this::toDomain).toList();
         return new PageResult<>(content, page, size, result.getTotalElements(), result.getTotalPages());
     }
@@ -87,7 +97,7 @@ public class CustomerRepositoryImpl implements CustomerRepository {
     public List<Customer> findAllForExport(String search) {
         List<CustomerEntity> entities = (search == null || search.isBlank())
                 ? customerJpaRepository.findAll()
-                : customerJpaRepository.findAllByNomeContainingIgnoreCaseOrContatoContaining(search, search);
+                : customerJpaRepository.searchAll(search.trim(), cpfSearchDigits(search));
         return entities.stream().map(this::toDomain).toList();
     }
 
@@ -117,6 +127,15 @@ public class CustomerRepositoryImpl implements CustomerRepository {
     @Transactional(readOnly = true)
     public List<Customer> findByEstagio(CustomerStage estagio) {
         return customerJpaRepository.findByEstagio(estagio).stream().map(this::toDomain).toList();
+    }
+
+    /**
+     * CPF é gravado só com dígitos; a busca por CPF só entra quando o termo tem dígitos suficientes
+     * para não casar qualquer cliente cujo CPF contenha "1".
+     */
+    private static String cpfSearchDigits(String search) {
+        String digits = CustomerIdentifiers.digitsOrNull(search);
+        return digits != null && digits.length() >= 3 ? digits : null;
     }
 
     private Customer toDomain(CustomerEntity e) {

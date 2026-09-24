@@ -73,7 +73,7 @@ public record AuditEvent(EventType type, String username, Instant timestamp, Map
         REPLENISHMENT_ITEM_ADDED, REPLENISHMENT_ITEM_UPDATED, REPLENISHMENT_ITEM_REMOVED,
         REPLENISHMENT_LIST_CLEARED,
         // CRM
-        CUSTOMER_CREATED, CUSTOMER_NOTE_ADDED, CUSTOMER_STAGE_CHANGED,
+        CUSTOMER_CREATED, CUSTOMER_UPDATED, CUSTOMER_NOTE_ADDED, CUSTOMER_STAGE_CHANGED,
         // Ecommerce (ECM-F001, Fatia 8) — distinto de CUSTOMER_CREATED: nasce de autocadastro
         // público em /shop/register, não de um operador com CRM_CUSTOMER_MANAGE.
         CUSTOMER_MARKETPLACE_REGISTERED,
@@ -95,7 +95,7 @@ public record AuditEvent(EventType type, String username, Instant timestamp, Map
         COMANDA_KIT_ADDED, COMANDA_KIT_REMOVED,
         // PDV-F016. COMANDA_MERGED é o que distingue, na trilha, a origem de uma junção de uma
         // mesa abandonada: as duas terminam CANCELADA, mas só o abandono devolveu estoque.
-        COMANDA_RENAMED, COMANDA_MERGED,
+        COMANDA_RENAMED, COMANDA_MERGED, COMANDA_CUSTOMER_LINKED,
         // Pedido
         ORDER_STATUS_CHANGED, ORDER_CANCELLED, ORDER_REFUNDED,
         // Cashback (CRM-F003)

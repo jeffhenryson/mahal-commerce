@@ -60,6 +60,15 @@ public record Customer(
         return new Customer(id, nome, contato, email, cpf, origem, cadastradoEm, estagio);
     }
 
+    /**
+     * Retorna uma cópia com os dados cadastrais trocados (CRM-C006) — id, data de cadastro e
+     * estágio são preservados; estágio muda só pelo fluxo do kanban.
+     */
+    public Customer withProfile(String novoNome, String novoContato, String novoEmail, String novoCpf,
+            String novaOrigem) {
+        return new Customer(id, novoNome, novoContato, novoEmail, novoCpf, novaOrigem, cadastradoEm, estagio);
+    }
+
     /** Retorna uma cópia deste cliente com o estágio atualizado. */
     public Customer withEstagio(CustomerStage novoEstagio) {
         return new Customer(id, nome, contato, email, cpf, origem, cadastradoEm, novoEstagio);

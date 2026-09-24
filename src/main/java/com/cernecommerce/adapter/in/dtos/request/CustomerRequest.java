@@ -27,9 +27,11 @@ public class CustomerRequest {
     @Schema(description = "Opcional se contato ou cpf forem informados.")
     private String email;
 
-    @Size(min = 11, max = 11)
-    @Schema(description = "Identificador OFICIAL do cadastro. Sem CPF, o cliente é \"leve\": "
-            + "válido e pesquisável, mas não elegível a cashback quando o programa existir.")
+    // CRM-C006: aceita máscara ("123.456.789-00"); o serviço normaliza para 11 dígitos e recusa
+    // com 400 o que não fechar 11 dígitos. Vazio vira nulo.
+    @Size(max = 14)
+    @Schema(description = "Identificador OFICIAL do cadastro, com ou sem máscara. Sem CPF, o cliente é "
+            + "\"leve\": válido e pesquisável, mas não elegível a cashback quando o programa existir.")
     private String cpf;
 
     @Size(max = 100)
