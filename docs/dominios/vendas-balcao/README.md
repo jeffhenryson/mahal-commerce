@@ -75,6 +75,13 @@ registro de vendas no balcão.
 
 | Método | Rota | Permissão | Descrição |
 |---|---|---|---|
+| `PATCH` | `/pdv/comandas/{id}/customer` | `PDV_COMANDA_MANAGE` (+ `CRM_LEAD_CREATE` com `lead`) | PDV-F020 — vincula/troca/remove o cliente da mesa aberta (`customerId` ou `lead` find-or-create) |
+| `GET` | `/pdv/sessao/cardapio` | `PDV_COMANDA_MANAGE` | PDV-F021 — faixas ativas, utensílios livres, configuração e `duploRoshHoje` |
+| `POST` | `/pdv/comandas/{id}/sessoes` | `PDV_COMANDA_MANAGE` | PDV-F021 — lança sessão `{tierId, essencia, vasoGrande}`; aloca utensílios; 409 `SESSION_ASSET_UNAVAILABLE` |
+| `POST` | `/pdv/comandas/{id}/sessoes/{itemId}/rosh` | `PDV_COMANDA_MANAGE` | PDV-F021 — 2º rosh `{tierId?, essencia}`; R$ 0 no dia de duplo rosh |
+| `GET`/`POST`/`PUT` | `/pdv/sessao/faixas[/{id}]` | `PDV_SESSAO_MANAGE` | PDV-F021 — cadastro das faixas |
+| `GET`/`POST`/`PUT` | `/pdv/sessao/utensilios[/{id}]` | `PDV_SESSAO_MANAGE` | PDV-F021 — tipos de utensílio e quantidade total |
+| `GET`/`PUT` | `/pdv/sessao/config` | `PDV_SESSAO_MANAGE` | PDV-F021 — vaso padrão/grande, preço do upgrade, dias de duplo rosh |
 | `GET` | `/pdv/sessions` | `PDV_READ` | Lista sessões de caixa paginadas (`page` ≥ 0, `size` 1–100), **das mais recentes para as mais antigas** — a ordenação entrou em PDV-C013; antes a paginação não era determinística |
 | `POST` | `/pdv/sessions` | `PDV_SESSION_MANAGE` | Abre o caixa. Uma sessão aberta por operador; o depósito informado vale para todas as vendas dela |
 | `GET` | `/pdv/sessions/current` | `PDV_READ` | Caixa aberto do operador autenticado |
@@ -894,6 +901,22 @@ Convenções, variáveis e o environment compartilhado estão em
 > Ver [`pedido`](../pedido/README.md#modelo-de-domínio).
 
 ## Histórico de Implementações
+
+- **2026-09-24** — `cardapio-de-sessao` (PDV-F021): a sessão de narguilé sai do catálogo e vira
+  cardápio próprio da mesa — faixas de preço editáveis (`session_tier`), utensílios como ativos da
+  casa com quantidade total (`session_asset_type`) e configuração de vaso/upgrade/duplo rosh
+  (`session_settings`), migration **V128**. A linha segue sendo `comanda_item` (SKU `SESS-{faixa}`,
+  modos `SESSAO`/`ROSH_EXTRA`), então fechamento, conta dividida, desconto, taxa e cashback não
+  mudaram. Nenhuma linha de sessão move estoque; o que ela prende são utensílios, alocados no
+  lançamento (trava pessimista nos tipos, em ordem de id) e liberados no fechamento, cancelamento
+  e remoção. Duplo rosh: o primeiro rosh extra de uma sessão sai a R$ 0 quando a **mesa foi aberta**
+  num dia configurado (fuso do salão), para a noite que passa da meia-noite não perder a promoção.
+  A sessão por produto (PDV-F010/F018) fica desligada por `pdv.sessao.legacy-enabled` (padrão
+  `false`) — religável sem deploy de código durante a transição.
+- **2026-09-24** — `cliente-da-mesa-e-lead-automatico` (PDV-F020, com CRM-C006): o atendente não
+  conseguia cadastrar cliente (403 em `POST /crm/customers`, engolido pela tela). Nova permissão
+  `CRM_LEAD_CREATE` (V127), `POST /crm/customers/lead` com find-or-create, lead na abertura da mesa
+  e `PATCH /pdv/comandas/{id}/customer` para vincular depois.
 
 - **2026-09-08** — `lata-de-essencia-na-comanda` (PDV-F018 + PDV-C020): par de **EST-F027** do lado
   da mesa. `addItem` chamava `adjustStock(SAIDA, quantity)` para toda linha, e com isso cada sessão

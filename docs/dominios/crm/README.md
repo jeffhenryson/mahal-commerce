@@ -199,6 +199,14 @@ Novas features e correções do CRM seguem as séries `CRM-F001+` e `CRM-C002+`.
 
 ## Histórico de Implementações
 
+- **2026-09-24** — `atendente-cadastra-lead-e-cpf-editavel` (CRM-C006): permissão `CRM_LEAD_CREATE`
+  (V127, admin + atendente) libera `POST /crm/customers` e o novo find-or-create
+  `POST /crm/customers/lead`; `PUT /crm/customers/{id}` para completar CPF/dados depois;
+  `CustomerIdentifiers` normaliza CPF (máscara → 11 dígitos) e troca `""` por nulo; listagem
+  ordenada por cadastro desc e busca por email/CPF. Diagnóstico na base HML: dos 501 clientes,
+  todos com nome, 417 com telefone e 382 com CPF (quase todos seed); o único cliente real criado
+  pelo PDV estava sem CPF porque o PDV não o enviava.
+
 - **2026-08-04** — `export-da-base-sem-auditoria-nem-limite` (**CRM-C002**, fechado): última peça
   do maior risco de segurança aberto do módulo. Rate limit e evento de auditoria já existiam desde
   mais cedo no mesmo dia; esta rodada adicionou a permissão dedicada `CRM_CUSTOMER_EXPORT`

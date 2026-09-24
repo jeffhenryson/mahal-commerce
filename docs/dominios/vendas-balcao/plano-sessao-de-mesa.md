@@ -1,5 +1,13 @@
 # Sessão de narguilé na mesa e canal `MESA` — plano de execução
 
+> ## ⚠️ Modelo de sessão substituído em 24/09/2026 (PDV-F021)
+>
+> A sessão **baseada em produto** descrita aqui (produto de sessão, `OPEN_ROSH`, `SABOR_EXTRA`,
+> `TROCA`, lata aberta) foi substituída pelo **cardápio de sessão**: faixas de preço, utensílios
+> como ativos e duplo rosh por dia da semana (V128). O caminho antigo fica desligado por
+> `pdv.sessao.legacy-enabled=false`; o histórico continua legível. O canal `MESA`, a comanda, a
+> conta dividida e o resto deste plano seguem valendo. Ver `feature-registry.md` (PDV-F021).
+
 **Criado em:** 2026-08-26.
 **Origem:** `mahal-admin/Docs/PROMPT_BACKEND_SESSAO_MESA.md` — a especificação de contrato, escrita
 pelo frontend. **Este arquivo é o roteiro de implementação aqui dentro:** a ordem, os arquivos e as
