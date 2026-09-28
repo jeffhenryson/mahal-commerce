@@ -14,7 +14,7 @@ import com.cernecommerce.adapter.in.converter.StageTransitionDTOConverter;
 import com.cernecommerce.adapter.in.converter.TagDTOConverter;
 import com.cernecommerce.core.domain.exception.crm.CampaignAutomationNotFoundException;
 import com.cernecommerce.core.domain.exception.crm.CustomerNotFoundException;
-import com.cernecommerce.core.domain.exception.crm.DuplicateCustomerEmailException;
+import com.cernecommerce.core.domain.exception.crm.CustomerAlreadyExistsException;
 import com.cernecommerce.core.domain.exception.crm.DuplicateTagNameException;
 import com.cernecommerce.core.domain.exception.crm.TagNotFoundException;
 import com.cernecommerce.core.domain.model.PageResult;
@@ -27,6 +27,8 @@ import com.cernecommerce.core.domain.model.crm.ChannelStatus;
 import com.cernecommerce.core.domain.model.crm.ChannelType;
 import com.cernecommerce.core.domain.model.crm.CrmDashboardOverview;
 import com.cernecommerce.core.domain.model.crm.Customer;
+import com.cernecommerce.core.domain.model.crm.CustomerMatch;
+import com.cernecommerce.core.domain.model.crm.CustomerMatchField;
 import com.cernecommerce.core.domain.model.crm.CustomerNote;
 import com.cernecommerce.core.domain.model.crm.CustomerStage;
 import com.cernecommerce.core.domain.model.crm.StageTransition;
@@ -48,6 +50,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 public class CrmControllerTest {
 
@@ -128,16 +131,20 @@ public class CrmControllerTest {
     }
 
     @Test
-    void create_duplicateEmail_returns_409() throws Exception {
+    void create_duplicate_returns_409_withMatchedByAndCustomerId() throws Exception {
         when(crmUseCase.createCustomer(any(), any(), eq("maria@example.com"), any(), any()))
-                .thenThrow(new DuplicateCustomerEmailException("maria@example.com"));
+                .thenThrow(new CustomerAlreadyExistsException(
+                        Set.of(CustomerMatchField.PHONE, CustomerMatchField.EMAIL), 7L));
 
         mockMvc.perform(post("/crm/customers")
                         .principal(AUTH)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"nome\":\"Maria Silva\",\"contato\":\"11999998888\",\"email\":\"maria@example.com\"}"))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.errorCode").value("CUSTOMER_EMAIL_ALREADY_EXISTS"));
+                .andExpect(jsonPath("$.errorCode").value("CUSTOMER_ALREADY_EXISTS"))
+                .andExpect(jsonPath("$.customerId").value(7))
+                .andExpect(jsonPath("$.matchedBy[0]").value("PHONE"))
+                .andExpect(jsonPath("$.matchedBy[1]").value("EMAIL"));
     }
 
     @Test
@@ -184,6 +191,33 @@ public class CrmControllerTest {
 
         mockMvc.perform(get("/crm/customers/lookup").principal(AUTH))
                 .andExpect(status().isBadRequest());
+    }
+
+    // ── CRM-C007: quem já usa este telefone/email/CPF ─────────────────────────────────────────
+
+    @Test
+    void lookupContact_returnsCustomerDtoWithMatchedBy() throws Exception {
+        when(crmUseCase.lookupCustomers("11999998888", "maria@example.com", null))
+                .thenReturn(List.of(new CustomerMatch(customer(1L, "maria@example.com"),
+                        Set.of(CustomerMatchField.EMAIL, CustomerMatchField.PHONE))));
+
+        mockMvc.perform(get("/crm/customers/lookup/contact").param("phone", "11999998888")
+                        .param("email", "maria@example.com").principal(AUTH))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(1))
+                .andExpect(jsonPath("$[0].nome").value("Maria Silva"))
+                .andExpect(jsonPath("$[0].email").value("maria@example.com"))
+                .andExpect(jsonPath("$[0].matchedBy[0]").value("PHONE"))
+                .andExpect(jsonPath("$[0].matchedBy[1]").value("EMAIL"));
+    }
+
+    @Test
+    void lookupContact_noMatch_returns_emptyList() throws Exception {
+        when(crmUseCase.lookupCustomers("11999998888", null, null)).thenReturn(List.of());
+
+        mockMvc.perform(get("/crm/customers/lookup/contact").param("phone", "11999998888").principal(AUTH))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isEmpty());
     }
 
     @Test

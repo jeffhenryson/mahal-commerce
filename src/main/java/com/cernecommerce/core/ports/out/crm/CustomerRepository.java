@@ -31,6 +31,12 @@ public interface CustomerRepository {
      */
     Optional<Customer> findByContato(String contato);
 
+    /** Todos os clientes com o mesmo telefone, comparado só pelos dígitos (CRM-C007), por id. */
+    List<Customer> findAllByContato(String contato);
+
+    /** Todos os clientes com o e-mail, aparado e sem diferenciar maiúsculas (CRM-C007), por id. */
+    List<Customer> findAllByEmailIgnoreCase(String email);
+
     Customer save(Customer customer);
 
     /** Lista clientes paginados, filtrando por nome ou contato quando {@code search} não for nulo/vazio. */

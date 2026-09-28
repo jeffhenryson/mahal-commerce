@@ -3,8 +3,7 @@ package com.cernecommerce.core.service;
 import com.cernecommerce.core.domain.exception.crm.AutomationWebhookNotConfiguredException;
 import com.cernecommerce.core.domain.exception.crm.CampaignAutomationNotFoundException;
 import com.cernecommerce.core.domain.exception.crm.CustomerNotFoundException;
-import com.cernecommerce.core.domain.exception.crm.DuplicateCustomerCpfException;
-import com.cernecommerce.core.domain.exception.crm.DuplicateCustomerEmailException;
+import com.cernecommerce.core.domain.exception.crm.CustomerAlreadyExistsException;
 import com.cernecommerce.core.domain.exception.crm.DuplicateTagNameException;
 import com.cernecommerce.core.domain.exception.crm.TagNotFoundException;
 import com.cernecommerce.core.domain.model.PageResult;
@@ -17,6 +16,8 @@ import com.cernecommerce.core.domain.model.crm.ChannelType;
 import com.cernecommerce.core.domain.model.crm.CrmDashboardOverview;
 import com.cernecommerce.core.domain.model.crm.Customer;
 import com.cernecommerce.core.domain.model.crm.CustomerIdentifiers;
+import com.cernecommerce.core.domain.model.crm.CustomerMatch;
+import com.cernecommerce.core.domain.model.crm.CustomerMatchField;
 import com.cernecommerce.core.domain.model.crm.CustomerNote;
 import com.cernecommerce.core.domain.model.crm.LeadResolution;
 import com.cernecommerce.core.domain.model.crm.CustomerStage;
@@ -46,11 +47,14 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Collection;
+import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
 public class CrmService implements CrmUseCase {
@@ -115,7 +119,7 @@ public class CrmService implements CrmUseCase {
         String normalizedContato = CustomerIdentifiers.normalizeContato(contato);
         String normalizedEmail = CustomerIdentifiers.normalizeEmail(email);
         String normalizedCpf = CustomerIdentifiers.normalizeCpf(cpf);
-        ensureIdentifiersFree(null, normalizedEmail, normalizedCpf);
+        ensureIdentifiersFree(null, normalizedContato, normalizedEmail, normalizedCpf);
         Customer customer = Customer.create(nome.trim(), normalizedContato, normalizedEmail, normalizedCpf,
                 CustomerIdentifiers.normalizeContato(origem));
         return customerRepository.save(customer);
@@ -125,10 +129,11 @@ public class CrmService implements CrmUseCase {
     @Transactional
     public Customer updateCustomer(Long id, String nome, String contato, String email, String cpf, String origem) {
         Customer current = requireCustomer(id);
+        String normalizedContato = CustomerIdentifiers.normalizeContato(contato);
         String normalizedEmail = CustomerIdentifiers.normalizeEmail(email);
         String normalizedCpf = CustomerIdentifiers.normalizeCpf(cpf);
-        ensureIdentifiersFree(id, normalizedEmail, normalizedCpf);
-        Customer updated = current.withProfile(nome.trim(), CustomerIdentifiers.normalizeContato(contato),
+        ensureIdentifiersFree(id, normalizedContato, normalizedEmail, normalizedCpf);
+        Customer updated = current.withProfile(nome.trim(), normalizedContato,
                 normalizedEmail, normalizedCpf, CustomerIdentifiers.normalizeContato(origem));
         return customerRepository.save(updated);
     }
@@ -171,27 +176,55 @@ public class CrmService implements CrmUseCase {
         }
         String newCpf = missingCpf ? cpf : customer.cpf();
         String newEmail = missingEmail ? email : customer.email();
-        ensureIdentifiersFree(customer.id(), missingEmail ? newEmail : null, missingCpf ? newCpf : null);
+        // Telefone fica fora da checagem aqui: completar o contato de um lead não deve travar o
+        // balcão porque o número já aparece em outro cadastro (telefone compartilhado).
+        ensureIdentifiersFree(customer.id(), null, missingEmail ? newEmail : null, missingCpf ? newCpf : null);
         return customerRepository.save(customer.withProfile(customer.nome(),
                 missingContato ? normalizedContato : customer.contato(), newEmail, newCpf, customer.origem()));
     }
 
-    /** Email/CPF já usados por OUTRO cliente viram 409; {@code selfId} é o próprio cliente em edição. */
-    private void ensureIdentifiersFree(Long selfId, String email, String cpf) {
-        if (email != null) {
-            customerRepository.findByEmail(email)
-                    .filter(c -> !c.id().equals(selfId))
-                    .ifPresent(c -> {
-                        throw new DuplicateCustomerEmailException(email);
-                    });
+    /**
+     * Telefone, email ou CPF já usados por OUTRO cliente viram 409 (CRM-C007); {@code selfId} é o
+     * próprio cliente em edição. Havendo mais de um, aponta o que bateu pelo identificador mais
+     * forte (CPF → email → telefone).
+     */
+    private void ensureIdentifiersFree(Long selfId, String contato, String email, String cpf) {
+        findMatches(contato, email, cpf).stream()
+                .filter(m -> !m.customer().id().equals(selfId))
+                .min(Comparator.comparingInt(CrmService::matchStrength))
+                .ifPresent(m -> {
+                    throw new CustomerAlreadyExistsException(m.matchedBy(), m.customer().id());
+                });
+    }
+
+    private static int matchStrength(CustomerMatch match) {
+        if (match.matchedBy().contains(CustomerMatchField.CPF)) {
+            return 0;
+        }
+        return match.matchedBy().contains(CustomerMatchField.EMAIL) ? 1 : 2;
+    }
+
+    /** Junta por cliente o que bateu em cada identificador informado; ordem por id. */
+    private List<CustomerMatch> findMatches(String contato, String email, String cpf) {
+        Map<Long, Customer> customers = new LinkedHashMap<>();
+        Map<Long, EnumSet<CustomerMatchField>> fields = new LinkedHashMap<>();
+        BiConsumer<Customer, CustomerMatchField> add = (c, field) -> {
+            customers.putIfAbsent(c.id(), c);
+            fields.computeIfAbsent(c.id(), k -> EnumSet.noneOf(CustomerMatchField.class)).add(field);
+        };
+        if (CustomerIdentifiers.digitsOrNull(contato) != null) {
+            customerRepository.findAllByContato(contato).forEach(c -> add.accept(c, CustomerMatchField.PHONE));
+        }
+        if (CustomerIdentifiers.normalizeEmailForMatch(email) != null) {
+            customerRepository.findAllByEmailIgnoreCase(email).forEach(c -> add.accept(c, CustomerMatchField.EMAIL));
         }
         if (cpf != null) {
-            customerRepository.findByCpf(cpf)
-                    .filter(c -> !c.id().equals(selfId))
-                    .ifPresent(c -> {
-                        throw new DuplicateCustomerCpfException(cpf);
-                    });
+            customerRepository.findByCpf(cpf).ifPresent(c -> add.accept(c, CustomerMatchField.CPF));
         }
+        return customers.values().stream()
+                .sorted(Comparator.comparing(Customer::id))
+                .map(c -> new CustomerMatch(c, fields.get(c.id())))
+                .toList();
     }
 
     @Override
@@ -229,6 +262,18 @@ public class CrmService implements CrmUseCase {
                     .orElseThrow(() -> new CustomerNotFoundException("contato " + contato));
         }
         throw new IllegalArgumentException("informe cpf, email ou contato para a busca");
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<CustomerMatch> lookupCustomers(String phone, String email, String cpf) {
+        String normalizedCpf = CustomerIdentifiers.normalizeCpf(cpf);
+        if (CustomerIdentifiers.digitsOrNull(phone) == null
+                && CustomerIdentifiers.normalizeEmailForMatch(email) == null
+                && normalizedCpf == null) {
+            throw new IllegalArgumentException("informe phone, email ou cpf para a busca");
+        }
+        return findMatches(phone, email, normalizedCpf);
     }
 
     @Override

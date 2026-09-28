@@ -61,7 +61,7 @@ public class CrmControllerSecurityTest {
         String email = "sec_test_" + System.nanoTime() + "@example.com";
         String location = mockMvc.perform(post("/crm/customers")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"nome\":\"Maria\",\"contato\":\"11999998888\",\"email\":\"" + email + "\"}")
+                .content("{\"nome\":\"Maria\",\"contato\":\"" + uniquePhone() + "\",\"email\":\"" + email + "\"}")
                 .with(user("gerente").authorities(
                         new SimpleGrantedAuthority("ROLE_ADMIN"),
                         new SimpleGrantedAuthority("CRM_CUSTOMER_MANAGE"))))
@@ -129,7 +129,7 @@ public class CrmControllerSecurityTest {
         String email = "sec_test_" + System.currentTimeMillis() + "@example.com";
         mockMvc.perform(post("/crm/customers")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"nome\":\"Maria\",\"contato\":\"11999998888\",\"email\":\"" + email + "\"}")
+                .content("{\"nome\":\"Maria\",\"contato\":\"" + uniquePhone() + "\",\"email\":\"" + email + "\"}")
                 .with(user("gerente").authorities(
                         new SimpleGrantedAuthority("ROLE_ADMIN"),
                         new SimpleGrantedAuthority("CRM_CUSTOMER_MANAGE"))))
@@ -147,6 +147,7 @@ public class CrmControllerSecurityTest {
     }
 
     /** Telefone único por teste, sem máscara (11 dígitos). */
+    /** Telefone único por teste: desde CRM-C007 telefone repetido barra o cadastro com 409. */
     private static String uniquePhone() {
         return "839" + String.format("%08d", System.nanoTime() % 100_000_000L);
     }
@@ -212,7 +213,7 @@ public class CrmControllerSecurityTest {
 
         mockMvc.perform(put("/crm/customers/" + id)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"nome\":\"Maria Editada\",\"contato\":\"11999998888\",\"cpf\":\"" + cpf + "\"}")
+                .content("{\"nome\":\"Maria Editada\",\"contato\":\"" + uniquePhone() + "\",\"cpf\":\"" + cpf + "\"}")
                 .with(user("gerente").authorities(
                         new SimpleGrantedAuthority("ROLE_ADMIN"),
                         new SimpleGrantedAuthority("CRM_CUSTOMER_MANAGE"))))
@@ -299,6 +300,21 @@ public class CrmControllerSecurityTest {
     }
 
     @Test
+    void lookup_contact_returns_empty_list_when_not_found() throws Exception {
+        mockMvc.perform(get("/crm/customers/lookup/contact").param("cpf", "99999999999")
+                .with(user("caixa").authorities(new SimpleGrantedAuthority("CRM_CUSTOMER_LOOKUP"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isEmpty());
+    }
+
+    @Test
+    void lookup_contact_without_crm_customer_lookup_returns_403() throws Exception {
+        mockMvc.perform(get("/crm/customers/lookup/contact").param("phone", "11999998888")
+                .with(user("bob").authorities(new SimpleGrantedAuthority("CRM_CUSTOMER_READ"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
     void lookup_customer_without_any_criteria_returns_400() throws Exception {
         mockMvc.perform(get("/crm/customers/lookup")
                 .with(user("caixa").authorities(new SimpleGrantedAuthority("CRM_CUSTOMER_LOOKUP"))))
@@ -323,6 +339,37 @@ public class CrmControllerSecurityTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.cpf").value(cpf))
                 .andExpect(jsonPath("$.nome").value("Cliente Balcao"));
+    }
+
+    @Test
+    void create_customer_with_existing_phone_returns_409_with_customer_id() throws Exception {
+        String phone = uniquePhone();
+        String location = mockMvc.perform(post("/crm/customers")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"nome\":\"Primeiro\",\"contato\":\"" + phone + "\"}")
+                .with(user("gerente").authorities(new SimpleGrantedAuthority("CRM_CUSTOMER_MANAGE"))))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getHeader("Location");
+        long id = Long.parseLong(location.substring(location.lastIndexOf('/') + 1));
+
+        // Mesmo número com DDI e máscara: bate pelo phone_normalized (dígitos, sem 55).
+        String masked = "+55 (" + phone.substring(0, 2) + ") " + phone.substring(2, 7) + "-" + phone.substring(7);
+        mockMvc.perform(post("/crm/customers")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"nome\":\"Segundo\",\"contato\":\"" + masked + "\"}")
+                .with(user("gerente").authorities(new SimpleGrantedAuthority("CRM_CUSTOMER_MANAGE"))))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.errorCode").value("CUSTOMER_ALREADY_EXISTS"))
+                .andExpect(jsonPath("$.customerId").value(id))
+                .andExpect(jsonPath("$.matchedBy[0]").value("PHONE"));
+
+        // O front manda só dígitos, sem DDI — casa com o contato gravado com +55 e máscara.
+        mockMvc.perform(get("/crm/customers/lookup/contact").param("phone", phone)
+                .with(user("caixa").authorities(new SimpleGrantedAuthority("CRM_CUSTOMER_LOOKUP"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(id))
+                .andExpect(jsonPath("$[0].nome").value("Primeiro"))
+                .andExpect(jsonPath("$[0].matchedBy[0]").value("PHONE"));
     }
 
     @Test

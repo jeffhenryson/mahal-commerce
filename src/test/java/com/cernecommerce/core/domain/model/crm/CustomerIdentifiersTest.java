@@ -35,4 +35,20 @@ class CustomerIdentifiersTest {
         assertThat(CustomerIdentifiers.digitsOrNull("+55 (83) 99999-0000")).isEqualTo("5583999990000");
         assertThat(CustomerIdentifiers.digitsOrNull("abc")).isNull();
     }
+
+    @Test
+    void normalizePhone_stripsMaskAndBrazilDdiOnly() {
+        assertThat(CustomerIdentifiers.normalizePhone("+55 (83) 99999-0000")).isEqualTo("83999990000");
+        assertThat(CustomerIdentifiers.normalizePhone("55 83 3222-1111")).isEqualTo("8332221111");
+        assertThat(CustomerIdentifiers.normalizePhone("(83) 99999-0000")).isEqualTo("83999990000");
+        // DDD 55 (RS) sem DDI: 11 dígitos, não é cortado.
+        assertThat(CustomerIdentifiers.normalizePhone("(55) 99999-0000")).isEqualTo("55999990000");
+        assertThat(CustomerIdentifiers.normalizePhone(" ")).isNull();
+    }
+
+    @Test
+    void normalizeEmailForMatch_trimsAndLowercases() {
+        assertThat(CustomerIdentifiers.normalizeEmailForMatch("  Maria@Example.COM ")).isEqualTo("maria@example.com");
+        assertThat(CustomerIdentifiers.normalizeEmailForMatch("")).isNull();
+    }
 }

@@ -8,6 +8,7 @@ import com.cernecommerce.core.domain.model.crm.CampaignTrigger;
 import com.cernecommerce.core.domain.model.crm.ChannelStatus;
 import com.cernecommerce.core.domain.model.crm.CrmDashboardOverview;
 import com.cernecommerce.core.domain.model.crm.Customer;
+import com.cernecommerce.core.domain.model.crm.CustomerMatch;
 import com.cernecommerce.core.domain.model.crm.CustomerNote;
 import com.cernecommerce.core.domain.model.crm.CustomerStage;
 import com.cernecommerce.core.domain.model.crm.LeadResolution;
@@ -30,10 +31,8 @@ public interface CrmUseCase {
      * {@code nome} e ao menos um identificador (cpf, email ou contato) são exigidos, checado no
      * compact constructor de {@link Customer}.
      *
-     * @throws com.cernecommerce.core.domain.exception.crm.DuplicateCustomerEmailException
-     *         se o email já estiver cadastrado
-     * @throws com.cernecommerce.core.domain.exception.crm.DuplicateCustomerCpfException
-     *         se o cpf já estiver cadastrado
+     * @throws com.cernecommerce.core.domain.exception.crm.CustomerAlreadyExistsException
+     *         se telefone, email ou cpf já estiverem cadastrados (CRM-C007)
      */
     Customer createCustomer(String nome, String contato, String email, String cpf, String origem);
 
@@ -43,10 +42,8 @@ public interface CrmUseCase {
      * normalização do cadastro ({@link com.cernecommerce.core.domain.model.crm.CustomerIdentifiers}).
      *
      * @throws com.cernecommerce.core.domain.exception.crm.CustomerNotFoundException se não existir
-     * @throws com.cernecommerce.core.domain.exception.crm.DuplicateCustomerEmailException
-     *         se o email pertencer a outro cliente
-     * @throws com.cernecommerce.core.domain.exception.crm.DuplicateCustomerCpfException
-     *         se o cpf pertencer a outro cliente
+     * @throws com.cernecommerce.core.domain.exception.crm.CustomerAlreadyExistsException
+     *         se telefone, email ou cpf pertencerem a outro cliente (CRM-C007)
      */
     Customer updateCustomer(Long id, String nome, String contato, String email, String cpf, String origem);
 
@@ -56,7 +53,7 @@ public interface CrmUseCase {
      * tinha —; não achando, cria em {@code NOVO_LEAD}. Nunca duplica o cliente só porque o
      * operador digitou o telefone com outra máscara.
      *
-     * @throws com.cernecommerce.core.domain.exception.crm.DuplicateCustomerCpfException
+     * @throws com.cernecommerce.core.domain.exception.crm.CustomerAlreadyExistsException
      *         se achou pelo telefone um cliente com CPF diferente do informado e o CPF informado já
      *         pertence a um terceiro
      */
@@ -87,6 +84,17 @@ public interface CrmUseCase {
      *         se não achar ninguém pelo critério informado
      */
     Customer lookupCustomer(String cpf, String email, String contato);
+
+    /**
+     * Quem já usa este telefone, email ou CPF (CRM-C007) — o PDV barra o cadastro duplicado e
+     * oferece selecionar o existente. Devolve TODOS os clientes que batem em qualquer
+     * um dos critérios informados — telefone só pelos dígitos, email aparado e sem diferenciar
+     * maiúsculas, CPF com ou sem máscara —, cada um com os campos que bateram. Lista vazia quando
+     * ninguém bate. Ordem por id.
+     *
+     * @throws IllegalArgumentException se nenhum critério for informado ou o CPF não tiver 11 dígitos
+     */
+    List<CustomerMatch> lookupCustomers(String phone, String email, String cpf);
 
     /**
      * Lista clientes paginados (mais recentes primeiro), filtrando por nome, contato, email ou CPF
