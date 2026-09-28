@@ -4,6 +4,8 @@ import com.cernecommerce.core.domain.model.pagamento.OrderPayment;
 import com.cernecommerce.core.domain.model.pagamento.PaymentMethod;
 
 import java.math.BigDecimal;
+import java.util.Map;
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -17,6 +19,10 @@ import java.util.List;
  * "conserte" isso de volta para uma linha nova sem reler o javadoc de {@code confirmCaptured}.</p>
  */
 public interface OrderPaymentRepository {
+
+    /** PDV-F026 — métodos {@code CAPTURED} distintos de cada pedido; pedido sem pagamento não aparece. */
+    Map<Long, List<PaymentMethod>> findCapturedMethodsByOrderIds(Collection<Long> orderIds);
+
 
     OrderPayment save(OrderPayment payment);
 

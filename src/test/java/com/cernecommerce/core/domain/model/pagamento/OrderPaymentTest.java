@@ -155,4 +155,29 @@ class OrderPaymentTest {
         assertThatThrownBy(() -> pending.confirmCaptured("txn-123", null))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("capturedAt");
     }
+
+    // ── PDV-F025 — canal e operadora ─────────────────────────────────────────────────────────
+
+    @Test
+    void captured_keepsChannelAndProvider_andTheRefundCopiesThem() {
+        OrderPayment pago = OrderPayment.captured(1L, PaymentMethod.CREDITO, new BigDecimal("50.00"), 2,
+                PaymentChannel.MAQUININHA, PaymentProvider.CIELO);
+
+        OrderPayment estorno = OrderPayment.refunded(pago);
+
+        assertThat(pago.channel()).isEqualTo(PaymentChannel.MAQUININHA);
+        assertThat(pago.provider()).isEqualTo(PaymentProvider.CIELO);
+        assertThat(estorno.channel()).isEqualTo(PaymentChannel.MAQUININHA);
+        assertThat(estorno.provider()).isEqualTo(PaymentProvider.CIELO);
+    }
+
+    @Test
+    void cash_hasNoChannel_andProviderNeedsAChannel() {
+        assertThatThrownBy(() -> OrderPayment.captured(1L, PaymentMethod.DINHEIRO, BigDecimal.TEN, null,
+                PaymentChannel.MAQUININHA, null)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> OrderPayment.captured(1L, PaymentMethod.PIX, BigDecimal.TEN, null,
+                null, PaymentProvider.INFINITYPAY)).isInstanceOf(IllegalArgumentException.class);
+        assertThat(OrderPayment.captured(1L, PaymentMethod.PIX, BigDecimal.TEN, null, PaymentChannel.LINK, null)
+                .channel()).isEqualTo(PaymentChannel.LINK);
+    }
 }
