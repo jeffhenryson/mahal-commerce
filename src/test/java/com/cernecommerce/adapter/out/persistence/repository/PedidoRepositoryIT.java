@@ -3,6 +3,11 @@ package com.cernecommerce.adapter.out.persistence.repository;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.Pricing;
 import com.cernecommerce.core.domain.model.pedido.Order;
+import com.cernecommerce.core.domain.model.pagamento.PaymentProvider;
+import com.cernecommerce.core.domain.model.pagamento.PaymentChannel;
+import com.cernecommerce.core.domain.model.pagamento.PaymentMethod;
+import com.cernecommerce.core.domain.model.pagamento.OrderPayment;
+import com.cernecommerce.core.domain.model.pedido.OrderFilter;
 import com.cernecommerce.core.domain.model.pedido.OrderItem;
 import com.cernecommerce.core.domain.model.pedido.OrderStatus;
 import com.cernecommerce.core.domain.model.pedido.SalesChannel;
@@ -20,6 +25,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -414,6 +420,48 @@ class PedidoRepositoryIT {
 
         assertThat(page.content()).allSatisfy(order -> assertThat(order.status()).isEqualTo(OrderStatus.RESERVADO));
         assertThat(page.content()).isNotEmpty();
+    }
+
+    // ── PDV-F026 — filtros de caixa, comanda e número; métodos pagos em lote ─────────────────
+
+    @Autowired OrderPaymentRepositoryImpl orderPaymentRepository;
+
+    @Test
+    void findAll_filtersBySessionComandaAndOrderNumber() {
+        Order doCaixa = orderRepository.save(Order.openBalcao(777001L, "LOJA-01", null, twoCharcoals(null))
+                .concluded(orderRepository.nextOrderNumber(), null, Instant.now()));
+        orderRepository.save(Order.openBalcao(777002L, "LOJA-01", null, twoCharcoals(null))
+                .concluded(orderRepository.nextOrderNumber(), null, Instant.now()));
+        Order daMesa = orderRepository.save(Order.openMesa(777001L, "LOJA-01", null, 888001L, "Mesa 4",
+                twoCharcoals(null)).concluded(orderRepository.nextOrderNumber(), null, Instant.now()));
+        flushAndClear();
+
+        assertThat(orderRepository.findAll(new OrderFilter(null, null, null, null, null, 777001L, null, null), 0, 20)
+                .content()).extracting(Order::id).containsExactlyInAnyOrder(doCaixa.id(), daMesa.id());
+        assertThat(orderRepository.findAll(new OrderFilter(null, null, null, null, null, null, 888001L, null), 0, 20)
+                .content()).extracting(Order::id).containsExactly(daMesa.id());
+        assertThat(orderRepository.findAll(new OrderFilter(null, null, null, null, null, null, null,
+                " " + doCaixa.orderNumber() + " "), 0, 20).content()).extracting(Order::id).containsExactly(doCaixa.id());
+    }
+
+    @Test
+    void findCapturedMethodsByOrderIds_groupsDistinctCapturedMethodsPerOrder() {
+        Order a = orderRepository.save(concludedBalcao(twoCharcoals(null)));
+        Order b = orderRepository.save(concludedBalcao(twoCharcoals(null)));
+        orderPaymentRepository.save(OrderPayment.captured(a.id(), PaymentMethod.DINHEIRO, new BigDecimal("20.00"), null));
+        orderPaymentRepository.save(OrderPayment.captured(a.id(), PaymentMethod.DINHEIRO, new BigDecimal("10.00"), null));
+        OrderPayment pix = orderPaymentRepository.save(OrderPayment.captured(a.id(), PaymentMethod.PIX,
+                new BigDecimal("14.00"), null, PaymentChannel.LINK, PaymentProvider.INFINITYPAY));
+        orderPaymentRepository.save(OrderPayment.refunded(pix));
+        flushAndClear();
+
+        Map<Long, List<PaymentMethod>> methods = orderPaymentRepository.findCapturedMethodsByOrderIds(
+                List.of(a.id(), b.id()));
+
+        assertThat(methods.get(a.id())).containsExactlyInAnyOrder(PaymentMethod.DINHEIRO, PaymentMethod.PIX);
+        assertThat(methods).doesNotContainKey(b.id());
+        assertThat(orderPaymentRepository.findByOrderId(a.id())).filteredOn(p -> p.method() == PaymentMethod.PIX)
+                .allSatisfy(p -> assertThat(p.channel()).isEqualTo(PaymentChannel.LINK));
     }
 
     // ── productName no item do pedido (BACKEND_TODO.md do mahal-admin) ────────────────────────

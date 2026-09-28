@@ -1,5 +1,11 @@
 package com.cernecommerce.core.service;
 
+import com.cernecommerce.core.domain.model.pedido.OrderDelivery;
+import com.cernecommerce.core.domain.model.pedido.DeliveryType;
+import com.cernecommerce.core.domain.model.pedido.DeliveryMethod;
+import com.cernecommerce.core.domain.model.pedido.DeliveryAddress;
+import com.cernecommerce.core.domain.exception.pedido.OrderHasNoDeliveryException;
+import com.cernecommerce.core.domain.exception.pedido.OrderDeliveryNotEditableException;
 import com.cernecommerce.core.domain.exception.pedido.InvalidOrderStatusTransitionException;
 import com.cernecommerce.core.domain.exception.pedido.OrderNotFoundException;
 import com.cernecommerce.core.domain.model.PageResult;
@@ -398,5 +404,50 @@ class OrderServiceTest {
 
         verify(estoqueUseCase, never()).adjustStock(any(), any(), any(), any(), any(), any(), any(), any());
         verify(orderRepository, never()).save(any());
+    }
+
+    // ── PDV-F022: edição da entrega depois da venda ──────────────────────────────────────────
+
+    private static OrderDelivery correios() {
+        return new OrderDelivery(DeliveryType.ENTREGA,
+                new DeliveryAddress("Rua A", "10", null, null, null, "João Pessoa", "PB", null, null),
+                DeliveryMethod.CORREIOS, null, null, null, null, null, new BigDecimal("15.00"));
+    }
+
+    private static OrderDelivery.Patch tracking(String code) {
+        return new OrderDelivery.Patch(null, null, null, null, null, null, null, code, null);
+    }
+
+    @Test
+    void updateDelivery_savesTheMergedDelivery() {
+        Order order = Order.openBalcao(1L, "LOJA-01", null, twoCharcoals(), correios())
+                .reserved("000000001", null, NOW);
+        when(orderRepository.findById(1L)).thenReturn(Optional.of(order));
+        when(orderRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Order updated = orderService.updateDelivery(1L, tracking("BR1BR"), "gerente");
+
+        assertThat(updated.delivery().trackingCode()).isEqualTo("BR1BR");
+        assertThat(updated.delivery().fee()).isEqualByComparingTo("15.00");
+    }
+
+    @Test
+    void updateDelivery_refusesOrderWithoutDelivery() {
+        Order order = Order.openBalcao(1L, "LOJA-01", null, twoCharcoals()).concluded("000000001", null, NOW);
+        when(orderRepository.findById(1L)).thenReturn(Optional.of(order));
+
+        assertThatThrownBy(() -> orderService.updateDelivery(1L, tracking("X"), "gerente"))
+                .isInstanceOf(OrderHasNoDeliveryException.class);
+        verify(orderRepository, never()).save(any());
+    }
+
+    @Test
+    void updateDelivery_refusesRefundedOrder() {
+        Order order = Order.openBalcao(1L, "LOJA-01", null, twoCharcoals(), correios())
+                .reserved("000000001", null, NOW).refunded("desistiu", NOW);
+        when(orderRepository.findById(1L)).thenReturn(Optional.of(order));
+
+        assertThatThrownBy(() -> orderService.updateDelivery(1L, tracking("X"), "gerente"))
+                .isInstanceOf(OrderDeliveryNotEditableException.class);
     }
 }

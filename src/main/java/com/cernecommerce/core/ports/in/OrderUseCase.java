@@ -3,10 +3,15 @@ package com.cernecommerce.core.ports.in;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.pagamento.OrderPayment;
 import com.cernecommerce.core.domain.model.pedido.Order;
+import com.cernecommerce.core.domain.model.pagamento.PaymentMethod;
+import com.cernecommerce.core.domain.model.pedido.OrderFilter;
+import com.cernecommerce.core.domain.model.pedido.OrderDelivery;
 import com.cernecommerce.core.domain.model.pedido.OrderStatus;
 import com.cernecommerce.core.domain.model.pedido.SalesChannel;
 
 import java.time.Instant;
+import java.util.Map;
+import java.util.Collection;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -22,6 +27,15 @@ public interface OrderUseCase {
     /** Listagem filtrada, do mais recente para o mais antigo. Filtro {@code null} é ignorado. */
     PageResult<Order> listOrders(SalesChannel channel, OrderStatus status, Long customerId,
             Instant from, Instant to, int page, int size);
+
+    /** Listagem com os filtros de caixa, comanda e número do pedido (PDV-F026). */
+    PageResult<Order> listOrders(OrderFilter filter, int page, int size);
+
+    /**
+     * PDV-F026 — métodos {@code CAPTURED} de cada pedido informado, numa consulta só: a listagem
+     * mostra como cada pedido foi pago sem abrir um recibo por linha.
+     */
+    Map<Long, List<PaymentMethod>> getCapturedPaymentMethods(Collection<Long> orderIds);
 
     /**
      * Busca um pedido pelo id.
@@ -45,6 +59,20 @@ public interface OrderUseCase {
      *         se a transição não for permitida pela máquina de estados
      */
     Order changeStatus(Long orderId, OrderStatus newStatus, String username);
+
+    /**
+     * Edita a entrega de um pedido depois da venda (PDV-F022) — códigos da 99, rastreio dos
+     * Correios, entregador, correção de endereço. Campo {@code null} mantém o atual.
+     *
+     * @throws com.cernecommerce.core.domain.exception.pedido.OrderNotFoundException se não existir
+     * @throws com.cernecommerce.core.domain.exception.pedido.OrderHasNoDeliveryException
+     *         se o pedido não foi vendido com entrega ou retirada
+     * @throws com.cernecommerce.core.domain.exception.pedido.OrderDeliveryNotEditableException
+     *         se o pedido estiver cancelado ou reembolsado
+     * @throws com.cernecommerce.core.domain.exception.pedido.InvalidDeliveryException
+     *         se tentar mudar a taxa ou o tipo, ou deixar o endereço incompleto
+     */
+    Order updateDelivery(Long orderId, OrderDelivery.Patch patch, String username);
 
     /**
      * Cancela um pedido ANTES de qualquer pagamento confirmado e <b>libera a reserva de

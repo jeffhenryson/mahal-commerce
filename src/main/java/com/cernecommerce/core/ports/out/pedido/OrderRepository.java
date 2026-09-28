@@ -2,6 +2,7 @@ package com.cernecommerce.core.ports.out.pedido;
 
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.pedido.Order;
+import com.cernecommerce.core.domain.model.pedido.OrderFilter;
 import com.cernecommerce.core.domain.model.pedido.OrderStatus;
 import com.cernecommerce.core.domain.model.pedido.SalesChannel;
 
@@ -34,6 +35,9 @@ public interface OrderRepository {
      */
     PageResult<Order> findAll(SalesChannel channel, OrderStatus status, Long customerId,
             Instant from, Instant to, int page, int size);
+
+    /** Mesma listagem, com os filtros de caixa, comanda e número do pedido (PDV-F026). */
+    PageResult<Order> findAll(OrderFilter filter, int page, int size);
 
     /**
      * Soma do líquido dos pedidos <b>concluídos</b> da sessão — a receita que a sessão gerou.

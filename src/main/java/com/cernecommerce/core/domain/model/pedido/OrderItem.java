@@ -47,7 +47,8 @@ public record OrderItem(
         ConsumptionMode mode,
         boolean courtesy,
         String notes,
-        BigDecimal surchargeAmount) {
+        BigDecimal surchargeAmount,
+        String charcoal) {
 
     public OrderItem {
         if (sku == null || sku.isBlank()) {
@@ -127,7 +128,7 @@ public record OrderItem(
             }
         }
         return new OrderItem(null, sku, quantity, pricing.effectivePrice(), pricing.costPrice(),
-                discountAmount, null, productName, ConsumptionMode.NORMAL, false, null, null);
+                discountAmount, null, productName, ConsumptionMode.NORMAL, false, null, null, null);
     }
 
     /**
@@ -172,20 +173,41 @@ public record OrderItem(
     public static OrderItem of(Long id, String sku, BigDecimal quantity, BigDecimal unitPrice,
             BigDecimal costPrice, BigDecimal discountAmount, BigDecimal cashbackPercent, String productName,
             ConsumptionMode mode, boolean courtesy, String notes, BigDecimal surchargeAmount) {
+        return of(id, sku, quantity, unitPrice, costPrice, discountAmount, cashbackPercent, productName, mode,
+                courtesy, notes, surchargeAmount, null);
+    }
+
+    /**
+     * Reconstitui um item com o carvão da sessão (PDV-F024) — só registro, sem efeito em preço. Nulo
+     * em toda linha que não é sessão do cardápio.
+     */
+    public static OrderItem of(Long id, String sku, BigDecimal quantity, BigDecimal unitPrice,
+            BigDecimal costPrice, BigDecimal discountAmount, BigDecimal cashbackPercent, String productName,
+            ConsumptionMode mode, boolean courtesy, String notes, BigDecimal surchargeAmount, String charcoal) {
         return new OrderItem(id, sku, quantity, unitPrice, costPrice, discountAmount, cashbackPercent, productName,
-                mode, courtesy, notes, surchargeAmount);
+                mode, courtesy, notes, surchargeAmount, charcoal);
     }
 
     /** Carimba a taxa de cashback vigente. Cópia — o item permanece imutável. */
     public OrderItem withCashbackPercent(BigDecimal newCashbackPercent) {
         return new OrderItem(id, sku, quantity, unitPrice, costPrice, discountAmount, newCashbackPercent, productName,
-                mode, courtesy, notes, surchargeAmount);
+                mode, courtesy, notes, surchargeAmount, charcoal);
+    }
+
+    /**
+     * Observação livre da linha (PDV-F022) — "sem gelo", "embrulhar para presente". Mesma coluna
+     * {@code notes} que a mesa já usava; o limite de tamanho é validado na borda.
+     */
+    public OrderItem withNotes(String newNotes) {
+        String trimmed = newNotes == null || newNotes.isBlank() ? null : newNotes.trim();
+        return new OrderItem(id, sku, quantity, unitPrice, costPrice, discountAmount, cashbackPercent, productName,
+                mode, courtesy, trimmed, surchargeAmount, charcoal);
     }
 
     /** Concede desconto neste item. Cópia — o item permanece imutável. */
     public OrderItem withDiscount(BigDecimal newDiscountAmount) {
         return new OrderItem(id, sku, quantity, unitPrice, costPrice, newDiscountAmount, cashbackPercent, productName,
-                mode, courtesy, notes, surchargeAmount);
+                mode, courtesy, notes, surchargeAmount, charcoal);
     }
 
     /**

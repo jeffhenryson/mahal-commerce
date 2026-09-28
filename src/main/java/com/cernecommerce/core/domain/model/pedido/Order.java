@@ -4,7 +4,10 @@ import com.cernecommerce.core.domain.exception.pedido.InvalidOrderStatusTransiti
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Collections;
+import java.util.EnumSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Pedido de venda, de qualquer canal (PDV-F003).
@@ -65,7 +68,8 @@ public record Order(
         long version,
         Long comandaId,
         String tableLabel,
-        BigDecimal serviceFeeAmount) {
+        BigDecimal serviceFeeAmount,
+        OrderDelivery delivery) {
 
     public Order {
         if (channel == null) {
@@ -145,6 +149,12 @@ public record Order(
             }
         }
 
+        // PDV-F022 — entrega/retirada é do balcão. A mesa consome no salão, e o marketplace ainda
+        // não tem frete modelado (quando tiver, esta regra é o lugar de abrir).
+        if (delivery != null && channel != SalesChannel.BALCAO) {
+            throw new IllegalArgumentException("delivery só existe em pedido de BALCAO: channel=" + channel);
+        }
+
         // Estado e carimbo de tempo não podem discordar: é a invariante que o CHECK do schema
         // espelha, para sobreviver a carga direta e script de correção.
         if ((status == OrderStatus.CANCELADO) != (cancelledAt != null)) {
@@ -179,11 +189,21 @@ public record Order(
      * ao depósito do caixa aberto e fecha o buraco de isolamento do módulo.</p>
      */
     public static Order openBalcao(Long sessionId, String warehouseCode, Long customerId, List<OrderItem> items) {
+        return openBalcao(sessionId, warehouseCode, customerId, items, null);
+    }
+
+    /**
+     * Igual a {@link #openBalcao(Long, String, Long, List)}, com entrega ou retirada (PDV-F022).
+     * Com {@code delivery}, quem chama fixa a venda via {@link #reserved}, nunca {@link #concluded}:
+     * a mercadoria ainda não saiu da loja.
+     */
+    public static Order openBalcao(Long sessionId, String warehouseCode, Long customerId, List<OrderItem> items,
+            OrderDelivery delivery) {
         Totals totals = Totals.from(items);
         return new Order(null, null, SalesChannel.BALCAO, OrderStatus.CRIADO, customerId, sessionId,
                 warehouseCode, items, totals.gross(), totals.discount(), BigDecimal.ZERO, totals.net(),
                 null, null, Instant.now(), null, null, null, null, null, null, null, null, 0L, null, null,
-                BigDecimal.ZERO);
+                BigDecimal.ZERO, delivery);
     }
 
     /**
@@ -210,7 +230,7 @@ public record Order(
         return new Order(null, null, SalesChannel.MESA, OrderStatus.CRIADO, customerId, sessionId,
                 warehouseCode, items, totals.gross(), totals.discount(), BigDecimal.ZERO, totals.net(),
                 null, null, Instant.now(), null, null, null, null, null, null, null, null, 0L,
-                comandaId, tableLabel, BigDecimal.ZERO);
+                comandaId, tableLabel, BigDecimal.ZERO, null);
     }
 
     /**
@@ -222,7 +242,7 @@ public record Order(
         return new Order(null, null, SalesChannel.MARKETPLACE, OrderStatus.AGUARDANDO_PAGAMENTO, customerId,
                 null, warehouseCode, items, totals.gross(), totals.discount(), BigDecimal.ZERO, totals.net(),
                 null, null, Instant.now(), null, null, null, null, null, null, null, null, 0L, null, null,
-                BigDecimal.ZERO);
+                BigDecimal.ZERO, null);
     }
 
     /**
@@ -291,8 +311,8 @@ public record Order(
     }
 
     /**
-     * Reconstitui um pedido a partir de persistência — forma canônica, com a taxa de serviço
-     * (PDV-F015).
+     * Reconstitui um pedido a partir de persistência — forma com a taxa de serviço (PDV-F015) e
+     * sem entrega (dado anterior a PDV-F022, ou venda sem entrega).
      */
     public static Order of(Long id, String orderNumber, SalesChannel channel, OrderStatus status,
             Long customerId, Long sessionId, String warehouseCode, List<OrderItem> items,
@@ -301,10 +321,26 @@ public record Order(
             Instant paidAt, Instant concludedAt, Instant cancelledAt, Instant refundedAt, Instant reservedAt,
             Instant separatedAt, Instant shippedAt, Instant deliveredAt, long version, Long comandaId,
             String tableLabel, BigDecimal serviceFeeAmount) {
+        return of(id, orderNumber, channel, status, customerId, sessionId, warehouseCode, items,
+                grossAmount, discountAmount, cashbackRedeemed, netAmount, changeAmount, cancelReason,
+                createdAt, paidAt, concludedAt, cancelledAt, refundedAt, reservedAt, separatedAt, shippedAt,
+                deliveredAt, version, comandaId, tableLabel, serviceFeeAmount, null);
+    }
+
+    /**
+     * Reconstitui um pedido a partir de persistência — forma canônica, com a entrega (PDV-F022).
+     */
+    public static Order of(Long id, String orderNumber, SalesChannel channel, OrderStatus status,
+            Long customerId, Long sessionId, String warehouseCode, List<OrderItem> items,
+            BigDecimal grossAmount, BigDecimal discountAmount, BigDecimal cashbackRedeemed,
+            BigDecimal netAmount, BigDecimal changeAmount, String cancelReason, Instant createdAt,
+            Instant paidAt, Instant concludedAt, Instant cancelledAt, Instant refundedAt, Instant reservedAt,
+            Instant separatedAt, Instant shippedAt, Instant deliveredAt, long version, Long comandaId,
+            String tableLabel, BigDecimal serviceFeeAmount, OrderDelivery delivery) {
         return new Order(id, orderNumber, channel, status, customerId, sessionId, warehouseCode, items,
                 grossAmount, discountAmount, cashbackRedeemed, netAmount, changeAmount, cancelReason,
                 createdAt, paidAt, concludedAt, cancelledAt, refundedAt, reservedAt, separatedAt, shippedAt,
-                deliveredAt, version, comandaId, tableLabel, serviceFeeAmount);
+                deliveredAt, version, comandaId, tableLabel, serviceFeeAmount, delivery);
     }
 
     /**
@@ -322,7 +358,7 @@ public record Order(
         return new Order(id, orderNumber, channel, OrderStatus.CONCLUIDO, customerId, sessionId,
                 warehouseCode, items, grossAmount, discountAmount, cashbackRedeemed, netAmount,
                 changeAmount, cancelReason, createdAt, paidAt == null ? concludedAt : paidAt,
-                concludedAt, null, null, reservedAt, separatedAt, shippedAt, deliveredAt, version, comandaId, tableLabel, serviceFeeAmount);
+                concludedAt, null, null, reservedAt, separatedAt, shippedAt, deliveredAt, version, comandaId, tableLabel, serviceFeeAmount, delivery);
     }
 
     /**
@@ -346,7 +382,7 @@ public record Order(
         return new Order(id, orderNumber, channel, OrderStatus.RESERVADO, customerId, sessionId,
                 warehouseCode, items, grossAmount, discountAmount, cashbackRedeemed, netAmount,
                 changeAmount, cancelReason, createdAt, paidAt == null ? reservedAt : paidAt,
-                null, null, null, reservedAt, separatedAt, shippedAt, deliveredAt, version, comandaId, tableLabel, serviceFeeAmount);
+                null, null, null, reservedAt, separatedAt, shippedAt, deliveredAt, version, comandaId, tableLabel, serviceFeeAmount, delivery);
     }
 
     /**
@@ -361,7 +397,7 @@ public record Order(
         return new Order(id, orderNumber, channel, OrderStatus.CONCLUIDO, customerId, sessionId,
                 warehouseCode, items, grossAmount, discountAmount, cashbackRedeemed, netAmount,
                 changeAmount, cancelReason, createdAt, paidAt, concludedAt, null, null, reservedAt,
-                separatedAt, shippedAt, deliveredAt, version, comandaId, tableLabel, serviceFeeAmount);
+                separatedAt, shippedAt, deliveredAt, version, comandaId, tableLabel, serviceFeeAmount, delivery);
     }
 
     /** Marca o pagamento como confirmado — caminho do marketplace, disparado pelo webhook. */
@@ -370,7 +406,7 @@ public record Order(
         return new Order(id, orderNumber, channel, OrderStatus.PAGO, customerId, sessionId, warehouseCode,
                 items, grossAmount, discountAmount, cashbackRedeemed, netAmount, changeAmount, cancelReason,
                 createdAt, paidAt, concludedAt, null, null, reservedAt, separatedAt, shippedAt, deliveredAt,
-                version, comandaId, tableLabel, serviceFeeAmount);
+                version, comandaId, tableLabel, serviceFeeAmount, delivery);
     }
 
     /**
@@ -387,7 +423,7 @@ public record Order(
         return new Order(id, orderNumber, channel, newStatus, customerId, sessionId, warehouseCode, items,
                 grossAmount, discountAmount, cashbackRedeemed, netAmount, changeAmount, cancelReason,
                 createdAt, paidAt, concludedAt, null, null, reservedAt, newSeparatedAt, newShippedAt,
-                newDeliveredAt, version, comandaId, tableLabel, serviceFeeAmount);
+                newDeliveredAt, version, comandaId, tableLabel, serviceFeeAmount, delivery);
     }
 
     /**
@@ -404,7 +440,7 @@ public record Order(
         return new Order(id, orderNumber, channel, OrderStatus.CANCELADO, customerId, sessionId,
                 warehouseCode, items, grossAmount, discountAmount, cashbackRedeemed, netAmount,
                 changeAmount, reason, createdAt, paidAt, concludedAt, cancelledAt, null, reservedAt,
-                separatedAt, shippedAt, deliveredAt, version, comandaId, tableLabel, serviceFeeAmount);
+                separatedAt, shippedAt, deliveredAt, version, comandaId, tableLabel, serviceFeeAmount, delivery);
     }
 
     /**
@@ -420,7 +456,7 @@ public record Order(
         return new Order(id, orderNumber, channel, OrderStatus.REEMBOLSADO, customerId, sessionId,
                 warehouseCode, items, grossAmount, discountAmount, cashbackRedeemed, netAmount,
                 changeAmount, reason, createdAt, paidAt, concludedAt, null, refundedAt, reservedAt,
-                separatedAt, shippedAt, deliveredAt, version, comandaId, tableLabel, serviceFeeAmount);
+                separatedAt, shippedAt, deliveredAt, version, comandaId, tableLabel, serviceFeeAmount, delivery);
     }
 
     /**
@@ -435,7 +471,7 @@ public record Order(
         return new Order(id, orderNumber, channel, status, customerId, sessionId, warehouseCode, items,
                 grossAmount, discountAmount, value, newNet, changeAmount, cancelReason, createdAt,
                 paidAt, concludedAt, cancelledAt, refundedAt, reservedAt, separatedAt, shippedAt,
-                deliveredAt, version, comandaId, tableLabel, serviceFeeAmount);
+                deliveredAt, version, comandaId, tableLabel, serviceFeeAmount, delivery);
     }
 
     /**
@@ -458,7 +494,7 @@ public record Order(
         return new Order(id, orderNumber, channel, status, customerId, newSessionId, warehouseCode,
                 items, grossAmount, discountAmount, cashbackRedeemed, netAmount, changeAmount,
                 cancelReason, createdAt, paidAt, concludedAt, cancelledAt, refundedAt, reservedAt,
-                separatedAt, shippedAt, deliveredAt, version, comandaId, tableLabel, serviceFeeAmount);
+                separatedAt, shippedAt, deliveredAt, version, comandaId, tableLabel, serviceFeeAmount, delivery);
     }
 
     /** Vincula o pedido a um cliente identificado depois da montagem — o "CPF na nota?" do balcão. */
@@ -466,7 +502,7 @@ public record Order(
         return new Order(id, orderNumber, channel, status, newCustomerId, sessionId, warehouseCode, items,
                 grossAmount, discountAmount, cashbackRedeemed, netAmount, changeAmount, cancelReason,
                 createdAt, paidAt, concludedAt, cancelledAt, refundedAt, reservedAt, separatedAt, shippedAt,
-                deliveredAt, version, comandaId, tableLabel, serviceFeeAmount);
+                deliveredAt, version, comandaId, tableLabel, serviceFeeAmount, delivery);
     }
 
     /**
@@ -479,7 +515,40 @@ public record Order(
      * Fora da mesa os dois coincidem sempre, porque a taxa é zero.</p>
      */
     public BigDecimal totalPayable() {
-        return netAmount.add(serviceFeeAmount);
+        return netAmount.add(serviceFeeAmount).add(deliveryFee());
+    }
+
+    /** Taxa de entrega (PDV-F022), zero quando não há entrega. Fora do líquido, como a taxa de serviço. */
+    public BigDecimal deliveryFee() {
+        return delivery == null ? BigDecimal.ZERO : delivery.fee();
+    }
+
+    /**
+     * Troca os dados de entrega — o {@code PATCH /orders/{id}/delivery} (PDV-F022). Quem valida o
+     * que pode mudar é {@link OrderDelivery#withPatch}: tipo e taxa ficam congelados.
+     */
+    public Order withDelivery(OrderDelivery newDelivery) {
+        return new Order(id, orderNumber, channel, status, customerId, sessionId, warehouseCode, items,
+                grossAmount, discountAmount, cashbackRedeemed, netAmount, changeAmount, cancelReason,
+                createdAt, paidAt, concludedAt, cancelledAt, refundedAt, reservedAt, separatedAt, shippedAt,
+                deliveredAt, version, comandaId, tableLabel, serviceFeeAmount, newDelivery);
+    }
+
+    /**
+     * Estados alcançáveis a partir do atual, para ESTE pedido. Difere de
+     * {@link OrderStatus#allowedTransitions()} num ponto só (PDV-F022): uma venda reservada com
+     * {@link DeliveryType#ENTREGA} segue a esteira de expedição ({@code RESERVADO → SEPARADO}); a
+     * reservada para retirada não — ela termina no balcão, via {@link #pickedUp}.
+     */
+    public Set<OrderStatus> allowedTransitions() {
+        Set<OrderStatus> allowed = status.allowedTransitions();
+        if (status == OrderStatus.RESERVADO && (delivery == null || !delivery.isEntrega())) {
+            EnumSet<OrderStatus> copy = EnumSet.noneOf(OrderStatus.class);
+            copy.addAll(allowed);
+            copy.remove(OrderStatus.SEPARADO);
+            return Collections.unmodifiableSet(copy);
+        }
+        return allowed;
     }
 
     /**
@@ -503,7 +572,31 @@ public record Order(
         return new Order(id, orderNumber, channel, status, customerId, sessionId, warehouseCode, items,
                 grossAmount, discountAmount, cashbackRedeemed, netAmount, changeAmount, cancelReason,
                 createdAt, paidAt, concludedAt, cancelledAt, refundedAt, reservedAt, separatedAt, shippedAt,
-                deliveredAt, version, comandaId, tableLabel, fee);
+                deliveredAt, version, comandaId, tableLabel, fee, delivery);
+    }
+
+    /**
+     * PDV-F023 — taxa de serviço só sobre as linhas de catálogo: a sessão de narguilé
+     * ({@code SESSAO}/{@code ROSH_EXTRA}) nunca leva os 10%, qualquer que seja o pedido do cliente
+     * HTTP. A base é o líquido de cada linha, então o desconto já rateado continua abatido dela.
+     */
+    public Order withServiceFeeOnCatalogLines(BigDecimal percent) {
+        if (percent == null || percent.signum() <= 0) {
+            return this;
+        }
+        BigDecimal base = items.stream()
+                .filter(i -> i.mode() == null || i.mode().isCatalogLine())
+                .map(OrderItem::netAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        if (base.signum() <= 0) {
+            return this;
+        }
+        BigDecimal fee = base.multiply(percent)
+                .divide(BigDecimal.valueOf(100), 2, java.math.RoundingMode.HALF_UP);
+        return new Order(id, orderNumber, channel, status, customerId, sessionId, warehouseCode, items,
+                grossAmount, discountAmount, cashbackRedeemed, netAmount, changeAmount, cancelReason,
+                createdAt, paidAt, concludedAt, cancelledAt, refundedAt, reservedAt, separatedAt, shippedAt,
+                deliveredAt, version, comandaId, tableLabel, fee, delivery);
     }
 
     /** Soma do cashback gerado por todos os itens; ignora itens sem taxa carimbada. */
@@ -520,8 +613,9 @@ public record Order(
     }
 
     private void requireTransition(OrderStatus target) {
-        if (!status.canTransitionTo(target)) {
-            throw new InvalidOrderStatusTransitionException(id, status, target);
+        Set<OrderStatus> allowed = allowedTransitions();
+        if (target == null || !allowed.contains(target)) {
+            throw new InvalidOrderStatusTransitionException(id, status, target, allowed);
         }
     }
 

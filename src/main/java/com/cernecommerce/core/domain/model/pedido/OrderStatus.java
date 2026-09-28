@@ -89,7 +89,9 @@ public enum OrderStatus {
             // A retirada normal é RESERVADO -> CONCLUIDO (Order.pickedUp). REEMBOLSADO cobre o
             // caso do cliente que pagou e nunca voltou para retirar — o dinheiro já foi capturado
             // e o estoque já saiu, então é reembolso, não cancelamento (mesma régua de PAGO acima).
-            RESERVADO, EnumSet.of(CONCLUIDO, REEMBOLSADO));
+            // SEPARADO é a venda de balcão com ENTREGA (PDV-F022) entrando na esteira de expedição;
+            // Order.allowedTransitions() o retira quando a reserva é só para retirada.
+            RESERVADO, EnumSet.of(CONCLUIDO, SEPARADO, REEMBOLSADO));
 
     /**
      * Indica se este estado é final — nenhuma transição parte dele.

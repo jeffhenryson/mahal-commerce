@@ -138,6 +138,26 @@ public class OrdersControllerSecurityTest {
                 .andExpect(status().isNotFound());
     }
 
+    // PDV-F022 — PATCH /orders/{id}/delivery exige ORDER_FULFILL, como a esteira de status.
+
+    @Test
+    void update_delivery_without_order_fulfill_returns_403() throws Exception {
+        mockMvc.perform(patch("/orders/999999/delivery")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"trackingCode\":\"BR1BR\"}")
+                .with(user("bob").authorities(new SimpleGrantedAuthority("PDV_SALE_MANAGE"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void update_delivery_with_order_fulfill_returns_404_for_inexistent() throws Exception {
+        mockMvc.perform(patch("/orders/999999/delivery")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"trackingCode\":\"BR1BR\"}")
+                .with(user("gerente").authorities(new SimpleGrantedAuthority("ORDER_FULFILL"))))
+                .andExpect(status().isNotFound());
+    }
+
     @Test
     void cancel_order_without_order_cancel_returns_403() throws Exception {
         mockMvc.perform(post("/orders/999999/cancel")

@@ -1,11 +1,16 @@
 package com.cernecommerce.core.service;
 
+import com.cernecommerce.core.domain.exception.pedido.OrderDeliveryNotEditableException;
+import com.cernecommerce.core.domain.exception.pedido.OrderHasNoDeliveryException;
 import com.cernecommerce.core.domain.exception.pedido.OrderNotFoundException;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.pagamento.OrderPayment;
 import com.cernecommerce.core.domain.model.pagamento.PaymentStatus;
 import com.cernecommerce.core.domain.model.pedido.Order;
+import com.cernecommerce.core.domain.model.pagamento.PaymentMethod;
+import com.cernecommerce.core.domain.model.pedido.OrderFilter;
+import com.cernecommerce.core.domain.model.pedido.OrderDelivery;
 import com.cernecommerce.core.domain.model.pedido.OrderItem;
 import com.cernecommerce.core.domain.model.pedido.OrderStatus;
 import com.cernecommerce.core.domain.model.pedido.SalesChannel;
@@ -17,6 +22,7 @@ import com.cernecommerce.core.ports.out.pedido.OrderRepository;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -46,6 +52,21 @@ public class OrderService implements OrderUseCase {
 
     @Override
     @Transactional(readOnly = true)
+    public PageResult<Order> listOrders(OrderFilter filter, int page, int size) {
+        return orderRepository.findAll(filter, page, size);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Map<Long, List<PaymentMethod>> getCapturedPaymentMethods(Collection<Long> orderIds) {
+        if (orderIds == null || orderIds.isEmpty()) {
+            return Map.of();
+        }
+        return orderPaymentRepository.findCapturedMethodsByOrderIds(orderIds);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public Order getOrder(Long orderId) {
         return orderRepository.findById(orderId).orElseThrow(() -> new OrderNotFoundException(orderId));
     }
@@ -68,6 +89,19 @@ public class OrderService implements OrderUseCase {
                 ? order.pickedUp(Instant.now())
                 : order.withStatus(newStatus);
         return orderRepository.save(updated);
+    }
+
+    @Override
+    @Transactional
+    public Order updateDelivery(Long orderId, OrderDelivery.Patch patch, String username) {
+        Order order = getOrder(orderId);
+        if (order.delivery() == null) {
+            throw new OrderHasNoDeliveryException(orderId);
+        }
+        if (order.status() == OrderStatus.CANCELADO || order.status() == OrderStatus.REEMBOLSADO) {
+            throw new OrderDeliveryNotEditableException(orderId, order.status());
+        }
+        return orderRepository.save(order.withDelivery(order.delivery().withPatch(patch)));
     }
 
     @Override
