@@ -54,9 +54,9 @@ public class OrderResponseDTO {
             + "receita e margem. Zero em toda venda que não veio de mesa.")
     private BigDecimal serviceFeeAmount;
 
-    @Schema(description = "O que o cliente efetivamente paga: netAmount + serviceFeeAmount "
-            + "(PDV-F015). É contra este valor que o pagamento é validado e o troco calculado. "
-            + "Fora da mesa coincide com netAmount, porque a taxa é zero.")
+    @Schema(description = "O que o cliente efetivamente paga: netAmount + serviceFeeAmount + "
+            + "delivery.fee (PDV-F015, PDV-F022). É contra este valor que o pagamento é validado e o "
+            + "troco calculado. No balcão sem entrega coincide com netAmount.")
     private BigDecimal totalPayable;
 
 
@@ -69,6 +69,9 @@ public class OrderResponseDTO {
     @Schema(description = "Instante da reserva para retirada depois (PDV-F008), quando status é ou "
             + "já foi RESERVADO. Permanece preenchido após a retirada (RESERVADO -> CONCLUIDO).")
     private Instant reservedAt;
+
+    @Schema(description = "PDV-F022 — entrega ou retirada; null quando a venda não tem. delivery.fee já está em totalPayable.")
+    private DeliveryResponseDTO delivery;
 
     private List<OrderItemResponseDTO> items;
 

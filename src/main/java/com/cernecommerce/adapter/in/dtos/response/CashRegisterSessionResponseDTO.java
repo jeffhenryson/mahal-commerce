@@ -30,6 +30,9 @@ public class CashRegisterSessionResponseDTO {
     @Schema(description = "Quem fez a conferência — nem sempre é o operador do caixa.")
     private String closedBy;
 
+    @Schema(description = "Motivo/observação registrado no fechamento, quando informado.")
+    private String closingNotes;
+
     @Schema(description = "O que deveria haver na gaveta: abertura + vendas − sangrias + suprimentos. "
             + "Só existe depois do fechamento.")
     private BigDecimal expectedAmount;

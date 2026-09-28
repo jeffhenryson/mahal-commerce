@@ -31,11 +31,34 @@ public final class CustomerIdentifiers {
     }
 
     /**
+     * Forma de COMPARAÇÃO do email (CRM-C007): aparado e em minúsculas. O valor gravado continua o
+     * de {@link #normalizeEmail(String)}; só a busca e a checagem de duplicidade usam esta forma.
+     */
+    public static String normalizeEmailForMatch(String email) {
+        String trimmed = blankToNull(email);
+        return trimmed == null ? null : trimmed.toLowerCase(java.util.Locale.ROOT);
+    }
+
+    /**
      * Contato aparado, com a formatação que o operador digitou — é o que aparece na tela. A
      * comparação entre contatos usa {@link #digitsOrNull(String)}.
      */
     public static String normalizeContato(String contato) {
         return blankToNull(contato);
+    }
+
+    /**
+     * Forma de COMPARAÇÃO do telefone (CRM-C007): só os dígitos e sem o DDI do Brasil —
+     * "+55 (21) 98877-1234" e "21988771234" são o mesmo número. Número nacional tem 10 ou 11
+     * dígitos (DDD + 8 ou 9), então só um total de 12 ou 13 começando com 55 carrega DDI; o DDD 55
+     * (RS) sozinho nunca passa de 11 e não é cortado.
+     */
+    public static String normalizePhone(String phone) {
+        String digits = digitsOrNull(phone);
+        if (digits != null && (digits.length() == 12 || digits.length() == 13) && digits.startsWith("55")) {
+            return digits.substring(2);
+        }
+        return digits;
     }
 
     /** Só os dígitos; {@code null} quando não sobra nenhum. */

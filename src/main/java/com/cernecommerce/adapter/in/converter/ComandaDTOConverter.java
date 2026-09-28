@@ -1,5 +1,6 @@
 package com.cernecommerce.adapter.in.converter;
 
+import com.cernecommerce.adapter.in.dtos.response.ComandaItemAddonResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.ComandaItemResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.ComandaResponseDTO;
 import com.cernecommerce.core.domain.model.pdv.Comanda;
@@ -51,6 +52,21 @@ public class ComandaDTOConverter {
         dto.setKitBundleId(item.kitBundleId());
         dto.setKitTemplateId(item.kitTemplateId());
         dto.setKitDiscountAmount(item.kitDiscountAmount());
+        if (item.session() != null) {
+            dto.setSessionStatus(item.session().status());
+            dto.setStartedAt(item.session().startedAt());
+            dto.setDeliveredAt(item.session().deliveredAt());
+            dto.setCollectedAt(item.session().collectedAt());
+        }
+        dto.setTierId(item.sessionTierId());
+        dto.setEssencia(item.sessionEssencia());
+        if (item.setup() != null) {
+            dto.setVasoGrande(item.setup().vasoGrande());
+            dto.setCarvao(item.setup().charcoal());
+            dto.setAdicionais(item.setup().addons().stream()
+                    .map(a -> new ComandaItemAddonResponseDTO(a.addonId(), a.nome(), a.preco()))
+                    .toList());
+        }
         return dto;
     }
 }

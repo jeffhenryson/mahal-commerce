@@ -6,6 +6,11 @@ import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.pdv.Comanda;
 import com.cernecommerce.core.domain.model.pdv.ComandaItem;
 import com.cernecommerce.core.domain.model.pdv.ComandaStatus;
+import com.cernecommerce.adapter.out.persistence.entity.ComandaItemAddonEntity;
+import com.cernecommerce.core.domain.model.pdv.Charcoal;
+import com.cernecommerce.core.domain.model.pdv.SessionProgress;
+import com.cernecommerce.core.domain.model.pdv.SessionSetup;
+import com.cernecommerce.core.domain.model.pdv.SessionStatus;
 import com.cernecommerce.core.domain.model.pedido.ConsumptionMode;
 import com.cernecommerce.core.ports.out.pdv.ComandaRepository;
 import org.springframework.data.domain.Page;
@@ -152,6 +157,26 @@ public class ComandaRepositoryImpl implements ComandaRepository {
             itemEntity.setKitBundleId(item.kitBundleId());
             itemEntity.setKitTemplateId(item.kitTemplateId());
             itemEntity.setKitDiscountAmount(item.kitDiscountAmount());
+            SessionProgress session = item.session();
+            itemEntity.setSessionStatus(session == null ? null : session.status().name());
+            itemEntity.setStartedAt(session == null ? null : session.startedAt());
+            itemEntity.setDeliveredAt(session == null ? null : session.deliveredAt());
+            itemEntity.setCollectedAt(session == null ? null : session.collectedAt());
+            // PDV-F024 — carvão e adicionais nascem com a linha e não mudam: os adicionais só são
+            // gravados na primeira vez, e o snapshot fica como foi cobrado.
+            SessionSetup setup = item.setup();
+            itemEntity.setCharcoal(setup == null || setup.charcoal() == null ? null : setup.charcoal().name());
+            itemEntity.setVasoGrande(setup != null && setup.vasoGrande());
+            if (setup != null && itemEntity.getAddons().isEmpty()) {
+                for (SessionSetup.Addon addon : setup.addons()) {
+                    ComandaItemAddonEntity addonEntity = new ComandaItemAddonEntity();
+                    addonEntity.setItem(itemEntity);
+                    addonEntity.setAddonId(addon.addonId());
+                    addonEntity.setNome(addon.nome());
+                    addonEntity.setPreco(addon.preco());
+                    itemEntity.getAddons().add(addonEntity);
+                }
+            }
         }
         return toDomain(comandaJpaRepository.save(entity));
     }
@@ -171,6 +196,20 @@ public class ComandaRepositoryImpl implements ComandaRepository {
                 e.getMode() == null ? ConsumptionMode.NORMAL : ConsumptionMode.valueOf(e.getMode()),
                 e.isCourtesy(), e.getLinkedItemId(), e.getNotes(), e.getSurchargeAmount(),
                 e.getClosedInOrderId(), e.getPackageUses(), e.getPackageSessionsPerUnit(), e.getKitBundleId(),
-                e.getKitTemplateId(), e.getKitDiscountAmount());
+                e.getKitTemplateId(), e.getKitDiscountAmount(),
+                e.getSessionStatus() == null ? null : new SessionProgress(SessionStatus.valueOf(e.getSessionStatus()),
+                        e.getStartedAt(), e.getDeliveredAt(), e.getCollectedAt()),
+                toSetup(e));
+    }
+
+    private static SessionSetup toSetup(ComandaItemEntity e) {
+        if (e.getCharcoal() == null && e.getAddons().isEmpty() && !e.isVasoGrande()) {
+            return null;
+        }
+        return new SessionSetup(e.getCharcoal() == null ? null : Charcoal.valueOf(e.getCharcoal()),
+                e.getAddons().stream()
+                        .map(a -> new SessionSetup.Addon(a.getAddonId(), a.getNome(), a.getPreco()))
+                        .toList(),
+                e.isVasoGrande());
     }
 }

@@ -68,6 +68,8 @@ import com.cernecommerce.core.service.PermissionService;
 import com.cernecommerce.core.service.RoleService;
 import com.cernecommerce.core.service.StatsService;
 import com.cernecommerce.core.service.SystemConfigService;
+import com.cernecommerce.core.service.StoreProfileService;
+import com.cernecommerce.core.ports.in.StoreProfileUseCase;
 import com.cernecommerce.core.service.TotpService;
 import com.cernecommerce.core.service.UserService;
 
@@ -277,7 +279,7 @@ class CoreBeanConfig {
             @Value("${pdv.sale.max-discount-percent:10}") BigDecimal maxDiscountPercent) {
         return new PdvService(cashRegisterRepository, cashMovementRepository, orderRepository,
                 orderPaymentRepository, estoqueUseCase, cashbackUseCase, comandaRepository,
-                maxDiscountPercent);
+                maxDiscountPercent, Clock.systemUTC());
     }
 
     @Bean
@@ -300,10 +302,14 @@ class CoreBeanConfig {
             // PDV-F021 — cardápio de sessão; a sessão por produto fica desligada por padrão e pode
             // ser religada por propriedade durante a transição, sem deploy de código.
             SessionMenuService sessionMenuService,
-            @Value("${pdv.sessao.legacy-enabled:false}") boolean legacySessionEnabled) {
+            @Value("${pdv.sessao.legacy-enabled:false}") boolean legacySessionEnabled,
+            // PDV-F024 — a mesa é só sessão do cardápio; produto do catálogo vai pelo balcão.
+            // Religável por propriedade, sem deploy, se a casa voltar a lançar produto na mesa.
+            @Value("${pdv.mesa.catalog-items-enabled:false}") boolean catalogItemsEnabled) {
         return new ComandaService(comandaRepository, estoqueUseCase, orderRepository,
                 orderPaymentRepository, cashbackUseCase, pdvService, notificationUseCase,
-                userRepository, serviceFeePercent, kitBuilderUseCase, sessionMenuService, legacySessionEnabled);
+                userRepository, serviceFeePercent, kitBuilderUseCase, sessionMenuService, legacySessionEnabled,
+                catalogItemsEnabled);
     }
 
     /** PDV-F021 — bean concreto: o ComandaService usa as regras de lançamento, como faz com o PdvService. */
@@ -467,6 +473,11 @@ class CoreBeanConfig {
     @Bean
     SystemConfigUseCase systemConfigUseCase(SystemConfigPort configPort) {
         return new SystemConfigService(configPort);
+    }
+
+    @Bean
+    StoreProfileUseCase storeProfileUseCase(SystemConfigPort configPort) {
+        return new StoreProfileService(configPort);
     }
 
     @Bean

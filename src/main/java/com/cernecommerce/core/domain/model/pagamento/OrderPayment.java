@@ -16,7 +16,7 @@ import java.time.Instant;
  */
 public record OrderPayment(Long id, Long orderId, PaymentMethod method, BigDecimal amount,
         PaymentStatus status, Integer installments, String gatewayRef, Instant authorizedAt,
-        Instant capturedAt, Instant createdAt) {
+        Instant capturedAt, Instant createdAt, PaymentChannel channel, PaymentProvider provider) {
 
     public OrderPayment {
         if (orderId == null) {
@@ -42,6 +42,13 @@ public record OrderPayment(Long id, Long orderId, PaymentMethod method, BigDecim
         if (createdAt == null) {
             throw new IllegalArgumentException("createdAt é obrigatório");
         }
+        // PDV-F025 — espelha os CHECKs da V134.
+        if (method == PaymentMethod.DINHEIRO && (channel != null || provider != null)) {
+            throw new IllegalArgumentException("DINHEIRO não tem canal nem operadora");
+        }
+        if (provider != null && channel == null) {
+            throw new IllegalArgumentException("operadora exige o canal (maquininha ou link)");
+        }
         // Espelha o CHECK da V68: status e captura não podem discordar.
         if ((status == PaymentStatus.CAPTURED) != (capturedAt != null)) {
             throw new IllegalArgumentException(
@@ -55,9 +62,15 @@ public record OrderPayment(Long id, Long orderId, PaymentMethod method, BigDecim
      */
     public static OrderPayment captured(Long orderId, PaymentMethod method, BigDecimal amount,
             Integer installments) {
+        return captured(orderId, method, amount, installments, null, null);
+    }
+
+    /** Pagamento de balcão com o canal e a operadora da cobrança (PDV-F025). */
+    public static OrderPayment captured(Long orderId, PaymentMethod method, BigDecimal amount,
+            Integer installments, PaymentChannel channel, PaymentProvider provider) {
         Instant now = Instant.now();
         return new OrderPayment(null, orderId, method, amount, PaymentStatus.CAPTURED, installments,
-                null, now, now, now);
+                null, now, now, now, channel, provider);
     }
 
     /**
@@ -75,15 +88,24 @@ public record OrderPayment(Long id, Long orderId, PaymentMethod method, BigDecim
         }
         Instant now = Instant.now();
         return new OrderPayment(null, original.orderId(), original.method(), original.amount(),
-                PaymentStatus.REFUNDED, original.installments(), null, now, null, now);
+                PaymentStatus.REFUNDED, original.installments(), null, now, null, now, original.channel(),
+                original.provider());
     }
 
     /** Reconstitui um pagamento a partir de persistência. */
     public static OrderPayment of(Long id, Long orderId, PaymentMethod method, BigDecimal amount,
             PaymentStatus status, Integer installments, String gatewayRef, Instant authorizedAt,
             Instant capturedAt, Instant createdAt) {
+        return of(id, orderId, method, amount, status, installments, gatewayRef, authorizedAt, capturedAt,
+                createdAt, null, null);
+    }
+
+    /** Reconstitui um pagamento com canal e operadora (PDV-F025). */
+    public static OrderPayment of(Long id, Long orderId, PaymentMethod method, BigDecimal amount,
+            PaymentStatus status, Integer installments, String gatewayRef, Instant authorizedAt,
+            Instant capturedAt, Instant createdAt, PaymentChannel channel, PaymentProvider provider) {
         return new OrderPayment(id, orderId, method, amount, status, installments, gatewayRef,
-                authorizedAt, capturedAt, createdAt);
+                authorizedAt, capturedAt, createdAt, channel, provider);
     }
 
     /**
@@ -94,7 +116,7 @@ public record OrderPayment(Long id, Long orderId, PaymentMethod method, BigDecim
     public static OrderPayment pending(Long orderId, PaymentMethod method, BigDecimal amount) {
         Instant now = Instant.now();
         return new OrderPayment(null, orderId, method, amount, PaymentStatus.PENDING, null,
-                null, null, null, now);
+                null, null, null, now, null, null);
     }
 
     /**
@@ -117,7 +139,7 @@ public record OrderPayment(Long id, Long orderId, PaymentMethod method, BigDecim
             throw new IllegalArgumentException("capturedAt é obrigatório na confirmação");
         }
         return new OrderPayment(id, orderId, method, amount, PaymentStatus.CAPTURED, installments,
-                gatewayRef, capturedAt, capturedAt, createdAt);
+                gatewayRef, capturedAt, capturedAt, createdAt, channel, provider);
     }
 
     /**
@@ -135,6 +157,6 @@ public record OrderPayment(Long id, Long orderId, PaymentMethod method, BigDecim
             throw new IllegalArgumentException("só se cancela uma cobrança PENDING");
         }
         return new OrderPayment(id, orderId, method, amount, PaymentStatus.CANCELLED, installments,
-                gatewayRef, authorizedAt, null, createdAt);
+                gatewayRef, authorizedAt, null, createdAt, channel, provider);
     }
 }

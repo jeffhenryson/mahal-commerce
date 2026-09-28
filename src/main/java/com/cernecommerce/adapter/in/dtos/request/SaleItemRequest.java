@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 import java.math.BigDecimal;
@@ -32,4 +33,8 @@ public class SaleItemRequest {
     @Schema(description = "Desconto em valor absoluto sobre este item. Exige a permissão "
             + "PDV_SALE_DISCOUNT e não pode passar do bruto do item.", example = "4.00")
     private BigDecimal discountAmount;
+
+    @Size(max = 200)
+    @Schema(description = "PDV-F022 — observação da linha, gravada no item do pedido.", example = "Sem gelo")
+    private String note;
 }

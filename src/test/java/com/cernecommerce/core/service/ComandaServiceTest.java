@@ -1310,9 +1310,12 @@ class ComandaServiceTest {
         assertThat(saved.getValue().runningTotal()).isEqualByComparingTo("20.00");
     }
 
-    /** O último fechamento encerra a mesa — com o pedido que a encerrou no cabeçalho. */
+    /**
+     * PDV-F023 — o fechamento parcial nunca encerra a mesa, nem levando a última linha aberta: com a
+     * sessão paga no lançamento, toda sessão seria a última. Quem encerra é o finish.
+     */
     @Test
-    void closeComanda_lastPartialCloseFinishesTheComanda() {
+    void closeComanda_lastPartialClose_keepsTheComandaOpen() {
         Comanda comanda = abertaComanda(
                 linha(1L, "ESS-A", "30.00", ConsumptionMode.NORMAL, false, null),
                 linha(2L, "ESS-B", "20.00", ConsumptionMode.NORMAL, false, null))
@@ -1327,8 +1330,9 @@ class ComandaServiceTest {
 
         ArgumentCaptor<Comanda> saved = ArgumentCaptor.forClass(Comanda.class);
         verify(comandaRepository).save(saved.capture());
-        assertThat(saved.getValue().status()).isEqualTo(ComandaStatus.FECHADA);
-        assertThat(saved.getValue().orderId()).isEqualTo(500L);
+        assertThat(saved.getValue().status()).isEqualTo(ComandaStatus.ABERTA);
+        assertThat(saved.getValue().orderId()).isNull();
+        assertThat(saved.getValue().isFullyCharged()).isTrue();
     }
 
     /** Sem itemIds nada muda: cobra tudo que está aberto, como sempre foi. */

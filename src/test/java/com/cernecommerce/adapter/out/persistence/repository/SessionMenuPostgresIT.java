@@ -5,6 +5,11 @@ import com.cernecommerce.core.domain.model.pagamento.PaymentMethod;
 import com.cernecommerce.core.domain.model.pdv.CashRegisterSession;
 import com.cernecommerce.core.domain.model.pdv.Comanda;
 import com.cernecommerce.core.domain.model.pdv.SessionMenu;
+import com.cernecommerce.core.domain.model.pdv.ComandaStatus;
+import com.cernecommerce.core.domain.model.pdv.ComandaItem;
+import com.cernecommerce.core.domain.model.pdv.Charcoal;
+import com.cernecommerce.core.domain.model.pdv.SessionAddon;
+import com.cernecommerce.core.domain.model.pdv.SessionStatus;
 import com.cernecommerce.core.domain.model.pdv.SessionSettings;
 import com.cernecommerce.core.domain.model.pdv.SessionTier;
 import com.cernecommerce.core.domain.model.pedido.ConsumptionMode;
@@ -125,9 +130,29 @@ class SessionMenuPostgresIT {
         assertThat(emUso.utensilios()).filteredOn(a -> a.tipo().incluso())
                 .allSatisfy(a -> assertThat(a.emUso()).isEqualTo(1));
 
+        // PDV-F023/F027 — o status mora nas colunas da V132, com os CHECKs de verdade (V135: aguardando
+        // pagamento ainda sem tempo de mesa).
+        assertThat(jdbc.queryForObject("SELECT session_status FROM comanda_item WHERE id = ?", String.class,
+                sessaoId)).isEqualTo("AGUARDANDO_PAGAMENTO");
+        assertThat(jdbc.queryForObject("SELECT started_at IS NULL FROM comanda_item WHERE id = ?", Boolean.class,
+                sessaoId)).isTrue();
+        assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM comanda_item WHERE linked_item_id = ? AND session_status = 'NA_FILA' "
+                        + "AND started_at IS NULL", Integer.class, sessaoId)).isEqualTo(1);
+
+        // Pagar leva ao preparo; o rosh extra, cobrado junto, continua na fila.
+        Long roshId = comandaUseCase.getComanda(mesa.id()).items().stream()
+                .filter(i -> sessaoId.equals(i.linkedItemId())).findFirst().orElseThrow().id();
         Order order = comandaUseCase.closeComanda(mesa.id(),
-                List.of(new PaymentCommand(PaymentMethod.PIX, new BigDecimal("60.00"), null)), null, false, null,
-                "caixa-pg");
+                List.of(new PaymentCommand(PaymentMethod.PIX, new BigDecimal("60.00"), null)), null, false,
+                List.of(sessaoId, roshId), "caixa-pg");
+        assertThat(jdbc.queryForObject("SELECT session_status FROM comanda_item WHERE id = ? AND started_at IS NOT NULL",
+                String.class, sessaoId)).isEqualTo("PREPARANDO");
+
+        // Encerrar a mesa exige tudo recolhido: recolher a sessão promove o rosh, que é recolhido em seguida.
+        comandaUseCase.updateSessionStatus(mesa.id(), sessaoId, SessionStatus.RECOLHIDO, "caixa-pg");
+        comandaUseCase.updateSessionStatus(mesa.id(), roshId, SessionStatus.RECOLHIDO, "caixa-pg");
+        comandaUseCase.finishComanda(mesa.id(), "caixa-pg");
 
         assertThat(order.items()).extracting(i -> i.mode())
                 .containsExactlyInAnyOrder(ConsumptionMode.SESSAO, ConsumptionMode.ROSH_EXTRA);
@@ -138,5 +163,56 @@ class SessionMenuPostgresIT {
                 "SELECT COUNT(*) FROM comanda_session_asset WHERE comanda_item_id = ? AND liberado_em IS NULL",
                 Integer.class, sessaoId)).isZero();
         assertThat(sessionMenuUseCase.getMenu().utensilios()).allSatisfy(a -> assertThat(a.emUso()).isZero());
+    }
+
+    /** PDV-F024 — V133: adicional com snapshot, rosh duplo atômico e carvão até a linha do pedido. */
+    @Test
+    void duploWithAddonAndCharcoal_persistsOnPostgres_andThePartialCloseKeepsTheTableOpen() {
+        sessionMenuUseCase.listAssetTypes().forEach(t -> sessionMenuUseCase.updateAssetType(t.id(), t.nome(), 3,
+                t.incluso(), true));
+        sessionMenuUseCase.updateSettings(new SessionSettings("VASO_P", "VASO_G", new BigDecimal("10.00"), Set.of()));
+        SessionTier premium = sessionMenuUseCase.listTiers().stream().filter(t -> t.nome().equals("Premium"))
+                .findFirst().orElseThrow();
+        SessionAddon filtro = sessionMenuUseCase.getMenu().adicionais().stream()
+                .filter(a -> a.nome().equals("Filtro de gelo")).findFirst().orElseThrow();
+        estoqueUseCase.createWarehouse("LOUNGE-PG2", "Lounge PG 2", WarehouseType.LOJA_FISICA);
+        CashRegisterSession caixa = pdvUseCase.openSession("caixa-pg2", BigDecimal.ZERO, "LOUNGE-PG2");
+        Comanda mesa = comandaUseCase.openComanda(caixa.id(), "Mesa 2", "caixa-pg2");
+
+        Comanda comDuplo = comandaUseCase.addSession(mesa.id(), new ComandaUseCase.AddSessionCommand(premium.id(),
+                "Smynar Limão", false, Charcoal.JUMBO, List.of(filtro.id()), true, "Nay Uva", null), "caixa-pg2");
+
+        ComandaItem sessao = comDuplo.items().stream().filter(i -> i.mode() == ConsumptionMode.SESSAO)
+                .findFirst().orElseThrow();
+        ComandaItem rosh = comDuplo.items().stream().filter(i -> i.mode() == ConsumptionMode.ROSH_EXTRA)
+                .findFirst().orElseThrow();
+        assertThat(sessao.unitPrice()).isEqualByComparingTo("35.00");
+        assertThat(jdbc.queryForObject("SELECT preco FROM comanda_item_addon WHERE comanda_item_id = ?",
+                BigDecimal.class, sessao.id())).isEqualByComparingTo("5.00");
+        assertThat(jdbc.queryForObject("SELECT charcoal FROM comanda_item WHERE id = ?", String.class, sessao.id()))
+                .isEqualTo("JUMBO");
+        assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM comanda_item WHERE id = ? AND courtesy AND unit_price = 0 "
+                        + "AND linked_item_id = ? AND session_status = 'NA_FILA'",
+                Integer.class, rosh.id(), sessao.id())).isEqualTo(1);
+
+        Order order = comandaUseCase.closeComanda(mesa.id(),
+                List.of(new PaymentCommand(PaymentMethod.PIX, new BigDecimal("35.00"), null)), null, true,
+                List.of(sessao.id(), rosh.id()), "caixa-pg2");
+
+        assertThat(order.serviceFeeAmount()).isEqualByComparingTo("0");
+        assertThat(jdbc.queryForObject(
+                "SELECT charcoal FROM order_item WHERE order_id = ? AND mode = 'SESSAO'", String.class, order.id()))
+                .isEqualTo("JUMBO");
+        assertThat(comandaUseCase.getComanda(mesa.id()).status()).isEqualTo(ComandaStatus.ABERTA);
+
+        // Recolhe a sessão (promove o rosh) e o rosh, e encerra: utensílios de volta para os outros testes.
+        comandaUseCase.updateSessionStatus(mesa.id(), sessao.id(), SessionStatus.RECOLHIDO, "caixa-pg2");
+        comandaUseCase.updateSessionStatus(mesa.id(), rosh.id(), SessionStatus.RECOLHIDO, "caixa-pg2");
+        Comanda encerrada = comandaUseCase.finishComanda(mesa.id(), "caixa-pg2");
+        assertThat(encerrada.status()).isEqualTo(ComandaStatus.FECHADA);
+        assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM comanda_session_asset WHERE comanda_item_id = ? AND liberado_em IS NULL",
+                Integer.class, sessao.id())).isZero();
     }
 }

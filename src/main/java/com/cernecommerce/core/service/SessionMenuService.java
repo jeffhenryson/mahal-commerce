@@ -3,11 +3,13 @@ package com.cernecommerce.core.service;
 import com.cernecommerce.core.domain.exception.pdv.SessionAssetTypeNotFoundException;
 import com.cernecommerce.core.domain.exception.pdv.SessionAssetUnavailableException;
 import com.cernecommerce.core.domain.exception.pdv.SessionMenuConflictException;
+import com.cernecommerce.core.domain.exception.pdv.SessionAddonNotFoundException;
 import com.cernecommerce.core.domain.exception.pdv.SessionTierNotFoundException;
 import com.cernecommerce.core.domain.model.pdv.SessionAssetAllocation;
 import com.cernecommerce.core.domain.model.pdv.SessionAssetType;
 import com.cernecommerce.core.domain.model.pdv.SessionMenu;
 import com.cernecommerce.core.domain.model.pdv.SessionSettings;
+import com.cernecommerce.core.domain.model.pdv.SessionAddon;
 import com.cernecommerce.core.domain.model.pdv.SessionTier;
 import com.cernecommerce.core.ports.in.SessionMenuUseCase;
 import com.cernecommerce.core.ports.out.pdv.SessionMenuRepository;
@@ -22,6 +24,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Cardápio de sessão da mesa (PDV-F021).
@@ -61,7 +64,8 @@ public class SessionMenuService implements SessionMenuUseCase {
                 .map(t -> new SessionMenu.AssetAvailability(t, inUse.getOrDefault(t.id(), 0)))
                 .toList();
         List<SessionTier> tiers = repository.findAllTiers().stream().filter(SessionTier::ativo).toList();
-        return new SessionMenu(tiers, assets, settings, isDuploRoshDay(settings, clock.instant()));
+        List<SessionAddon> addons = repository.findAllAddons().stream().filter(SessionAddon::ativo).toList();
+        return new SessionMenu(tiers, assets, settings, isDuploRoshDay(settings, clock.instant()), addons);
     }
 
     // ── Cadastro (admin) ──────────────────────────────────────────────────────────────────────
@@ -87,6 +91,52 @@ public class SessionMenuService implements SessionMenuUseCase {
         SessionTier updated = current.withData(nome, preco, marcas, ordem, ativo);
         ensureTierNameFree(updated.nome(), id);
         return repository.saveTier(updated);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<SessionAddon> listAddons() {
+        return repository.findAllAddons();
+    }
+
+    @Override
+    @Transactional
+    public SessionAddon createAddon(String nome, BigDecimal preco, int ordem) {
+        SessionAddon addon = SessionAddon.create(nome, preco, ordem);
+        ensureAddonNameFree(addon.nome(), null);
+        return repository.saveAddon(addon);
+    }
+
+    @Override
+    @Transactional
+    public SessionAddon updateAddon(Long id, String nome, BigDecimal preco, int ordem, boolean ativo) {
+        SessionAddon current = repository.findAddonById(id).orElseThrow(() -> new SessionAddonNotFoundException(id));
+        SessionAddon updated = current.withData(nome, preco, ordem, ativo);
+        ensureAddonNameFree(updated.nome(), id);
+        return repository.saveAddon(updated);
+    }
+
+    /**
+     * Adicionais pedidos no lançamento, existentes e ativos, na ordem pedida. Id repetido conta duas
+     * vezes — dois filtros são dois filtros.
+     */
+    List<SessionAddon> requireActiveAddons(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return List.of();
+        }
+        return ids.stream()
+                .map(id -> (id == null ? Optional.<SessionAddon>empty() : repository.findAddonById(id))
+                        .filter(SessionAddon::ativo)
+                        .orElseThrow(() -> new SessionAddonNotFoundException(id)))
+                .toList();
+    }
+
+    private void ensureAddonNameFree(String nome, Long selfId) {
+        repository.findAddonByNome(nome)
+                .filter(a -> !a.id().equals(selfId))
+                .ifPresent(a -> {
+                    throw new SessionMenuConflictException("Já existe adicional de sessão com o nome " + nome);
+                });
     }
 
     @Override

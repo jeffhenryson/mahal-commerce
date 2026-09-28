@@ -56,6 +56,10 @@ public class OrderItemAdminResponseDTO {
             + "venda que não veio de mesa.")
     private String notes;
 
+    @Schema(description = "Carvão da sessão de narguilé (CUBO ou JUMBO), só registro (PDV-F024). Nulo "
+            + "fora de sessão do cardápio.", example = "JUMBO")
+    private String carvao;
+
     @Schema(description = "Parcela de unitPrice que veio de acréscimo manual no open rosh "
             + "(PDV-F011). Não é reconstruível a partir de unitPrice, que já é a soma — daí o "
             + "campo próprio, na mesma lógica de discountAmount. Nulo em toda venda que não veio "

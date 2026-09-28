@@ -1,5 +1,7 @@
 package com.cernecommerce.core.service;
 
+import com.cernecommerce.core.domain.exception.pdv.SessionAddonNotFoundException;
+import com.cernecommerce.core.domain.model.pdv.SessionAddon;
 import com.cernecommerce.core.domain.exception.pdv.SessionAssetTypeNotFoundException;
 import com.cernecommerce.core.domain.exception.pdv.SessionAssetUnavailableException;
 import com.cernecommerce.core.domain.exception.pdv.SessionMenuConflictException;
@@ -186,5 +188,54 @@ class SessionMenuServiceTest {
                 new SessionSettings("VASO_X", null, BigDecimal.ZERO, Set.of())))
                 .isInstanceOf(SessionAssetTypeNotFoundException.class);
         verify(repository, never()).saveSettings(any());
+    }
+
+    // ── PDV-F024 — adicionais ────────────────────────────────────────────────────────────────
+
+    private static final SessionAddon FILTRO = new SessionAddon(1L, "Filtro de gelo", new BigDecimal("5.00"), 1, true);
+    private static final SessionAddon ANTIGO = new SessionAddon(2L, "Essência extra", new BigDecimal("8.00"), 2, false);
+
+    @Test
+    void getMenu_listsOnlyActiveAddons() {
+        when(repository.getSettings()).thenReturn(SETTINGS);
+        when(repository.findAllTiers()).thenReturn(List.of());
+        when(repository.findAllAssetTypes()).thenReturn(List.of());
+        when(repository.countInUseByAssetType()).thenReturn(Map.of());
+        when(repository.findAllAddons()).thenReturn(List.of(FILTRO, ANTIGO));
+
+        assertThat(service.getMenu().adicionais()).containsExactly(FILTRO);
+    }
+
+    @Test
+    void requireActiveAddons_repeatedIdChargesTwice_andInactiveOrUnknownIsRefused() {
+        when(repository.findAddonById(1L)).thenReturn(Optional.of(FILTRO));
+        assertThat(service.requireActiveAddons(List.of(1L, 1L))).containsExactly(FILTRO, FILTRO);
+
+        when(repository.findAddonById(2L)).thenReturn(Optional.of(ANTIGO));
+        assertThatThrownBy(() -> service.requireActiveAddons(List.of(2L)))
+                .isInstanceOf(SessionAddonNotFoundException.class);
+        when(repository.findAddonById(99L)).thenReturn(Optional.empty());
+        assertThatThrownBy(() -> service.requireActiveAddons(List.of(99L)))
+                .isInstanceOf(SessionAddonNotFoundException.class);
+        assertThat(service.requireActiveAddons(null)).isEmpty();
+    }
+
+    @Test
+    void createAddon_withRepeatedName_isAConflict() {
+        when(repository.findAddonByNome("Filtro de gelo")).thenReturn(Optional.of(FILTRO));
+
+        assertThatThrownBy(() -> service.createAddon(" Filtro de gelo ", new BigDecimal("6.00"), 1))
+                .isInstanceOf(SessionMenuConflictException.class);
+    }
+
+    @Test
+    void updateAddon_keepingItsOwnName_isAccepted() {
+        when(repository.findAddonById(1L)).thenReturn(Optional.of(FILTRO));
+        when(repository.findAddonByNome("Filtro de gelo")).thenReturn(Optional.of(FILTRO));
+        when(repository.saveAddon(org.mockito.ArgumentMatchers.any())).thenAnswer(inv -> inv.getArgument(0));
+
+        SessionAddon updated = service.updateAddon(1L, "Filtro de gelo", new BigDecimal("6.00"), 1, true);
+
+        assertThat(updated.preco()).isEqualByComparingTo("6.00");
     }
 }

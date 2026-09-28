@@ -1,5 +1,12 @@
 package com.cernecommerce.core.service;
 
+import java.time.ZoneOffset;
+import java.time.Clock;
+import com.cernecommerce.core.domain.model.pedido.OrderDelivery;
+import com.cernecommerce.core.domain.model.pedido.DeliveryType;
+import com.cernecommerce.core.domain.model.pedido.DeliveryMethod;
+import com.cernecommerce.core.domain.model.pedido.DeliveryAddress;
+import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionStaleException;
 import com.cernecommerce.core.domain.exception.estoque.InsufficientStockException;
 import com.cernecommerce.core.domain.exception.estoque.ProductNotFoundException;
 import com.cernecommerce.core.domain.exception.pagamento.ChangeNotSupportedException;
@@ -23,6 +30,9 @@ import com.cernecommerce.core.domain.model.estoque.StockBalance;
 import com.cernecommerce.core.domain.model.pagamento.OrderPayment;
 import com.cernecommerce.core.domain.model.pagamento.PaymentStatus;
 import com.cernecommerce.core.domain.model.pagamento.PaymentMethod;
+import com.cernecommerce.core.domain.exception.pdv.InvalidPaymentChannelException;
+import com.cernecommerce.core.domain.model.pagamento.PaymentProvider;
+import com.cernecommerce.core.domain.model.pagamento.PaymentChannel;
 import com.cernecommerce.core.domain.model.pdv.CashMovement;
 import com.cernecommerce.core.domain.model.pdv.CashMovementType;
 import com.cernecommerce.core.domain.model.pdv.CashRegisterSession;
@@ -108,11 +118,14 @@ class PdvServiceTest {
         // em produção: OrderPayment exige orderId.
         when(orderRepository.save(any())).thenAnswer(inv -> {
             Order arg = inv.getArgument(0);
+            // Forma canônica de Order.of — uma sobrecarga menor descartaria campos em silêncio
+            // (serviceFeeAmount, delivery...) e o teste passaria sem enxergar o que foi gravado.
             return arg.id() != null ? arg : Order.of(100L, arg.orderNumber(), arg.channel(), arg.status(),
                     arg.customerId(), arg.sessionId(), arg.warehouseCode(), arg.items(), arg.grossAmount(),
                     arg.discountAmount(), arg.cashbackRedeemed(), arg.netAmount(), arg.changeAmount(),
                     arg.cancelReason(), arg.createdAt(), arg.paidAt(), arg.concludedAt(), arg.cancelledAt(),
-                    arg.refundedAt(), arg.reservedAt(), arg.version());
+                    arg.refundedAt(), arg.reservedAt(), arg.separatedAt(), arg.shippedAt(), arg.deliveredAt(),
+                    arg.version(), arg.comandaId(), arg.tableLabel(), arg.serviceFeeAmount(), arg.delivery());
         });
     }
 
@@ -211,6 +224,46 @@ class PdvServiceTest {
         when(cashRegisterRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         assertThat(pdvService.closeSession(1L, BigDecimal.TEN, "gerente").closedBy()).isEqualTo("gerente");
+    }
+
+    private void givenClosableSession() {
+        when(cashRegisterRepository.findById(1L)).thenReturn(Optional.of(openSession()));
+        when(orderPaymentRepository.sumCapturedAmountBySessionIdAndMethod(1L, PaymentMethod.DINHEIRO))
+                .thenReturn(BigDecimal.ZERO);
+        when(cashMovementRepository.sumSignedAmountBySessionId(1L)).thenReturn(BigDecimal.ZERO);
+        givenNoCashOutflows();
+        when(cashRegisterRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+    }
+
+    @Test
+    void closeSession_adminClosesAnotherOperatorsSessionWithNotes() {
+        givenClosableSession();
+
+        CashRegisterSession closed = pdvService.closeSession(1L, BigDecimal.TEN,
+                "  Operador saiu sem fechar  ", "admin", true);
+
+        assertThat(closed.closedBy()).isEqualTo("admin");
+        assertThat(closed.operator()).isEqualTo("caixa1");
+        assertThat(closed.closingNotes()).isEqualTo("Operador saiu sem fechar");
+    }
+
+    @Test
+    void closeSession_ownerClosesOwnSessionWithoutPrivilege() {
+        givenClosableSession();
+
+        CashRegisterSession closed = pdvService.closeSession(1L, BigDecimal.TEN, null, "caixa1", false);
+
+        assertThat(closed.status()).isEqualTo(CashRegisterSession.Status.CLOSED);
+        assertThat(closed.closingNotes()).isNull();
+    }
+
+    @Test
+    void closeSession_nonPrivilegedCannotCloseAnotherOperatorsSession() {
+        when(cashRegisterRepository.findById(1L)).thenReturn(Optional.of(openSession()));
+
+        assertThatThrownBy(() -> pdvService.closeSession(1L, BigDecimal.TEN, null, "atendente2", false))
+                .isInstanceOf(CashRegisterSessionNotOwnedException.class);
+        verify(cashRegisterRepository, never()).save(any());
     }
 
     // ── PDV-C017/C018 — o esperado conta o que SAIU da gaveta ────────────────────────────────
@@ -329,6 +382,8 @@ class PdvServiceTest {
                 .thenReturn(BigDecimal.ZERO);
         when(orderPaymentRepository.sumCapturedAmountBySessionIdAndMethod(1L, PaymentMethod.PIX))
                 .thenReturn(new BigDecimal("45.00"));
+        when(orderPaymentRepository.sumRefundedAmountBySessionIdAndMethod(eq(1L), any())).thenReturn(BigDecimal.ZERO);
+        when(orderRepository.sumChangeAmountBySessionId(1L)).thenReturn(BigDecimal.ZERO);
 
         List<PaymentTotal> totals = pdvService.getSessionPaymentTotals(1L);
 
@@ -338,6 +393,34 @@ class PdvServiceTest {
                         PaymentMethod.CREDITO, PaymentMethod.PIX);
         assertThat(totals.stream().filter(t -> t.method() == PaymentMethod.DINHEIRO).findFirst().orElseThrow()
                 .amount()).isEqualByComparingTo("120.00");
+    }
+
+    /**
+     * PDV-F026 — o bruto continua em amount; refundedAmount, changeAmount (só DINHEIRO) e netAmount
+     * deixam a aba Caixas mostrar o líquido sem abrir recibo.
+     */
+    @Test
+    void getSessionPaymentTotals_netsRefundsAndCashChange() {
+        when(cashRegisterRepository.findById(1L)).thenReturn(Optional.of(openSession()));
+        when(orderPaymentRepository.sumCapturedAmountBySessionIdAndMethod(eq(1L), any())).thenReturn(BigDecimal.ZERO);
+        when(orderPaymentRepository.sumCapturedAmountBySessionIdAndMethod(1L, PaymentMethod.DINHEIRO))
+                .thenReturn(new BigDecimal("150.00"));
+        when(orderPaymentRepository.sumCapturedAmountBySessionIdAndMethod(1L, PaymentMethod.PIX))
+                .thenReturn(new BigDecimal("80.00"));
+        when(orderPaymentRepository.sumRefundedAmountBySessionIdAndMethod(eq(1L), any())).thenReturn(BigDecimal.ZERO);
+        when(orderPaymentRepository.sumRefundedAmountBySessionIdAndMethod(1L, PaymentMethod.PIX))
+                .thenReturn(new BigDecimal("30.00"));
+        when(orderRepository.sumChangeAmountBySessionId(1L)).thenReturn(new BigDecimal("20.00"));
+
+        List<PaymentTotal> totals = pdvService.getSessionPaymentTotals(1L);
+
+        PaymentTotal dinheiro = totals.stream().filter(t -> t.method() == PaymentMethod.DINHEIRO).findFirst().orElseThrow();
+        PaymentTotal pix = totals.stream().filter(t -> t.method() == PaymentMethod.PIX).findFirst().orElseThrow();
+        assertThat(dinheiro.changeAmount()).isEqualByComparingTo("20.00");
+        assertThat(dinheiro.netAmount()).isEqualByComparingTo("130.00");
+        assertThat(pix.refundedAmount()).isEqualByComparingTo("30.00");
+        assertThat(pix.changeAmount()).isEqualByComparingTo("0");
+        assertThat(pix.netAmount()).isEqualByComparingTo("50.00");
     }
 
     @Test
@@ -472,6 +555,31 @@ class PdvServiceTest {
         assertThat(gravado.method()).isEqualTo(PaymentMethod.DINHEIRO);
         assertThat(gravado.amount()).isEqualByComparingTo("44.00");
         assertThat(gravado.status()).isEqualTo(PaymentStatus.CAPTURED);
+    }
+
+    /** PDV-F025 — canal e operadora chegam até a linha de pagamento gravada. */
+    @Test
+    void settleOnlineOrder_recordsTheChannelAndProviderOfTheCharge() {
+        when(cashRegisterRepository.findById(1L)).thenReturn(Optional.of(openSession()));
+        when(orderRepository.findById(7L)).thenReturn(Optional.of(pendingOnlineOrder()));
+        when(orderRepository.nextOrderNumber()).thenReturn("000001001");
+        when(orderRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        pdvService.settleOnlineOrder(1L, 7L, List.of(new PaymentCommand(PaymentMethod.DEBITO,
+                new BigDecimal("44.00"), null, PaymentChannel.MAQUININHA, PaymentProvider.INFINITYPAY)), "caixa1");
+
+        ArgumentCaptor<OrderPayment> captor = ArgumentCaptor.forClass(OrderPayment.class);
+        verify(orderPaymentRepository).save(captor.capture());
+        assertThat(captor.getValue().channel()).isEqualTo(PaymentChannel.MAQUININHA);
+        assertThat(captor.getValue().provider()).isEqualTo(PaymentProvider.INFINITYPAY);
+    }
+
+    @Test
+    void paymentCommand_cashWithChannelOrProviderWithoutChannel_isRefused() {
+        assertThatThrownBy(() -> new PaymentCommand(PaymentMethod.DINHEIRO, BigDecimal.TEN, null,
+                PaymentChannel.LINK, null)).isInstanceOf(InvalidPaymentChannelException.class);
+        assertThatThrownBy(() -> new PaymentCommand(PaymentMethod.PIX, BigDecimal.TEN, null,
+                null, PaymentProvider.CIELO)).isInstanceOf(InvalidPaymentChannelException.class);
     }
 
     /**
@@ -1007,5 +1115,101 @@ class PdvServiceTest {
                 .thenReturn(new PageResult<>(List.of(), 0, 20, 0L, 0));
 
         assertThat(pdvService.listSessionOrders(1L, 0, 20).content()).isEmpty();
+    }
+
+    // ── PDV-F022: entrega, observação por item e caixa por dia ──────────────────────────────
+
+    private static OrderDelivery entregaMotoboy(String fee) {
+        return new OrderDelivery(DeliveryType.ENTREGA,
+                new DeliveryAddress("Rua A", "10", null, "58000-000", "Centro", "João Pessoa", "PB", "Brasil", null),
+                DeliveryMethod.MOTOBOY_LOJA, "Zé", "83999990000", null, null, null, new BigDecimal(fee));
+    }
+
+    private void givenCharcoalOnCatalog() {
+        when(estoqueUseCase.resolveSaleInfo("CARV-001")).thenReturn(new EstoqueUseCase.CatalogSaleInfo("Carvao Coco", CARVAO));
+    }
+
+    @Test
+    void registerSale_withEntrega_reservesAndChargesTheFeeOnTopOfNet() {
+        givenOpenSessionAndPersistence();
+        givenCharcoalOnCatalog();
+
+        Order order = pdvService.registerSale(1L, null, List.of(twoCharcoals(null)), cash("52.00"), "caixa1",
+                false, entregaMotoboy("8.00"));
+
+        assertThat(order.status()).isEqualTo(OrderStatus.RESERVADO);
+        assertThat(order.netAmount()).isEqualByComparingTo("44.00");
+        assertThat(order.totalPayable()).isEqualByComparingTo("52.00");
+        assertThat(order.delivery().courierName()).isEqualTo("Zé");
+        assertThat(order.allowedTransitions()).contains(OrderStatus.SEPARADO);
+    }
+
+    @Test
+    void registerSale_withEntrega_refusesPaymentThatCoversOnlyTheNet() {
+        when(cashRegisterRepository.findById(1L)).thenReturn(Optional.of(openSession()));
+        givenCharcoalOnCatalog();
+
+        assertThatThrownBy(() -> pdvService.registerSale(1L, null, List.of(twoCharcoals(null)), cash("44.00"),
+                "caixa1", false, entregaMotoboy("8.00")))
+                .isInstanceOf(InsufficientPaymentException.class);
+        verify(orderRepository, never()).save(any());
+    }
+
+    @Test
+    void registerSale_withRetirada_reservesButCannotEnterTheShippingPipeline() {
+        givenOpenSessionAndPersistence();
+        givenCharcoalOnCatalog();
+
+        Order order = pdvService.registerSale(1L, null, List.of(twoCharcoals(null)), cash("44.00"), "caixa1",
+                false, new OrderDelivery(DeliveryType.RETIRADA, null, null, null, null, null, null, null, null));
+
+        assertThat(order.status()).isEqualTo(OrderStatus.RESERVADO);
+        assertThat(order.totalPayable()).isEqualByComparingTo("44.00");
+        assertThat(order.allowedTransitions()).doesNotContain(OrderStatus.SEPARADO);
+    }
+
+    @Test
+    void registerSale_persistsTheItemNote() {
+        givenOpenSessionAndPersistence();
+        givenCharcoalOnCatalog();
+
+        Order order = pdvService.registerSale(1L, null,
+                List.of(new SaleItemCommand("CARV-001", new BigDecimal("2.000"), null, "  Sem gelo ")),
+                cash("44.00"), "caixa1");
+
+        assertThat(order.items().get(0).notes()).isEqualTo("Sem gelo");
+    }
+
+    @Test
+    void registerSale_refusesASessionOpenedOnAPreviousDayInStoreTime() {
+        // 26/09 às 00:30 em São Paulo (03:30 UTC); o caixa abriu 25/09 às 22:00 em São Paulo
+        // (01:00 UTC de 26/09 — mesmo dia em UTC, dia anterior na loja).
+        Clock clock = Clock.fixed(Instant.parse("2026-09-26T03:30:00Z"), ZoneOffset.UTC);
+        PdvService service = new PdvService(cashRegisterRepository, cashMovementRepository, orderRepository,
+                orderPaymentRepository, estoqueUseCase, cashbackUseCase, comandaRepository,
+                MAX_DISCOUNT_PERCENT, clock);
+        when(cashRegisterRepository.findById(1L)).thenReturn(Optional.of(CashRegisterSession.of(1L, "caixa1",
+                Instant.parse("2026-09-26T01:00:00Z"), BigDecimal.TEN, "LOJA-01",
+                null, null, null, null, null, CashRegisterSession.Status.OPEN)));
+
+        assertThatThrownBy(() -> service.registerSale(1L, null, List.of(twoCharcoals(null)), cash("44.00"), "caixa1"))
+                .isInstanceOf(CashRegisterSessionStaleException.class);
+        verify(estoqueUseCase, never()).adjustStock(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void registerSale_acceptsASessionOpenedEarlierTheSameStoreDay() {
+        Clock clock = Clock.fixed(Instant.parse("2026-09-27T02:00:00Z"), ZoneOffset.UTC); // 26/09 23:00 SP
+        PdvService service = new PdvService(cashRegisterRepository, cashMovementRepository, orderRepository,
+                orderPaymentRepository, estoqueUseCase, cashbackUseCase, comandaRepository,
+                MAX_DISCOUNT_PERCENT, clock);
+        givenOpenSessionAndPersistence();
+        when(cashRegisterRepository.findById(1L)).thenReturn(Optional.of(CashRegisterSession.of(1L, "caixa1",
+                Instant.parse("2026-09-26T11:00:00Z"), BigDecimal.TEN, "LOJA-01", // 26/09 08:00 SP
+                null, null, null, null, null, CashRegisterSession.Status.OPEN)));
+        givenCharcoalOnCatalog();
+
+        assertThat(service.registerSale(1L, null, List.of(twoCharcoals(null)), cash("44.00"), "caixa1").status())
+                .isEqualTo(OrderStatus.CONCLUIDO);
     }
 }

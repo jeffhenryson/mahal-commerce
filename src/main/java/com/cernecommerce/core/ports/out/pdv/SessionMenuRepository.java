@@ -3,6 +3,7 @@ package com.cernecommerce.core.ports.out.pdv;
 import com.cernecommerce.core.domain.model.pdv.SessionAssetAllocation;
 import com.cernecommerce.core.domain.model.pdv.SessionAssetType;
 import com.cernecommerce.core.domain.model.pdv.SessionSettings;
+import com.cernecommerce.core.domain.model.pdv.SessionAddon;
 import com.cernecommerce.core.domain.model.pdv.SessionTier;
 
 import java.time.Instant;
@@ -24,6 +25,15 @@ public interface SessionMenuRepository {
     Optional<SessionTier> findTierByNome(String nome);
 
     SessionTier saveTier(SessionTier tier);
+
+    // PDV-F024 — adicionais pagos
+    List<SessionAddon> findAllAddons();
+
+    Optional<SessionAddon> findAddonById(Long id);
+
+    Optional<SessionAddon> findAddonByNome(String nome);
+
+    SessionAddon saveAddon(SessionAddon addon);
 
     List<SessionAssetType> findAllAssetTypes();
 

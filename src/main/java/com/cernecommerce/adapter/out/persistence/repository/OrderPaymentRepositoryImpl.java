@@ -2,13 +2,19 @@ package com.cernecommerce.adapter.out.persistence.repository;
 
 import com.cernecommerce.adapter.out.persistence.entity.OrderPaymentEntity;
 import com.cernecommerce.core.domain.model.pagamento.OrderPayment;
+import com.cernecommerce.core.domain.model.pagamento.PaymentChannel;
 import com.cernecommerce.core.domain.model.pagamento.PaymentMethod;
+import com.cernecommerce.core.domain.model.pagamento.PaymentProvider;
 import com.cernecommerce.core.domain.model.pagamento.PaymentStatus;
 import com.cernecommerce.core.ports.out.pagamento.OrderPaymentRepository;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -35,6 +41,8 @@ public class OrderPaymentRepositoryImpl implements OrderPaymentRepository {
         entity.setAuthorizedAt(payment.authorizedAt());
         entity.setCapturedAt(payment.capturedAt());
         entity.setCreatedAt(payment.createdAt());
+        entity.setChannel(payment.channel() == null ? null : payment.channel().name());
+        entity.setProvider(payment.provider() == null ? null : payment.provider().name());
         return toDomain(orderPaymentJpaRepository.save(entity));
     }
 
@@ -66,9 +74,24 @@ public class OrderPaymentRepositoryImpl implements OrderPaymentRepository {
         return orderPaymentJpaRepository.findByGatewayRef(gatewayRef).map(this::toDomain);
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public Map<Long, List<PaymentMethod>> findCapturedMethodsByOrderIds(Collection<Long> orderIds) {
+        if (orderIds == null || orderIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, List<PaymentMethod>> result = new LinkedHashMap<>();
+        for (Object[] row : orderPaymentJpaRepository.findCapturedMethodsByOrderIds(orderIds)) {
+            result.computeIfAbsent((Long) row[0], k -> new ArrayList<>()).add(PaymentMethod.valueOf((String) row[1]));
+        }
+        return result;
+    }
+
     private OrderPayment toDomain(OrderPaymentEntity e) {
         return OrderPayment.of(e.getId(), e.getOrderId(), PaymentMethod.valueOf(e.getMethod()), e.getAmount(),
                 PaymentStatus.valueOf(e.getStatus()), e.getInstallments(), e.getGatewayRef(),
-                e.getAuthorizedAt(), e.getCapturedAt(), e.getCreatedAt());
+                e.getAuthorizedAt(), e.getCapturedAt(), e.getCreatedAt(),
+                e.getChannel() == null ? null : PaymentChannel.valueOf(e.getChannel()),
+                e.getProvider() == null ? null : PaymentProvider.valueOf(e.getProvider()));
     }
 }

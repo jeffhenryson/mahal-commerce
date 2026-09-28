@@ -1,8 +1,11 @@
 package com.cernecommerce.adapter.in.converter;
 
+import com.cernecommerce.adapter.in.dtos.request.DeliveryAddressRequest;
+import com.cernecommerce.adapter.in.dtos.request.DeliveryRequest;
 import com.cernecommerce.adapter.in.dtos.request.SaleItemRequest;
 import com.cernecommerce.adapter.in.dtos.request.SalePaymentRequest;
 import com.cernecommerce.adapter.in.dtos.response.DailyRevenueResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.DeliveryResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.MarginByProductResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.MarginReportResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.OrderAdminResponseDTO;
@@ -19,7 +22,9 @@ import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.pagamento.OrderPayment;
 import com.cernecommerce.core.domain.model.pagamento.PaymentMethod;
 import com.cernecommerce.core.domain.model.pedido.MarginSummary;
+import com.cernecommerce.core.domain.model.pedido.DeliveryAddress;
 import com.cernecommerce.core.domain.model.pedido.Order;
+import com.cernecommerce.core.domain.model.pedido.OrderDelivery;
 import com.cernecommerce.core.domain.model.pedido.OrderItem;
 import com.cernecommerce.core.domain.model.pedido.OrderSummary;
 import com.cernecommerce.core.ports.in.PdvUseCase.PaymentCommand;
@@ -39,7 +44,7 @@ public class OrderDTOConverter {
      */
     public List<SaleItemCommand> toCommands(List<SaleItemRequest> requests) {
         return requests.stream()
-                .map(r -> new SaleItemCommand(r.getSku(), r.getQuantity(), r.getDiscountAmount()))
+                .map(r -> new SaleItemCommand(r.getSku(), r.getQuantity(), r.getDiscountAmount(), r.getNote()))
                 .toList();
     }
 
@@ -47,7 +52,7 @@ public class OrderDTOConverter {
     public List<PaymentCommand> toPaymentCommands(List<SalePaymentRequest> requests) {
         return requests.stream()
                 .map(r -> new PaymentCommand(PaymentMethod.valueOf(r.getMethod()), r.getAmount(),
-                        r.getInstallments()))
+                        r.getInstallments(), r.getChannel(), r.getProvider()))
                 .toList();
     }
 
@@ -77,6 +82,7 @@ public class OrderDTOConverter {
         dto.setConcludedAt(order.concludedAt());
         dto.setCancelledAt(order.cancelledAt());
         dto.setReservedAt(order.reservedAt());
+        dto.setDelivery(toDeliveryResponse(order.delivery()));
         dto.setItems(order.items().stream().map(this::toResponse).toList());
         return dto;
     }
@@ -109,6 +115,8 @@ public class OrderDTOConverter {
         dto.setInstallments(payment.installments());
         dto.setCapturedAt(payment.capturedAt());
         dto.setCreatedAt(payment.createdAt());
+        dto.setChannel(payment.channel());
+        dto.setProvider(payment.provider());
         return dto;
     }
 
@@ -117,6 +125,9 @@ public class OrderDTOConverter {
             PaymentTotalResponseDTO dto = new PaymentTotalResponseDTO();
             dto.setMethod(t.method().name());
             dto.setAmount(t.amount());
+            dto.setRefundedAmount(t.refundedAmount());
+            dto.setChangeAmount(t.changeAmount());
+            dto.setNetAmount(t.netAmount());
             return dto;
         }).toList();
     }
@@ -131,8 +142,16 @@ public class OrderDTOConverter {
         dto.setOrderId(order.id());
         dto.setOrderNumber(order.orderNumber());
         dto.setWarehouseCode(order.warehouseCode());
+        dto.setCreatedAt(order.createdAt());
         dto.setConcludedAt(order.concludedAt());
+        dto.setChannel(order.channel().name());
+        dto.setStatus(order.status().name());
+        dto.setTableLabel(order.tableLabel());
+        dto.setComandaId(order.comandaId());
+        dto.setSessionId(order.sessionId());
         dto.setCustomerId(order.customerId());
+        dto.setDelivery(toDeliveryResponse(order.delivery()));
+        dto.setCashbackRedeemed(order.cashbackRedeemed());
         dto.setItems(order.items().stream().map(this::toReceiptItem).toList());
         dto.setGrossAmount(order.grossAmount());
         dto.setDiscountAmount(order.discountAmount());
@@ -140,6 +159,7 @@ public class OrderDTOConverter {
         // PDV-F015 — os dois lado a lado de propósito: netAmount é o que a loja vendeu,
         // totalPayable é o que o cliente pagou. Fora da mesa coincidem.
         dto.setServiceFeeAmount(order.serviceFeeAmount());
+        dto.setDeliveryFee(order.deliveryFee());
         dto.setTotalPayable(order.totalPayable());
         dto.setChangeAmount(order.changeAmount());
         dto.setPayments(payments.stream().map(this::toResponse).toList());
@@ -154,6 +174,12 @@ public class OrderDTOConverter {
         dto.setUnitPrice(item.unitPrice());
         dto.setDiscountAmount(item.discountAmount());
         dto.setNetAmount(item.netAmount());
+        dto.setSurchargeAmount(item.surchargeAmount());
+        dto.setCashbackAmount(item.cashbackAmount());
+        dto.setCourtesy(item.courtesy());
+        dto.setMode(item.mode().name());
+        dto.setNotes(item.notes());
+        dto.setCarvao(item.charcoal());
         return dto;
     }
 
@@ -189,7 +215,8 @@ public class OrderDTOConverter {
         dto.setSeparatedAt(order.separatedAt());
         dto.setShippedAt(order.shippedAt());
         dto.setDeliveredAt(order.deliveredAt());
-        dto.setAllowedTransitions(order.status().allowedTransitions().stream()
+        dto.setDelivery(toDeliveryResponse(order.delivery()));
+        dto.setAllowedTransitions(order.allowedTransitions().stream()
                 .map(Enum::name).sorted().toList());
         dto.setItems(order.items().stream().map(this::toAdminResponse).toList());
         return dto;
@@ -217,6 +244,7 @@ public class OrderDTOConverter {
         dto.setMode(item.mode());
         dto.setCourtesy(item.courtesy());
         dto.setNotes(item.notes());
+        dto.setCarvao(item.charcoal());
         dto.setSurchargeAmount(item.surchargeAmount());
         return dto;
     }
@@ -250,6 +278,64 @@ public class OrderDTOConverter {
         dto.setNetAmount(item.netAmount());
         dto.setCashbackPercent(item.cashbackPercent());
         dto.setCashbackAmount(item.cashbackAmount());
+        dto.setNote(item.notes());
+        return dto;
+    }
+
+    // ── Entrega (PDV-F022) ───────────────────────────────────────────────────────────────────
+
+    /** Entrega do request de venda; {@code null} quando a venda não tem. */
+    public OrderDelivery toDelivery(DeliveryRequest request) {
+        if (request == null) {
+            return null;
+        }
+        DeliveryAddressRequest a = request.getAddress();
+        DeliveryAddress address = a == null ? null : new DeliveryAddress(a.getStreet(), a.getNumber(),
+                a.getComplement(), a.getZipCode(), a.getDistrict(), a.getCity(), a.getState(), a.getCountry(),
+                a.getReference());
+        return new OrderDelivery(request.getType(), address, request.getMethod(), request.getCourierName(),
+                request.getCourierPhone(), request.getPickupCode(), request.getDropoffCode(),
+                request.getTrackingCode(), request.getFee());
+    }
+
+    /** Edição parcial da entrega — {@code PATCH /orders/{id}/delivery}. */
+    public OrderDelivery.Patch toDeliveryPatch(DeliveryRequest request) {
+        DeliveryAddressRequest a = request.getAddress();
+        DeliveryAddress.Patch address = a == null ? null : new DeliveryAddress.Patch(a.getStreet(), a.getNumber(),
+                a.getComplement(), a.getZipCode(), a.getDistrict(), a.getCity(), a.getState(), a.getCountry(),
+                a.getReference());
+        return new OrderDelivery.Patch(request.getType(), address, request.getMethod(), request.getCourierName(),
+                request.getCourierPhone(), request.getPickupCode(), request.getDropoffCode(),
+                request.getTrackingCode(), request.getFee());
+    }
+
+    private DeliveryResponseDTO toDeliveryResponse(OrderDelivery delivery) {
+        if (delivery == null) {
+            return null;
+        }
+        DeliveryResponseDTO dto = new DeliveryResponseDTO();
+        dto.setType(delivery.type().name());
+        dto.setMethod(delivery.method() == null ? null : delivery.method().name());
+        dto.setCourierName(delivery.courierName());
+        dto.setCourierPhone(delivery.courierPhone());
+        dto.setPickupCode(delivery.pickupCode());
+        dto.setDropoffCode(delivery.dropoffCode());
+        dto.setTrackingCode(delivery.trackingCode());
+        dto.setFee(delivery.fee());
+        DeliveryAddress a = delivery.address();
+        if (a != null) {
+            DeliveryResponseDTO.Address address = new DeliveryResponseDTO.Address();
+            address.setStreet(a.street());
+            address.setNumber(a.number());
+            address.setComplement(a.complement());
+            address.setZipCode(a.zipCode());
+            address.setDistrict(a.district());
+            address.setCity(a.city());
+            address.setState(a.state());
+            address.setCountry(a.country());
+            address.setReference(a.reference());
+            dto.setAddress(address);
+        }
         return dto;
     }
 

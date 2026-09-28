@@ -3,6 +3,11 @@ package com.cernecommerce.adapter.out.persistence.repository;
 import com.cernecommerce.adapter.out.persistence.entity.CashRegisterSessionEntity;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.pdv.CashRegisterSession;
+import java.util.List;
+import java.util.ArrayList;
+import org.springframework.data.jpa.domain.Specification;
+import jakarta.persistence.criteria.Predicate;
+import com.cernecommerce.core.domain.model.pdv.CashRegisterSessionFilter;
 import com.cernecommerce.core.ports.out.pdv.CashRegisterRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -41,6 +46,31 @@ public class CashRegisterRepositoryImpl implements CashRegisterRepository {
                 page, size, result.getTotalElements(), result.getTotalPages());
     }
 
+    /**
+     * PDV-F026 — filtros por status, operador e período de abertura. Specification em vez de
+     * {@code :x IS NULL OR}, pela mesma razão de {@code OrderRepositoryImpl.findAll}: o Postgres não
+     * infere o tipo de um {@code Instant} nulo. Ordena por {@code openedAt DESC} (a aba Caixas lê
+     * por data), com {@code id DESC} de desempate para a paginação continuar determinística
+     * (PDV-C013).
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public PageResult<CashRegisterSession> findAll(CashRegisterSessionFilter filter, int page, int size) {
+        CashRegisterSessionFilter f = filter == null ? CashRegisterSessionFilter.none() : filter;
+        Specification<CashRegisterSessionEntity> spec = (root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
+            if (f.status()   != null) predicates.add(cb.equal(root.get("status"), f.status().name()));
+            if (f.operator() != null) predicates.add(cb.equal(root.get("operator"), f.operator()));
+            if (f.from()     != null) predicates.add(cb.greaterThanOrEqualTo(root.get("openedAt"), f.from()));
+            if (f.to()       != null) predicates.add(cb.lessThanOrEqualTo(root.get("openedAt"), f.to()));
+            return cb.and(predicates.toArray(new Predicate[0]));
+        };
+        Page<CashRegisterSessionEntity> result = cashRegisterSessionJpaRepository.findAll(spec,
+                PageRequest.of(page, size, Sort.by(Sort.Order.desc("openedAt"), Sort.Order.desc("id"))));
+        return new PageResult<>(result.getContent().stream().map(this::toDomain).toList(),
+                page, size, result.getTotalElements(), result.getTotalPages());
+    }
+
     @Override
     @Transactional(readOnly = true)
     public Optional<CashRegisterSession> findOpenByOperator(String operator) {
@@ -72,6 +102,7 @@ public class CashRegisterRepositoryImpl implements CashRegisterRepository {
         entity.setCountedAmount(session.countedAmount());
         entity.setDifferenceAmount(session.differenceAmount());
         entity.setStatus(session.status().name());
+        entity.setClosingNotes(session.closingNotes());
         return toDomain(cashRegisterSessionJpaRepository.save(entity));
     }
 
@@ -79,6 +110,6 @@ public class CashRegisterRepositoryImpl implements CashRegisterRepository {
         return CashRegisterSession.of(e.getId(), e.getOperator(), e.getOpenedAt(), e.getOpeningAmount(),
                 e.getWarehouseCode(), e.getClosedAt(), e.getClosedBy(), e.getExpectedAmount(),
                 e.getCountedAmount(), e.getDifferenceAmount(),
-                CashRegisterSession.Status.valueOf(e.getStatus()));
+                CashRegisterSession.Status.valueOf(e.getStatus()), e.getClosingNotes());
     }
 }

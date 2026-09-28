@@ -3,6 +3,7 @@ package com.cernecommerce.adapter.in.controller;
 import com.cernecommerce.adapter.in.converter.OrderDTOConverter;
 import com.cernecommerce.adapter.in.dtos.request.OrderCancelRequest;
 import com.cernecommerce.adapter.in.dtos.request.OrderRefundRequest;
+import com.cernecommerce.adapter.in.dtos.request.DeliveryRequest;
 import com.cernecommerce.adapter.in.dtos.request.OrderStatusRequest;
 import com.cernecommerce.adapter.in.dtos.request.RefundItemLotRequest;
 import com.cernecommerce.adapter.in.dtos.response.OrderAdminResponseDTO;
@@ -15,11 +16,15 @@ import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.pagamento.OrderPayment;
 import com.cernecommerce.core.domain.model.pedido.Order;
 import com.cernecommerce.core.domain.model.pedido.OrderStatus;
+import com.cernecommerce.core.domain.model.pagamento.PaymentMethod;
+import com.cernecommerce.core.domain.model.pedido.OrderFilter;
 import com.cernecommerce.core.domain.model.pedido.OrderSummary;
 import com.cernecommerce.core.domain.model.pedido.SalesChannel;
 import com.cernecommerce.core.ports.in.CrmUseCase;
 import com.cernecommerce.core.ports.in.OrderReportUseCase;
 import com.cernecommerce.core.ports.in.OrderUseCase;
+import com.cernecommerce.core.ports.in.PdvUseCase;
+import com.cernecommerce.core.domain.model.crm.Customer;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -38,6 +43,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -69,14 +75,17 @@ public class OrdersController {
     private final OrderUseCase orderUseCase;
     private final OrderReportUseCase orderReportUseCase;
     private final CrmUseCase crmUseCase;
+    private final PdvUseCase pdvUseCase;
     private final OrderDTOConverter orderConverter;
     private final ApplicationEventPublisher publisher;
 
     public OrdersController(OrderUseCase orderUseCase, OrderReportUseCase orderReportUseCase,
-            CrmUseCase crmUseCase, OrderDTOConverter orderConverter, ApplicationEventPublisher publisher) {
+            CrmUseCase crmUseCase, PdvUseCase pdvUseCase, OrderDTOConverter orderConverter,
+            ApplicationEventPublisher publisher) {
         this.orderUseCase = orderUseCase;
         this.orderReportUseCase = orderReportUseCase;
         this.crmUseCase = crmUseCase;
+        this.pdvUseCase = pdvUseCase;
         this.orderConverter = orderConverter;
         this.publisher = publisher;
     }
@@ -100,7 +109,9 @@ public class OrdersController {
     }
 
     @Operation(summary = "Lista pedidos com filtros, do mais recente para o mais antigo",
-            description = "Todo filtro é opcional. O período incide sobre a data de criação.")
+            description = "Todo filtro é opcional. O período incide sobre a data de criação. PDV-F026: "
+                    + "sessionId (caixa), comandaId (mesa) e orderNumber (exato); cada linha traz "
+                    + "paymentMethods, os métodos CAPTURED do pedido.")
     @GetMapping
     @PreAuthorize("hasAuthority('ORDER_READ')")
     public ResponseEntity<PageResult<OrderAdminResponseDTO>> listOrders(
@@ -109,12 +120,26 @@ public class OrdersController {
             @RequestParam(required = false) Long customerId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
+            @RequestParam(required = false) Long sessionId,
+            @RequestParam(required = false) Long comandaId,
+            @RequestParam(required = false) String orderNumber,
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
-        PageResult<OrderAdminResponseDTO> result = orderConverter.toAdminResponse(
-                orderUseCase.listOrders(channel, status, customerId, from, to, page, size));
+        PageResult<OrderAdminResponseDTO> result = orderConverter.toAdminResponse(orderUseCase.listOrders(
+                new OrderFilter(channel, status, customerId, from, to, sessionId, comandaId, orderNumber), page, size));
         enrichCustomerNames(result.content());
+        enrichPaymentMethods(result.content());
         return ResponseEntity.ok(result);
+    }
+
+    /** PDV-F026 — uma consulta por página, não um recibo por pedido. */
+    private void enrichPaymentMethods(List<OrderAdminResponseDTO> content) {
+        List<Long> ids = content.stream().map(OrderAdminResponseDTO::getId).toList();
+        if (ids.isEmpty()) {
+            return;
+        }
+        Map<Long, List<PaymentMethod>> methods = orderUseCase.getCapturedPaymentMethods(ids);
+        content.forEach(dto -> dto.setPaymentMethods(methods.getOrDefault(dto.getId(), List.of())));
     }
 
     @Operation(summary = "Resumo agregado de vendas do período",
@@ -171,6 +196,8 @@ public class OrdersController {
     public ResponseEntity<OrderAdminResponseDTO> getOrder(@PathVariable("id") Long orderId) {
         OrderAdminResponseDTO dto = orderConverter.toAdminResponse(orderUseCase.getOrder(orderId));
         enrichCustomerNames(List.of(dto));
+        // PDV-F026 — o detalhe deixa de precisar do recibo só para saber como o pedido foi pago.
+        dto.setPayments(orderUseCase.getOrderPayments(orderId).stream().map(orderConverter::toResponse).toList());
         return ResponseEntity.ok(dto);
     }
 
@@ -189,7 +216,33 @@ public class OrdersController {
     public ResponseEntity<SaleReceiptResponseDTO> getReceipt(@PathVariable("id") Long orderId) {
         Order order = orderUseCase.getOrder(orderId);
         List<OrderPayment> payments = orderUseCase.getOrderPayments(orderId);
-        return ResponseEntity.ok(orderConverter.toReceipt(order, payments));
+        SaleReceiptResponseDTO receipt = orderConverter.toReceipt(order, payments);
+        enrichReceipt(receipt);
+        return ResponseEntity.ok(receipt);
+    }
+
+    /**
+     * Cliente (nome, telefone, CPF) e operador do caixa para o cupom. São enfeites de impressão: se o
+     * cliente foi removido do CRM ou a sessão não existe mais, o cupom sai sem eles em vez de falhar.
+     */
+    private void enrichReceipt(SaleReceiptResponseDTO receipt) {
+        if (receipt.getCustomerId() != null) {
+            try {
+                Customer customer = crmUseCase.findCustomerById(receipt.getCustomerId());
+                receipt.setCustomerName(customer.nome());
+                receipt.setCustomerPhone(customer.contato());
+                receipt.setCustomerDocument(customer.cpf());
+            } catch (RuntimeException e) {
+                // cliente fora do CRM — o cupom sai só com o id
+            }
+        }
+        if (receipt.getSessionId() != null) {
+            try {
+                receipt.setOperatorName(pdvUseCase.getSession(receipt.getSessionId()).operator());
+            } catch (RuntimeException e) {
+                // sessão ausente — o cupom sai sem operador
+            }
+        }
     }
 
     @Operation(summary = "Avança o pedido na esteira de fulfillment",
@@ -212,6 +265,29 @@ public class OrdersController {
                         "orderNumber", String.valueOf(order.orderNumber()),
                         "from", before.status().name(),
                         "to", order.status().name())));
+        return ResponseEntity.ok(orderConverter.toAdminResponse(order));
+    }
+
+    @Operation(summary = "Edita a entrega do pedido depois da venda (PDV-F022)",
+            description = "Mesmo corpo da entrega da venda, todos os campos opcionais: null mantém "
+                    + "o valor atual, texto em branco apaga. Serve para preencher depois os códigos "
+                    + "da 99 (pickupCode/dropoffCode), o rastreio dos Correios, o entregador ou "
+                    + "corrigir o endereço. type e fee são congelados na venda — enviá-los com outro "
+                    + "valor dá 400 INVALID_DELIVERY.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = OrderAdminResponseDTO.class))),
+            @ApiResponse(responseCode = "400", description = "INVALID_DELIVERY — fee/type alterados ou endereço incompleto", content = @Content),
+            @ApiResponse(responseCode = "404", description = "Pedido não encontrado", content = @Content),
+            @ApiResponse(responseCode = "409", description = "ORDER_HAS_NO_DELIVERY, ou ORDER_DELIVERY_NOT_EDITABLE (cancelado/reembolsado)", content = @Content)
+    })
+    @PatchMapping("/{id}/delivery")
+    @PreAuthorize("hasAuthority('ORDER_FULFILL')")
+    public ResponseEntity<OrderAdminResponseDTO> updateDelivery(@PathVariable("id") Long orderId,
+            @Valid @RequestBody DeliveryRequest request, Authentication authentication) {
+        Order order = orderUseCase.updateDelivery(orderId, orderConverter.toDeliveryPatch(request),
+                authentication.getName());
+        publisher.publishEvent(AuditEvent.of(EventType.ORDER_DELIVERY_UPDATED, authentication.getName(),
+                Map.of("orderId", orderId, "orderNumber", String.valueOf(order.orderNumber()))));
         return ResponseEntity.ok(orderConverter.toAdminResponse(order));
     }
 

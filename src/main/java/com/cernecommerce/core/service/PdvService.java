@@ -8,6 +8,7 @@ import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionClosedExce
 import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionHasOpenComandasException;
 import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionNotFoundException;
 import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionNotOwnedException;
+import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionStaleException;
 import com.cernecommerce.core.domain.exception.pdv.NoOpenCashRegisterSessionException;
 import com.cernecommerce.core.domain.exception.pedido.DiscountLimitExceededException;
 import com.cernecommerce.core.domain.exception.pedido.OrderNotFoundException;
@@ -21,7 +22,9 @@ import com.cernecommerce.core.domain.model.pagamento.PaymentStatus;
 import com.cernecommerce.core.domain.model.pdv.CashMovement;
 import com.cernecommerce.core.domain.model.pdv.CashMovementType;
 import com.cernecommerce.core.domain.model.pdv.CashRegisterSession;
+import com.cernecommerce.core.domain.model.pdv.CashRegisterSessionFilter;
 import com.cernecommerce.core.domain.model.pedido.Order;
+import com.cernecommerce.core.domain.model.pedido.OrderDelivery;
 import com.cernecommerce.core.domain.model.pedido.OrderItem;
 import com.cernecommerce.core.domain.model.pedido.OrderStatus;
 import com.cernecommerce.core.domain.model.pedido.SalesChannel;
@@ -36,7 +39,10 @@ import com.cernecommerce.core.ports.out.pedido.OrderRepository;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -58,11 +64,27 @@ public class PdvService implements PdvUseCase {
     /** Teto de desconto por pedido, em percentual sobre o bruto. */
     private final BigDecimal maxDiscountPercent;
 
+    /** PDV-F022 — "hoje" para barrar venda em caixa de ontem; injetável para teste. */
+    private final Clock clock;
+
+    /** Fuso do dia de caixa: é a data da loja que conta, não a do servidor em UTC. */
+    static final ZoneId ZONA_LOJA = ZoneId.of("America/Sao_Paulo");
+
     public PdvService(CashRegisterRepository cashRegisterRepository,
             CashMovementRepository cashMovementRepository, OrderRepository orderRepository,
             OrderPaymentRepository orderPaymentRepository, EstoqueUseCase estoqueUseCase,
             CashbackUseCase cashbackUseCase, ComandaRepository comandaRepository,
             BigDecimal maxDiscountPercent) {
+        this(cashRegisterRepository, cashMovementRepository, orderRepository, orderPaymentRepository,
+                estoqueUseCase, cashbackUseCase, comandaRepository, maxDiscountPercent, Clock.systemUTC());
+    }
+
+    public PdvService(CashRegisterRepository cashRegisterRepository,
+            CashMovementRepository cashMovementRepository, OrderRepository orderRepository,
+            OrderPaymentRepository orderPaymentRepository, EstoqueUseCase estoqueUseCase,
+            CashbackUseCase cashbackUseCase, ComandaRepository comandaRepository,
+            BigDecimal maxDiscountPercent, Clock clock) {
+        this.clock = clock;
         this.cashRegisterRepository = cashRegisterRepository;
         this.cashMovementRepository = cashMovementRepository;
         this.orderRepository = orderRepository;
@@ -79,6 +101,12 @@ public class PdvService implements PdvUseCase {
     @Transactional(readOnly = true)
     public PageResult<CashRegisterSession> listSessions(int page, int size) {
         return cashRegisterRepository.findAll(page, size);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResult<CashRegisterSession> listSessions(CashRegisterSessionFilter filter, int page, int size) {
+        return cashRegisterRepository.findAll(filter, page, size);
     }
 
     @Override
@@ -128,13 +156,19 @@ public class PdvService implements PdvUseCase {
 
     @Override
     @Transactional
-    public CashRegisterSession closeSession(Long sessionId, BigDecimal countedAmount, String username) {
+    public CashRegisterSession closeSession(Long sessionId, BigDecimal countedAmount, String notes,
+            String username, boolean canCloseAny) {
         CashRegisterSession session = getSession(sessionId);
         if (!session.isOpen()) {
             throw new CashRegisterSessionClosedException(sessionId);
         }
-        // Fechar NÃO exige ser o dono: a conferência costuma ser do gerente, e é por isso que
-        // PDV_SESSION_CLOSE existe separada de PDV_SESSION_MANAGE.
+        // Fechar o caixa de OUTRO operador é conferência de gerente (admin/dev), e é por isso que
+        // PDV_SESSION_CLOSE existe separada de PDV_SESSION_MANAGE. O atendente também tem
+        // PDV_SESSION_CLOSE (V86) para fechar o próprio turno, mas não o do colega: até aqui a API
+        // aceitava, e um atendente podia encerrar a gaveta de outro pela rota.
+        if (!canCloseAny && !session.belongsTo(username)) {
+            throw new CashRegisterSessionNotOwnedException(sessionId, username);
+        }
         //
         // PDV-C005: mas mesa aberta barra o fechamento, e esta é a única regra do ciclo de caixa
         // que BLOQUEIA em vez de apenas registrar. A assimetria é deliberada. Divergência de
@@ -175,7 +209,7 @@ public class PdvService implements PdvUseCase {
                 .add(cashMovementRepository.sumSignedAmountBySessionId(sessionId));
 
         // Divergência não bloqueia — é o achado do fechamento, como no balanço de inventário.
-        return cashRegisterRepository.save(session.closedWith(expected, countedAmount, username));
+        return cashRegisterRepository.save(session.closedWith(expected, countedAmount, username, notes));
     }
 
     @Override
@@ -190,8 +224,15 @@ public class PdvService implements PdvUseCase {
             if (method == PaymentMethod.GATEWAY_PIX) {
                 continue;
             }
-            totals.add(new PaymentTotal(method,
-                    orderPaymentRepository.sumCapturedAmountBySessionIdAndMethod(sessionId, method)));
+            // PDV-F026 — além do bruto, o estorno e (em dinheiro) o troco, para a aba Caixas mostrar o
+            // líquido sem abrir recibo nenhum. Mesmas somas do esperado de closeSession.
+            BigDecimal captured = orderPaymentRepository.sumCapturedAmountBySessionIdAndMethod(sessionId, method);
+            BigDecimal refunded = orderPaymentRepository.sumRefundedAmountBySessionIdAndMethod(sessionId, method);
+            BigDecimal change = method == PaymentMethod.DINHEIRO
+                    ? orderRepository.sumChangeAmountBySessionId(sessionId)
+                    : BigDecimal.ZERO;
+            totals.add(new PaymentTotal(method, captured, refunded, change,
+                    captured.subtract(refunded).subtract(change)));
         }
         return totals;
     }
@@ -201,8 +242,9 @@ public class PdvService implements PdvUseCase {
     @Override
     @Transactional
     public Order registerSale(Long sessionId, Long customerId, List<SaleItemCommand> items,
-            List<PaymentCommand> payments, String username, boolean reserveForPickup) {
+            List<PaymentCommand> payments, String username, boolean reserveForPickup, OrderDelivery delivery) {
         CashRegisterSession session = requireOwnOpenSession(sessionId, username);
+        requireSessionFromToday(session);
 
         // PDV-F004: o preço e o custo vêm do catálogo. resolveSaleInfo já lança
         // ProductNotFoundException para SKU inexistente, e fromCatalog recusa produto sem preço —
@@ -211,7 +253,8 @@ public class PdvService implements PdvUseCase {
         for (SaleItemCommand command : items) {
             EstoqueUseCase.CatalogSaleInfo saleInfo = estoqueUseCase.resolveSaleInfo(command.sku());
             OrderItem item = OrderItem.fromCatalog(command.sku(), command.quantity(),
-                    saleInfo.pricing(), command.discountAmount(), saleInfo.productName());
+                    saleInfo.pricing(), command.discountAmount(), saleInfo.productName())
+                    .withNotes(command.note());
             // CRM-F003: a taxa é resolvida e carimbada aqui — mudar a taxa amanhã não pode
             // reescrever o cashback gerado por pedidos de ontem.
             CashbackRate resolvedRate = cashbackUseCase.resolveApplicableRate(command.sku());
@@ -224,12 +267,14 @@ public class PdvService implements PdvUseCase {
         // PDV-C004: o depósito vem da SESSÃO, não do request. É o que impede o operador de baixar
         // estoque de um depósito que não é o do caixa dele.
         String warehouseCode = session.warehouseCode();
-        Order order = Order.openBalcao(sessionId, warehouseCode, customerId, orderItems);
+        Order order = Order.openBalcao(sessionId, warehouseCode, customerId, orderItems, delivery);
         requireDiscountWithinLimit(order);
 
         // PDV-F006: pagamento é validado ANTES de tocar o estoque — um pagamento insuficiente não
         // deveria custar um adjustStock que só vai ser desfeito pelo rollback da transação.
-        BigDecimal changeAmount = validatePaymentsAndComputeChange(payments, order.netAmount());
+        // PDV-F022: contra totalPayable(), que inclui a taxa de entrega — no balcão sem entrega é
+        // igual ao líquido, como sempre foi.
+        BigDecimal changeAmount = validatePaymentsAndComputeChange(payments, order.totalPayable());
 
         for (OrderItem item : order.items()) {
             estoqueUseCase.adjustStock(item.sku(), warehouseCode, MovementType.SAIDA, item.quantity(),
@@ -239,13 +284,15 @@ public class PdvService implements PdvUseCase {
         // No balcão a mercadoria sai e o dinheiro entra no mesmo instante: CRIADO → CONCLUIDO (ou,
         // com reserva para retirada depois — PDV-F008 —, CRIADO → RESERVADO) na mesma transação. A
         // numeração é consumida aqui, e não na criação, nos dois casos.
-        Order saved = orderRepository.save(reserveForPickup
+        // PDV-F022: entrega e retirada também reservam — a mercadoria ainda não saiu da loja.
+        boolean reserve = reserveForPickup || delivery != null;
+        Order saved = orderRepository.save(reserve
                 ? order.reserved(orderRepository.nextOrderNumber(), changeAmount, Instant.now())
                 : order.concluded(orderRepository.nextOrderNumber(), changeAmount, Instant.now()));
 
         for (PaymentCommand payment : payments) {
             orderPaymentRepository.save(OrderPayment.captured(saved.id(), payment.method(),
-                    payment.amount(), payment.installments()));
+                    payment.amount(), payment.installments(), payment.channel(), payment.provider()));
         }
         cashbackUseCase.recordEarnedForOrder(saved);
         return saved;
@@ -351,7 +398,7 @@ public class PdvService implements PdvUseCase {
         // com a lista de pagamentos vazia.
         for (PaymentCommand payment : payments) {
             orderPaymentRepository.save(OrderPayment.captured(saved.id(), payment.method(),
-                    payment.amount(), payment.installments()));
+                    payment.amount(), payment.installments(), payment.channel(), payment.provider()));
         }
         // E a cobrança de gateway aberta no checkout (ShopService grava uma PENDING/GATEWAY_PIX em
         // todo pedido de marketplace) é encerrada: pago no balcão, nenhum webhook vai confirmá-la,
@@ -389,6 +436,19 @@ public class PdvService implements PdvUseCase {
      * mesmo pacote) reaproveita esta checagem via injeção do bean concreto {@code PdvService}, em
      * vez de duplicar a regra de posse de sessão.</p>
      */
+    /**
+     * PDV-F022 — venda só no caixa de HOJE, na data da loja. Barra o caixa de ontem esquecido
+     * aberto, que misturaria dois dias num fechamento. Só a venda de balcão passa por aqui:
+     * fechar o caixa antigo continua permitido, e a mesa que vira a madrugada não é afetada.
+     */
+    private void requireSessionFromToday(CashRegisterSession session) {
+        LocalDate openedOn = LocalDate.ofInstant(session.openedAt(), ZONA_LOJA);
+        LocalDate today = LocalDate.now(clock.withZone(ZONA_LOJA));
+        if (openedOn.isBefore(today)) {
+            throw new CashRegisterSessionStaleException(session.id(), openedOn, today);
+        }
+    }
+
     CashRegisterSession requireOwnOpenSession(Long sessionId, String username) {
         CashRegisterSession session = getSession(sessionId);
         if (!session.isOpen()) {

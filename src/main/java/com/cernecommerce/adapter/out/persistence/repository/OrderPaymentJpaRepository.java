@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -55,4 +56,17 @@ public interface OrderPaymentJpaRepository extends JpaRepository<OrderPaymentEnt
             """)
     BigDecimal sumRefundedAmountBySessionIdAndMethod(@Param("sessionId") Long sessionId,
             @Param("method") String method);
+
+    /**
+     * PDV-F026 — pares (pedido, método) dos pagamentos {@code CAPTURED} dos pedidos informados, sem
+     * repetição: a listagem de pedidos mostra como cada um foi pago numa consulta só por página.
+     */
+    @Query("""
+            SELECT DISTINCT p.orderId, p.method
+            FROM OrderPaymentEntity p
+            WHERE p.orderId IN :orderIds
+              AND p.status = 'CAPTURED'
+            ORDER BY p.orderId, p.method
+            """)
+    List<Object[]> findCapturedMethodsByOrderIds(@Param("orderIds") Collection<Long> orderIds);
 }

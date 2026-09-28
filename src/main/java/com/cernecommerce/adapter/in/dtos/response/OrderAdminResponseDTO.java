@@ -1,5 +1,6 @@
 package com.cernecommerce.adapter.in.dtos.response;
 
+import com.cernecommerce.core.domain.model.pagamento.PaymentMethod;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
@@ -49,9 +50,9 @@ public class OrderAdminResponseDTO {
             + "receita e margem. Zero em toda venda que não veio de mesa.")
     private BigDecimal serviceFeeAmount;
 
-    @Schema(description = "O que o cliente efetivamente paga: netAmount + serviceFeeAmount "
-            + "(PDV-F015). É contra este valor que o pagamento é validado e o troco calculado. "
-            + "Fora da mesa coincide com netAmount, porque a taxa é zero.")
+    @Schema(description = "O que o cliente efetivamente paga: netAmount + serviceFeeAmount + "
+            + "delivery.fee (PDV-F015, PDV-F022). É contra este valor que o pagamento é validado e o "
+            + "troco calculado. No balcão sem entrega coincide com netAmount.")
     private BigDecimal totalPayable;
 
 
@@ -80,5 +81,16 @@ public class OrderAdminResponseDTO {
     @Schema(description = "Estados para os quais este pedido pode transitar agora.")
     private List<String> allowedTransitions;
 
+
+    @Schema(description = "PDV-F022 — entrega ou retirada; null quando a venda não tem. delivery.fee já está em totalPayable.")
+    private DeliveryResponseDTO delivery;
     private List<OrderItemAdminResponseDTO> items;
+
+    @Schema(description = "PDV-F026 — pagamentos do pedido (todas as linhas, inclusive REFUNDED). Só em "
+            + "GET /orders/{id}; nulo na listagem.")
+    private List<OrderPaymentResponseDTO> payments;
+
+    @Schema(description = "PDV-F026 — métodos com pagamento CAPTURED, sem repetição. Só na listagem "
+            + "GET /orders; com changeAmount, diz como o pedido foi pago sem abrir o recibo.")
+    private List<PaymentMethod> paymentMethods;
 }

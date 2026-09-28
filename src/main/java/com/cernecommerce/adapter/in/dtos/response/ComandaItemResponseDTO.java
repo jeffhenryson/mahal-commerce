@@ -1,11 +1,14 @@
 package com.cernecommerce.adapter.in.dtos.response;
 
+import com.cernecommerce.core.domain.model.pdv.Charcoal;
+import com.cernecommerce.core.domain.model.pdv.SessionStatus;
 import com.cernecommerce.core.domain.model.pedido.ConsumptionMode;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 
 @Data
 public class ComandaItemResponseDTO {
@@ -19,8 +22,9 @@ public class ComandaItemResponseDTO {
     private BigDecimal subtotal;
     private Instant addedAt;
 
-    @Schema(description = "Por que a linha existe: NORMAL, OPEN_ROSH, SABOR_EXTRA ou TROCA "
-            + "(PDV-F010). Sem isto a tela não sabe quais linhas aceitam troca de sabor.")
+    @Schema(description = "Por que a linha existe: NORMAL, OPEN_ROSH, SABOR_EXTRA, TROCA (PDV-F010), "
+            + "SESSAO ou ROSH_EXTRA (cardápio de sessão, PDV-F021). Sem isto a tela não sabe quais "
+            + "linhas aceitam troca de sabor.")
     // PDV-C010 — enum, não String: era assimétrico com AddComandaItemRequest.mode, que já é o
     // enum, e o cliente mantinha o tipo à mão em vez de gerá-lo do OpenAPI.
     private ConsumptionMode mode;
@@ -64,4 +68,31 @@ public class ComandaItemResponseDTO {
     private String kitBundleId;
     private Long kitTemplateId;
     private BigDecimal kitDiscountAmount;
+
+    @Schema(description = "Onde está a sessão no salão (PDV-F023): NA_FILA, PREPARANDO, ENTREGUE ou "
+            + "RECOLHIDO. Só em SESSAO/ROSH_EXTRA; nulo em linha de catálogo.")
+    private SessionStatus sessionStatus;
+
+    @Schema(description = "Início do tempo de mesa. Nulo enquanto NA_FILA.")
+    private Instant startedAt;
+    private Instant deliveredAt;
+    private Instant collectedAt;
+
+    @Schema(description = "Faixa da sessão (SESSAO/ROSH_EXTRA), lida do SKU SESS-{id} (PDV-F027). "
+            + "Nulo em linha de catálogo.", example = "1")
+    private Long tierId;
+
+    @Schema(description = "Sabor da sessão, sem o sufixo de vaso (PDV-F027). Nulo em linha de catálogo.",
+            example = "Sence Menta")
+    private String essencia;
+
+    @Schema(description = "Sessão no vaso grande (PDV-F027). Base do \"repetir sessão\".")
+    private boolean vasoGrande;
+
+    @Schema(description = "Carvão da sessão (CUBO ou JUMBO), só registro (PDV-F024).")
+    private Charcoal carvao;
+
+    @Schema(description = "Adicionais pagos cobrados nesta sessão, com o preço da época (PDV-F024). "
+            + "Vazio fora de sessão do cardápio.")
+    private List<ComandaItemAddonResponseDTO> adicionais = List.of();
 }

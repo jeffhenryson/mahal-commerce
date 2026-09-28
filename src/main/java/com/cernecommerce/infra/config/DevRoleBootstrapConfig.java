@@ -54,7 +54,9 @@ public class DevRoleBootstrapConfig {
         // PDV-F014 — mesma família: abater da conta no fechamento da mesa é alçada, não operação
         // de turno (V119). Separada de PDV_SALE_DISCOUNT, que é a alçada do balcão.
         "PDV_COMANDA_DISCOUNT",
-        "ORDER_READ", "ORDER_FULFILL", "ORDER_CANCEL", "ORDER_REFUND"
+        "ORDER_READ", "ORDER_FULFILL", "ORDER_CANCEL", "ORDER_REFUND",
+        // Perfil da loja impresso no cupom (V131).
+        "STORE_PROFILE_MANAGE"
     };
 
     private static final String[] DEV_ONLY_PERMISSIONS = {

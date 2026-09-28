@@ -3,10 +3,12 @@ package com.cernecommerce.adapter.out.persistence.repository;
 import com.cernecommerce.adapter.out.persistence.entity.ComandaSessionAssetEntity;
 import com.cernecommerce.adapter.out.persistence.entity.SessionAssetTypeEntity;
 import com.cernecommerce.adapter.out.persistence.entity.SessionSettingsEntity;
+import com.cernecommerce.adapter.out.persistence.entity.SessionAddonEntity;
 import com.cernecommerce.adapter.out.persistence.entity.SessionTierEntity;
 import com.cernecommerce.core.domain.model.pdv.SessionAssetAllocation;
 import com.cernecommerce.core.domain.model.pdv.SessionAssetType;
 import com.cernecommerce.core.domain.model.pdv.SessionSettings;
+import com.cernecommerce.core.domain.model.pdv.SessionAddon;
 import com.cernecommerce.core.domain.model.pdv.SessionTier;
 import com.cernecommerce.core.ports.out.pdv.SessionMenuRepository;
 import org.springframework.stereotype.Repository;
@@ -28,8 +30,12 @@ public class SessionMenuRepositoryImpl implements SessionMenuRepository {
     private final SessionSettingsJpaRepository settingsJpa;
     private final ComandaSessionAssetJpaRepository allocationJpa;
 
+    private final SessionAddonJpaRepository addonJpa;
+
     public SessionMenuRepositoryImpl(SessionTierJpaRepository tierJpa, SessionAssetTypeJpaRepository assetTypeJpa,
-            SessionSettingsJpaRepository settingsJpa, ComandaSessionAssetJpaRepository allocationJpa) {
+            SessionSettingsJpaRepository settingsJpa, ComandaSessionAssetJpaRepository allocationJpa,
+            SessionAddonJpaRepository addonJpa) {
+        this.addonJpa = addonJpa;
         this.tierJpa = tierJpa;
         this.assetTypeJpa = assetTypeJpa;
         this.settingsJpa = settingsJpa;
@@ -59,6 +65,30 @@ public class SessionMenuRepositoryImpl implements SessionMenuRepository {
         SessionTierEntity e = new SessionTierEntity(tier.id(), tier.nome(), tier.preco(), tier.marcas(), tier.ordem(),
                 tier.ativo());
         return toDomain(tierJpa.save(e));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<SessionAddon> findAllAddons() {
+        return addonJpa.findAllByOrderByOrdemAscIdAsc().stream().map(this::toDomain).toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<SessionAddon> findAddonById(Long id) {
+        return addonJpa.findById(id).map(this::toDomain);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<SessionAddon> findAddonByNome(String nome) {
+        return addonJpa.findFirstByNomeIgnoreCase(nome).map(this::toDomain);
+    }
+
+    @Override
+    public SessionAddon saveAddon(SessionAddon addon) {
+        return toDomain(addonJpa.save(new SessionAddonEntity(addon.id(), addon.nome(), addon.preco(), addon.ordem(),
+                addon.ativo())));
     }
 
     @Override
@@ -147,6 +177,10 @@ public class SessionMenuRepositoryImpl implements SessionMenuRepository {
 
     private SessionTier toDomain(SessionTierEntity e) {
         return new SessionTier(e.getId(), e.getNome(), e.getPreco(), e.getMarcas(), e.getOrdem(), e.isAtivo());
+    }
+
+    private SessionAddon toDomain(SessionAddonEntity e) {
+        return new SessionAddon(e.getId(), e.getNome(), e.getPreco(), e.getOrdem(), e.isAtivo());
     }
 
     private SessionAssetType toDomain(SessionAssetTypeEntity e) {

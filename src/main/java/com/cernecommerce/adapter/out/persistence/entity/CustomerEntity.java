@@ -15,7 +15,7 @@ import java.time.Instant;
 @Table(name = "customers", uniqueConstraints = {
         @UniqueConstraint(name = "uk_customers_email", columnNames = "email"),
         @UniqueConstraint(name = "uk_customers_cpf", columnNames = "cpf")
-})
+}, indexes = @Index(name = "idx_customers_phone_normalized", columnList = "phone_normalized"))
 public class CustomerEntity {
 
     @Id
@@ -29,6 +29,10 @@ public class CustomerEntity {
     /** Opcional desde CRM-C005 — cpf ou email sozinhos já identificam o cliente. */
     @Column(length = 30)
     private String contato;
+
+    /** {@code contato} só com dígitos e sem DDI 55 (CRM-C007) — base do lookup e da checagem de duplicidade. */
+    @Column(name = "phone_normalized", length = 30)
+    private String phoneNormalized;
 
     /** Opcional desde CRM-C005 — cliente "leve" pode ser identificado só por cpf/contato. */
     @Column(length = 255)

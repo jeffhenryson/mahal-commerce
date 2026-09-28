@@ -23,6 +23,7 @@ import com.cernecommerce.adapter.in.dtos.response.ChannelStatusResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.CrmDashboardResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.CashbackEntryResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.CustomerNoteResponseDTO;
+import com.cernecommerce.adapter.in.dtos.response.CustomerMatchResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.CustomerResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.StageTransitionResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.TagResponseDTO;
@@ -39,6 +40,7 @@ import com.cernecommerce.core.domain.model.crm.CustomerNote;
 import com.cernecommerce.core.domain.model.crm.LeadResolution;
 import com.cernecommerce.core.ports.in.CashbackUseCase;
 import com.cernecommerce.core.ports.in.CrmUseCase;
+import com.cernecommerce.infra.handler.CustomerConflictError;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -105,7 +107,9 @@ public class CrmController {
     @Operation(summary = "Cria um cliente")
     @ApiResponses({
             @ApiResponse(responseCode = "201", description = "Criado", content = @Content(schema = @Schema(implementation = CustomerResponseDTO.class))),
-            @ApiResponse(responseCode = "409", description = "Email já cadastrado", content = @Content),
+            @ApiResponse(responseCode = "409", description = "Telefone, email ou CPF já cadastrados — "
+                    + "CUSTOMER_ALREADY_EXISTS com matchedBy e customerId",
+                    content = @Content(schema = @Schema(implementation = CustomerConflictError.class))),
             @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
     })
     @PostMapping("/customers")
@@ -187,6 +191,29 @@ public class CrmController {
             @RequestParam(required = false) String contato) {
         Customer customer = crmUseCase.lookupCustomer(cpf, email, contato);
         return ResponseEntity.ok(converter.toResponse(customer));
+    }
+
+    @Operation(summary = "Clientes que já usam este telefone, email ou CPF (CRM-C007)",
+            description = "Para o PDV barrar o cadastro duplicado e oferecer \"Selecionar este "
+                    + "cliente\". Critérios opcionais, ao menos um: telefone comparado só pelos "
+                    + "dígitos, email aparado e sem diferenciar maiúsculas, CPF com ou sem máscara. "
+                    + "Devolve TODOS os clientes que batem em qualquer critério, cada um com "
+                    + "matchedBy; [] quando ninguém bate.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK — lista, possivelmente vazia"),
+            @ApiResponse(responseCode = "400", description = "Nenhum critério informado ou CPF inválido",
+                    content = @Content),
+            @ApiResponse(responseCode = "403", description = "Sem permissão", content = @Content)
+    })
+    @GetMapping("/customers/lookup/contact")
+    @PreAuthorize("hasAuthority('CRM_CUSTOMER_LOOKUP')")
+    public ResponseEntity<List<CustomerMatchResponseDTO>> lookupCustomersByContact(
+            @RequestParam(required = false) String phone,
+            @RequestParam(required = false) String email,
+            @RequestParam(required = false) String cpf) {
+        return ResponseEntity.ok(crmUseCase.lookupCustomers(phone, email, cpf).stream()
+                .map(converter::toMatchResponse)
+                .toList());
     }
 
     @Operation(summary = "Busca um cliente por id")

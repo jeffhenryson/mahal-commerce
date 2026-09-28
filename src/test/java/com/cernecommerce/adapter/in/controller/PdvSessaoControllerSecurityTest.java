@@ -106,4 +106,59 @@ public class PdvSessaoControllerSecurityTest {
                         .with(user("atendente").authorities(COMANDA)))
                 .andExpect(status().isBadRequest());
     }
+
+    // ── PDV-F023 ──
+
+    @Test
+    void session_status_without_comanda_manage_returns_403() throws Exception {
+        mockMvc.perform(patch("/pdv/comandas/1/sessoes/1/status")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"ENTREGUE\"}")
+                        .with(user("gerente").authorities(SESSAO_MANAGE)))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void session_status_on_unknown_comanda_returns_404_and_invalid_status_400() throws Exception {
+        mockMvc.perform(patch("/pdv/comandas/999999/sessoes/1/status")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"ENTREGUE\"}")
+                        .with(user("atendente").authorities(COMANDA)))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(patch("/pdv/comandas/999999/sessoes/1/status")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}")
+                        .with(user("atendente").authorities(COMANDA)))
+                .andExpect(status().isBadRequest());
+    }
+
+    // ── PDV-F024 ──
+
+    @Test
+    void addons_are_managed_only_with_sessao_manage_and_listed_in_the_menu() throws Exception {
+        mockMvc.perform(get("/pdv/sessao/adicionais").with(user("atendente").authorities(COMANDA)))
+                .andExpect(status().isForbidden());
+        String nome = "Adicional " + UUID.randomUUID().toString().substring(0, 8);
+        String body = "{\"nome\":\"" + nome + "\",\"preco\":5.00,\"ordem\":1}";
+        mockMvc.perform(post("/pdv/sessao/adicionais").contentType(MediaType.APPLICATION_JSON).content(body)
+                        .with(user("gerente").authorities(SESSAO_MANAGE)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.ativo").value(true));
+        mockMvc.perform(post("/pdv/sessao/adicionais").contentType(MediaType.APPLICATION_JSON).content(body)
+                        .with(user("gerente").authorities(SESSAO_MANAGE)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.errorCode").value("SESSION_MENU_CONFLICT"));
+        mockMvc.perform(get("/pdv/sessao/cardapio").with(user("atendente").authorities(COMANDA)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.adicionais[?(@.nome == '" + nome + "')]").exists());
+    }
+
+    @Test
+    void update_unknown_addon_returns_404() throws Exception {
+        mockMvc.perform(put("/pdv/sessao/adicionais/999999").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nome\":\"X\",\"preco\":1}")
+                        .with(user("gerente").authorities(SESSAO_MANAGE)))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.errorCode").value("SESSION_ADDON_NOT_FOUND"));
+    }
 }

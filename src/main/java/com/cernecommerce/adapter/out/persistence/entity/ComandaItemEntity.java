@@ -2,9 +2,12 @@ package com.cernecommerce.adapter.out.persistence.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.BatchSize;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Item de uma {@link ComandaEntity} (PDV-F009). Tabela {@code comanda_item}.
@@ -108,4 +111,31 @@ public class ComandaItemEntity {
 
     @Column(name = "kit_discount_amount", precision = 14, scale = 2)
     private BigDecimal kitDiscountAmount;
+
+    // PDV-F023 — status e tempo de mesa da sessão. Nulos em linha de catálogo.
+    @Column(name = "session_status", length = 20)
+    private String sessionStatus;
+
+    @Column(name = "started_at")
+    private Instant startedAt;
+
+    @Column(name = "delivered_at")
+    private Instant deliveredAt;
+
+    @Column(name = "collected_at")
+    private Instant collectedAt;
+
+    // PDV-F024 — carvão (só registro) e adicionais cobrados na sessão.
+    @Column(length = 10)
+    private String charcoal;
+
+    // PDV-F027 — sessão no vaso grande, para "repetir sessão" refazer a mesma configuração.
+    @Column(name = "vaso_grande", nullable = false)
+    private boolean vasoGrande;
+
+    @OneToMany(mappedBy = "item", cascade = CascadeType.ALL, orphanRemoval = true)
+    @BatchSize(size = 100)
+    @OrderBy("id")
+    @ToString.Exclude
+    private List<ComandaItemAddonEntity> addons = new ArrayList<>();
 }

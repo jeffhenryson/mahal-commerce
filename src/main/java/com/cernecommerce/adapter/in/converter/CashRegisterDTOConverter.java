@@ -24,6 +24,7 @@ public class CashRegisterDTOConverter {
         dto.setDifferenceAmount(session.differenceAmount());
         dto.setDiverges(session.diverges());
         dto.setStatus(session.status().name());
+        dto.setClosingNotes(session.closingNotes());
         return dto;
     }
 

@@ -77,22 +77,26 @@ registro de vendas no balcão.
 |---|---|---|---|
 | `PATCH` | `/pdv/comandas/{id}/customer` | `PDV_COMANDA_MANAGE` (+ `CRM_LEAD_CREATE` com `lead`) | PDV-F020 — vincula/troca/remove o cliente da mesa aberta (`customerId` ou `lead` find-or-create) |
 | `GET` | `/pdv/sessao/cardapio` | `PDV_COMANDA_MANAGE` | PDV-F021 — faixas ativas, utensílios livres, configuração e `duploRoshHoje` |
-| `POST` | `/pdv/comandas/{id}/sessoes` | `PDV_COMANDA_MANAGE` | PDV-F021 — lança sessão `{tierId, essencia, vasoGrande}`; aloca utensílios; 409 `SESSION_ASSET_UNAVAILABLE` |
+| `POST` | `/pdv/comandas/{id}/sessoes` | `PDV_COMANDA_MANAGE` | PDV-F021 — lança sessão `{tierId, essencia, vasoGrande}`; aloca utensílios; 409 `SESSION_ASSET_UNAVAILABLE`. PDV-F027: nasce `AGUARDANDO_PAGAMENTO` (utensílio já reservado) e vai a `PREPARANDO` quando paga (`close` com `itemIds`); a mesa aceita sessões **em paralelo**, limitadas ao utensílio livre (o antigo 409 `SESSION_STILL_ACTIVE` deixou de existir). PDV-F024: `carvao` (`CUBO`/`JUMBO`, só registro), `adicionalIds` (somados ao preço; 404 `SESSION_ADDON_NOT_FOUND`) e `modo=DUPLO` + `essenciaRosh` (+ `tierIdRosh`) — cria o 2º rosh a R$ 0 ligado, em `NA_FILA`, na mesma transação |
+| `POST` | `/pdv/comandas/{id}/sessoes/{itemId}/repetir` | `PDV_COMANDA_MANAGE` | PDV-F027 — nova sessão com a faixa, o vaso, o carvão e os adicionais da sessão `{itemId}` (em qualquer status, inclusive recolhida), pelo preço atual. `{essencia?, duplo?, essenciaRosh?, tierIdRosh?}` — `essencia` nula repete o sabor. Mesmos 404/409 do lançamento, + 409 `NOT_A_SESSION_LINE` |
 | `POST` | `/pdv/comandas/{id}/sessoes/{itemId}/rosh` | `PDV_COMANDA_MANAGE` | PDV-F021 — 2º rosh `{tierId?, essencia}`; R$ 0 no dia de duplo rosh |
 | `GET`/`POST`/`PUT` | `/pdv/sessao/faixas[/{id}]` | `PDV_SESSAO_MANAGE` | PDV-F021 — cadastro das faixas |
 | `GET`/`POST`/`PUT` | `/pdv/sessao/utensilios[/{id}]` | `PDV_SESSAO_MANAGE` | PDV-F021 — tipos de utensílio e quantidade total |
+| `PATCH` | `/pdv/comandas/{id}/sessoes/{itemId}/status` | `PDV_COMANDA_MANAGE` | PDV-F023 — `{status}`: `NA_FILA → PREPARANDO → ENTREGUE → RECOLHIDO` (+ `PREPARANDO → RECOLHIDO`); 409 `INVALID_SESSION_TRANSITION` (inclusive a partir de `AGUARDANDO_PAGAMENTO`, que só o pagamento promove — PDV-F027). Recolher libera os utensílios quando o grupo (sessão + roshs ligados) está todo recolhido e promove a próxima `NA_FILA` **do mesmo grupo** |
+| `POST` | `/pdv/comandas/{id}/finish` | `PDV_COMANDA_MANAGE` | PDV-F023 — encerra a mesa já toda paga, sem novo pedido (o cabeçalho aponta o último). 409 `COMANDA_EMPTY`, `COMANDA_HAS_OPEN_ITEMS` ou `SESSION_NOT_COLLECTED` |
+| `GET`/`POST`/`PUT` | `/pdv/sessao/adicionais[/{id}]` | `PDV_SESSAO_MANAGE` | PDV-F024 — adicionais pagos da sessão (filtro de gelo R$ 5); ativos aparecem em `cardapio.adicionais` |
 | `GET`/`PUT` | `/pdv/sessao/config` | `PDV_SESSAO_MANAGE` | PDV-F021 — vaso padrão/grande, preço do upgrade, dias de duplo rosh |
-| `GET` | `/pdv/sessions` | `PDV_READ` | Lista sessões de caixa paginadas (`page` ≥ 0, `size` 1–100), **das mais recentes para as mais antigas** — a ordenação entrou em PDV-C013; antes a paginação não era determinística |
+| `GET` | `/pdv/sessions` | `PDV_READ` | PDV-F026: filtros opcionais `status` (`OPEN`/`CLOSED`), `operator` e `from`/`to` sobre `openedAt`, ordenado por `openedAt desc, id desc`. Lista sessões de caixa paginadas (`page` ≥ 0, `size` 1–100), **das mais recentes para as mais antigas** — a ordenação entrou em PDV-C013; antes a paginação não era determinística |
 | `POST` | `/pdv/sessions` | `PDV_SESSION_MANAGE` | Abre o caixa. Uma sessão aberta por operador; o depósito informado vale para todas as vendas dela |
 | `GET` | `/pdv/sessions/current` | `PDV_READ` | Caixa aberto do operador autenticado |
 | `GET` | `/pdv/sessions/{id}` | `PDV_READ` | Detalhe da sessão |
 | `POST` | `/pdv/sessions/{id}/movements` | `PDV_SESSION_MANAGE` | Sangria ou suprimento. Exige sessão aberta **e do próprio operador** |
 | `GET` | `/pdv/sessions/{id}/movements` | `PDV_READ` | Movimentos da sessão, paginados (`page` ≥ 0, `size` 1–100), na ordem de lançamento (PDV-C012) |
 | `POST` | `/pdv/sessions/{id}/close` | `PDV_SESSION_CLOSE` | Fecha confrontando contado × esperado. **Divergência não bloqueia** — mas **mesa aberta sim** (PDV-C005): `409 SESSION_HAS_OPEN_COMANDAS`, checado antes de calcular o esperado |
-| `GET` | `/pdv/sessions/{id}/payment-totals` | `PDV_READ` | Total recebido na sessão por forma de pagamento — só `CAPTURED` conta. As quatro formas sempre aparecem, mesmo zeradas |
+| `GET` | `/pdv/sessions/{id}/payment-totals` | `PDV_READ` | Total recebido na sessão por forma de pagamento — `amount` é o bruto `CAPTURED`. As quatro formas sempre aparecem, mesmo zeradas. PDV-F026: `refundedAmount`, `changeAmount` (só DINHEIRO) e `netAmount = amount - refundedAmount - changeAmount` |
 | `GET` | `/pdv/pending-online-orders` | `PDV_READ` | Pedidos do app aguardando pagamento, para o caixa localizar quem chegou na loja |
 | `POST` | `/pdv/sessions/{id}/orders/{orderId}/settle` | `PDV_SALE_MANAGE` | Liquida no balcão um pedido do app: consome a reserva, **registra o pagamento recebido** e conclui. **Corpo obrigatório desde PDV-C015** (`payments`, mesmo shape da venda de balcão), somando **exatamente** o líquido — aqui não há onde guardar troco. Encerra a cobrança de gateway aberta no checkout. Erros: `400 INSUFFICIENT_PAYMENT`, `400 CHANGE_NOT_SUPPORTED` |
-| `POST` | `/pdv/sessions/{id}/sales` | `PDV_SALE_MANAGE` (+ `PDV_SALE_DISCOUNT` se houver desconto) | Registra venda na sessão, **captura o pagamento** e **dá baixa no estoque** item a item. Preço e custo vêm do catálogo, não do request. Exige sessão `OPEN` e ao menos uma linha em `payments`. Desconto de linha acima do bruto dela: `409 ITEM_DISCOUNT_EXCEEDS_GROSS` (PDV-C016 — era um 400 genérico) |
+| `POST` | `/pdv/sessions/{id}/sales` | `PDV_SALE_MANAGE` (+ `PDV_SALE_DISCOUNT` se houver desconto) | Registra venda na sessão, **captura o pagamento** e **dá baixa no estoque** item a item. Preço e custo vêm do catálogo, não do request. Exige sessão `OPEN` e ao menos uma linha em `payments`. Desconto de linha acima do bruto dela: `409 ITEM_DISCOUNT_EXCEEDS_GROSS` (PDV-C016 — era um 400 genérico). PDV-F022: `delivery` (RETIRADA/ENTREGA → `RESERVADO`; `fee` em `totalPayable`, fora do líquido), `items[].note` (≤200) e `409 SESSION_STALE` para sessão aberta em dia anterior (data de São Paulo) |
 | `GET` | `/pdv/sales/{id}` | `PDV_READ` | Consulta um pedido, com os pagamentos. Antes de PDV-F005 a venda era write-only |
 | `GET` | `/pdv/sales/{id}/receipt` | `PDV_READ` | Comprovante interno da venda — **não é documento fiscal** (isso é a NFC-e, Fatia 11) |
 | `GET` | `/pdv/sessions/{id}/sales` | `PDV_READ` | Pedidos da sessão, paginados, do mais recente para o mais antigo |
@@ -131,6 +135,25 @@ registro de vendas no balcão.
 > o corpo. **Atenção ao valor exato:** o canal continua `MARKETPLACE` e pedido de marketplace não
 > admite `changeAmount` — a tela tem que lançar o que fica na gaveta, não a cédula entregue, e
 > excedente responde `400 CHANGE_NOT_SUPPORTED`.
+
+> **Contrato alterado em PDV-F023** (2026-09-28), **com consumidor real**: `POST /pdv/comandas/{id}/close`
+> com `itemIds` **nunca mais encerra a mesa** nem libera utensílio, mesmo levando a última linha
+> aberta — com a sessão paga no lançamento, toda sessão seria a última e a mesa fecharia com o
+> narguilé ainda nela. A conta dividida que dependia do último parcial para fechar a mesa passa a
+> chamar `POST /pdv/comandas/{id}/finish`. `close` sem `itemIds` segue encerrando, desde que toda
+> sessão esteja `RECOLHIDO`. A taxa de serviço deixou de incidir sobre linhas `SESSAO`/`ROSH_EXTRA`,
+> qualquer que seja o `applyServiceFee`.
+
+> **Contrato alterado em PDV-F027** (2026-09-28), **com consumidor real**: `POST .../sessoes` não
+> responde mais 409 `SESSION_STILL_ACTIVE` — a mesa aceita sessões em paralelo. A sessão nasce
+> `AGUARDANDO_PAGAMENTO` (não mais `PREPARANDO`) e só entra no preparo quando o `close` com
+> `itemIds` a cobra; o front que lançava e deixava para pagar no fim precisa pagar cada sessão.
+> `ComandaItemResponseDTO` ganhou `tierId`, `essencia` e `vasoGrande`.
+
+> **Contrato alterado em PDV-F024** (2026-09-28): com `pdv.mesa.catalog-items-enabled=false` (o
+> padrão), `POST /pdv/comandas/{id}/items` e `POST /pdv/comandas/{id}/kits` respondem 409
+> `CATALOG_ITEM_NOT_ALLOWED_ON_TABLE` — a mesa é só sessão do cardápio, produto vai pelo balcão.
+> O histórico com linhas `NORMAL` continua legível.
 
 ## Regras de Negócio Implementadas
 
@@ -414,7 +437,8 @@ venda inteira, e nada é persistido.
 | Chave | Default | Para quê |
 |---|---|---|
 | `pdv.sale.max-discount-percent` | `10` | Teto do desconto, **compartilhado** entre a venda de balcão (PDV-F004) e o fechamento de mesa (PDV-F014). Acima dele, `409 DISCOUNT_LIMIT_EXCEEDED` |
-| `pdv.comanda.service-fee-percent` | `10` | Taxa de serviço da mesa (PDV-F015). Zero desliga a cobrança sem mexer em código |
+| `pdv.comanda.service-fee-percent` | `10` | Taxa de serviço da mesa (PDV-F015). Zero desliga a cobrança sem mexer em código. Nunca incide sobre `SESSAO`/`ROSH_EXTRA` (PDV-F023) |
+| `pdv.mesa.catalog-items-enabled` | `false` | PDV-F024 — a mesa aceita produto do catálogo (`/items`, `/kits`). Desligado, 409 `CATALOG_ITEM_NOT_ALLOWED_ON_TABLE`. O perfil de teste liga, para as ITs da comanda por produto |
 
 Ambas migram para `system_config` junto com o painel de configuração, como o resto das chaves de
 política comercial do projeto.
@@ -750,6 +774,27 @@ mudam juntos.
   tem. O valor é decidido no balcão, sem tabela que o justifique depois — é o tipo de lançamento
   que precisa de um nome atrás dele quando o fechamento não bater.
 
+**V132 — `pdv_sessao_status`** (PDV-F023)
+- `comanda_item.session_status` (`NA_FILA`/`PREPARANDO`/`ENTREGUE`/`RECOLHIDO`), `started_at`,
+  `delivered_at`, `collected_at`, só em `SESSAO`/`ROSH_EXTRA` (CHECKs), e `started_at` obrigatório
+  fora da fila. Backfill: sessão de mesa já encerrada vira `RECOLHIDO`; de mesa aberta, `ENTREGUE`.
+
+**V133 — `pdv_sessao_carvao_adicionais`** (PDV-F024)
+- `comanda_item.charcoal` e `order_item.charcoal` (`CUBO`/`JUMBO`, CHECK; na comanda só em sessão).
+- `session_addon` (nome único sem caixa, preço ≥ 0, ordem, ativo) com seed "Filtro de gelo" R$ 5.
+- `comanda_item_addon` (FK `comanda_item` ON DELETE CASCADE, `addon_id` sem FK, nome e preço
+  snapshot).
+
+**V134 — `pagamento_canal_operadora`** (PDV-F025)
+- `order_payment.channel` (`MAQUININHA`/`LINK`) e `provider` (`CIELO`/`INFINITYPAY`), nulos, com
+  CHECKs: DINHEIRO sem nenhum dos dois, operadora só com canal.
+
+**V135 — `pdv_sessao_aguardando_pagamento`** (PDV-F027)
+- `ck_comanda_item_session_status` aceita `AGUARDANDO_PAGAMENTO`; `ck_comanda_item_session_started`
+  dispensa `started_at` também nele.
+- `comanda_item.vaso_grande BOOLEAN NOT NULL DEFAULT FALSE` (só `SESSAO`, CHECK), com backfill pelo
+  sufixo ` · Vaso grande` da nota — base do "repetir sessão".
+
 **Nota de modelagem:** `sales_order`/`order_item`/`order_payment` referenciam depósito só por
 texto livre (`warehouse_code`), sem FK — mesmo padrão de `stock_balance`/`stock_movement` em
 `estoque` (ver EST-C002 no README daquele domínio). Nenhuma validação equivalente a
@@ -901,6 +946,43 @@ Convenções, variáveis e o environment compartilhado estão em
 > Ver [`pedido`](../pedido/README.md#modelo-de-domínio).
 
 ## Histórico de Implementações
+
+- **2026-09-28** — `sessoes-paralelas-e-pagamento` (PDV-F027): a mesa aceita sessões em paralelo
+  (limite = utensílio livre); a sessão nasce `AGUARDANDO_PAGAMENTO` e o fechamento parcial que a
+  cobra a leva a `PREPARANDO`; a fila de rosh passou a ser por sessão (recolher uma não começa o
+  rosh de outra); `POST .../sessoes/{itemId}/repetir` refaz a configuração de uma sessão com sabor
+  opcional. **V135**.
+- **2026-09-28** — `caixas-e-pedidos-por-caixa` (PDV-F026): `GET /pdv/sessions` filtra por
+  status, operador e período de abertura (Specification, `openedAt desc`); `GET /orders` filtra
+  por `sessionId`, `comandaId` e `orderNumber` e traz `paymentMethods` por linha (uma consulta por
+  página); `GET /orders/{id}` traz `payments`; `payment-totals` ganhou `refundedAmount`,
+  `changeAmount` e `netAmount`. Sem migration.
+- **2026-09-28** — `canal-e-operadora-do-pagamento` (PDV-F025): `SalePaymentRequest.channel`
+  (`MAQUININHA`/`LINK`) e `provider` (`CIELO`/`INFINITYPAY`), no balcão e no fechamento de mesa,
+  gravados em `order_payment` (**V134**, com CHECKs) e devolvidos em `OrderPaymentResponseDto` e no
+  recibo. DINHEIRO com canal, ou operadora sem canal → 400 `INVALID_PAYMENT_CHANNEL`. O estorno
+  copia os dois.
+- **2026-09-28** — `sessao-carvao-adicionais-e-duplo` (PDV-F024): carvão (`CUBO`/`JUMBO`, só
+  registro) na linha da sessão e na do pedido; adicionais pagos em `session_addon` (**V133**, seed
+  "Filtro de gelo" R$ 5) com snapshot por linha em `comanda_item_addon`; preço = faixa + upgrade +
+  Σ adicionais. `modo=DUPLO` cria sessão e 2º rosh (R$ 0, cortesia, `NA_FILA`) na mesma transação;
+  `diasDuploRosh` fica só para o `POST .../rosh` avulso, deprecado. Mesa recusa produto do catálogo
+  por padrão (`pdv.mesa.catalog-items-enabled=false`).
+- **2026-09-28** — `sessao-paga-na-hora-e-status` (PDV-F023): fechamento parcial não encerra a mesa
+  nem libera utensílio; `POST /pdv/comandas/{id}/finish` encerra a mesa já paga. Status da sessão em
+  `comanda_item` (**V132**, backfill: mesa fechada → `RECOLHIDO`, aberta → `ENTREGUE`) com
+  `PATCH .../sessoes/{itemId}/status`; recolher libera os utensílios do grupo e promove a fila.
+  Sessões em sequência (409 `SESSION_STILL_ACTIVE`/`SESSION_NOT_COLLECTED`). Taxa de serviço fora
+  das linhas de sessão.
+
+- **2026-09-26** — `entrega-na-venda-e-caixa-do-dia` (PDV-F022): o endereço de entrega digitado
+  no PDV não chegava ao backend. Agora `SaleRequest.delivery` grava em `order_delivery` (**V130**,
+  tabela secundária de `OrderEntity`), retirada e entrega nascem `RESERVADO`, a entrega segue a
+  esteira de expedição e `PATCH /orders/{id}/delivery` completa códigos da 99 e rastreio depois
+  (tipo e taxa congelados). A taxa entra em `totalPayable` e não no líquido — o balcão passou a
+  validar o pagamento contra `totalPayable`, como a mesa já fazia. Observação por item em
+  `order_item.notes`. Venda em caixa de dia anterior → `409 SESSION_STALE` (só a venda; fechar o
+  caixa e as comandas seguem livres).
 
 - **2026-09-24** — `cardapio-de-sessao` (PDV-F021): a sessão de narguilé sai do catálogo e vira
   cardápio próprio da mesa — faixas de preço editáveis (`session_tier`), utensílios como ativos da

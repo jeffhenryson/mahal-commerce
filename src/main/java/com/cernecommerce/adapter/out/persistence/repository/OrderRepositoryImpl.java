@@ -4,7 +4,12 @@ import com.cernecommerce.adapter.out.persistence.entity.OrderEntity;
 import com.cernecommerce.adapter.out.persistence.entity.OrderItemEntity;
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.pedido.ConsumptionMode;
+import com.cernecommerce.core.domain.model.pedido.DeliveryAddress;
+import com.cernecommerce.core.domain.model.pedido.DeliveryMethod;
+import com.cernecommerce.core.domain.model.pedido.DeliveryType;
 import com.cernecommerce.core.domain.model.pedido.Order;
+import com.cernecommerce.core.domain.model.pedido.OrderFilter;
+import com.cernecommerce.core.domain.model.pedido.OrderDelivery;
 import com.cernecommerce.core.domain.model.pedido.OrderItem;
 import com.cernecommerce.core.domain.model.pedido.OrderStatus;
 import com.cernecommerce.core.domain.model.pedido.SalesChannel;
@@ -64,6 +69,7 @@ public class OrderRepositoryImpl implements OrderRepository {
         entity.setComandaId(order.comandaId());
         entity.setTableLabel(order.tableLabel());
         entity.setServiceFeeAmount(order.serviceFeeAmount());
+        writeDelivery(entity, order.delivery());
 
         // Os itens são reescritos por inteiro: o pedido é imutável depois de concluído, então este
         // caminho só é exercitado antes da conclusão. orphanRemoval limpa os antigos.
@@ -81,6 +87,7 @@ public class OrderRepositoryImpl implements OrderRepository {
             itemEntity.setMode(item.mode().name());
             itemEntity.setCourtesy(item.courtesy());
             itemEntity.setNotes(item.notes());
+            itemEntity.setCharcoal(item.charcoal());
             itemEntity.setSurchargeAmount(item.surchargeAmount());
             entity.getItems().add(itemEntity);
         }
@@ -140,13 +147,24 @@ public class OrderRepositoryImpl implements OrderRepository {
     @Transactional(readOnly = true)
     public PageResult<Order> findAll(SalesChannel channel, OrderStatus status, Long customerId,
             Instant from, Instant to, int page, int size) {
+        return findAll(OrderFilter.of(channel, status, customerId, from, to), page, size);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResult<Order> findAll(OrderFilter filter, int page, int size) {
+        OrderFilter f = filter == null ? OrderFilter.of(null, null, null, null, null) : filter;
         Specification<OrderEntity> spec = (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
-            if (channel    != null) predicates.add(cb.equal(root.get("channel"), channel.name()));
-            if (status     != null) predicates.add(cb.equal(root.get("status"), status.name()));
-            if (customerId != null) predicates.add(cb.equal(root.get("customerId"), customerId));
-            if (from       != null) predicates.add(cb.greaterThanOrEqualTo(root.get("createdAt"), from));
-            if (to         != null) predicates.add(cb.lessThanOrEqualTo(root.get("createdAt"), to));
+            if (f.channel()     != null) predicates.add(cb.equal(root.get("channel"), f.channel().name()));
+            if (f.status()      != null) predicates.add(cb.equal(root.get("status"), f.status().name()));
+            if (f.customerId()  != null) predicates.add(cb.equal(root.get("customerId"), f.customerId()));
+            if (f.from()        != null) predicates.add(cb.greaterThanOrEqualTo(root.get("createdAt"), f.from()));
+            if (f.to()          != null) predicates.add(cb.lessThanOrEqualTo(root.get("createdAt"), f.to()));
+            // PDV-F026 — as colunas já existiam; faltava o filtro.
+            if (f.sessionId()   != null) predicates.add(cb.equal(root.get("sessionId"), f.sessionId()));
+            if (f.comandaId()   != null) predicates.add(cb.equal(root.get("comandaId"), f.comandaId()));
+            if (f.orderNumber() != null) predicates.add(cb.equal(root.get("orderNumber"), f.orderNumber()));
             return cb.and(predicates.toArray(new Predicate[0]));
         };
         // A Specification resolve só QUAIS pedidos entram na página, sem tocar a coleção de itens;
@@ -186,13 +204,50 @@ public class OrderRepositoryImpl implements OrderRepository {
                 e.getVersion() == null ? 0L : e.getVersion(), e.getComandaId(), e.getTableLabel(),
                 // Pedido anterior a PDV-F015 lê como zero: o DEFAULT da V118 cobre as linhas já
                 // gravadas, e este null-check cobre carga direta.
-                e.getServiceFeeAmount() == null ? java.math.BigDecimal.ZERO : e.getServiceFeeAmount());
+                e.getServiceFeeAmount() == null ? java.math.BigDecimal.ZERO : e.getServiceFeeAmount(),
+                readDelivery(e));
+    }
+
+    /** PDV-F022 — sem entrega, tudo nulo: a linha opcional de order_delivery não é gravada. */
+    private static void writeDelivery(OrderEntity entity, OrderDelivery delivery) {
+        DeliveryAddress address = delivery == null ? null : delivery.address();
+        entity.setDeliveryType(delivery == null ? null : delivery.type().name());
+        entity.setDeliveryMethod(delivery == null || delivery.method() == null ? null : delivery.method().name());
+        entity.setDeliveryStreet(address == null ? null : address.street());
+        entity.setDeliveryNumber(address == null ? null : address.number());
+        entity.setDeliveryComplement(address == null ? null : address.complement());
+        entity.setDeliveryZipCode(address == null ? null : address.zipCode());
+        entity.setDeliveryDistrict(address == null ? null : address.district());
+        entity.setDeliveryCity(address == null ? null : address.city());
+        entity.setDeliveryState(address == null ? null : address.state());
+        entity.setDeliveryCountry(address == null ? null : address.country());
+        entity.setDeliveryReference(address == null ? null : address.reference());
+        entity.setDeliveryCourierName(delivery == null ? null : delivery.courierName());
+        entity.setDeliveryCourierPhone(delivery == null ? null : delivery.courierPhone());
+        entity.setDeliveryPickupCode(delivery == null ? null : delivery.pickupCode());
+        entity.setDeliveryDropoffCode(delivery == null ? null : delivery.dropoffCode());
+        entity.setDeliveryTrackingCode(delivery == null ? null : delivery.trackingCode());
+        entity.setDeliveryFee(delivery == null ? null : delivery.fee());
+    }
+
+    private static OrderDelivery readDelivery(OrderEntity e) {
+        if (e.getDeliveryType() == null) {
+            return null;
+        }
+        DeliveryAddress address = e.getDeliveryStreet() == null ? null : new DeliveryAddress(
+                e.getDeliveryStreet(), e.getDeliveryNumber(), e.getDeliveryComplement(), e.getDeliveryZipCode(),
+                e.getDeliveryDistrict(), e.getDeliveryCity(), e.getDeliveryState(), e.getDeliveryCountry(),
+                e.getDeliveryReference());
+        return new OrderDelivery(DeliveryType.valueOf(e.getDeliveryType()), address,
+                e.getDeliveryMethod() == null ? null : DeliveryMethod.valueOf(e.getDeliveryMethod()),
+                e.getDeliveryCourierName(), e.getDeliveryCourierPhone(), e.getDeliveryPickupCode(),
+                e.getDeliveryDropoffCode(), e.getDeliveryTrackingCode(), e.getDeliveryFee());
     }
 
     private OrderItem toDomain(OrderItemEntity e) {
         return OrderItem.of(e.getId(), e.getSku(), e.getQuantity(), e.getUnitPrice(), e.getCostPrice(),
                 e.getDiscountAmount(), e.getCashbackPercent(), e.getProductName(),
                 e.getMode() == null ? ConsumptionMode.NORMAL : ConsumptionMode.valueOf(e.getMode()),
-                e.isCourtesy(), e.getNotes(), e.getSurchargeAmount());
+                e.isCourtesy(), e.getNotes(), e.getSurchargeAmount(), e.getCharcoal());
     }
 }

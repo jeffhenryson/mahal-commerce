@@ -52,4 +52,11 @@ public class OrderPaymentEntity {
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
+
+    // PDV-F025 — maquininha ou link, e a operadora. Nulos em DINHEIRO e em pagamento anterior à V134.
+    @Column(length = 20)
+    private String channel;
+
+    @Column(length = 20)
+    private String provider;
 }

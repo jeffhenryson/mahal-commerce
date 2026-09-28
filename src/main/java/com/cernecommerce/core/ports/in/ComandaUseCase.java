@@ -2,7 +2,9 @@ package com.cernecommerce.core.ports.in;
 
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.estoque.KitSelection;
+import com.cernecommerce.core.domain.model.pdv.Charcoal;
 import com.cernecommerce.core.domain.model.pdv.Comanda;
+import com.cernecommerce.core.domain.model.pdv.SessionStatus;
 import com.cernecommerce.core.domain.model.pedido.ConsumptionMode;
 import com.cernecommerce.core.domain.model.pedido.Order;
 import com.cernecommerce.core.ports.in.PdvUseCase.PaymentCommand;
@@ -330,6 +332,57 @@ public interface ComandaUseCase {
     Comanda addSession(Long comandaId, Long tierId, String essencia, boolean vasoGrande, String username);
 
     /**
+     * Lança uma sessão com carvão, adicionais pagos e, no rosh duplo, o 2º rosh já pago (PDV-F024).
+     * Preço da sessão = faixa + upgrade de vaso + Σ adicionais. No {@code duplo} as duas linhas nascem
+     * na mesma transação: a sessão em {@code AGUARDANDO_PAGAMENTO} (PDV-F027 — o pagamento a leva ao
+     * preparo) e o rosh a R$ 0 (cortesia, ligado) em {@code NA_FILA}, sem utensílio novo. PDV-F027: a
+     * mesa aceita sessões em paralelo; o limite é o utensílio livre.
+     *
+     * @throws com.cernecommerce.core.domain.exception.pdv.SessionAddonNotFoundException adicional
+     *         inexistente ou inativo
+     */
+    Comanda addSession(Long comandaId, AddSessionCommand command, String username);
+
+    /**
+     * PDV-F027 — lança outra sessão com a configuração de {@code sourceItemId} (faixa, vaso, carvão e
+     * adicionais), pelo preço <b>atual</b> do cardápio. Sabor nulo repete o da sessão de origem. A
+     * origem pode estar em qualquer status, inclusive recolhida: os utensílios são reservados de novo.
+     *
+     * @throws com.cernecommerce.core.domain.exception.pdv.NotASessionLineException se
+     *         {@code sourceItemId} não for uma sessão desta comanda
+     */
+    Comanda repeatSession(Long comandaId, Long sourceItemId, RepeatSessionCommand command, String username);
+
+    /**
+     * O pedido de "repetir sessão" (PDV-F027). Tudo opcional.
+     *
+     * @param essencia sabor da nova sessão; nulo repete o da origem
+     * @param duplo rosh duplo: cria também o 2º rosh já pago, com {@code essenciaRosh}
+     * @param tierIdRosh faixa do 2º rosh; nula usa a da sessão
+     */
+    record RepeatSessionCommand(String essencia, boolean duplo, String essenciaRosh, Long tierIdRosh) {
+    }
+
+    /**
+     * O pedido de sessão (PDV-F024).
+     *
+     * @param adicionalIds adicionais pagos; id repetido cobra duas vezes
+     * @param duplo rosh duplo: cria também o 2º rosh já pago, com {@code essenciaRosh}
+     * @param tierIdRosh faixa do 2º rosh; nula usa a da sessão
+     */
+    record AddSessionCommand(Long tierId, String essencia, boolean vasoGrande, Charcoal carvao,
+            List<Long> adicionalIds, boolean duplo, String essenciaRosh, Long tierIdRosh) {
+
+        public AddSessionCommand {
+            adicionalIds = adicionalIds == null ? List.of() : List.copyOf(adicionalIds);
+        }
+
+        public static AddSessionCommand simple(Long tierId, String essencia, boolean vasoGrande) {
+            return new AddSessionCommand(tierId, essencia, vasoGrande, null, List.of(), false, null, null);
+        }
+    }
+
+    /**
      * Lança o 2º rosh de uma sessão (PDV-F021): nova essência, mesmos utensílios, ligado à sessão
      * (fecha junto com ela). De graça no primeiro rosh extra da sessão quando a mesa foi aberta em
      * dia de duplo rosh; pelo preço da faixa ({@code tierId}, ou a da sessão se nulo) nos demais.
@@ -338,6 +391,30 @@ public interface ComandaUseCase {
      *         {@code sessionItemId} não for uma sessão em aberto desta comanda
      */
     Comanda addRoshExtra(Long comandaId, Long sessionItemId, Long tierId, String essencia, String username);
+
+    /**
+     * Encerra a mesa cujas linhas já foram todas cobradas em fechamentos parciais (PDV-F023). Não
+     * gera pedido: o cabeçalho aponta o último pedido que cobrou a mesa.
+     *
+     * @throws com.cernecommerce.core.domain.exception.pdv.ComandaEmptyException mesa sem nenhuma
+     *         linha — a saída é cancelar
+     * @throws com.cernecommerce.core.domain.exception.pdv.ComandaHasOpenItemsException ainda há
+     *         linha a cobrar
+     * @throws com.cernecommerce.core.domain.exception.pdv.SessionNotCollectedException sessão ainda
+     *         no salão
+     */
+    Comanda finishComanda(Long comandaId, String username);
+
+    /**
+     * Avança o status de uma sessão (PDV-F023): {@code NA_FILA → PREPARANDO → ENTREGUE → RECOLHIDO},
+     * mais {@code PREPARANDO → RECOLHIDO}. Recolher libera os utensílios quando a sessão e os roshs
+     * ligados a ela estão todos recolhidos, e promove a próxima linha da fila para o preparo.
+     *
+     * @throws com.cernecommerce.core.domain.exception.pdv.NotASessionLineException linha sem status
+     * @throws com.cernecommerce.core.domain.exception.pdv.InvalidSessionTransitionException
+     *         transição fora da ordem
+     */
+    Comanda updateSessionStatus(Long comandaId, Long itemId, SessionStatus status, String username);
 
     /**
      * Junta duas mesas que viraram uma conta só (PDV-F016): as linhas em aberto de

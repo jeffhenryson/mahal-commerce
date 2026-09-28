@@ -73,6 +73,12 @@ import com.cernecommerce.core.domain.exception.estoque.KitTemplateNotFoundExcept
 import com.cernecommerce.core.domain.exception.estoque.DuplicateKitTemplateNameException;
 import com.cernecommerce.core.domain.exception.estoque.InvalidKitSelectionException;
 import com.cernecommerce.core.domain.exception.pdv.KitItemRemovalNotAllowedException;
+import com.cernecommerce.core.domain.exception.pdv.InvalidSessionTransitionException;
+import com.cernecommerce.core.domain.exception.pdv.SessionNotCollectedException;
+import com.cernecommerce.core.domain.exception.pdv.ComandaHasOpenItemsException;
+import com.cernecommerce.core.domain.exception.pdv.InvalidPaymentChannelException;
+import com.cernecommerce.core.domain.exception.pdv.SessionAddonNotFoundException;
+import com.cernecommerce.core.domain.exception.pdv.CatalogItemNotAllowedOnTableException;
 import com.cernecommerce.core.domain.exception.estoque.KitHasVariantsException;
 import com.cernecommerce.core.domain.exception.estoque.KitSelfReferenceException;
 import com.cernecommerce.core.domain.exception.estoque.LotExpiryDateMismatchException;
@@ -93,7 +99,11 @@ import com.cernecommerce.core.domain.exception.estoque.WarehouseNotFoundExceptio
 import com.cernecommerce.core.domain.exception.crm.AutomationWebhookNotConfiguredException;
 import com.cernecommerce.core.domain.exception.crm.CampaignAutomationNotFoundException;
 import com.cernecommerce.core.domain.exception.crm.CustomerNotFoundException;
-import com.cernecommerce.core.domain.exception.crm.DuplicateCustomerCpfException;
+import com.cernecommerce.core.domain.exception.crm.CustomerAlreadyExistsException;
+import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionStaleException;
+import com.cernecommerce.core.domain.exception.pedido.InvalidDeliveryException;
+import com.cernecommerce.core.domain.exception.pedido.OrderDeliveryNotEditableException;
+import com.cernecommerce.core.domain.exception.pedido.OrderHasNoDeliveryException;
 import com.cernecommerce.core.domain.exception.crm.DuplicateCustomerEmailException;
 import com.cernecommerce.core.domain.exception.crm.DuplicateTagNameException;
 import com.cernecommerce.core.domain.exception.crm.TagNotFoundException;
@@ -183,6 +193,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -626,9 +637,12 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.CONFLICT, ex.getMessage(), "CUSTOMER_EMAIL_ALREADY_EXISTS", req);
     }
 
-    @ExceptionHandler(DuplicateCustomerCpfException.class)
-    public ResponseEntity<ApiError> handleDuplicateCustomerCpf(DuplicateCustomerCpfException ex, HttpServletRequest req) {
-        return error(HttpStatus.CONFLICT, ex.getMessage(), "CUSTOMER_CPF_ALREADY_EXISTS", req);
+    @ExceptionHandler(CustomerAlreadyExistsException.class)
+    public ResponseEntity<CustomerConflictError> handleCustomerAlreadyExists(CustomerAlreadyExistsException ex,
+            HttpServletRequest req) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(new CustomerConflictError(ex.getMessage(),
+                "CUSTOMER_ALREADY_EXISTS", Instant.now(), req.getRequestURI(), MDC.get("traceId"),
+                ex.getMatchedBy().stream().sorted().toList(), ex.getCustomerId()));
     }
 
     @ExceptionHandler(CustomerNotFoundException.class)
@@ -938,6 +952,28 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.CONFLICT, ex.getMessage(), "CASH_REGISTER_SESSION_CLOSED", req);
     }
 
+    @ExceptionHandler(CashRegisterSessionStaleException.class)
+    public ResponseEntity<ApiError> handleCashRegisterSessionStale(CashRegisterSessionStaleException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "SESSION_STALE", req);
+    }
+
+    @ExceptionHandler(InvalidDeliveryException.class)
+    public ResponseEntity<ApiError> handleInvalidDelivery(InvalidDeliveryException ex, HttpServletRequest req) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "INVALID_DELIVERY", req);
+    }
+
+    @ExceptionHandler(OrderHasNoDeliveryException.class)
+    public ResponseEntity<ApiError> handleOrderHasNoDelivery(OrderHasNoDeliveryException ex, HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "ORDER_HAS_NO_DELIVERY", req);
+    }
+
+    @ExceptionHandler(OrderDeliveryNotEditableException.class)
+    public ResponseEntity<ApiError> handleOrderDeliveryNotEditable(OrderDeliveryNotEditableException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "ORDER_DELIVERY_NOT_EDITABLE", req);
+    }
+
     @ExceptionHandler(CashRegisterSessionAlreadyOpenException.class)
     public ResponseEntity<ApiError> handleSessionAlreadyOpen(CashRegisterSessionAlreadyOpenException ex,
             HttpServletRequest req) {
@@ -1056,6 +1092,45 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(NotASessionLineException.class)
     public ResponseEntity<ApiError> handleNotASessionLine(NotASessionLineException ex, HttpServletRequest req) {
         return error(HttpStatus.CONFLICT, ex.getMessage(), "NOT_A_SESSION_LINE", req);
+    }
+
+    // ── PDV-F023 — status da sessão e encerramento da mesa ──────────────────────────────────
+
+    @ExceptionHandler(InvalidSessionTransitionException.class)
+    public ResponseEntity<ApiError> handleInvalidSessionTransition(InvalidSessionTransitionException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "INVALID_SESSION_TRANSITION", req);
+    }
+
+    @ExceptionHandler(SessionNotCollectedException.class)
+    public ResponseEntity<ApiError> handleSessionNotCollected(SessionNotCollectedException ex, HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "SESSION_NOT_COLLECTED", req);
+    }
+
+    @ExceptionHandler(ComandaHasOpenItemsException.class)
+    public ResponseEntity<ApiError> handleComandaHasOpenItems(ComandaHasOpenItemsException ex, HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "COMANDA_HAS_OPEN_ITEMS", req);
+    }
+
+    // ── PDV-F024 — adicionais e mesa sem catálogo ───────────────────────────────────────────
+
+    @ExceptionHandler(SessionAddonNotFoundException.class)
+    public ResponseEntity<ApiError> handleSessionAddonNotFound(SessionAddonNotFoundException ex, HttpServletRequest req) {
+        return error(HttpStatus.NOT_FOUND, ex.getMessage(), "SESSION_ADDON_NOT_FOUND", req);
+    }
+
+    @ExceptionHandler(CatalogItemNotAllowedOnTableException.class)
+    public ResponseEntity<ApiError> handleCatalogItemNotAllowedOnTable(CatalogItemNotAllowedOnTableException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.CONFLICT, ex.getMessage(), "CATALOG_ITEM_NOT_ALLOWED_ON_TABLE", req);
+    }
+
+    // ── PDV-F025 — canal/operadora do pagamento ─────────────────────────────────────────────
+
+    @ExceptionHandler(InvalidPaymentChannelException.class)
+    public ResponseEntity<ApiError> handleInvalidPaymentChannel(InvalidPaymentChannelException ex,
+            HttpServletRequest req) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage(), "INVALID_PAYMENT_CHANNEL", req);
     }
 
     @ExceptionHandler(LegacySessionDisabledException.class)

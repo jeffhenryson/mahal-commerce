@@ -177,6 +177,23 @@ class PdvComandaControllerSecurityTest {
                 .andExpect(status().isBadRequest());
     }
 
+    // ── Encerrar (PDV-F023) ──────────────────────────────────────────────────────────────────
+
+    @Test
+    void finish_comanda_without_pdv_comanda_manage_returns_403() throws Exception {
+        mockMvc.perform(post("/pdv/comandas/999999/finish")
+                        .with(user("bob").authorities(new SimpleGrantedAuthority("ROLE_USER"))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void finish_nonexistent_comanda_with_permission_returns_404() throws Exception {
+        mockMvc.perform(post("/pdv/comandas/999999/finish")
+                        .with(user("caixa").authorities(new SimpleGrantedAuthority("PDV_COMANDA_MANAGE"))))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.errorCode").value("COMANDA_NOT_FOUND"));
+    }
+
     // ── Fechar ───────────────────────────────────────────────────────────────────────────────
 
     @Test

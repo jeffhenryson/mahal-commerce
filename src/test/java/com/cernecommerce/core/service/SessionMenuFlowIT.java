@@ -1,5 +1,6 @@
 package com.cernecommerce.core.service;
 
+import com.cernecommerce.core.domain.exception.pdv.ComandaHasOpenItemsException;
 import com.cernecommerce.core.domain.exception.pdv.SessionAssetUnavailableException;
 import com.cernecommerce.core.domain.model.estoque.WarehouseType;
 import com.cernecommerce.core.domain.model.pagamento.PaymentMethod;
@@ -9,6 +10,7 @@ import com.cernecommerce.core.domain.model.pdv.ComandaItem;
 import com.cernecommerce.core.domain.model.pdv.ComandaStatus;
 import com.cernecommerce.core.domain.model.pdv.SessionAssetType;
 import com.cernecommerce.core.domain.model.pdv.SessionMenu;
+import com.cernecommerce.core.domain.model.pdv.SessionStatus;
 import com.cernecommerce.core.domain.model.pdv.SessionSettings;
 import com.cernecommerce.core.domain.model.pdv.SessionTier;
 import com.cernecommerce.core.domain.model.pedido.ConsumptionMode;
@@ -86,13 +88,15 @@ class SessionMenuFlowIT {
         Comanda mesa = comandaUseCase.openComanda(caixa.id(), "Mesa 4", operator);
         flushAndClear();
 
-        // 1. Sessão Premium com vaso grande: R$ 30 + R$ 10.
+        // 1. Sessão Premium com vaso grande: R$ 30 + R$ 10. PDV-F027: nasce aguardando pagamento.
         Comanda comSessao = comandaUseCase.addSession(mesa.id(), premium.id(), "Luk Uva", true, operator);
         flushAndClear();
         ComandaItem sessao = comSessao.items().get(0);
         assertThat(sessao.mode()).isEqualTo(ConsumptionMode.SESSAO);
         assertThat(sessao.unitPrice()).isEqualByComparingTo("40.00");
         assertThat(sessao.notes()).isEqualTo("Luk Uva · Vaso grande");
+        assertThat(sessao.sessionStatus()).isEqualTo(SessionStatus.AGUARDANDO_PAGAMENTO);
+        assertThat(comandaUseCase.getComanda(mesa.id()).items().get(0).setup().vasoGrande()).isTrue();
 
         SessionMenu emUso = sessionMenuUseCase.getMenu();
         assertThat(disponivel(emUso, vasoG)).isZero();
@@ -114,19 +118,81 @@ class SessionMenuFlowIT {
         assertThat(rosh.linkedItemId()).isEqualTo(sessao.id());
         assertThat(disponivel(sessionMenuUseCase.getMenu(), pinca)).isEqualTo(1);
 
-        // 4. Fecha: R$ 65, pedido com a essência na nota, utensílios de volta.
+        // 4. Pagar a sessão (fechamento parcial de R$ 65) a leva ao preparo, sem encerrar a mesa nem
+        //    devolver utensílio.
         Order order = comandaUseCase.closeComanda(mesa.id(),
                 List.of(new PaymentCommand(PaymentMethod.DINHEIRO, new BigDecimal("65.00"), null)),
-                null, false, null, operator);
+                null, false, List.of(sessao.id(), rosh.id()), operator);
         flushAndClear();
 
         assertThat(order.netAmount()).isEqualByComparingTo("65.00");
         assertThat(order.items()).extracting(i -> i.mode())
                 .containsExactlyInAnyOrder(ConsumptionMode.SESSAO, ConsumptionMode.ROSH_EXTRA);
-        assertThat(comandaUseCase.getComanda(mesa.id()).status()).isEqualTo(ComandaStatus.FECHADA);
+        Comanda paga = comandaUseCase.getComanda(mesa.id());
+        assertThat(paga.status()).isEqualTo(ComandaStatus.ABERTA);
+        assertThat(paga.items()).filteredOn(i -> i.id().equals(sessao.id())).singleElement()
+                .satisfies(i -> assertThat(i.sessionStatus()).isEqualTo(SessionStatus.PREPARANDO));
+        assertThat(disponivel(sessionMenuUseCase.getMenu(), vasoG)).isZero();
+
+        // 5. PDV-F027 — outra sessão em paralelo, no vaso pequeno. A mesa segue sem encerrar.
+        Comanda comDuas = comandaUseCase.addSession(mesa.id(), premium.id(), "Nay", false, operator);
+        flushAndClear();
+        ComandaItem paralela = comDuas.items().stream()
+                .filter(i -> i.mode() == ConsumptionMode.SESSAO && !i.id().equals(sessao.id()))
+                .findFirst().orElseThrow();
+        assertThat(paralela.sessionStatus()).isEqualTo(SessionStatus.AGUARDANDO_PAGAMENTO);
+        assertThat(disponivel(sessionMenuUseCase.getMenu(), vasoP)).isEqualTo(1);
+        assertThat(disponivel(sessionMenuUseCase.getMenu(), pinca)).isZero();
+        assertThatThrownBy(() -> comandaUseCase.finishComanda(mesa.id(), operator))
+                .isInstanceOf(ComandaHasOpenItemsException.class);
+
+        // 6. Entregue e recolhida: o rosh da MESMA sessão é promovido; a paralela não é tocada.
+        comandaUseCase.updateSessionStatus(mesa.id(), sessao.id(), SessionStatus.ENTREGUE, operator);
+        Comanda aposRecolher = comandaUseCase.updateSessionStatus(mesa.id(), sessao.id(), SessionStatus.RECOLHIDO,
+                operator);
+        flushAndClear();
+        assertThat(aposRecolher.items()).filteredOn(i -> i.id().equals(rosh.id()))
+                .singleElement().satisfies(i -> assertThat(i.sessionStatus()).isEqualTo(SessionStatus.PREPARANDO));
+        assertThat(aposRecolher.items()).filteredOn(i -> i.id().equals(paralela.id()))
+                .singleElement().satisfies(i -> assertThat(i.sessionStatus())
+                        .isEqualTo(SessionStatus.AGUARDANDO_PAGAMENTO));
+        assertThat(disponivel(sessionMenuUseCase.getMenu(), vasoG)).isZero();
+
+        // 7. O rosh recolhido fecha o grupo: utensílios de volta.
+        comandaUseCase.updateSessionStatus(mesa.id(), rosh.id(), SessionStatus.RECOLHIDO, operator);
+        flushAndClear();
         SessionMenu livre = sessionMenuUseCase.getMenu();
         assertThat(disponivel(livre, vasoG)).isEqualTo(1);
-        assertThat(disponivel(livre, pinca)).isEqualTo(pincaType.quantidadeTotal());
+        assertThat(disponivel(livre, pinca)).isEqualTo(1);
+
+        // 8. Repetir a sessão recolhida com sabor novo: mesma faixa e vaso grande, utensílio de novo.
+        Comanda comRepetida = comandaUseCase.repeatSession(mesa.id(), sessao.id(),
+                new ComandaUseCase.RepeatSessionCommand("Luk Menta", false, null, null), operator);
+        flushAndClear();
+        ComandaItem repetida = comRepetida.items().stream()
+                .filter(i -> i.mode() == ConsumptionMode.SESSAO && i.sessionStatus() == SessionStatus.AGUARDANDO_PAGAMENTO
+                        && !i.id().equals(paralela.id()))
+                .findFirst().orElseThrow();
+        assertThat(repetida.unitPrice()).isEqualByComparingTo("40.00");
+        assertThat(repetida.notes()).isEqualTo("Luk Menta · Vaso grande");
+        assertThat(disponivel(sessionMenuUseCase.getMenu(), vasoG)).isZero();
+
+        // 9. Paga as duas, recolhe as duas, e a mesa encerra com o último pedido.
+        Order segundo = comandaUseCase.closeComanda(mesa.id(),
+                List.of(new PaymentCommand(PaymentMethod.DINHEIRO, new BigDecimal("70.00"), null)),
+                null, false, List.of(paralela.id(), repetida.id()), operator);
+        flushAndClear();
+        comandaUseCase.updateSessionStatus(mesa.id(), paralela.id(), SessionStatus.RECOLHIDO, operator);
+        comandaUseCase.updateSessionStatus(mesa.id(), repetida.id(), SessionStatus.RECOLHIDO, operator);
+        flushAndClear();
+        SessionMenu tudoLivre = sessionMenuUseCase.getMenu();
+        assertThat(disponivel(tudoLivre, vasoG)).isEqualTo(1);
+        assertThat(disponivel(tudoLivre, vasoP)).isEqualTo(2);
+        assertThat(disponivel(tudoLivre, pinca)).isEqualTo(pincaType.quantidadeTotal());
+
+        Comanda encerrada = comandaUseCase.finishComanda(mesa.id(), operator);
+        assertThat(encerrada.status()).isEqualTo(ComandaStatus.FECHADA);
+        assertThat(encerrada.orderId()).isEqualTo(segundo.id());
     }
 
     @Test

@@ -19,16 +19,13 @@ public interface CustomerJpaRepository extends JpaRepository<CustomerEntity, Lon
 
     /**
      * Compara só os dígitos do contato (CRM-C006): "(83) 99999-0000" e "83999990000" são o mesmo
-     * telefone. Cadeia de {@code replace} em vez de {@code regexp_replace} para rodar igual no
-     * Postgres e no H2 dos testes.
+     * telefone. Desde CRM-C007 usa a coluna {@code phone_normalized}, mantida no save.
      */
-    @Query("""
-            SELECT c FROM CustomerEntity c
-            WHERE replace(replace(replace(replace(replace(replace(c.contato,
-                  ' ', ''), '(', ''), ')', ''), '-', ''), '+', ''), '.', '') = :digits
-            ORDER BY c.id
-            """)
-    List<CustomerEntity> findByContatoDigits(@Param("digits") String digits, Pageable pageable);
+    List<CustomerEntity> findByPhoneNormalizedOrderByIdAsc(String phoneNormalized);
+
+    /** E-mail sem diferenciar maiúsculas (CRM-C007); {@code email} já chega em minúsculas. */
+    @Query("SELECT c FROM CustomerEntity c WHERE lower(c.email) = :email ORDER BY c.id")
+    List<CustomerEntity> findByEmailLower(@Param("email") String email);
 
     /** Busca livre por nome, contato, email ou CPF (CRM-C006 incluiu email e CPF). */
     @Query("""

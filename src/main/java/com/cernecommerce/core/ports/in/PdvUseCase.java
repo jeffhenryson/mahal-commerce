@@ -2,11 +2,16 @@ package com.cernecommerce.core.ports.in;
 
 import com.cernecommerce.core.domain.model.PageResult;
 import com.cernecommerce.core.domain.model.pagamento.OrderPayment;
+import com.cernecommerce.core.domain.exception.pdv.InvalidPaymentChannelException;
+import com.cernecommerce.core.domain.model.pagamento.PaymentChannel;
 import com.cernecommerce.core.domain.model.pagamento.PaymentMethod;
+import com.cernecommerce.core.domain.model.pagamento.PaymentProvider;
 import com.cernecommerce.core.domain.model.pdv.CashMovement;
 import com.cernecommerce.core.domain.model.pdv.CashMovementType;
 import com.cernecommerce.core.domain.model.pdv.CashRegisterSession;
+import com.cernecommerce.core.domain.model.pdv.CashRegisterSessionFilter;
 import com.cernecommerce.core.domain.model.pedido.Order;
+import com.cernecommerce.core.domain.model.pedido.OrderDelivery;
 import com.cernecommerce.core.domain.model.pedido.OrderStatus;
 
 import java.math.BigDecimal;
@@ -24,6 +29,9 @@ public interface PdvUseCase {
 
     /** Lista as sessões de caixa paginadas. */
     PageResult<CashRegisterSession> listSessions(int page, int size);
+
+    /** PDV-F026 — sessões filtradas por status, operador e período de abertura, mais recentes primeiro. */
+    PageResult<CashRegisterSession> listSessions(CashRegisterSessionFilter filter, int page, int size);
 
     /**
      * Abre um caixa para o operador.
@@ -70,11 +78,26 @@ public interface PdvUseCase {
      * <p><b>Divergência não bloqueia</b> — é registrada, exatamente como no fechamento de um balanço
      * de inventário. Recusar o fechamento só produziria caixas que nunca fecham.</p>
      *
-     * <p>Ao contrário das demais operações da sessão, fechar <b>não</b> exige ser o dono: a
-     * conferência é frequentemente feita pelo gerente, e é por isso que existe a permissão
-     * {@code PDV_SESSION_CLOSE} separada de {@code PDV_SESSION_MANAGE}.</p>
+     * <p>Este overload é o fechamento privilegiado (sem checagem de dono), usado internamente e por
+     * quem já tem a decisão de acesso tomada. A API usa
+     * {@link #closeSession(Long, BigDecimal, String, String, boolean)}.</p>
      */
-    CashRegisterSession closeSession(Long sessionId, BigDecimal countedAmount, String username);
+    default CashRegisterSession closeSession(Long sessionId, BigDecimal countedAmount, String username) {
+        return closeSession(sessionId, countedAmount, null, username, true);
+    }
+
+    /**
+     * Fecha o caixa com motivo opcional.
+     *
+     * <p>Fechar o caixa de <b>outro</b> operador é conferência de gerente: só quem tem
+     * {@code canCloseAny} (admin/dev) pode. O atendente, que também tem {@code PDV_SESSION_CLOSE},
+     * fecha só o próprio caixa.</p>
+     *
+     * @throws com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionNotOwnedException
+     *         quem não tem {@code canCloseAny} tentou fechar o caixa de outro operador (403)
+     */
+    CashRegisterSession closeSession(Long sessionId, BigDecimal countedAmount, String notes, String username,
+            boolean canCloseAny);
 
     /**
      * Totais recebidos na sessão, agrupados por forma de pagamento — só pagamento {@code CAPTURED}
@@ -128,11 +151,25 @@ public interface PdvUseCase {
      * Registra a venda já decidindo o destino: {@code reserveForPickup=false} conclui na hora
      * (comportamento de sempre); {@code true} grava {@link OrderStatus#RESERVADO} em vez de
      * {@link OrderStatus#CONCLUIDO} (PDV-F008) — mercadoria já baixada do estoque e pagamento já
-     * capturado, exatamente como uma venda concluída, só que o cliente ainda não levou. Único
-     * método abstrato — a sobrecarga acima delega até aqui.
+     * capturado, exatamente como uma venda concluída, só que o cliente ainda não levou.
+     */
+    default Order registerSale(Long sessionId, Long customerId, List<SaleItemCommand> items,
+            List<PaymentCommand> payments, String username, boolean reserveForPickup) {
+        return registerSale(sessionId, customerId, items, payments, username, reserveForPickup, null);
+    }
+
+    /**
+     * Registra a venda com entrega ou retirada (PDV-F022). Com {@code delivery}, a venda sempre
+     * nasce {@link OrderStatus#RESERVADO}; a taxa de entrega entra no total a pagar (fora do
+     * líquido) e o pagamento é validado contra ele. Único método abstrato — as sobrecargas acima
+     * delegam até aqui.
+     *
+     * @throws com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionStaleException
+     *         se a sessão foi aberta num dia anterior (data de America/Sao_Paulo)
      */
     Order registerSale(Long sessionId, Long customerId, List<SaleItemCommand> items,
-            List<PaymentCommand> payments, String username, boolean reserveForPickup);
+            List<PaymentCommand> payments, String username, boolean reserveForPickup,
+            OrderDelivery delivery);
 
     /** Pagamentos de um pedido, na ordem em que foram lançados (PDV-F006). */
     List<OrderPayment> getOrderPayments(Long orderId);
@@ -196,7 +233,12 @@ public interface PdvUseCase {
      * pelo cliente HTTP, e quem tivesse {@code PDV_SALE_MANAGE} vendia qualquer coisa por qualquer
      * valor sem deixar trilha de desconto.</p>
      */
-    record SaleItemCommand(String sku, BigDecimal quantity, BigDecimal discountAmount) {
+    record SaleItemCommand(String sku, BigDecimal quantity, BigDecimal discountAmount, String note) {
+
+        /** Sem observação — forma anterior a PDV-F022. */
+        public SaleItemCommand(String sku, BigDecimal quantity, BigDecimal discountAmount) {
+            this(sku, quantity, discountAmount, null);
+        }
     }
 
     /**
@@ -204,10 +246,41 @@ public interface PdvUseCase {
      *
      * @param installments só faz sentido com {@code method == CREDITO}; {@code null} nos demais
      */
-    record PaymentCommand(PaymentMethod method, BigDecimal amount, Integer installments) {
+    record PaymentCommand(PaymentMethod method, BigDecimal amount, Integer installments,
+            PaymentChannel channel, PaymentProvider provider) {
+
+        /**
+         * PDV-F025 — recusa na borda, com código próprio, o que o CHECK da V134 recusaria como 500:
+         * DINHEIRO não passa por maquininha nem link, e operadora sem canal não diz por onde saiu.
+         */
+        public PaymentCommand {
+            if (method == PaymentMethod.DINHEIRO && (channel != null || provider != null)) {
+                throw new InvalidPaymentChannelException("Pagamento em DINHEIRO não tem canal nem operadora");
+            }
+            if (provider != null && channel == null) {
+                throw new InvalidPaymentChannelException("Informe o canal (MAQUININHA ou LINK) junto com a operadora");
+            }
+        }
+
+        public PaymentCommand(PaymentMethod method, BigDecimal amount, Integer installments) {
+            this(method, amount, installments, null, null);
+        }
     }
 
-    /** Total recebido por forma de pagamento numa sessão — só {@code CAPTURED} conta. */
-    record PaymentTotal(PaymentMethod method, BigDecimal amount) {
+    /**
+     * Total recebido por forma de pagamento numa sessão.
+     *
+     * @param amount bruto: soma dos {@code CAPTURED} — em DINHEIRO é o valor entregue, troco dentro
+     * @param refundedAmount soma dos estornos ({@code REFUNDED}) do método (PDV-F026)
+     * @param changeAmount troco devolvido na sessão; só em DINHEIRO, zero nos demais (PDV-F026)
+     * @param netAmount o que ficou: {@code amount - refundedAmount - changeAmount} (PDV-F026). Em
+     *        DINHEIRO é a mesma conta do esperado de {@code closeSession}, sem o fundo e os movimentos
+     */
+    record PaymentTotal(PaymentMethod method, BigDecimal amount, BigDecimal refundedAmount,
+            BigDecimal changeAmount, BigDecimal netAmount) {
+
+        public PaymentTotal(PaymentMethod method, BigDecimal amount) {
+            this(method, amount, BigDecimal.ZERO, BigDecimal.ZERO, amount);
+        }
     }
 }

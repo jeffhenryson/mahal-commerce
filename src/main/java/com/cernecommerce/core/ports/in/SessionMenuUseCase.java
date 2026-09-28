@@ -3,6 +3,7 @@ package com.cernecommerce.core.ports.in;
 import com.cernecommerce.core.domain.model.pdv.SessionAssetType;
 import com.cernecommerce.core.domain.model.pdv.SessionMenu;
 import com.cernecommerce.core.domain.model.pdv.SessionSettings;
+import com.cernecommerce.core.domain.model.pdv.SessionAddon;
 import com.cernecommerce.core.domain.model.pdv.SessionTier;
 
 import java.math.BigDecimal;
@@ -27,6 +28,18 @@ public interface SessionMenuUseCase {
      * @throws com.cernecommerce.core.domain.exception.pdv.SessionMenuConflictException nome repetido
      */
     SessionTier updateTier(Long id, String nome, BigDecimal preco, String marcas, int ordem, boolean ativo);
+
+    /** PDV-F024 — adicionais pagos (ativos e inativos). */
+    List<SessionAddon> listAddons();
+
+    /** @throws com.cernecommerce.core.domain.exception.pdv.SessionMenuConflictException nome repetido */
+    SessionAddon createAddon(String nome, BigDecimal preco, int ordem);
+
+    /**
+     * @throws com.cernecommerce.core.domain.exception.pdv.SessionAddonNotFoundException se não existir
+     * @throws com.cernecommerce.core.domain.exception.pdv.SessionMenuConflictException nome repetido
+     */
+    SessionAddon updateAddon(Long id, String nome, BigDecimal preco, int ordem, boolean ativo);
 
     List<SessionAssetType> listAssetTypes();
 

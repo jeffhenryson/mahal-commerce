@@ -378,15 +378,19 @@ public class PdvComandaController {
                     + "pagamento é validado contra netAmount + taxa. PDV-F017: mandando itemIds, "
                     + "o fechamento cobra SÓ aquelas linhas e a comanda CONTINUA ABERTA com o "
                     + "restante — é a conta dividida, \"cada um paga o que consumiu\". Desconto, "
-                    + "taxa e troco incidem só sobre o escopo, e o último fechamento encerra a "
-                    + "mesa. Omitir itemIds cobra tudo que está em aberto, como sempre.")
+                    + "taxa e troco incidem só sobre o escopo. PDV-F023: o fechamento com itemIds "
+                    + "NUNCA encerra a mesa nem libera utensílio, mesmo levando a última linha "
+                    + "aberta — encerra-se com POST /{id}/finish. Omitir itemIds cobra tudo que "
+                    + "está em aberto e encerra a mesa, desde que toda sessão esteja RECOLHIDO "
+                    + "(senão 409 SESSION_NOT_COLLECTED). A taxa de serviço nunca incide sobre "
+                    + "linhas SESSAO/ROSH_EXTRA.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Fechada", content = @Content(schema = @Schema(implementation = OrderResponseDTO.class))),
             @ApiResponse(responseCode = "400", description = "Pagamento insuficiente", content = @Content),
             @ApiResponse(responseCode = "403", description = "Desconto sem PDV_COMANDA_DISCOUNT (COMANDA_DISCOUNT_NOT_ALLOWED)", content = @Content),
             @ApiResponse(responseCode = "404", description = "Comanda não encontrada", content = @Content),
             @ApiResponse(responseCode = "400", description = "Linha inexistente ou já cobrada em itemIds (ITEM_NOT_OPEN_IN_COMANDA)", content = @Content),
-            @ApiResponse(responseCode = "409", description = "Comanda não está aberta, sem itens (COMANDA_EMPTY), só com cortesias (COMANDA_ONLY_COURTESY), quem fecha não tem caixa aberto, desconto acima do teto (DISCOUNT_LIMIT_EXCEEDED), pagamento não-dinheiro acima do total, ou seleção que separa linhas ligadas (LINKED_ITEM_MUST_CLOSE_TOGETHER)", content = @Content)
+            @ApiResponse(responseCode = "409", description = "Comanda não está aberta, sem itens (COMANDA_EMPTY), só com cortesias (COMANDA_ONLY_COURTESY), quem fecha não tem caixa aberto, desconto acima do teto (DISCOUNT_LIMIT_EXCEEDED), pagamento não-dinheiro acima do total, ou seleção que separa linhas ligadas (LINKED_ITEM_MUST_CLOSE_TOGETHER) ou sessão não recolhida no fechamento total (SESSION_NOT_COLLECTED)", content = @Content)
     })
     @PostMapping("/{id}/close")
     @PreAuthorize("hasAuthority('PDV_COMANDA_MANAGE')")
@@ -396,7 +400,7 @@ public class PdvComandaController {
         List<PaymentCommand> payments = request.getPayments().stream()
                 .map(p -> new PaymentCommand(
                         com.cernecommerce.core.domain.model.pagamento.PaymentMethod.valueOf(p.getMethod()),
-                        p.getAmount(), p.getInstallments()))
+                        p.getAmount(), p.getInstallments(), p.getChannel(), p.getProvider()))
                 .toList();
         // A sobrecarga completa, sempre: as de conveniência de ComandaUseCase são `default` da
         // interface e perdem a transação quando chamadas pelo proxy (PLAT-C047).
@@ -419,6 +423,27 @@ public class PdvComandaController {
                             "amount", order.totalCashbackEarned())));
         }
         return ResponseEntity.ok(orderConverter.toResponse(order));
+    }
+
+    @Operation(summary = "Encerra a mesa já toda paga",
+            description = "PDV-F023 — com a sessão paga no lançamento, a mesa chega ao fim sem nada a "
+                    + "cobrar, e o fechamento parcial nunca a encerra. Não gera pedido: o cabeçalho "
+                    + "aponta o último pedido que cobrou a mesa. Mesa sem nenhuma linha se cancela.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Encerrada"),
+            @ApiResponse(responseCode = "404", description = "Comanda não encontrada", content = @Content),
+            @ApiResponse(responseCode = "409", description = "Comanda não aberta, sem linhas (COMANDA_EMPTY), com linha a cobrar (COMANDA_HAS_OPEN_ITEMS) ou com sessão não recolhida (SESSION_NOT_COLLECTED)", content = @Content)
+    })
+    @PostMapping("/{id}/finish")
+    @PreAuthorize("hasAuthority('PDV_COMANDA_MANAGE')")
+    public ResponseEntity<ComandaResponseDTO> finishComanda(@PathVariable("id") Long comandaId,
+            Authentication authentication) {
+        Comanda comanda = comandaUseCase.finishComanda(comandaId, authentication.getName());
+        publisher.publishEvent(AuditEvent.of(EventType.COMANDA_FINISHED, authentication.getName(),
+                auditPayload(comandaId, "orderId", comanda.orderId())));
+        ComandaResponseDTO dto = comandaConverter.toResponse(comanda);
+        enrichCustomerNames(List.of(dto));
+        return ResponseEntity.ok(dto);
     }
 
     @Operation(summary = "Percentual da taxa de serviço vigente",

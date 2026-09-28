@@ -59,7 +59,7 @@ CRM-F002) e `CRM_CUSTOMER_EXPORT` (V81, CRM-C002) — todas concedidas a `ROLE_A
 |---|---|---|
 | `CRM_CUSTOMER_READ` | toda leitura: clientes, notas, pedidos, cashback, histórico de estágio, dashboard, tags, automações, log de disparos e status de canal | 12 |
 | `CRM_CUSTOMER_MANAGE` | toda escrita: criar cliente e nota, mover estágio, CRUD de tags e associações, CRUD de automações e disparo manual | 11 |
-| `CRM_CUSTOMER_LOOKUP` | `GET /crm/customers/lookup` — busca pontual por CPF/email/contato (CRM-F002) | 1 |
+| `CRM_CUSTOMER_LOOKUP` | `GET /crm/customers/lookup` — busca pontual por CPF/email/contato (CRM-F002); `GET /crm/customers/lookup/contact` — todos que já usam o telefone/email/CPF, com `matchedBy` (CRM-C007) | 2 |
 | `CRM_CUSTOMER_EXPORT` | `GET /crm/customers/export` — export CSV da base inteira (CRM-C002) | 1 |
 
 O programa de cashback (CRM-F003) tem controller e permissões próprios, fora do `CrmController` e
@@ -198,6 +198,13 @@ Novas features e correções do CRM seguem as séries `CRM-F001+` e `CRM-C002+`.
 `F001–F009` está congelada (todos concluídos, ver histórico).
 
 ## Histórico de Implementações
+
+- **2026-09-26** — `cadastro-sem-duplicado-por-telefone-ou-email` (CRM-C007): `GET
+  /crm/customers/lookup/contact?phone=&email=&cpf=` devolve todos os clientes que batem, com
+  `matchedBy`; `POST`/`PUT /crm/customers` respondem `409 CUSTOMER_ALREADY_EXISTS {matchedBy,
+  customerId}` também para telefone e e-mail sem diferenciar caixa. **V129**: `phone_normalized`
+  (dígitos sem DDI 55) e índice em `lower(email)`, ambos **não únicos** — a regra fica no serviço
+  para a migração não falhar em base com repetidos.
 
 - **2026-09-24** — `atendente-cadastra-lead-e-cpf-editavel` (CRM-C006): permissão `CRM_LEAD_CREATE`
   (V127, admin + atendente) libera `POST /crm/customers` e o novo find-or-create

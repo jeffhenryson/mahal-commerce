@@ -54,4 +54,7 @@ public class CashRegisterSessionEntity {
 
     @Column(nullable = false, length = 10)
     private String status;
+
+    @Column(name = "closing_notes", length = 500)
+    private String closingNotes;
 }

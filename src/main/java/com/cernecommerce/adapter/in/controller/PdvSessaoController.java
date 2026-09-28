@@ -2,6 +2,10 @@ package com.cernecommerce.adapter.in.controller;
 
 import com.cernecommerce.adapter.in.converter.ComandaDTOConverter;
 import com.cernecommerce.adapter.in.dtos.request.AddRoshExtraRequest;
+import com.cernecommerce.adapter.in.dtos.request.RepeatSessionRequest;
+import com.cernecommerce.adapter.in.dtos.request.SessionAddonRequest;
+import com.cernecommerce.adapter.in.dtos.response.SessionAddonResponseDTO;
+import com.cernecommerce.adapter.in.dtos.request.UpdateSessionStatusRequest;
 import com.cernecommerce.adapter.in.dtos.request.AddSessionRequest;
 import com.cernecommerce.adapter.in.dtos.request.SessionAssetTypeRequest;
 import com.cernecommerce.adapter.in.dtos.request.SessionSettingsRequest;
@@ -34,6 +38,7 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
@@ -80,21 +85,70 @@ public class PdvSessaoController {
     }
 
     @Operation(summary = "Lança uma sessão do cardápio na mesa",
-            description = "Preço = faixa (+ upgrade se vasoGrande), resolvido pelo servidor. A essência "
-                    + "vai na nota da linha. Aloca vaso e utensílios inclusos; não move estoque.")
+            description = "Preço = faixa (+ upgrade se vasoGrande) + Σ adicionais, resolvido pelo servidor. "
+                    + "A essência vai na nota da linha; o carvão é só registro. Aloca vaso e utensílios "
+                    + "inclusos; não move estoque. PDV-F027: a sessão nasce AGUARDANDO_PAGAMENTO e vai a "
+                    + "PREPARANDO quando é paga (close com itemIds); a mesa aceita sessões em paralelo, "
+                    + "limitadas ao utensílio livre. modo=DUPLO cria também o 2º rosh a R$ 0 ligado à "
+                    + "sessão, em NA_FILA, na mesma transação — para pagar a sessão, mande os dois ids em "
+                    + "itemIds do close.")
     @ApiResponses({
             @ApiResponse(responseCode = "201", description = "Lançada, com a comanda atualizada"),
-            @ApiResponse(responseCode = "404", description = "Comanda ou faixa não encontrada (SESSION_TIER_NOT_FOUND)", content = @Content),
+            @ApiResponse(responseCode = "400", description = "Essência vazia, ou DUPLO sem essenciaRosh", content = @Content),
+            @ApiResponse(responseCode = "404", description = "Comanda, faixa (SESSION_TIER_NOT_FOUND) ou adicional (SESSION_ADDON_NOT_FOUND) não encontrado", content = @Content),
             @ApiResponse(responseCode = "409", description = "Comanda não aberta, sem utensílio livre (SESSION_ASSET_UNAVAILABLE) ou vaso não configurado (SESSION_MENU_CONFLICT)", content = @Content)
     })
     @PostMapping("/pdv/comandas/{id}/sessoes")
     @PreAuthorize("hasAuthority('PDV_COMANDA_MANAGE')")
     public ResponseEntity<ComandaResponseDTO> addSession(@PathVariable("id") Long comandaId,
             @Valid @RequestBody AddSessionRequest request, Authentication authentication) {
-        Comanda comanda = comandaUseCase.addSession(comandaId, request.getTierId(), request.getEssencia(),
-                request.isVasoGrande(), authentication.getName());
-        publisher.publishEvent(AuditEvent.of(EventType.COMANDA_SESSION_ADDED, authentication.getName(),
-                Map.of("comandaId", comandaId, "tierId", request.getTierId(), "vasoGrande", request.isVasoGrande())));
+        if (request.isDuplo() && (request.getEssenciaRosh() == null || request.getEssenciaRosh().isBlank())) {
+            throw new IllegalArgumentException("essenciaRosh é obrigatória no rosh duplo");
+        }
+        Comanda comanda = comandaUseCase.addSession(comandaId, new ComandaUseCase.AddSessionCommand(
+                request.getTierId(), request.getEssencia(), request.isVasoGrande(), request.getCarvao(),
+                request.getAdicionalIds(), request.isDuplo(), request.getEssenciaRosh(), request.getTierIdRosh()),
+                authentication.getName());
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("comandaId", comandaId);
+        payload.put("tierId", request.getTierId());
+        payload.put("vasoGrande", request.isVasoGrande());
+        payload.put("duplo", request.isDuplo());
+        if (request.getAdicionalIds() != null && !request.getAdicionalIds().isEmpty()) {
+            payload.put("adicionalIds", request.getAdicionalIds());
+        }
+        publisher.publishEvent(AuditEvent.of(EventType.COMANDA_SESSION_ADDED, authentication.getName(), payload));
+        return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(comanda));
+    }
+
+    @Operation(summary = "Repete uma sessão da mesa (mesma configuração)",
+            description = "PDV-F027 — nova sessão com a faixa, o vaso, o carvão e os adicionais da sessão "
+                    + "{itemId}, pelo preço atual do cardápio. essencia nula repete o sabor. A origem pode "
+                    + "estar recolhida: os utensílios são reservados de novo. Nasce AGUARDANDO_PAGAMENTO, "
+                    + "como no lançamento normal.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "201", description = "Lançada, com a comanda atualizada"),
+            @ApiResponse(responseCode = "400", description = "DUPLO sem essenciaRosh", content = @Content),
+            @ApiResponse(responseCode = "404", description = "Comanda, faixa (SESSION_TIER_NOT_FOUND) ou adicional (SESSION_ADDON_NOT_FOUND) não encontrado ou inativo", content = @Content),
+            @ApiResponse(responseCode = "409", description = "Comanda não aberta, a linha não é uma sessão desta comanda (NOT_A_SESSION_LINE), sem utensílio livre (SESSION_ASSET_UNAVAILABLE) ou vaso não configurado (SESSION_MENU_CONFLICT)", content = @Content)
+    })
+    @PostMapping("/pdv/comandas/{id}/sessoes/{itemId}/repetir")
+    @PreAuthorize("hasAuthority('PDV_COMANDA_MANAGE')")
+    public ResponseEntity<ComandaResponseDTO> repeatSession(@PathVariable("id") Long comandaId,
+            @PathVariable("itemId") Long sourceItemId, @Valid @RequestBody RepeatSessionRequest request,
+            Authentication authentication) {
+        if (request.isDuplo() && (request.getEssenciaRosh() == null || request.getEssenciaRosh().isBlank())) {
+            throw new IllegalArgumentException("essenciaRosh é obrigatória no rosh duplo");
+        }
+        Comanda comanda = comandaUseCase.repeatSession(comandaId, sourceItemId,
+                new ComandaUseCase.RepeatSessionCommand(request.getEssencia(), request.isDuplo(),
+                        request.getEssenciaRosh(), request.getTierIdRosh()),
+                authentication.getName());
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("comandaId", comandaId);
+        payload.put("repeatedFromItemId", sourceItemId);
+        payload.put("duplo", request.isDuplo());
+        publisher.publishEvent(AuditEvent.of(EventType.COMANDA_SESSION_ADDED, authentication.getName(), payload));
         return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(comanda));
     }
 
@@ -122,6 +176,29 @@ public class PdvSessaoController {
         }
         publisher.publishEvent(AuditEvent.of(EventType.COMANDA_ROSH_EXTRA_ADDED, authentication.getName(), payload));
         return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(comanda));
+    }
+
+    @Operation(summary = "Avança o status de uma sessão da mesa",
+            description = "PDV-F023 — NA_FILA → PREPARANDO → ENTREGUE → RECOLHIDO (e PREPARANDO → "
+                    + "RECOLHIDO). Recolher libera os utensílios quando a sessão e os roshs ligados a "
+                    + "ela estão todos recolhidos, e promove o próximo rosh NA_FILA da mesma sessão para "
+                    + "PREPARANDO. AGUARDANDO_PAGAMENTO não sai por aqui: quem a promove é o pagamento "
+                    + "(PDV-F027).")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Atualizada, com a comanda"),
+            @ApiResponse(responseCode = "404", description = "Comanda ou linha não encontrada", content = @Content),
+            @ApiResponse(responseCode = "409", description = "Comanda não aberta, linha sem status de sessão (NOT_A_SESSION_LINE) ou transição inválida (INVALID_SESSION_TRANSITION)", content = @Content)
+    })
+    @PatchMapping("/pdv/comandas/{id}/sessoes/{itemId}/status")
+    @PreAuthorize("hasAuthority('PDV_COMANDA_MANAGE')")
+    public ResponseEntity<ComandaResponseDTO> updateSessionStatus(@PathVariable("id") Long comandaId,
+            @PathVariable("itemId") Long itemId, @Valid @RequestBody UpdateSessionStatusRequest request,
+            Authentication authentication) {
+        Comanda comanda = comandaUseCase.updateSessionStatus(comandaId, itemId, request.getStatus(),
+                authentication.getName());
+        publisher.publishEvent(AuditEvent.of(EventType.COMANDA_SESSION_STATUS_CHANGED, authentication.getName(),
+                Map.of("comandaId", comandaId, "itemId", itemId, "status", request.getStatus().name())));
+        return ResponseEntity.ok(toResponse(comanda));
     }
 
     // ── Cadastro (admin) ──────────────────────────────────────────────────────────────────────
@@ -154,6 +231,35 @@ public class PdvSessaoController {
                 request.getOrdem(), request.getAtivo() == null || request.getAtivo());
         audit(authentication, "faixa", id);
         return ResponseEntity.ok(SessionTierResponseDTO.of(tier));
+    }
+
+    @Operation(summary = "Lista os adicionais pagos da sessão (ativos e inativos)")
+    @GetMapping("/pdv/sessao/adicionais")
+    @PreAuthorize("hasAuthority('PDV_SESSAO_MANAGE')")
+    public ResponseEntity<List<SessionAddonResponseDTO>> listAddons() {
+        return ResponseEntity.ok(sessionMenuUseCase.listAddons().stream().map(SessionAddonResponseDTO::of).toList());
+    }
+
+    @Operation(summary = "Cria um adicional pago da sessão", description = "PDV-F024 — ex.: filtro de gelo.")
+    @PostMapping("/pdv/sessao/adicionais")
+    @PreAuthorize("hasAuthority('PDV_SESSAO_MANAGE')")
+    public ResponseEntity<SessionAddonResponseDTO> createAddon(@Valid @RequestBody SessionAddonRequest request,
+            Authentication authentication) {
+        var addon = sessionMenuUseCase.createAddon(request.getNome(), request.getPreco(), request.getOrdem());
+        audit(authentication, "adicional", addon.id());
+        return ResponseEntity.status(HttpStatus.CREATED).body(SessionAddonResponseDTO.of(addon));
+    }
+
+    @Operation(summary = "Atualiza um adicional pago da sessão",
+            description = "Mudar o preço vale para lançamentos novos; a linha já lançada guarda o preço da época.")
+    @PutMapping("/pdv/sessao/adicionais/{id}")
+    @PreAuthorize("hasAuthority('PDV_SESSAO_MANAGE')")
+    public ResponseEntity<SessionAddonResponseDTO> updateAddon(@PathVariable Long id,
+            @Valid @RequestBody SessionAddonRequest request, Authentication authentication) {
+        var addon = sessionMenuUseCase.updateAddon(id, request.getNome(), request.getPreco(), request.getOrdem(),
+                request.getAtivo() == null || request.getAtivo());
+        audit(authentication, "adicional", id);
+        return ResponseEntity.ok(SessionAddonResponseDTO.of(addon));
     }
 
     @Operation(summary = "Lista os utensílios da sessão")

@@ -95,11 +95,15 @@ public record AuditEvent(EventType type, String username, Instant timestamp, Map
         COMANDA_KIT_ADDED, COMANDA_KIT_REMOVED,
         // PDV-F021 — cardápio de sessão da mesa.
         COMANDA_SESSION_ADDED, COMANDA_ROSH_EXTRA_ADDED, SESSION_MENU_CHANGED,
+        // PDV-F023
+        COMANDA_SESSION_STATUS_CHANGED, COMANDA_FINISHED,
         // PDV-F016. COMANDA_MERGED é o que distingue, na trilha, a origem de uma junção de uma
         // mesa abandonada: as duas terminam CANCELADA, mas só o abandono devolveu estoque.
         COMANDA_RENAMED, COMANDA_MERGED, COMANDA_CUSTOMER_LINKED,
         // Pedido
         ORDER_STATUS_CHANGED, ORDER_CANCELLED, ORDER_REFUNDED,
+        // PDV-F022 — códigos da 99, rastreio, entregador preenchidos depois da venda.
+        ORDER_DELIVERY_UPDATED,
         // Cashback (CRM-F003)
         CASHBACK_RATE_CHANGED, CASHBACK_EARNED,
         // Support

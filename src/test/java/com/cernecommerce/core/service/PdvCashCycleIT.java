@@ -1,5 +1,9 @@
 package com.cernecommerce.core.service;
 
+import com.cernecommerce.core.domain.model.pedido.OrderDelivery;
+import com.cernecommerce.core.domain.model.pedido.DeliveryType;
+import com.cernecommerce.core.domain.model.pedido.DeliveryMethod;
+import com.cernecommerce.core.domain.model.pedido.DeliveryAddress;
 import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionAlreadyOpenException;
 import com.cernecommerce.core.domain.exception.pdv.CashRegisterSessionNotOwnedException;
 import com.cernecommerce.core.domain.model.estoque.MovementType;
@@ -9,6 +13,7 @@ import com.cernecommerce.core.domain.model.pagamento.PaymentMethod;
 import com.cernecommerce.core.domain.model.pagamento.PaymentStatus;
 import com.cernecommerce.core.domain.model.pdv.CashMovementType;
 import com.cernecommerce.core.domain.model.pdv.CashRegisterSession;
+import com.cernecommerce.core.domain.model.pdv.CashRegisterSessionFilter;
 import com.cernecommerce.core.domain.model.pedido.Order;
 import com.cernecommerce.core.domain.model.pedido.OrderItem;
 import com.cernecommerce.core.domain.model.pedido.OrderStatus;
@@ -388,6 +393,25 @@ class PdvCashCycleIT {
         assertThat(vistas).isSortedAccordingTo(Comparator.reverseOrder());
     }
 
+    /** PDV-F026 — status e operador filtram no banco, e o período incide sobre openedAt. */
+    @Test
+    void listSessions_filtersByStatusOperatorAndOpenedAt() {
+        String suffix = uniqueSuffix();
+        String warehouseCode = givenStockedWarehouse("caixa-seed-" + suffix).split("\\|")[0];
+        String operador = "caixa-filtro-" + suffix;
+        CashRegisterSession aberta = pdvUseCase.openSession(operador, BigDecimal.TEN, warehouseCode);
+        flushAndClear();
+
+        assertThat(pdvUseCase.listSessions(new CashRegisterSessionFilter(CashRegisterSession.Status.OPEN, null, null,
+                operador), 0, 20).content()).extracting(CashRegisterSession::id).containsExactly(aberta.id());
+        assertThat(pdvUseCase.listSessions(new CashRegisterSessionFilter(CashRegisterSession.Status.CLOSED, null,
+                null, operador), 0, 20).content()).isEmpty();
+        assertThat(pdvUseCase.listSessions(new CashRegisterSessionFilter(null, aberta.openedAt().plusSeconds(60),
+                null, operador), 0, 20).content()).isEmpty();
+        assertThat(pdvUseCase.listSessions(new CashRegisterSessionFilter(null, aberta.openedAt().minusSeconds(60),
+                aberta.openedAt().plusSeconds(60), operador), 0, 20).content()).hasSize(1);
+    }
+
     @Test
     void orderNumbersAreUniqueAcrossSales() {
         String operator = "caixa-" + uniqueSuffix();
@@ -401,5 +425,68 @@ class PdvCashCycleIT {
                 List.of(new SaleItemCommand(sku, BigDecimal.ONE, null)), cash("22.00"), operator).orderNumber();
 
         assertThat(first).isNotEqualTo(second);
+    }
+
+    // ── PDV-F022: entrega persistida em order_delivery (tabela secundária) ───────────────────
+
+    @Test
+    void saleWithEntrega_persistsDelivery_patchesTrackingLater_andFollowsTheShippingPipeline() {
+        String operator = "caixa-" + uniqueSuffix();
+        String[] setup = givenStockedWarehouse(operator).split("\\|");
+        CashRegisterSession session = pdvUseCase.openSession(operator, new BigDecimal("0.00"), setup[0]);
+        flushAndClear();
+
+        OrderDelivery delivery = new OrderDelivery(DeliveryType.ENTREGA,
+                new DeliveryAddress("Rua A", "10", "Casa", "58000-000", "Centro", "João Pessoa", "PB", "Brasil", null),
+                DeliveryMethod.CORREIOS, null, null, null, null, null, new BigDecimal("12.50"));
+        Order sold = pdvUseCase.registerSale(session.id(), null,
+                List.of(new SaleItemCommand(setup[1], new BigDecimal("2.000"), null, "Embrulhar para presente")),
+                cash("56.50"), operator, false, delivery);
+        flushAndClear();
+
+        Order reloaded = orderUseCase.getOrder(sold.id());
+        assertThat(reloaded.status()).isEqualTo(OrderStatus.RESERVADO);
+        assertThat(reloaded.totalPayable()).isEqualByComparingTo("56.50");
+        assertThat(reloaded.delivery()).isEqualTo(delivery);
+        assertThat(reloaded.items().get(0).notes()).isEqualTo("Embrulhar para presente");
+
+        // Rastreio chega depois da postagem; o resto da entrega fica como estava.
+        orderUseCase.updateDelivery(sold.id(), new OrderDelivery.Patch(null, null, null, null, null, null, null,
+                "BR123456789BR", null), operator);
+        flushAndClear();
+        Order patched = orderUseCase.getOrder(sold.id());
+        assertThat(patched.delivery().trackingCode()).isEqualTo("BR123456789BR");
+        assertThat(patched.delivery().address().complement()).isEqualTo("Casa");
+        assertThat(patched.delivery().fee()).isEqualByComparingTo("12.50");
+
+        orderUseCase.changeStatus(sold.id(), OrderStatus.SEPARADO, operator);
+        orderUseCase.changeStatus(sold.id(), OrderStatus.ENVIADO, operator);
+        orderUseCase.changeStatus(sold.id(), OrderStatus.ENTREGUE, operator);
+        flushAndClear();
+        Order delivered = orderUseCase.getOrder(sold.id());
+        assertThat(delivered.status()).isEqualTo(OrderStatus.ENTREGUE);
+        assertThat(delivered.shippedAt()).isNotNull();
+        assertThat(delivered.delivery().trackingCode()).isEqualTo("BR123456789BR");
+
+        // A listagem da sessão lê a entrega na mesma consulta (LEFT JOIN da tabela secundária).
+        assertThat(pdvUseCase.listSessionOrders(session.id(), 0, 10).content())
+                .singleElement().satisfies(o -> assertThat(o.delivery()).isNotNull());
+    }
+
+    @Test
+    void saleWithoutDelivery_readsBackWithNullDelivery() {
+        String operator = "caixa-" + uniqueSuffix();
+        String[] setup = givenStockedWarehouse(operator).split("\\|");
+        CashRegisterSession session = pdvUseCase.openSession(operator, new BigDecimal("0.00"), setup[0]);
+        Order sold = pdvUseCase.registerSale(session.id(), null,
+                List.of(new SaleItemCommand(setup[1], new BigDecimal("1.000"), null)), cash("22.00"), operator);
+        flushAndClear();
+
+        Order reloaded = orderUseCase.getOrder(sold.id());
+        assertThat(reloaded.delivery()).isNull();
+        assertThat(reloaded.status()).isEqualTo(OrderStatus.CONCLUIDO);
+        Number rows = (Number) em.createNativeQuery("SELECT COUNT(*) FROM order_delivery WHERE order_id = :id")
+                .setParameter("id", sold.id()).getSingleResult();
+        assertThat(rows.intValue()).isZero();
     }
 }

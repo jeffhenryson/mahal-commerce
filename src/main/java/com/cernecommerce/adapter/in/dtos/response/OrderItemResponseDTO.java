@@ -42,4 +42,7 @@ public class OrderItemResponseDTO {
 
     @Schema(description = "Cashback gerado por este item. Nulo enquanto não houver taxa carimbada.")
     private BigDecimal cashbackAmount;
+
+    @Schema(description = "PDV-F022 — observação da linha, quando houver.", example = "Sem gelo")
+    private String note;
 }

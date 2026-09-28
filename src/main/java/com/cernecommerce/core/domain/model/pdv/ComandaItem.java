@@ -38,7 +38,12 @@ public record ComandaItem(
         Integer packageSessionsPerUnit,
         String kitBundleId,
         Long kitTemplateId,
-        BigDecimal kitDiscountAmount) {
+        BigDecimal kitDiscountAmount,
+        SessionProgress session,
+        SessionSetup setup) {
+
+    /** Sufixo que a sessão de vaso grande leva na {@link #notes}, depois da essência (PDV-F021). */
+    public static final String VASO_GRANDE_NOTE_SUFFIX = " · Vaso grande";
 
     /** Limite de {@link #notes}, casado com {@code comanda_item.notes VARCHAR(200)}. */
     public static final int NOTES_MAX_LENGTH = 200;
@@ -111,6 +116,14 @@ public record ComandaItem(
                 || kitDiscountAmount.compareTo(quantity.multiply(unitPrice)) > 0)) {
             throw new IllegalArgumentException("kitDiscountAmount fora do intervalo da linha: " + kitDiscountAmount);
         }
+        // PDV-F023 — espelha ck_comanda_item_session_status_by_mode (V132).
+        if (session != null && !mode.isMenuSession()) {
+            throw new IllegalArgumentException("status de sessão só existe em SESSAO/ROSH_EXTRA: mode=" + mode);
+        }
+        // PDV-F024 — carvão e adicionais só em linha do cardápio de sessão.
+        if (setup != null && !mode.isMenuSession()) {
+            throw new IllegalArgumentException("carvão/adicionais só existem em SESSAO/ROSH_EXTRA: mode=" + mode);
+        }
     }
 
     /**
@@ -125,7 +138,7 @@ public record ComandaItem(
         }
         return new ComandaItem(null, sku, quantity, pricing.effectivePrice(), pricing.costPrice(),
                 productName, Instant.now(), ConsumptionMode.NORMAL, false, null, null, null, null, null, null, null, null,
-                null);
+                null, null, null);
     }
 
     /**
@@ -157,7 +170,7 @@ public record ComandaItem(
             throw new ProductNotPricedException(sku);
         }
         return new ComandaItem(null, sku, quantity, unitPrice, pricing.costPrice(), productName,
-                Instant.now(), mode, courtesy, linkedItemId, notes, surchargeAmount, null, null, null, null, null, null);
+                Instant.now(), mode, courtesy, linkedItemId, notes, surchargeAmount, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -169,12 +182,17 @@ public record ComandaItem(
      * o que a casa pergunta depois do fechamento.</p>
      */
     public static ComandaItem forMenuSession(String sku, BigDecimal unitPrice, String productName,
-            ConsumptionMode mode, boolean courtesy, Long linkedItemId, String notes) {
+            ConsumptionMode mode, boolean courtesy, Long linkedItemId, String notes, SessionProgress session,
+            SessionSetup setup) {
         if (mode == null || !mode.isMenuSession()) {
             throw new IllegalArgumentException("linha do cardápio de sessão exige SESSAO ou ROSH_EXTRA: " + mode);
         }
+        if (session == null) {
+            throw new IllegalArgumentException("linha do cardápio de sessão nasce com status (PDV-F023)");
+        }
         return new ComandaItem(null, sku, BigDecimal.ONE, unitPrice, null, productName, Instant.now(), mode,
-                courtesy, linkedItemId, notes, null, null, null, null, null, null, null);
+                courtesy, linkedItemId, notes, null, null, null, null, null, null, null, session,
+                setup == null || setup.isEmpty() ? null : setup);
     }
 
     /** Reconstitui um item a partir de persistência. */
@@ -232,9 +250,34 @@ public record ComandaItem(
             Long linkedItemId, String notes, BigDecimal surchargeAmount, Long closedInOrderId,
             Integer packageUses, Integer packageSessionsPerUnit, String kitBundleId, Long kitTemplateId,
             BigDecimal kitDiscountAmount) {
+        return of(id, sku, quantity, unitPrice, costPrice, productName, addedAt, mode, courtesy, linkedItemId,
+                notes, surchargeAmount, closedInOrderId, packageUses, packageSessionsPerUnit, kitBundleId,
+                kitTemplateId, kitDiscountAmount, null);
+    }
+
+    /**
+     * Reconstitui um item a partir de persistência, com o status da sessão (PDV-F023). Linha de
+     * catálogo, e linha de sessão anterior à V132 sem backfill, lê {@code session} nulo.
+     */
+    public static ComandaItem of(Long id, String sku, BigDecimal quantity, BigDecimal unitPrice,
+            BigDecimal costPrice, String productName, Instant addedAt, ConsumptionMode mode, boolean courtesy,
+            Long linkedItemId, String notes, BigDecimal surchargeAmount, Long closedInOrderId,
+            Integer packageUses, Integer packageSessionsPerUnit, String kitBundleId, Long kitTemplateId,
+            BigDecimal kitDiscountAmount, SessionProgress session) {
+        return of(id, sku, quantity, unitPrice, costPrice, productName, addedAt, mode, courtesy, linkedItemId,
+                notes, surchargeAmount, closedInOrderId, packageUses, packageSessionsPerUnit, kitBundleId,
+                kitTemplateId, kitDiscountAmount, session, null);
+    }
+
+    /** Reconstitui um item a partir de persistência, com carvão e adicionais (PDV-F024). */
+    public static ComandaItem of(Long id, String sku, BigDecimal quantity, BigDecimal unitPrice,
+            BigDecimal costPrice, String productName, Instant addedAt, ConsumptionMode mode, boolean courtesy,
+            Long linkedItemId, String notes, BigDecimal surchargeAmount, Long closedInOrderId,
+            Integer packageUses, Integer packageSessionsPerUnit, String kitBundleId, Long kitTemplateId,
+            BigDecimal kitDiscountAmount, SessionProgress session, SessionSetup setup) {
         return new ComandaItem(id, sku, quantity, unitPrice, costPrice, productName, addedAt, mode, courtesy,
                 linkedItemId, notes, surchargeAmount, closedInOrderId, packageUses, packageSessionsPerUnit,
-                kitBundleId, kitTemplateId, kitDiscountAmount);
+                kitBundleId, kitTemplateId, kitDiscountAmount, session, setup);
     }
 
     /**
@@ -258,7 +301,7 @@ public record ComandaItem(
         }
         return new ComandaItem(id, sku, quantity, unitPrice, costPrice, productName, addedAt, mode, courtesy,
                 linkedItemId, notes, surchargeAmount, orderId, packageUses, packageSessionsPerUnit, kitBundleId,
-                kitTemplateId, kitDiscountAmount);
+                kitTemplateId, kitDiscountAmount, session, setup);
     }
 
     /**
@@ -273,7 +316,7 @@ public record ComandaItem(
     public ComandaItem withPackageCounter(int uses, int sessionsPerUnit) {
         return new ComandaItem(id, sku, quantity, unitPrice, costPrice, productName, addedAt, mode, courtesy,
                 linkedItemId, notes, surchargeAmount, closedInOrderId, uses, sessionsPerUnit, kitBundleId,
-                kitTemplateId, kitDiscountAmount);
+                kitTemplateId, kitDiscountAmount, session, setup);
     }
 
     /**
@@ -285,7 +328,71 @@ public record ComandaItem(
     public ComandaItem withKit(String bundleId, Long templateId, BigDecimal discountAmount) {
         return new ComandaItem(id, sku, quantity, unitPrice, costPrice, productName, addedAt, mode, courtesy,
                 linkedItemId, notes, surchargeAmount, closedInOrderId, packageUses, packageSessionsPerUnit,
-                bundleId, templateId, discountAmount);
+                bundleId, templateId, discountAmount, session, setup);
+    }
+
+    /**
+     * PDV-F023 — avança o status da sessão. Cópia — o item permanece imutável.
+     *
+     * @throws IllegalStateException se a linha não tem status ou a transição não é permitida
+     */
+    public ComandaItem withSessionStatus(SessionStatus next, Instant at) {
+        if (session == null) {
+            throw new IllegalStateException("item " + id + " não tem status de sessão");
+        }
+        return new ComandaItem(id, sku, quantity, unitPrice, costPrice, productName, addedAt, mode, courtesy,
+                linkedItemId, notes, surchargeAmount, closedInOrderId, packageUses, packageSessionsPerUnit,
+                kitBundleId, kitTemplateId, kitDiscountAmount, session.advanceTo(next, at), setup);
+    }
+
+    /**
+     * PDV-F027 — a faixa de uma linha do cardápio de sessão, lida do SKU sintético {@code SESS-{id}}.
+     * Nulo em linha de catálogo ou SKU fora do padrão.
+     */
+    public Long sessionTierId() {
+        if (!mode.isMenuSession() || !sku.startsWith(SessionTier.SKU_PREFIX)) {
+            return null;
+        }
+        try {
+            return Long.valueOf(sku.substring(SessionTier.SKU_PREFIX.length()));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /** PDV-F027 — a essência da linha de sessão: a nota sem o sufixo de vaso. Nulo fora de sessão. */
+    public String sessionEssencia() {
+        if (!mode.isMenuSession() || notes == null) {
+            return null;
+        }
+        return notes.endsWith(VASO_GRANDE_NOTE_SUFFIX)
+                ? notes.substring(0, notes.length() - VASO_GRANDE_NOTE_SUFFIX.length())
+                : notes;
+    }
+
+    /**
+     * PDV-F027 — a sessão foi paga: sai de {@code AGUARDANDO_PAGAMENTO} para o preparo, e o tempo de
+     * mesa começa. Linha em outro status volta como está — pagar não mexe no ciclo físico dela.
+     */
+    public ComandaItem withSessionPaid(Instant at) {
+        if (session == null || !session.isAwaitingPayment()) {
+            return this;
+        }
+        return new ComandaItem(id, sku, quantity, unitPrice, costPrice, productName, addedAt, mode, courtesy,
+                linkedItemId, notes, surchargeAmount, closedInOrderId, packageUses, packageSessionsPerUnit,
+                kitBundleId, kitTemplateId, kitDiscountAmount, session.paid(at), setup);
+    }
+
+    /**
+     * A sessão ainda está no salão — tudo que não foi recolhido. Linha de sessão sem status (anterior
+     * à V132) conta como recolhida: o backfill já a resolveu, e não há como o operador avançá-la.
+     */
+    public boolean isActiveSession() {
+        return mode.isMenuSession() && session != null && !session.isCollected();
+    }
+
+    public SessionStatus sessionStatus() {
+        return session == null ? null : session.status();
     }
 
     public boolean inKit() {

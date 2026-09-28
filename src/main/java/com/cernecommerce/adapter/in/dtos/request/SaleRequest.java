@@ -33,5 +33,10 @@ public class SaleRequest {
             + "Omitido/false: comportamento de sempre (CONCLUIDO). true: mercadoria já baixada e "
             + "pagamento já capturado, mas o pedido grava RESERVADO até o cliente voltar para "
             + "retirar.")
-    private boolean reserveForPickup;
+    private Boolean reserveForPickup;
+
+    @Valid
+    @Schema(description = "PDV-F022 — entrega ou retirada. Com delivery, o pedido grava RESERVADO "
+            + "(reserveForPickup=false explícito é recusado) e delivery.fee entra no total a pagar.")
+    private DeliveryRequest delivery;
 }

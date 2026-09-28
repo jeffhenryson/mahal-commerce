@@ -166,4 +166,31 @@ class CashRegisterSessionTest {
         assertThat(session.belongsTo("caixa2")).isFalse();
         assertThat(session.belongsTo(null)).isFalse();
     }
+
+    @Test
+    void closedWith_recordsNormalizedClosingNotes() {
+        CashRegisterSession closed = open()
+                .closedWith(BigDecimal.TEN, BigDecimal.TEN, "admin", "  saiu sem fechar ");
+
+        assertThat(closed.closingNotes()).isEqualTo("saiu sem fechar");
+    }
+
+    @Test
+    void closedWith_blankNotesBecomeNull() {
+        assertThat(open().closedWith(BigDecimal.TEN, BigDecimal.TEN, "admin", "   ").closingNotes()).isNull();
+    }
+
+    @Test
+    void closingNotes_rejectsTooLongText() {
+        String longo = "x".repeat(CashRegisterSession.MAX_CLOSING_NOTES + 1);
+        assertThatThrownBy(() -> open().closedWith(BigDecimal.TEN, BigDecimal.TEN, "admin", longo))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void closingNotes_cannotExistOnOpenSession() {
+        assertThatThrownBy(() -> CashRegisterSession.of(1L, "caixa1", NOW, BigDecimal.TEN, "LOJA-01",
+                null, null, null, null, null, CashRegisterSession.Status.OPEN, "nota"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
 }

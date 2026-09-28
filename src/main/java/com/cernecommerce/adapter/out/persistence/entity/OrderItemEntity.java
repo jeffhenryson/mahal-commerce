@@ -71,4 +71,8 @@ public class OrderItemEntity {
 
     @Column(name = "surcharge_amount", precision = 14, scale = 2)
     private BigDecimal surchargeAmount;
+
+    // PDV-F024 — carvão da sessão (CUBO/JUMBO), só registro. Nulo fora de sessão do cardápio.
+    @Column(length = 10)
+    private String charcoal;
 }

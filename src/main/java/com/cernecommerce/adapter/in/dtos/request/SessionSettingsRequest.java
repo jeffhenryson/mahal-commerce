@@ -27,6 +27,10 @@ public class SessionSettingsRequest {
     @Schema(example = "10.00")
     private BigDecimal upgradeVasoGrandePreco;
 
-    @Schema(description = "Dias em que o 2º rosh sai de graça.", example = "[\"WEDNESDAY\"]")
+    // PDV-F024 — o rosh duplo virou modo sempre disponível (AddSessionRequest.modo = DUPLO). Os dias
+    // continuam valendo só para o POST .../rosh avulso, e saem quando o front deixar de usá-lo.
+    @Schema(description = "Dias em que o 2º rosh avulso (POST .../rosh) sai de graça. Deprecado: o rosh "
+            + "duplo agora é AddSessionRequest.modo = DUPLO, gratuito em qualquer dia.",
+            example = "[\"WEDNESDAY\"]", deprecated = true)
     private Set<DayOfWeek> diasDuploRosh;
 }

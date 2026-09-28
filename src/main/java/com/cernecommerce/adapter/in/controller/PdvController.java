@@ -12,6 +12,7 @@ import com.cernecommerce.adapter.in.dtos.response.CashRegisterSessionResponseDTO
 import com.cernecommerce.adapter.in.dtos.response.OrderResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.PaymentTotalResponseDTO;
 import com.cernecommerce.adapter.in.dtos.response.SaleReceiptResponseDTO;
+import com.cernecommerce.core.domain.exception.pedido.InvalidDeliveryException;
 import com.cernecommerce.core.domain.event.AuditEvent;
 import com.cernecommerce.core.domain.event.AuditEvent.EventType;
 import com.cernecommerce.core.domain.model.PageResult;
@@ -19,7 +20,9 @@ import com.cernecommerce.core.domain.model.estoque.MovementType;
 import com.cernecommerce.core.domain.model.pagamento.OrderPayment;
 import com.cernecommerce.core.domain.model.pdv.CashMovement;
 import com.cernecommerce.core.domain.model.pdv.CashRegisterSession;
+import com.cernecommerce.core.domain.model.pdv.CashRegisterSessionFilter;
 import com.cernecommerce.core.domain.model.pedido.Order;
+import com.cernecommerce.core.domain.model.pedido.OrderDelivery;
 import com.cernecommerce.core.ports.in.PdvUseCase;
 import com.cernecommerce.core.ports.in.PdvUseCase.PaymentCommand;
 import com.cernecommerce.core.ports.in.PdvUseCase.SaleItemCommand;
@@ -47,12 +50,14 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.format.annotation.DateTimeFormat;
 
 import java.net.URI;
 import java.math.BigDecimal;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.time.Instant;
 
 /**
  * Controller do domínio <b>vendas-balcao (PDV)</b>.
@@ -85,13 +90,20 @@ public class PdvController {
 
     // ── Ciclo de caixa ───────────────────────────────────────────────────────────────────────
 
-    @Operation(summary = "Lista sessões de caixa")
+    @Operation(summary = "Lista sessões de caixa",
+            description = "PDV-F026 — filtros opcionais: status (OPEN/CLOSED), operator (exato) e "
+                    + "from/to sobre openedAt (ISO date-time, inclusivos). Ordenado por openedAt desc.")
     @GetMapping("/sessions")
     @PreAuthorize("hasAuthority('PDV_READ')")
     public ResponseEntity<PageResult<CashRegisterSessionResponseDTO>> listSessions(
+            @RequestParam(required = false) CashRegisterSession.Status status,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
+            @RequestParam(required = false) String operator,
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
-        return ResponseEntity.ok(cashRegisterConverter.toResponse(pdvUseCase.listSessions(page, size)));
+        return ResponseEntity.ok(cashRegisterConverter.toResponse(pdvUseCase.listSessions(
+                new CashRegisterSessionFilter(status, from, to, operator), page, size)));
     }
 
     @Operation(summary = "Abre um caixa para o operador autenticado",
@@ -174,25 +186,31 @@ public class PdvController {
 
     @Operation(summary = "Fecha o caixa confrontando o contado com o esperado",
             description = "Divergência NÃO impede o fechamento — é registrada, como no fechamento de "
-                    + "um balanço de inventário. Fechar não exige ser o dono da sessão: a conferência "
-                    + "costuma ser do gerente.")
+                    + "um balanço de inventário. Admin e dev fecham o caixa de qualquer operador (a "
+                    + "conferência costuma ser do gerente); os demais só o próprio. `notes` registra o "
+                    + "motivo do fechamento.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Fechado, com esperado × contado × diferença", content = @Content(schema = @Schema(implementation = CashRegisterSessionResponseDTO.class))),
+            @ApiResponse(responseCode = "403", description = "Caixa de outro operador, sem ser admin/dev", content = @Content),
             @ApiResponse(responseCode = "404", description = "Sessão não encontrada", content = @Content),
-            @ApiResponse(responseCode = "409", description = "Sessão já encerrada", content = @Content)
+            @ApiResponse(responseCode = "409", description = "Sessão já encerrada ou com mesas abertas", content = @Content)
     })
     @PostMapping("/sessions/{id}/close")
     @PreAuthorize("hasAuthority('PDV_SESSION_CLOSE')")
     public ResponseEntity<CashRegisterSessionResponseDTO> closeSession(@PathVariable("id") Long sessionId,
             @Valid @RequestBody CloseCashRegisterSessionRequest request, Authentication authentication) {
         CashRegisterSession session = pdvUseCase.closeSession(sessionId, request.getCountedAmount(),
-                authentication.getName());
+                request.getNotes(), authentication.getName(), canCloseAnySession(authentication));
         Map<String, Object> details = new HashMap<>();
         details.put("sessionId", sessionId);
         details.put("expectedAmount", session.expectedAmount());
         details.put("countedAmount", session.countedAmount());
         details.put("differenceAmount", session.differenceAmount());
         details.put("diverges", session.diverges());
+        details.put("operator", session.operator());
+        if (session.closingNotes() != null) {
+            details.put("notes", session.closingNotes());
+        }
         publisher.publishEvent(
                 AuditEvent.of(EventType.CASH_SESSION_CLOSED, authentication.getName(), details));
         return ResponseEntity.ok(cashRegisterConverter.toResponse(session));
@@ -208,13 +226,17 @@ public class PdvController {
                     + "tem que cobrir o líquido, e só DINHEIRO pode ser tendido a mais para gerar troco. "
                     + "`reserveForPickup=true` (PDV-F008) grava RESERVADO em vez de CONCLUIDO — mercadoria "
                     + "já baixada e pagamento já capturado, só a retirada fica pendente; marcar como "
-                    + "retirado depois é `POST /orders/{id}/status` com `CONCLUIDO`.")
+                    + "retirado depois é `POST /orders/{id}/status` com `CONCLUIDO`. `delivery` (PDV-F022) "
+                    + "registra RETIRADA ou ENTREGA — as duas gravam RESERVADO; ENTREGA segue "
+                    + "RESERVADO → SEPARADO → ENVIADO → ENTREGUE, e `delivery.fee` entra no total a "
+                    + "pagar (fora do líquido). `items[].note` grava a observação da linha. Sessão "
+                    + "aberta num dia anterior (data de America/Sao_Paulo) é recusada com 409 SESSION_STALE.")
     @ApiResponses({
             @ApiResponse(responseCode = "201", description = "Criada", content = @Content(schema = @Schema(implementation = OrderResponseDTO.class))),
             @ApiResponse(responseCode = "400", description = "Saldo ou pagamento insuficiente para a venda", content = @Content),
             @ApiResponse(responseCode = "403", description = "Sessão de outro operador, ou desconto sem PDV_SALE_DISCOUNT", content = @Content),
             @ApiResponse(responseCode = "404", description = "Sessão de caixa ou SKU não encontrado", content = @Content),
-            @ApiResponse(responseCode = "409", description = "Sessão encerrada, produto sem preço, desconto acima do teto ou pagamento não-dinheiro acima do total", content = @Content)
+            @ApiResponse(responseCode = "409", description = "Sessão encerrada, sessão de dia anterior (SESSION_STALE), produto sem preço, desconto acima do teto ou pagamento não-dinheiro acima do total", content = @Content)
     })
     @PostMapping("/sessions/{id}/sales")
     @PreAuthorize("hasAuthority('PDV_SALE_MANAGE')")
@@ -224,8 +246,14 @@ public class PdvController {
         List<PaymentCommand> payments = orderConverter.toPaymentCommands(request.getPayments());
         requireDiscountAuthority(items, authentication);
 
+        OrderDelivery delivery = orderConverter.toDelivery(request.getDelivery());
+        // PDV-F022: entrega e retirada sempre reservam; pedir o contrário é contraditório.
+        if (delivery != null && Boolean.FALSE.equals(request.getReserveForPickup())) {
+            throw new InvalidDeliveryException(
+                    "venda com delivery sempre fica RESERVADO; não envie reserveForPickup=false");
+        }
         Order order = pdvUseCase.registerSale(sessionId, request.getCustomerId(), items, payments,
-                authentication.getName(), request.isReserveForPickup());
+                authentication.getName(), Boolean.TRUE.equals(request.getReserveForPickup()), delivery);
 
         // EST-C004: a venda é o caminho de maior volume de movimentação de estoque. É um evento por
         // operação (não por item) para não inundar a trilha numa venda com muitos itens.
@@ -373,5 +401,11 @@ public class PdvController {
             throw new AccessDeniedException(
                     "Conceder desconto exige a permissão " + DISCOUNT_AUTHORITY + ".");
         }
+    }
+
+    /** Admin e dev encerram o caixa de qualquer operador; os demais, só o próprio. */
+    private static boolean canCloseAnySession(Authentication authentication) {
+        return authentication.getAuthorities().stream()
+                .anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()) || "ROLE_DEV".equals(a.getAuthority()));
     }
 }

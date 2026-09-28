@@ -4,8 +4,12 @@ import com.cernecommerce.core.domain.model.pedido.ConsumptionMode;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -309,6 +313,70 @@ public record Comanda(
         }
         return new Comanda(id, sessionId, warehouseCode, newLabel, customerId, status, items, orderId,
                 openedBy, openedAt, closedAt);
+    }
+
+    /**
+     * PDV-F023 — há narguilé desta mesa ainda no salão: alguma linha de sessão não recolhida (inclusive
+     * a que aguarda pagamento, que já reservou utensílio). É o que impede a mesa de ser encerrada.
+     * PDV-F027: não impede mais outra sessão — a mesa aceita sessões em paralelo.
+     */
+    public boolean hasActiveSession() {
+        return items.stream().anyMatch(ComandaItem::isActiveSession);
+    }
+
+    /**
+     * PDV-F023 — avança o status de uma linha de sessão. Cópia — a comanda permanece imutável.
+     *
+     * @throws IllegalStateException se a comanda não estiver {@code ABERTA}
+     * @throws IllegalArgumentException se o item não estiver nesta comanda
+     */
+    public Comanda withSessionStatus(Long itemId, SessionStatus next, Instant at) {
+        requireOpen();
+        boolean exists = items.stream().anyMatch(i -> itemId != null && itemId.equals(i.id()));
+        if (!exists) {
+            throw new IllegalArgumentException("item " + itemId + " não pertence à comanda " + id);
+        }
+        List<ComandaItem> newItems = items.stream()
+                .map(i -> itemId.equals(i.id()) ? i.withSessionStatus(next, at) : i)
+                .toList();
+        return new Comanda(id, sessionId, warehouseCode, tableOrCustomerLabel, customerId, status, newItems, orderId,
+                openedBy, openedAt, closedAt);
+    }
+
+    /**
+     * PDV-F027 — as linhas pagas agora que aguardavam pagamento entram no preparo. Cópia — a comanda
+     * permanece imutável.
+     */
+    public Comanda withSessionsPaid(Collection<Long> paidItemIds, Instant at) {
+        requireOpen();
+        Set<Long> alvo = new HashSet<>(paidItemIds);
+        List<ComandaItem> newItems = items.stream()
+                .map(i -> alvo.contains(i.id()) ? i.withSessionPaid(at) : i)
+                .toList();
+        return new Comanda(id, sessionId, warehouseCode, tableOrCustomerLabel, customerId, status, newItems, orderId,
+                openedBy, openedAt, closedAt);
+    }
+
+    /**
+     * A primeira linha {@code NA_FILA} ligada à sessão {@code rootId}, pela ordem de lançamento — quem
+     * entra quando a atual sai. PDV-F027: a fila é por narguilé, não por mesa; com sessões em paralelo,
+     * recolher uma não pode começar o rosh de outra.
+     */
+    public Optional<ComandaItem> nextQueuedSessionOf(Long rootId) {
+        return items.stream()
+                .filter(i -> i.sessionStatus() == SessionStatus.NA_FILA)
+                .filter(i -> rootId != null && rootId.equals(i.linkedItemId()))
+                .min(Comparator.comparing(ComandaItem::addedAt)
+                        .thenComparing(i -> i.id() == null ? Long.MAX_VALUE : i.id()));
+    }
+
+    /**
+     * O pedido que cobrou por último alguma linha desta mesa — é ele que fica no cabeçalho quando a
+     * mesa, já toda paga em fechamentos parciais, é encerrada por {@code finish} (PDV-F023).
+     */
+    public Optional<Long> lastChargedOrderId() {
+        return items.stream().map(ComandaItem::closedInOrderId).filter(Objects::nonNull)
+                .max(Long::compareTo);
     }
 
     public boolean isOpen() {

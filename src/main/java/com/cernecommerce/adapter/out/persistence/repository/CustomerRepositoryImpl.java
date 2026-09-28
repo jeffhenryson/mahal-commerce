@@ -55,12 +55,28 @@ public class CustomerRepositoryImpl implements CustomerRepository {
     @Override
     @Transactional(readOnly = true)
     public Optional<Customer> findByContato(String contato) {
-        String digits = CustomerIdentifiers.digitsOrNull(contato);
+        return findAllByContato(contato).stream().findFirst();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<Customer> findAllByContato(String contato) {
+        String digits = CustomerIdentifiers.normalizePhone(contato);
         if (digits == null) {
-            return Optional.empty();
+            return List.of();
         }
-        return customerJpaRepository.findByContatoDigits(digits, PageRequest.of(0, 1)).stream()
-                .findFirst().map(this::toDomain);
+        return customerJpaRepository.findByPhoneNormalizedOrderByIdAsc(digits).stream()
+                .map(this::toDomain).toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<Customer> findAllByEmailIgnoreCase(String email) {
+        String normalized = CustomerIdentifiers.normalizeEmailForMatch(email);
+        if (normalized == null) {
+            return List.of();
+        }
+        return customerJpaRepository.findByEmailLower(normalized).stream().map(this::toDomain).toList();
     }
 
     @Override
@@ -69,6 +85,7 @@ public class CustomerRepositoryImpl implements CustomerRepository {
         entity.setId(customer.id());
         entity.setNome(customer.nome());
         entity.setContato(customer.contato());
+        entity.setPhoneNormalized(CustomerIdentifiers.normalizePhone(customer.contato()));
         entity.setEmail(customer.email());
         entity.setCpf(customer.cpf());
         entity.setOrigem(customer.origem());

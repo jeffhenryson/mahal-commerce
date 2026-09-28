@@ -18,4 +18,13 @@ public class PaymentTotalResponseDTO {
     @Schema(description = "Soma dos pagamentos CAPTURED deste método na sessão. Zero se o método "
             + "não foi usado.")
     private BigDecimal amount;
+
+    @Schema(description = "PDV-F026 — soma dos estornos (REFUNDED) deste método na sessão.")
+    private BigDecimal refundedAmount;
+
+    @Schema(description = "PDV-F026 — troco devolvido na sessão. Só em DINHEIRO; zero nos demais.")
+    private BigDecimal changeAmount;
+
+    @Schema(description = "PDV-F026 — o que ficou: amount - refundedAmount - changeAmount.")
+    private BigDecimal netAmount;
 }

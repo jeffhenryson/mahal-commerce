@@ -6,13 +6,14 @@ import java.util.List;
 
 /** Cardápio de sessão para a tela da mesa (PDV-F021). */
 public record SessionMenuResponseDTO(List<SessionTierResponseDTO> faixas, List<SessionAssetTypeResponseDTO> utensilios,
-        SessionSettingsResponseDTO config, boolean duploRoshHoje) {
+        SessionSettingsResponseDTO config, boolean duploRoshHoje, List<SessionAddonResponseDTO> adicionais) {
 
     public static SessionMenuResponseDTO of(SessionMenu m) {
         return new SessionMenuResponseDTO(
                 m.faixas().stream().map(SessionTierResponseDTO::of).toList(),
                 m.utensilios().stream().map(SessionAssetTypeResponseDTO::of).toList(),
                 SessionSettingsResponseDTO.of(m.settings()),
-                m.duploRoshHoje());
+                m.duploRoshHoje(),
+                m.adicionais().stream().map(SessionAddonResponseDTO::of).toList());
     }
 }

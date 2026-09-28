@@ -128,6 +128,12 @@ compacto.
 balcão termina. Mandá-lo por `SEPARADO`/`ENVIADO` descreveria uma separação e um envio que não
 aconteceram.
 
+`RESERVADO` (venda de balcão paga, mercadoria ainda na loja — PDV-F008) sai por `CONCLUIDO`
+(retirada, `Order.pickedUp`) ou `REEMBOLSADO`. Desde **PDV-F022** a venda com `delivery.type =
+ENTREGA` também pode ir para `SEPARADO` e seguir a esteira de envio. A regra é por pedido,
+`Order.allowedTransitions()`: o enum permite `RESERVADO → SEPARADO`, e o pedido o retira quando a
+reserva não é uma ENTREGA. O `allowedTransitions` do DTO de administrador já vem dessa versão.
+
 ### `AGUARDANDO_PAGAMENTO → PAGO`: quem chama `Order.paid(...)`
 
 Dois caminhos levam a `PAGO`, e nenhum dos dois é o cliente afirmando "eu paguei":
@@ -149,9 +155,10 @@ Dois caminhos levam a `PAGO`, e nenhum dos dois é o cliente afirmando "eu pague
 
 | Método | Rota | Permissão | Descrição |
 |---|---|---|---|
-| `GET` | `/orders` | `ORDER_READ` | Filtros por `channel`, `status`, `customerId`, `from`, `to`; paginado |
-| `GET` | `/orders/{id}` | `ORDER_READ` | Detalhe **com custo e margem** |
+| `GET` | `/orders` | `ORDER_READ` | Filtros por `channel`, `status`, `customerId`, `from`, `to` e — PDV-F026 — `sessionId`, `comandaId`, `orderNumber` (exato); paginado. Cada linha traz `paymentMethods` (métodos `CAPTURED`, uma consulta por página) |
+| `GET` | `/orders/{id}` | `ORDER_READ` | Detalhe **com custo e margem**, e — PDV-F026 — `payments` (todas as linhas, com `channel`/`provider` de PDV-F025) |
 | `POST` | `/orders/{id}/status` | `ORDER_FULFILL` | `SEPARADO`/`ENVIADO`/`ENTREGUE` |
+| `PATCH` | `/orders/{id}/delivery` | `ORDER_FULFILL` | PDV-F022 — edita a entrega depois da venda (códigos da 99, rastreio, entregador, endereço); `type`/`fee` congelados |
 | `POST` | `/orders/{id}/cancel` | `ORDER_CANCEL` | Cancela (só pré-pagamento) e **devolve a mercadoria ao estoque** |
 | `POST` | `/orders/{id}/refund` | `ORDER_REFUND` | Reembolsa (só pós-pagamento): devolve estoque (com suporte a lote via `itemLots`), estorna cada pagamento `CAPTURED` com uma linha `REFUNDED` nova e reverte o cashback ganho — tudo em uma transação |
 

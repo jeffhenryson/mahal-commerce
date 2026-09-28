@@ -1,5 +1,7 @@
 package com.cernecommerce.adapter.in.dtos.request;
 
+import com.cernecommerce.core.domain.model.pagamento.PaymentChannel;
+import com.cernecommerce.core.domain.model.pagamento.PaymentProvider;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Max;
@@ -32,4 +34,11 @@ public class SalePaymentRequest {
     @Max(24)
     @Schema(description = "Só em CREDITO. Ausente nos demais métodos.", example = "3")
     private Integer installments;
+
+    @Schema(description = "Por onde a cobrança não-dinheiro saiu: MAQUININHA ou LINK (PDV-F025). Proibido "
+            + "em DINHEIRO (400 INVALID_PAYMENT_CHANNEL).", example = "MAQUININHA")
+    private PaymentChannel channel;
+
+    @Schema(description = "Operadora: CIELO ou INFINITYPAY (PDV-F025). Exige channel.", example = "CIELO")
+    private PaymentProvider provider;
 }

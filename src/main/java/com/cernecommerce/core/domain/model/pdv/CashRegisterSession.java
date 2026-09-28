@@ -25,6 +25,8 @@ import java.time.Instant;
  *        suprimentos. Só existe depois do fechamento.
  * @param differenceAmount {@code countedAmount − expectedAmount}. <b>Negativo significa falta</b>, e
  *        é um número legítimo — não uma violação.
+ * @param closingNotes motivo/observação do fechamento, opcional. Usado sobretudo quando admin ou
+ *        dev encerra o caixa de outro operador pelo módulo de Vendas.
  */
 public record CashRegisterSession(
         Long id,
@@ -37,9 +39,12 @@ public record CashRegisterSession(
         BigDecimal expectedAmount,
         BigDecimal countedAmount,
         BigDecimal differenceAmount,
-        Status status) {
+        Status status,
+        String closingNotes) {
 
     public enum Status { OPEN, CLOSED }
+
+    public static final int MAX_CLOSING_NOTES = 500;
 
     public CashRegisterSession {
         if (operator == null || operator.isBlank()) {
@@ -56,6 +61,13 @@ public record CashRegisterSession(
         }
         if (status == null) {
             throw new IllegalArgumentException("status é obrigatório");
+        }
+        closingNotes = closingNotes == null || closingNotes.isBlank() ? null : closingNotes.strip();
+        if (closingNotes != null && closingNotes.length() > MAX_CLOSING_NOTES) {
+            throw new IllegalArgumentException("closingNotes excede " + MAX_CLOSING_NOTES + " caracteres");
+        }
+        if (closingNotes != null && status != Status.CLOSED) {
+            throw new IllegalArgumentException("sessão aberta não tem motivo de fechamento");
         }
         // Estado e carimbos não podem discordar — é a invariante que o CHECK da V66 espelha.
         boolean closed = status == Status.CLOSED;
@@ -82,7 +94,7 @@ public record CashRegisterSession(
     /** Abre um caixa para o operador, com o fundo de troco informado. */
     public static CashRegisterSession open(String operator, BigDecimal openingAmount, String warehouseCode) {
         return new CashRegisterSession(null, operator, Instant.now(), openingAmount, warehouseCode,
-                null, null, null, null, null, Status.OPEN);
+                null, null, null, null, null, Status.OPEN, null);
     }
 
     /** Reconstitui a partir de persistência. */
@@ -90,8 +102,17 @@ public record CashRegisterSession(
             BigDecimal openingAmount, String warehouseCode, Instant closedAt, String closedBy,
             BigDecimal expectedAmount, BigDecimal countedAmount, BigDecimal differenceAmount,
             Status status) {
+        return of(id, operator, openedAt, openingAmount, warehouseCode, closedAt, closedBy,
+                expectedAmount, countedAmount, differenceAmount, status, null);
+    }
+
+    /** Reconstitui a partir de persistência, com o motivo do fechamento. */
+    public static CashRegisterSession of(Long id, String operator, Instant openedAt,
+            BigDecimal openingAmount, String warehouseCode, Instant closedAt, String closedBy,
+            BigDecimal expectedAmount, BigDecimal countedAmount, BigDecimal differenceAmount,
+            Status status, String closingNotes) {
         return new CashRegisterSession(id, operator, openedAt, openingAmount, warehouseCode, closedAt,
-                closedBy, expectedAmount, countedAmount, differenceAmount, status);
+                closedBy, expectedAmount, countedAmount, differenceAmount, status, closingNotes);
     }
 
     /**
@@ -104,6 +125,12 @@ public record CashRegisterSession(
      *         conferência original, que é justamente o registro que precisa ser imutável.
      */
     public CashRegisterSession closedWith(BigDecimal expected, BigDecimal counted, String closedBy) {
+        return closedWith(expected, counted, closedBy, null);
+    }
+
+    /** Como {@link #closedWith(BigDecimal, BigDecimal, String)}, registrando o motivo do fechamento. */
+    public CashRegisterSession closedWith(BigDecimal expected, BigDecimal counted, String closedBy,
+            String closingNotes) {
         if (status == Status.CLOSED) {
             throw new IllegalStateException("sessão de caixa " + id + " já está fechada");
         }
@@ -117,7 +144,8 @@ public record CashRegisterSession(
             throw new IllegalArgumentException("closedBy é obrigatório no fechamento");
         }
         return new CashRegisterSession(id, operator, openedAt, openingAmount, warehouseCode,
-                Instant.now(), closedBy, expected, counted, counted.subtract(expected), Status.CLOSED);
+                Instant.now(), closedBy, expected, counted, counted.subtract(expected), Status.CLOSED,
+                closingNotes);
     }
 
     public boolean isOpen() {

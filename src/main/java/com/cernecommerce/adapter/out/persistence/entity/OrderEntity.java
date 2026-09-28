@@ -19,7 +19,16 @@ import java.util.List;
 @Entity
 @EqualsAndHashCode(onlyExplicitlyIncluded = true)
 @Table(name = "sales_order")
+// PDV-F022 — entrega em tabela própria (a regra de Order: endereço e frete fora de sales_order),
+// mapeada como tabela secundária em vez de @OneToOne: o lado não-dono de um @OneToOne não é LAZY
+// sem bytecode enhancement, e toda listagem de pedidos pagaria uma consulta por linha. A secundária
+// entra por LEFT JOIN na mesma consulta. Linha opcional: só é gravada quando algum campo de entrega
+// é não nulo, e é apagada se todos voltarem a nulo.
+@SecondaryTable(name = OrderEntity.DELIVERY_TABLE, pkJoinColumns = @PrimaryKeyJoinColumn(name = "order_id"))
+@org.hibernate.annotations.SecondaryRow(table = OrderEntity.DELIVERY_TABLE, optional = true)
 public class OrderEntity {
+
+    public static final String DELIVERY_TABLE = "order_delivery";
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -113,6 +122,58 @@ public class OrderEntity {
 
     @Column(name = "delivered_at")
     private Instant deliveredAt;
+
+    // ---- PDV-F022: order_delivery (tabela secundária). Tudo nulo quando a venda não tem entrega.
+    @Column(table = DELIVERY_TABLE, name = "type", length = 20)
+    private String deliveryType;
+
+    @Column(table = DELIVERY_TABLE, name = "method", length = 20)
+    private String deliveryMethod;
+
+    @Column(table = DELIVERY_TABLE, name = "street", length = 200)
+    private String deliveryStreet;
+
+    @Column(table = DELIVERY_TABLE, name = "number", length = 20)
+    private String deliveryNumber;
+
+    @Column(table = DELIVERY_TABLE, name = "complement", length = 100)
+    private String deliveryComplement;
+
+    @Column(table = DELIVERY_TABLE, name = "zip_code", length = 20)
+    private String deliveryZipCode;
+
+    @Column(table = DELIVERY_TABLE, name = "district", length = 100)
+    private String deliveryDistrict;
+
+    @Column(table = DELIVERY_TABLE, name = "city", length = 100)
+    private String deliveryCity;
+
+    @Column(table = DELIVERY_TABLE, name = "state", length = 50)
+    private String deliveryState;
+
+    @Column(table = DELIVERY_TABLE, name = "country", length = 60)
+    private String deliveryCountry;
+
+    @Column(table = DELIVERY_TABLE, name = "reference", length = 200)
+    private String deliveryReference;
+
+    @Column(table = DELIVERY_TABLE, name = "courier_name", length = 120)
+    private String deliveryCourierName;
+
+    @Column(table = DELIVERY_TABLE, name = "courier_phone", length = 30)
+    private String deliveryCourierPhone;
+
+    @Column(table = DELIVERY_TABLE, name = "pickup_code", length = 60)
+    private String deliveryPickupCode;
+
+    @Column(table = DELIVERY_TABLE, name = "dropoff_code", length = 60)
+    private String deliveryDropoffCode;
+
+    @Column(table = DELIVERY_TABLE, name = "tracking_code", length = 60)
+    private String deliveryTrackingCode;
+
+    @Column(table = DELIVERY_TABLE, name = "fee", precision = 14, scale = 2)
+    private BigDecimal deliveryFee;
 
     /**
      * Bloqueio otimista. A {@code Sale} anterior não tinha — era irrelevante numa tabela
